@@ -1,0 +1,399 @@
+This agreement (the "AGREEMENT"), entered into between DA and You as of
+the date You indicate your acceptance to the terms of this Agreement
+(the "EFFECTIVE DATE"), governs Your access to and use of the Canton
+Software, as described below. "DA" means either Digital Asset Holdings,
+LLC, a Delaware Limited Liability Company with offices at 4 World Trade
+Center, 150 Greenwich St., 47th Floor, New York, NY 10007, if Your
+billing address is located in the United States or Digital Asset
+(Switzerland) GmbH, a Swiss company with limited liability, having
+offices at Thurgauerstrasse 40, 8050 Zurich, Switzerland, if Your
+billing address is outside of the United States. "YOU" or "YOUR" means
+the individual or legal entity agreeing to the terms of this Agreement.
+Each party may be referred to herein individually as a "PARTY" and
+collectively the "PARTIES".
+
+By entering into this Agreement, the Parties agree as follows:
+
+1.  PRODUCTS AND SERVICES
+
+    1.  _COVERED PRODUCTS_. This Agreement covers Your use of a
+        pre-alpha version of the Canton Software, as defined below.
+
+    2.  _CANTON SOFTWARE LICENSE_. Subject to Your compliance with this
+        Agreement, DA grants to You a limited, non-exclusive,
+        non-transferable, non-sublicensable and non-assignable license
+        to use Canton Software during the Alpha Term solely for internal
+        evaluation, non-production demonstrations, prototype
+        development, or testing (collectively, the "PURPOSE"). "CANTON
+        SOFTWARE" means any goods, licensed materials, and software made
+        available for download by DA that relates to its ledger
+        technology.
+
+    3.  _AUTHORIZED USERS_. You will ensure that: (a) if You are an
+        individual, only You, and (b) if You are entering into this
+        Agreement on behalf of a company or other legal entity, only
+        that company or entity's employees, its Affiliates and the
+        employees of its Affiliates who have a need to access and use
+        the Canton Software (in each case, the "AUTHORIZED USERS") have
+        access to such Canton Software. You shall be liable for any
+        breach of any term of this Agreement by any of your Authorized
+        Users. "AFFILIATE" means, with respect to any entity, any other
+        entity that, directly or indirectly, through one or more
+        intermediaries, controls, is controlled by, or is under common
+        control with, such entity. The term "control" means the
+        possession, directly or indirectly, of the power to direct or
+        cause the direction of the management and policies of an entity,
+        whether through the ownership of voting securities, by contract,
+        or otherwise.
+
+    4.  _YOUR DATA AND APPLICATIONS_. You may only use mock or fake data
+        with the Canton Software (_e.g._, to develop custom
+        applications, referred to herein as "CUSTOM APPLICATIONS"; and
+        collectively with such mock data, "YOUR DATA"). You shall not
+        use any real-world data with the Canton Software, including but
+        not limited to data pertaining to real world transactions or
+        events, persons, entities, or subjects, financial data, or
+        Personal Information or Sensitive Data. As between You and DA,
+        You retain ownership of Your Data, subject to DA's ownership
+        of the Canton Software (including DAML libraries). You shall be
+        solely responsible and liable with respect to Your Data.
+        "PERSONAL INFORMATION OR SENSITIVE DATA" means any information
+        relating to an identified or identifiable natural person,
+        including any and all similarly protected sensitive data; an
+        identifiable natural person is one who can be identified,
+        directly or indirectly, in particular by reference to an
+        identifier such as a name, an identification number, location
+        data, an online identifier or to one or more factors specific to
+        the physical, physiological, genetic, mental, economic, cultural
+        or social identity of that natural person.
+
+    5.  _NO SLA OR TECHNICAL SUPPORT_. Alpha products, including the
+        Canton Software, may not always perform as specified and can be
+        changed from time to time without notice. With respect to this
+        alpha program, You acknowledge and agree that DA has no
+        obligation to provide You with any technical support services in
+        relation to the Canton Software under this Agreement, and that
+        no Service Level Agreement ("SLA") or any service credits apply
+        to Your use of the Canton Software, including with respect to
+        any failures or degradations of such Software. Support, if any,
+        will be governed by a separate agreement between DA and You.
+
+2.  FEES AND TAXES
+
+During the Alpha Term, the Canton Software is provided at no cost to
+You. Any future fees (the "FEES") for the Canton Software will be listed
+at [https://www.canton.io/fees.html] and communicated to You in advance of
+those Fees becoming effective. DA can change the Fees from time to time
+and, by continuing to use the Canton Software after receiving
+notification of new Fees becoming effective, You agrees to those Fees,
+as applicable. If any authority imposes any duty, tax, levy, or fee
+(excluding those based on DA's net income) on the Canton Software or any
+support services provided hereunder, You agree that You are responsible
+for and will pay any such amount and that You shall indemnify DA from
+and against any liability with respect to any amount imposed.
+
+3.  INTELLECTUAL PROPERTY
+
+    1.  _OWNERSHIP/TITLE_. As between DA and You, during and after the
+        term of this Agreement, (a) DA exclusively retains and owns all
+        right, title and interest, including but not limited to any and
+        all Intellectual Property Rights, in and to the Canton Software,
+        and (b) You exclusively retain and own all right, title and
+        interest, including but not limited to any and all Intellectual
+        Property Rights, in and to Your Data. "INTELLECTUAL PROPERTY
+        RIGHTS" means any (i) copyrights and copyrightable works,
+        whether registered or unregistered, (ii) trademarks, service
+        marks, trade dress, logos, registered designs, trade and
+        business names (including internet domain names, corporate
+        names, and email address names), whether registered or
+        unregistered, (iii) patents, patent applications, patent
+        disclosures, mask works and inventions (whether patentable or
+        not), (iv) trade secrets, know-how, data privacy rights,
+        database rights, know-how, and rights in designs, and (v) all
+        other forms of intellectual property or proprietary rights, in
+        each case in every jurisdiction worldwide. All rights not
+        expressly granted to You are retained by DA.
+
+    2.  _PURPOSE; RESTRICTIONS_. THE CANTON SOFTWARE IS PROVIDED BY DA
+        TO YOU DURING THE ALPHA TERM FOR EVALUATION PURPOSES ONLY. You
+        may use the Canton Software only during the Alpha Term and only
+        for the Purpose. ANY USE OF THE CANTON SOFTWARE FOR ANYTHING
+        OTHER THAN THE PURPOSE, INCLUDING USE IN ANY PRODUCTION SETTING,
+        IS STRICTLY PROHIBITED AND IS A MATERIAL BREACH OF THIS
+        AGREEMENT. Without limiting the foregoing, You will not and will
+        not induce any third party to, directly or indirectly: (a) copy,
+        modify, create a derivative work of, reverse engineer,
+        decompile, translate, disassemble, or otherwise attempt to
+        extract any or all of the source code of the Canton Software
+        (except to the extent such restriction is expressly prohibited
+        by applicable law), (b) use the Canton Software for any
+        non-evaluation activity or in violation of DA's Acceptable Use
+        Policy; (c) use the Canton Software in any manner which violates
+        applicable law, including, without limitation, export controls,
+        broker dealer regulations, and banking regulations, or (d)
+        sublicense, resell, or distribute any or all of the Canton
+        Software.
+
+    3.  _FEEDBACK_. You may choose to provide comments, suggestions and
+        other evaluative observations or analysis regarding the Canton
+        Software (such items, collectively, "FEEDBACK") to DA. Feedback
+        shall be confidential information of DA. You grant to DA, under
+        Your Intellectual Property Rights, a worldwide, fully paid,
+        irrevocable and non-exclusive license, with the right to
+        sublicense to DA's licensees and customers, the right to use and
+        disclose Feedback in any manner DA chooses and to display,
+        perform, copy, make, have made, use, sell, and otherwise dispose
+        of DA's and its sublicensees products embodying such Feedback in
+        any manner and via any media DA or its sublicensee chooses,
+        without reference or obligation to You. You will not provide DA
+        any Feedback that (i) You have reason to believe is subject to
+        any patent, copyright, or other intellectual property claim or
+        right of any third party; or (ii) is subject to license terms
+        that seek to require any DA product incorporating or derived
+        from any Feedback, or other DA intellectual property, to be
+        licensed to or otherwise shared with any third party. Unless
+        authorized by You, DA shall not use or reference Your name or
+        trademarks in its use of such Feedback.
+
+4.  REPRESENTATIONS AND DISCLAIMERS
+
+    1.  _REPRESENTATIONS_. Each Party represents and warrants that (a)
+        this Agreement is duly and validly executed and delivered by
+        such Party and constitutes a legal and binding obligation of
+        such Party, enforceable against such Party in accordance with
+        its terms; (b) such Party has all necessary power and authority
+        to execute and perform in accordance with this Agreement;
+        and (c) such Party's execution and performance of this Agreement
+        does not conflict with or violate any provision of law, rule or
+        regulation to which such Party is subject, or any agreement or
+        other obligation applicable to such Party or binding upon its
+        assets. If You are entering this Agreement on behalf of a legal
+        entity, You represent that You have the proper legal authority
+        to bind that entity to this Agreement.
+
+    2.  _DISCLAIMER OF WARRANTIES_. THE CANTON SOFTWARE IS AN ALPHA
+        VERSION NOT YET GENERALLY RELEASED AND IS PROVIDED "AS IS" WITH
+        NO REPRESENTATIONS AND WARRANTIES WHATSOEVER, EXPRESS OR
+        IMPLIED, AS TO THE CANTON SOFTWARE OR ANY TECHNICAL SUPPORT
+        SERVICES INCLUDING, BUT NOT LIMITED TO, ANY IMPLIED WARRANTIES
+        OR CONDITIONS OF MERCHANTABILITY, QUIET ENJOYMENT, SATISFACTORY
+        QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND TITLE, AND ANY
+        WARRANTY OR CONDITION OF NON-INFRINGEMENT. WITHOUT LIMITING THE
+        GENERALITY OF THE FOREGOING, NEITHER DA NOR ANY OF ITS LICENSORS
+        WARRANTS THAT THE CANTON SOFTWARE WILL PERFORM WITHOUT ERROR,
+        THAT IT WILL RUN WITHOUT IMMATERIAL INTERRUPTION OR THAT ANY
+        CONTENT AND DATA USED WITH THE CANTON SOFTWARE WILL BE SECURE OR
+        NOT OTHERWISE LOST OR DAMAGED.
+
+    3.  _THIRD-PARTY MATERIALS_. DA ASSUMES NO LIABILITY FOR ANY
+        COMPUTER VIRUS OR SIMILAR CODE THAT IS DOWNLOADED TO ANY
+        COMPUTER OR OTHER DEVICE AS A RESULT OF YOUR USE OF THE CANTON
+        SOFTWARE. DA DOES NOT CONTROL, ENDORSE OR ACCEPT RESPONSIBILITY
+        FOR ANY THIRD-PARTY MATERIALS OR SERVICES OFFERED BY OR THROUGH
+        THE CANTON SOFTWARE.
+
+5.  LIMITATION OF LIABILITY
+
+Regardless of the basis on which You are entitled to claim damages from
+DA (including fundamental breach, negligence, misrepresentation, or
+other contract or tort claim), DA's entire liability for all claims in
+the aggregate arising from or related to the Canton Software, any
+support services or otherwise arising under this Agreement will not
+exceed the actual amount paid by You to DA under this Agreement during
+the three (3) months prior to the event giving rise to liability.
+
+IN NO EVENT WILL DA BE LIABLE TO YOU OR ANY OTHER PARTY FOR INDIRECT,
+INCIDENTAL, CONSEQUENTIAL, EXEMPLARY, PUNITIVE OR SPECIAL DAMAGES,
+INCLUDING, BUT NOT LIMITED TO, LOST PROFITS, BUSINESS GOODWILL OR
+ANTICIPATED SAVINGS, REGARDLESS OF THE FORM OF THE ACTION OR THE THEORY
+OF RECOVERY, EVEN IF DA HAS BEEN ADVISED OF THE POSSIBILITY OF THOSE
+DAMAGES.
+
+6.  INDEMNIFICATION
+
+Unless prohibited by applicable law, You will defend and indemnify DA
+and hold DA harmless from and against any and all claims, liabilities,
+damages, and expenses, including, without limitation, reasonable
+attorneys' and experts' fees, arising from or relating to Your use of
+the Canton Software or any acts, omissions, or misrepresentations under
+this Agreement, including but not limited to: (i) Your violation of DA's
+Acceptable Use Policy, (ii) any claim by a third party that Your Data
+(_e.g._, Your Custom Application(s)) violates the Intellectual Property
+Rights of a third party, and (iii) Your violation of any policy
+communicated to You by DA.
+
+7.  NOTICES
+
+All notices to DA must be in writing and will be deemed given only when
+sent by first class mail (return receipt requested), hand-delivered or
+sent by a nationally recognized overnight delivery service, to the DA
+address indicated at the beginning of this Agreement. All notices to You
+may be given electronically (_e.g._, to the email address submitted by
+the You upon registration). A Party may change its address for notices
+by notifying the other Party in writing.
+
+8.  GOVERNING LAW; JURY WAIVER
+
+THE AGREEMENT IS DEEMED TO BE MADE UNDER AND SHALL BE CONSTRUED
+ACCORDING TO THE LAWS OF THE STATE OF NEW YORK WITHOUT REFERENCE TO ITS
+CONFLICTS OF LAWS PROVISIONS. THE PARTIES HEREBY CONSENT TO THE
+EXCLUSIVE JURISDICTION OF THE STATE AND FEDERAL COURTS WITHIN THE
+BOROUGH OF MANHATTAN, CITY OF NEW YORK, FOR THE ADJUDICATION OF ALL
+MATTERS RELATING TO, OR ARISING UNDER THIS AGREEMENT AND THE PARTIES
+HEREBY IRREVOCABLY WAIVE, TO THE FULLEST EXTENT PERMITTED BY APPLICABLE
+LAW, ANY OBJECTION WHICH THEY MAY NOW OR HEREAFTER HAVE TO THE LAYING OF
+VENUE OF ANY SUCH PROCEEDING BROUGHT IN SUCH A COURT AND ANY CLAIM THAT
+ANY SUCH PROCEEDING BROUGHT IN SUCH COURT HAS BEEN BROUGHT IN ANY FORUM
+NON CONVENIENS. BOTH PARTIES AGREE TO WAIVE ANY RIGHT TO HAVE A JURY
+PARTICIPATE IN THE RESOLUTION OF THE DISPUTE OR CLAIM, BETWEEN ANY OF
+THE PARTIES OR ANY OF THEIR RESPECTIVE AFFILIATES RELATED TO IN ANY WAY
+THIS AGREEMENT. THIS AGREEMENT WILL NOT BE GOVERNED BY THE UNITED
+NATIONS CONVENTION ON CONTRACTS FOR THE INTERNATIONAL SALE OF GOODS, THE
+APPLICATION OF WHICH IS HEREBY EXPRESSLY EXCLUDED.
+
+9.  TERMINATION
+
+This Agreement is effective from the Effective Date until terminated in
+accordance with its terms (the "ALPHA TERM"). Either Party may terminate
+this Agreement for convenience, in whole or in part, any time by giving
+the other Party prior notice of the termination date. This Agreement
+shall automatically terminate upon Your acceptance, if any, of a
+successor agreement related to the Canton Software. The provisions
+relating to the following rights and obligations shall survive the
+termination, cancellation, expiration and/or rescission of this
+Agreement: Sections 1.4-1.7, 1.9, 2, 3.3, 3.4-6, and 8-10.
+
+Upon termination, You agree to promptly delete or return all copies of
+the Canton Software in your possession or control and cease using such
+Software or exercising any rights You may have under this Agreement.
+
+10.  GENERAL
+
+    1.  _INDEPENDENT CONTRACTORS_. DA and You will at all times be
+        independent contractors. Neither Party has any right, power or
+        authority to enter into any agreement for or on behalf of, or to
+        assume or incur any obligation or liabilities, express or
+        implied, on behalf of or in the name of, the other Party. This
+        Agreement will not be interpreted or construed to create an
+        association, joint venture or partnership between the Parties or
+        to impose any partnership obligation or liability upon either
+        Party.
+
+    2.  _YOUR INFORMATION_. Apart from account information, You shall
+        not disclose any Personal Information or Sensitive Data or
+        similarly protected or personal data to DA. If You disclose or
+        otherwise provide or furnish Personal Information or Sensitive
+        Data to DA, You represent and warrant that You have obtained all
+        the relevant consents to do so and will defend, indemnify and
+        hold DA harmless from and against any claims arising out of such
+        disclosure. To the full extent allowed by applicable law, You
+        agree that You are solely liable for all Personal Information
+        and Sensitive Data obligations, including, without limitation,
+        confidentiality and data protection and privacy obligations and
+        restrictions imposed by applicable law, regulation or court
+        order.
+
+        You agree to allow DA and its subsidiaries, Affiliates,
+        subcontractors and assignees to store, use, and transfer among
+        such entities and persons, any Personal Information or Sensitive
+        Data provided by You, including names, business phone numbers
+        and business email addresses, anywhere DA or any of such
+        entities or persons does business worldwide, provided that such
+        information will be used only in connection with DA's business
+        relationship with You.
+
+    3.  _SEVERABILITY_. If any provision of this Agreement is held
+        invalid or unenforceable by a court of competent jurisdiction,
+        the remaining provisions of this Agreement remain in full force
+        and effect. The Parties agree to replace the invalid or
+        unenforceable provision with one that matches the original
+        intent of the Parties.
+    
+    4.  _THIRD-PARTY BENEFICIARIES_. For the avoidance of doubt, all
+        rights and benefits granted under this Agreement to You will be
+        deemed granted directly to You. Otherwise, no third party will
+        be deemed to be an intended or unintended third-party
+        beneficiary of this Agreement. DA is not responsible for any
+        third-party claims against You.
+    
+    5.  _FORCE MAJEURE_. With the exceptions of confidentiality,
+        restrictions on use, and payment obligations, a Party will be
+        excused from the performance of its obligations under this
+        Agreement to the extent that such performance is prevented by
+        Force Majeure and the non-performing Party promptly provides
+        notice of the prevention to the other Party referencing this
+        Section. Such excuse shall be continued so long as the condition
+        constituting force majeure continues and the non-performing
+        Party takes reasonable efforts to remove the condition. "FORCE
+        MAJEURE" means conditions beyond the control of the affected
+        Party, including an act of any God, war, civil commotion,
+        terrorist act, labor strike, failure or default of public
+        utilities or common carriers, fire, earthquake, storm or like
+        catastrophe, or failure or loss of utilities, communications or
+        computer (software and hardware) services (provided that such
+        failure could not have been prevented by the exercise of skill,
+        diligence, and prudence on the behalf of the affected Party that
+        would be reasonably and ordinarily expected from a skilled and
+        experienced person or entity engaged in the same type of
+        undertaking under the same or similar circumstances.
+    
+    6.  _ENTIRE AGREEMENT, ASSIGNMENT_. This Agreement constitutes the
+        entire agreement of the Parties pertaining to the subject matter
+        hereof, and supersedes all prior agreements and understandings
+        pertaining thereto, notwithstanding any oral representations or
+        statements to the contrary heretofore made. This Agreement may
+        not be assigned or transferred by You without the prior written
+        consent of DA.
+    
+    7.  _MODIFICATION; WAIVER; RIGHTS_. DA MAY AMEND OR RESTATE THIS
+        AGREEMENT AT ANY TIME UPON NOTICE TO YOU, WHICH NOTICE MAY BE
+        GIVEN ELECTRONICALLY. BY CONTINUING TO ACCESS OR USE ANY CANTON
+        SOFTWARE, YOU AGREE TO BE BOUND BY ANY SUCH AMENDMENTS MADE BY
+        DA. No amendment of this Agreement may be made by You unless in
+        writing and signed by both Parties. All rights and remedies
+        provided for in this Agreement will be cumulative and in
+        addition to, and not in lieu of, any other remedies available to
+        either Party at law, in equity or otherwise.
+
+DA ACCEPTABLE USE POLICY
+
+Your use of the Canton Software is subject to this Acceptable Use
+Policy. Capitalized terms have the meaning given to them in the
+Agreement between You and DA.
+
+You agree not to, and not to allow third parties to use the Canton
+Software:
+
+1.  To violate, or encourage the violation of, the legal rights of
+    others (including, without limitation, storage or transmittal of any
+    material that violates the Intellectual Property Rights of any
+    entity or person);
+
+2.  To engage in, promote or encourage illegal activity;
+
+3.  To engage in the purchase, sale, or other transaction of any asset
+    or other item that would violate or cause DA to violate any
+    applicable law, including without limitation, the Securities
+    Exchange Act of 1934;
+
+4.  For any unlawful, invasive, infringing, defamatory or fraudulent
+    purpose (for example, this may include phishing, creating a pyramid
+    scheme or mirroring a website);
+
+5.  To store or transmit infringing, libelous, or otherwise unlawful or
+    tortious material, (including any materials which illegal, obscene,
+    indecent, defamatory, incites racial or ethnic hatred, violates the
+    rights of any entity or person, harms or threatens the safety of any
+    entity or person or may otherwise constitute a breach of any
+    applicable law);
+
+6.  To intentionally store or distribute Malicious Code or any items of
+    a destructive or deceptive nature;
+
+7.  To generate, distribute, publish or facilitate unsolicited emails,
+    promotions, advertisements or other solicitations; or
+
+8.  To use the Canton Software, or any interfaces provided with the
+    Canton Software, to access any other products or services of DA or
+    its subcontractors in a manner that violates the terms of service of
+    such other product or service.
