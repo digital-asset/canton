@@ -1,6 +1,6 @@
 # Canton
 
-Canton is a next-generation distributed DAML runtime that implements DAML's built-in models of authorization and
+[Canton is a next-generation distributed DAML runtime](https://www.canton.io) that implements DAML's built-in models of authorization and
 privacy faithfully.
 
 * By partitioning the global state it solves both the privacy problems and the scaling bottlenecks of platforms such as
@@ -22,7 +22,7 @@ Refer to the [Canton Whitepaper](https://www.canton.io/publications/canton-white
 
 This repository is hosting an early version of Canton (pre-alpha) and only
 provides binary releases. At this point, Canton is not open source. Refer to the
-[LICENSE](LICENSE.txt) for details.
+[LICENSE](LICENSE.txt) for details and visit [canton.io](https://www.canton.io) for further information.
 
 ## Running
 
