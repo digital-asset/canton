@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: A stack for deploying Canton applications in AWS Fargate.
+Description: Example multi-node deployment of Canton
 Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
     - Label:
         default: 'S3 Parameters'
       Parameters:
-      - S3bucketName    
+      - S3BucketName    
     - Label:
         default: 'DB Parameters'
       Parameters:
@@ -22,21 +22,21 @@ Metadata:
       - DBMultiAZ
 
 Parameters:
-  S3bucketName:
-    Description: S3 Bucket Name for where the lambda functions for generating the databases and Canton configuration files have been placed
+  S3BucketName:
+    Description: S3 Bucket Name of where the lambda functions for generating the databases and Canton configuration files have been placed
     Type: String
     MinLength: '3'
     MaxLength: '64'
     AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
-    ConstraintDescription: must begin with a letter and contain only alphanumeric characters. Be a minimum of three (3) characters in length
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters. Be a minimum of three (3) characters in length
     Default: canton-aws-quickstart
   DBPrefix:
-    Description: This prefix is used to define the database and user names
+    Description: Prefix used to define the database and user names
     Type: String
     MinLength: '3'
     MaxLength: '64'
     AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
-    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.  Be a minimum of three (3) characters in length
+    ConstraintDescription: Must begin with a letter and contain only alphanumeric characters.  Be a minimum of three (3) characters in length
   DBPasswordMaster:
     NoEcho: 'true'
     Description: The database Master account password. Be a minimum of eight (8) characters in length
@@ -44,7 +44,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters . 
+    ConstraintDescription: Must contain only alphanumeric characters 
   DBPasswordDomainOne:
     NoEcho: 'true'
     Description: The database admin account password for domain one. Be a minimum of eight (8) characters in length
@@ -52,7 +52,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters 
+    ConstraintDescription: Must contain only alphanumeric characters 
   DBPasswordDomainTwo:
     NoEcho: 'true'
     Description: The database admin account password for domain two. Be a minimum of eight (8) characters in length
@@ -60,7 +60,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters .
+    ConstraintDescription: Must contain only alphanumeric characters
   DBPasswordParticipantOne:
     NoEcho: 'true'
     Description: The database admin account password for participant one . Be a minimum of eight (8) characters in length
@@ -68,7 +68,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters .
+    ConstraintDescription: Must contain only alphanumeric characters
   DBPasswordParticipantTwo:
     NoEcho: 'true'
     Description: The database admin account password for participant two .  Be a minimum of eight (8) characters in length
@@ -76,7 +76,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters .
+    ConstraintDescription: Must contain only alphanumeric characters
   DBPasswordParticipantThree:
     NoEcho: 'true'
     Description: The database admin account password for Participant three . Be a minimum of eight (8) characters in length
@@ -84,7 +84,7 @@ Parameters:
     MinLength: '8'
     MaxLength: '41'
     AllowedPattern: '[a-zA-Z0-9]*'
-    ConstraintDescription: must contain only alphanumeric characters
+    ConstraintDescription: Must contain only alphanumeric characters
   DBBackupRetentionPeriod:
     Description: 'The number of days to keep snapshots of the database.'
     Type: Number
@@ -190,7 +190,7 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref AWS::StackName
-  GatewayAttachement:
+  GatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref 'VPC'
@@ -204,7 +204,7 @@ Resources:
             Value: !Sub ${AWS::StackName} Public Routes
   DefaultPublicRoute:
     Type: AWS::EC2::Route
-    DependsOn: GatewayAttachement
+    DependsOn: GatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -223,12 +223,12 @@ Resources:
   # Setup networking resources for the private subnets.  
   NatGatewayOneAttachment:
     Type: AWS::EC2::EIP
-    DependsOn: GatewayAttachement
+    DependsOn: GatewayAttachment
     Properties:
         Domain: vpc
   NatGatewayTwoAttachment:
     Type: AWS::EC2::EIP
-    DependsOn: GatewayAttachement
+    DependsOn: GatewayAttachment
     Properties:
         Domain: vpc
   NatGatewayOne:
@@ -378,7 +378,7 @@ Resources:
       Environment:
         Variables:
           MasterUser: !Join [ '_', [ !Ref DBPrefix , master ]]
-          DBPrifix: !Ref DBPrefix
+          DBPrefix: !Ref DBPrefix
           RdsHost: !GetAtt 'DBInstance.Endpoint.Address'
           MasterPassword: !Ref DBPasswordMaster
           DBPasswordDomainOne: !Ref DBPasswordDomainOne
@@ -387,7 +387,7 @@ Resources:
           DBPasswordParticipantTwo: !Ref DBPasswordParticipantTwo
           DBPasswordParticipantThree: !Ref DBPasswordParticipantThree
       Code:
-        S3Bucket: !Ref S3bucketName
+        S3Bucket: !Ref S3BucketName
         S3Key: create-dbs.zip
   LambdaCreateDBVersion:
     Type: AWS::Lambda::Version
@@ -462,7 +462,7 @@ Resources:
       SubnetId: !Ref PrivateSubnetTwo
       SecurityGroups:
         - !Ref MountTargetSecurityGroup
-  AccessPointCantonValume:
+  AccessPointCantonVolume:
     Type: 'AWS::EFS::AccessPoint'
     DependsOn:
     - cantonMountTargetTwo
@@ -524,11 +524,11 @@ Resources:
     - cantonMountTargetTwo
     - LambdaEFSRole
     - MountTargetSecurityGroup
-    - AccessPointCantonValume
+    - AccessPointCantonVolume
     Properties:
       Timeout: 30
       FunctionName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaCreateConfigEfs ]] 
-      Description: Lambda craete canton config on EFS
+      Description: Lambda for creating canton configs on EFS
       Runtime: nodejs12.x
       Handler: index.handler
       Role: !GetAtt 'LambdaEFSRole.Arn'
@@ -547,10 +547,10 @@ Resources:
           DBPasswordParticipantTwo: !Ref DBPasswordParticipantTwo
           DBPasswordParticipantThree: !Ref DBPasswordParticipantThree
       Code:
-        S3Bucket: !Ref S3bucketName
+        S3Bucket: !Ref S3BucketName
         S3Key: generate-configs.zip
       FileSystemConfigs:
-        - Arn: !GetAtt 'AccessPointCantonValume.Arn' 
+        - Arn: !GetAtt 'AccessPointCantonVolume.Arn' 
           LocalMountPath: /mnt/share
   LambdaCreateConfigEfsVersion:
     Type: AWS::Lambda::Version
@@ -622,7 +622,7 @@ Resources:
   # LoadBalancer
   PublicLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    DependsOn: GatewayAttachement
+    DependsOn: GatewayAttachment
     Properties:
       Name: !Join [ '-', [ !Ref 'AWS::StackName' , LoadBalancer ]]
       LoadBalancerAttributes:
@@ -698,7 +698,7 @@ Resources:
   TargetGroupDomain2AdminApi:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Join ['-', [!Ref 'AWS::StackName', 'Doamin2AdminAPI']]
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Domain2AdminAPI']]
       Port: 3011
       Protocol: TCP
       TargetType: ip
@@ -779,7 +779,7 @@ Resources:
       Protocol: TCP
       TargetType: ip
       VpcId: !Ref 'VPC'
-  AlbListenerParticipant1Ledgerpi:
+  AlbListenerParticipant1LedgerApi:
     Type: AWS::ElasticLoadBalancingV2::Listener
     DependsOn:
       - TargetGroupParticipant1LedgerApi
@@ -798,7 +798,7 @@ Resources:
       Protocol: TCP
       TargetType: ip
       VpcId: !Ref 'VPC'
-  AlbListenerParticipant2Ledgerpi:
+  AlbListenerParticipant2LedgerApi:
     Type: AWS::ElasticLoadBalancingV2::Listener
     DependsOn:
       - TargetGroupParticipant2LedgerApi
@@ -817,7 +817,7 @@ Resources:
       Protocol: TCP
       TargetType: ip
       VpcId: !Ref 'VPC'
-  AlbListenerParticipant3Ledgerpi:
+  AlbListenerParticipant3LedgerApi:
     Type: AWS::ElasticLoadBalancingV2::Listener
     DependsOn:
       - TargetGroupParticipant3LedgerApi
@@ -1150,7 +1150,7 @@ Resources:
         - Name: cantonVolume
           EFSVolumeConfiguration:
             AuthorizationConfig: 
-              AccessPointId: !Ref AccessPointCantonValume
+              AccessPointId: !Ref AccessPointCantonVolume
             FilesystemId: !Ref cantonVolume
             TransitEncryption: "ENABLED"
 
@@ -1205,7 +1205,7 @@ Resources:
         - Name: cantonVolume
           EFSVolumeConfiguration:
             AuthorizationConfig: 
-              AccessPointId: !Ref AccessPointCantonValume
+              AccessPointId: !Ref AccessPointCantonVolume
             FilesystemId: !Ref cantonVolume
             TransitEncryption: "ENABLED"
 
@@ -1279,7 +1279,7 @@ Resources:
         - Name: cantonVolume
           EFSVolumeConfiguration:
             AuthorizationConfig: 
-              AccessPointId: !Ref AccessPointCantonValume
+              AccessPointId: !Ref AccessPointCantonVolume
             FilesystemId: !Ref cantonVolume
             TransitEncryption: "ENABLED"
 
@@ -1353,7 +1353,7 @@ Resources:
         - Name: cantonVolume
           EFSVolumeConfiguration:
             AuthorizationConfig: 
-              AccessPointId: !Ref AccessPointCantonValume
+              AccessPointId: !Ref AccessPointCantonVolume
             FilesystemId: !Ref cantonVolume
             TransitEncryption: "ENABLED"
 
@@ -1427,7 +1427,7 @@ Resources:
         - Name: cantonVolume
           EFSVolumeConfiguration:
             AuthorizationConfig: 
-              AccessPointId: !Ref AccessPointCantonValume
+              AccessPointId: !Ref AccessPointCantonVolume
             FilesystemId: !Ref cantonVolume
             TransitEncryption: "ENABLED"
 
@@ -1548,7 +1548,7 @@ Resources:
     DependsOn:
     - ecsTaskDefinitionParticipant1
     - PublicLoadBalancer
-    - AlbListenerParticipant1Ledgerpi
+    - AlbListenerParticipant1LedgerApi
     - AlbListenerParticipant1AdminApi
     - InvokeLambdaCreateDB
     - InvokeLambdaCreateConfigEfs
@@ -1599,7 +1599,7 @@ Resources:
     DependsOn:
     - ecsTaskDefinitionParticipant2
     - PublicLoadBalancer
-    - AlbListenerParticipant2Ledgerpi
+    - AlbListenerParticipant2LedgerApi
     - AlbListenerParticipant2AdminApi
     - InvokeLambdaCreateDB
     - InvokeLambdaCreateConfigEfs
@@ -1650,7 +1650,7 @@ Resources:
     DependsOn:
     - ecsTaskDefinitionParticipant3
     - PublicLoadBalancer
-    - AlbListenerParticipant3Ledgerpi
+    - AlbListenerParticipant3LedgerApi
     - AlbListenerParticipant3AdminApi
     - InvokeLambdaCreateDB
     - InvokeLambdaCreateConfigEfs

@@ -1,5 +1,6 @@
 var response = require('cfn-response');
-exports.handler = function(event, context) { 
+
+exports.handler = function (event, context) {
     const fs = require('fs');
     fs.mkdirSync('/mnt/share/domain1');
     fs.mkdirSync('/mnt/share/domain2');
@@ -57,7 +58,7 @@ exports.handler = function(event, context) {
             }
         }
     }
-}`;   
+}`;
     fs.writeFileSync('/mnt/share/domain2/canton.conf', DomainTwo);
 
     let participant1 = `canton {
@@ -83,7 +84,7 @@ exports.handler = function(event, context) {
             }
         }
     }
-}`;   
+}`;
     fs.writeFileSync('/mnt/share/participant1/canton.conf', participant1);
 
     let participant2 = `canton {
@@ -109,7 +110,7 @@ exports.handler = function(event, context) {
             }
         }
     }
-}`;   
+}`;
     fs.writeFileSync('/mnt/share/participant2/canton.conf', participant2);
 
     let participant3 = `canton {
@@ -135,7 +136,7 @@ exports.handler = function(event, context) {
             }
         }
     }
-}`;   
+}`;
     fs.writeFileSync('/mnt/share/participant3/canton.conf', participant3);
 
     let participant1Navigator = `users {
@@ -159,23 +160,23 @@ exports.handler = function(event, context) {
 }`;
     fs.writeFileSync('/mnt/share/participant3/ui-backend.conf', participant3Navigator);
 
-    let participant1Bootstarp = `if (participant1.domains.list_registered().isEmpty) {
+    let participant1Bootstrap = `if (participant1.domains.list_registered().isEmpty) {
     participant1.domains.connect("domain1", "http://domain1.canton.io:3000")
-}`;   
-    fs.writeFileSync('/mnt/share/participant1/bootstrap.canton', participant1Bootstarp);
+}`;
+    fs.writeFileSync('/mnt/share/participant1/bootstrap.canton', participant1Bootstrap);
 
-    let participant2Bootstarp = `if (participant2.domains.list_registered().isEmpty) {
+    let participant2Bootstrap = `if (participant2.domains.list_registered().isEmpty) {
     participant2.domains.connect("domain1", "http://domain1.canton.io:3000")
     participant2.domains.connect("domain2", "http://domain2.canton.io:3010")
-}`;   
-    fs.writeFileSync('/mnt/share/participant2/bootstrap.canton', participant2Bootstarp);
+}`;
+    fs.writeFileSync('/mnt/share/participant2/bootstrap.canton', participant2Bootstrap);
 
-    let participant3Bootstarp = `if (participant3.domains.list_registered().isEmpty) {
+    let participant3Bootstrap = `if (participant3.domains.list_registered().isEmpty) {
     participant3.domains.connect("domain2", "http://domain2.canton.io:3010")
-}`;   
-    fs.writeFileSync('/mnt/share/participant3/bootstrap.canton', participant3Bootstarp);
+}`;
+    fs.writeFileSync('/mnt/share/participant3/bootstrap.canton', participant3Bootstrap);
 
     var responseData = {};
-    responseData = {"efs": "All configuration is created!"};
+    responseData = { "efs": "All configuration is created!" };
     response.send(event, context, response.SUCCESS, responseData);
 };
