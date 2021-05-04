@@ -8,7 +8,7 @@ This presents an example AWS CloudFormation deployment template for deploying a 
 
  * Three Canton Participants and two Canton Domains are connected.
  * Participant1 and Participant2 is connected to Domain1.
- * Participant2 and Participant3 is connected to Domain1.
+ * Participant2 and Participant3 is connected to Domain2.
  * Each Participant is fronted by an instance of [DAML Navigator](https://docs.daml.com/tools/navigator/index.html) to allow exploring their view of the Virtual Global Ledger.
  * Each node has its own database but all are hosted on the same PostgreSQL instance (each application has a dedicated user only permitting access to their database).
 
@@ -77,7 +77,7 @@ This step will have to be repeated for any nodes that should be in communication
 
 ### JSON API
 
-In order to interact with the models in an easy and reliable fashion, we can use DAMLs JSON API, like so:
+In order to interact with the models using a JSON/REST API, we can use Damls JSON Api:
 
 ```
 daml json-api \

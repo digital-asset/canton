@@ -6,7 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Canton Team <team@canton.io>",
+  "author": "Canton Team <canton@digitalasset.com>",
   "dependencies": {
     "cfn-response": "^1.0.1",
     "cfn-response-async": "^1.0.0",
