@@ -35,3 +35,5 @@ for instructions on how to get started with Canton.
 Consult the [Canton User
 Manual](https://www.canton.io/docs/stable/user-manual/index.html) for further
 references of Canton's configuration, command-line arguments, or its console.
+
+Templates for deploying the community version of Canton to AWS can be found in [deployment](./deployment).

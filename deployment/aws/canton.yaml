@@ -1,0 +1,1740 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: A stack for deploying Canton applications in AWS Fargate.
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+    - Label:
+        default: 'S3 Parameters'
+      Parameters:
+      - S3bucketName    
+    - Label:
+        default: 'DB Parameters'
+      Parameters:
+      - DBPrefix
+      - DBPasswordMaster
+      - DBPasswordDomainOne
+      - DBPasswordDomainTwo
+      - DBPasswordParticipantOne
+      - DBPasswordParticipantTwo
+      - DBPasswordParticipantThree
+      - DBBackupRetentionPeriod
+      - DBInstanceClass
+      - DBMultiAZ
+
+Parameters:
+  S3bucketName:
+    Description: S3 Bucket Name for where the lambda functions for generating the databases and Canton configuration files have been placed
+    Type: String
+    MinLength: '3'
+    MaxLength: '64'
+    AllowedPattern: '^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters. Be a minimum of three (3) characters in length
+    Default: canton-aws-quickstart
+  DBPrefix:
+    Description: This prefix is used to define the database and user names
+    Type: String
+    MinLength: '3'
+    MaxLength: '64'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: must begin with a letter and contain only alphanumeric characters.  Be a minimum of three (3) characters in length
+  DBPasswordMaster:
+    NoEcho: 'true'
+    Description: The database Master account password. Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters . 
+  DBPasswordDomainOne:
+    NoEcho: 'true'
+    Description: The database admin account password for domain one. Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters 
+  DBPasswordDomainTwo:
+    NoEcho: 'true'
+    Description: The database admin account password for domain two. Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters .
+  DBPasswordParticipantOne:
+    NoEcho: 'true'
+    Description: The database admin account password for participant one . Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters .
+  DBPasswordParticipantTwo:
+    NoEcho: 'true'
+    Description: The database admin account password for participant two .  Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters .
+  DBPasswordParticipantThree:
+    NoEcho: 'true'
+    Description: The database admin account password for Participant three . Be a minimum of eight (8) characters in length
+    Type: String
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: must contain only alphanumeric characters
+  DBBackupRetentionPeriod:
+    Description: 'The number of days to keep snapshots of the database.'
+    Type: Number
+    MinValue: 0
+    MaxValue: 35
+    Default: 30
+  DBInstanceClass:
+    Description: 'The instance type of database server.'
+    Type: String
+    Default: 'db.t2.micro'
+  DBMultiAZ:
+    Description: 'Specifies if the database instance is deployed to multiple Availability Zones for HA.'
+    Type: String
+    Default: false
+    AllowedValues: [true, false]
+
+Mappings:
+  SubnetConfig:
+    VPC:
+      CIDR: '10.0.0.0/16'
+    PublicOne:
+      CIDR: '10.0.0.0/24'
+    PublicTwo:
+      CIDR: '10.0.1.0/24'
+    PrivateOne:
+      CIDR: '10.0.2.0/24'
+    PrivateTwo:
+      CIDR: '10.0.3.0/24'
+
+Resources:
+  # define VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !FindInMap ['SubnetConfig', 'VPC', 'CIDR']
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+
+  # two public subnets, where containers can have public IP addresses
+  PublicSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicOne', 'CIDR']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Public Subnet (AZ1)
+
+  PublicSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PublicTwo', 'CIDR']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Public Subnet (AZ2)
+
+  # Two private subnets where containers will only have private IP addresses
+  PrivateSubnetOne:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 0
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PrivateOne', 'CIDR']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Subnet (AZ1)
+  PrivateSubnetTwo:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone:
+         Fn::Select:
+         - 1
+         - Fn::GetAZs: {Ref: 'AWS::Region'}
+      VpcId: !Ref 'VPC'
+      CidrBlock: !FindInMap ['SubnetConfig', 'PrivateTwo', 'CIDR']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Subnet (AZ2)
+
+  # Setup networking resources for the public subnets.
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+  GatewayAttachement:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref 'VPC'
+      InternetGatewayId: !Ref 'InternetGateway'
+  PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties:
+        VpcId: !Ref 'VPC'
+        Tags:
+          - Key: Name
+            Value: !Sub ${AWS::StackName} Public Routes
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetOneRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+
+  # Setup networking resources for the private subnets.  
+  NatGatewayOneAttachment:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachement
+    Properties:
+        Domain: vpc
+  NatGatewayTwoAttachment:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachement
+    Properties:
+        Domain: vpc
+  NatGatewayOne:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayOneAttachment.AllocationId
+      SubnetId: !Ref PublicSubnetOne
+  NatGatewayTwo:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayTwoAttachment.AllocationId
+      SubnetId: !Ref PublicSubnetTwo
+  PrivateRouteTableOne:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Routes (AZ1)
+  PrivateRouteOne:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayOne
+  PrivateRouteTableOneAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableOne
+      SubnetId: !Ref PrivateSubnetOne
+  PrivateRouteTableTwo:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref 'VPC'
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} Private Routes (AZ2)
+  PrivateRouteTwo:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayTwo
+  PrivateRouteTableTwoAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableTwo
+      SubnetId: !Ref PrivateSubnetTwo
+
+  #RDS
+  DBSubnetGroup:
+    Type: 'AWS::RDS::DBSubnetGroup'
+    DependsOn:
+    - PrivateSubnetOne
+    - PrivateSubnetTwo
+    Properties:
+      DBSubnetGroupDescription: !Ref 'AWS::StackName'
+      SubnetIds:
+          - !Ref PrivateSubnetOne
+          - !Ref PrivateSubnetTwo
+  DatabaseSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+    - VPC
+    Properties:
+      GroupName: RDSSecurityGroup
+      GroupDescription: RDSSecurityGroup Canton
+      VpcId: !Ref 'VPC'
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        CidrIp: 10.0.0.0/16
+      Tags:
+          - Key: Name
+            Value: DatabaseSecurityGroup
+  DBInstance:
+    DeletionPolicy: Snapshot 
+    UpdateReplacePolicy: Snapshot
+    DependsOn:
+    - DBSubnetGroup
+    - DatabaseSecurityGroup
+    Type: 'AWS::RDS::DBInstance'
+    Properties:
+      AllocatedStorage: 5
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: !Ref DBBackupRetentionPeriod
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DBInstanceClass
+      DBInstanceIdentifier:  !Ref 'AWS::StackName'
+      DBName: MasterDb
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      Engine: postgres
+      EngineVersion: 12.5
+      MasterUsername: !Join [ '_', [ !Ref DBPrefix , master ]]
+      MasterUserPassword: !Ref DBPasswordMaster
+      MultiAZ: !Ref DBMultiAZ
+      StorageType: gp2
+      StorageEncrypted: false
+      VPCSecurityGroups:
+      - !Ref DatabaseSecurityGroup
+
+  #Lambda Function RDS
+  LambdaRdsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaRdsRole ]] 
+      Description: Access to RDS for Lambda function
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaVpcRdsAccess ]]  
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeInstances
+                  - ec2:AttachNetworkInterface
+                Resource: "*"
+  LambdaCreateDB:
+    Type: AWS::Lambda::Function
+    DependsOn:
+    - LambdaRdsRole
+    Properties:
+      Timeout: 30
+      FunctionName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaCreateDB ]]  
+      Description: LambdaCreateDB
+      Runtime: nodejs12.x
+      Handler: index.handler
+      Role: !GetAtt 'LambdaRdsRole.Arn'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref DatabaseSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetOne
+          - !Ref PrivateSubnetTwo
+      Environment:
+        Variables:
+          MasterUser: !Join [ '_', [ !Ref DBPrefix , master ]]
+          DBPrifix: !Ref DBPrefix
+          RdsHost: !GetAtt 'DBInstance.Endpoint.Address'
+          MasterPassword: !Ref DBPasswordMaster
+          DBPasswordDomainOne: !Ref DBPasswordDomainOne
+          DBPasswordDomainTwo: !Ref DBPasswordDomainTwo
+          DBPasswordParticipantOne: !Ref DBPasswordParticipantOne
+          DBPasswordParticipantTwo: !Ref DBPasswordParticipantTwo
+          DBPasswordParticipantThree: !Ref DBPasswordParticipantThree
+      Code:
+        S3Bucket: !Ref S3bucketName
+        S3Key: create-dbs.zip
+  LambdaCreateDBVersion:
+    Type: AWS::Lambda::Version
+    DependsOn:
+    - LambdaCreateDB
+    - DBInstance    
+    Properties:
+      FunctionName: !Ref LambdaCreateDB
+  LambdaCreateDBEventInvoke:
+    Type: AWS::Lambda::EventInvokeConfig
+    DependsOn:
+    - LambdaCreateDBVersion
+    - LambdaCreateDB
+    - DBInstance   
+    Properties:    
+      FunctionName: !Ref LambdaCreateDB
+      MaximumEventAgeInSeconds: 300
+      MaximumRetryAttempts: 1
+      Qualifier: !GetAtt LambdaCreateDBVersion.Version
+  InvokeLambdaCreateDB:
+    Type: Custom::CustomResource
+    DeletionPolicy: Retain
+    DependsOn:
+    - LambdaCreateDB
+    - DBInstance
+    - LambdaCreateDBVersion
+    - LambdaCreateDBEventInvoke
+    Properties:
+      ServiceToken:  !GetAtt 'LambdaCreateDB.Arn'
+
+  #EFS    
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+    - VPC
+    Properties:
+      GroupDescription: FileSystem Security Group canton
+      VpcId: !Ref 'VPC'
+      GroupName: !Join [ '_', [ !Ref 'AWS::StackName' , EfsSecurityGroup ]] 
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: 10.0.0.0/16
+      Tags:
+          - Key: Name
+            Value: !Join [ '_', [ !Ref 'AWS::StackName' , EfsSecurityGroup ]] 
+  cantonVolume:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      FileSystemTags:
+        - Key: Name
+          Value: !Join [ '_', [ !Ref 'AWS::StackName' , volume ]]
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+  cantonMountTargetOne:
+    Type: AWS::EFS::MountTarget
+    DependsOn:
+    - cantonVolume
+    Properties: 
+      FileSystemId: !Ref cantonVolume
+      SubnetId: !Ref PrivateSubnetOne
+      SecurityGroups: 
+        - !Ref MountTargetSecurityGroup
+  cantonMountTargetTwo:
+    Type: AWS::EFS::MountTarget
+    DependsOn:
+    - cantonVolume
+    Properties:
+      FileSystemId: !Ref cantonVolume
+      SubnetId: !Ref PrivateSubnetTwo
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+  AccessPointCantonValume:
+    Type: 'AWS::EFS::AccessPoint'
+    DependsOn:
+    - cantonMountTargetTwo
+    - cantonMountTargetOne
+    Properties:
+      FileSystemId: !Ref cantonVolume
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        CreationInfo:
+          OwnerGid: "1000"
+          OwnerUid: "1000"
+          Permissions: "0777"
+        Path: "/data"
+
+  #Lambda Function EFS
+  LambdaEFSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaEFSRole ]] 
+      Description: Access to EFS for Lambda function
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaVpcEc2Access ]] 
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeInstances
+                  - ec2:AttachNetworkInterface
+                Resource: "*"      
+        - PolicyName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaVpcEfsAccess ]] 
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Allow the LAMBDA Tasks to EFS
+                  - 'elasticfilesystem:CreateFileSystem'
+                  - 'elasticfilesystem:CreateMountTarget'
+                  - 'elasticfilesystem:DescribeAccessPoints'
+                  - 'elasticfilesystem:DescribeFileSystems'
+                Resource: "*"
+  LambdaCreateConfigEfs:
+    Type: AWS::Lambda::Function
+    DependsOn:
+    - cantonMountTargetOne
+    - cantonMountTargetTwo
+    - LambdaEFSRole
+    - MountTargetSecurityGroup
+    - AccessPointCantonValume
+    Properties:
+      Timeout: 30
+      FunctionName: !Join [ '_', [ !Ref 'AWS::StackName' , LambdaCreateConfigEfs ]] 
+      Description: Lambda craete canton config on EFS
+      Runtime: nodejs12.x
+      Handler: index.handler
+      Role: !GetAtt 'LambdaEFSRole.Arn'
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref MountTargetSecurityGroup
+        SubnetIds:
+          - !Ref PrivateSubnetOne
+          - !Ref PrivateSubnetTwo
+      Environment:
+        Variables:
+          RdsHost: !GetAtt 'DBInstance.Endpoint.Address'
+          DBPasswordDomainOne: !Ref DBPasswordDomainOne
+          DBPasswordDomainTwo: !Ref DBPasswordDomainTwo
+          DBPasswordParticipantOne: !Ref DBPasswordParticipantOne
+          DBPasswordParticipantTwo: !Ref DBPasswordParticipantTwo
+          DBPasswordParticipantThree: !Ref DBPasswordParticipantThree
+      Code:
+        S3Bucket: !Ref S3bucketName
+        S3Key: generate-configs.zip
+      FileSystemConfigs:
+        - Arn: !GetAtt 'AccessPointCantonValume.Arn' 
+          LocalMountPath: /mnt/share
+  LambdaCreateConfigEfsVersion:
+    Type: AWS::Lambda::Version
+    DependsOn:
+    - LambdaCreateConfigEfs
+    Properties:
+      FunctionName: !Ref LambdaCreateConfigEfs
+  LambdaCreateConfigEfsInvoke:
+    Type: AWS::Lambda::EventInvokeConfig
+    DependsOn:
+    - LambdaCreateConfigEfs
+    - LambdaCreateConfigEfsVersion  
+    Properties:    
+      FunctionName: !Ref LambdaCreateConfigEfs
+      MaximumEventAgeInSeconds: 500
+      MaximumRetryAttempts: 1
+      Qualifier: !GetAtt LambdaCreateConfigEfsVersion.Version
+  InvokeLambdaCreateConfigEfs:
+    Type: Custom::CustomResource
+    DeletionPolicy: Retain
+    DependsOn:
+    - LambdaCreateConfigEfs
+    - LambdaCreateConfigEfsInvoke       
+    Properties:
+      ServiceToken:  !GetAtt 'LambdaCreateConfigEfs.Arn'
+
+  #Log Group
+  LogGroupDomainOne:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/domainOne
+          RetentionInDays: 7
+  LogGroupDomainTwo:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/domainTwo
+          RetentionInDays: 7
+  LogGroupParticipantOne:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant1
+          RetentionInDays: 7
+  LogGroupParticipantTwo:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant2
+          RetentionInDays: 7
+  LogGroupParticipantThree:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant3
+          RetentionInDays: 7
+  LogGroupParticipantThreeNavigator:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant3navigator
+          RetentionInDays: 7
+  LogGroupParticipantTwoNavigator:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant2navigator
+          RetentionInDays: 7
+  LogGroupParticipantOneNavigator:
+      Type: AWS::Logs::LogGroup
+      Properties: 
+          LogGroupName: /ecs/canton/participant1navigator
+          RetentionInDays: 7          
+
+  # LoadBalancer
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: GatewayAttachement
+    Properties:
+      Name: !Join [ '-', [ !Ref 'AWS::StackName' , LoadBalancer ]]
+      LoadBalancerAttributes:
+        - Key: load_balancing.cross_zone.enabled
+          Value: true
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnetOne
+        - !Ref PublicSubnetTwo
+      Type: network
+
+
+  TargetGroupDomain1PublicApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Domain1PublicAPI']]
+      Port: 3000
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+      Tags: 
+        - Key: Name
+          Value: TargetGroupDomain1PublicApi
+  AlbListenerDomain1PublicApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupDomain1PublicApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupDomain1PublicApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 3000
+      Protocol: TCP
+  TargetGroupDomain2PublicApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Domain2PublicAPI']]
+      Port: 3010
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerDomain2PublicApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupDomain2PublicApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupDomain2PublicApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 3010
+      Protocol: TCP
+  TargetGroupDomain1AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Domain1AdminAPI']]
+      Port: 3001
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerDomain1AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupDomain1AdminApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupDomain1AdminApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 3001
+      Protocol: TCP
+  TargetGroupDomain2AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Doamin2AdminAPI']]
+      Port: 3011
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerDomain2AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupDomain2AdminApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupDomain2AdminApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 3011
+      Protocol: TCP
+  TargetGroupParticipant1AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant1AdminAPI']]
+      Port: 4001
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant1AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant1AdminApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant1AdminApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4001
+      Protocol: TCP
+  TargetGroupParticipant2AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant2AdminAPI']]
+      Port: 4011
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant2AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant2AdminApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant2AdminApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4011
+      Protocol: TCP
+  TargetGroupParticipant3AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant3AdminAPI']]
+      Port: 4021
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant3AdminApi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant3AdminApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant3AdminApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4021
+      Protocol: TCP
+  TargetGroupParticipant1LedgerApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant1LedgerAPI']]
+      Port: 4000
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant1Ledgerpi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant1LedgerApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant1LedgerApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4000
+      Protocol: TCP
+  TargetGroupParticipant2LedgerApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant2LedgerAPI']]
+      Port: 4010
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant2Ledgerpi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant2LedgerApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant2LedgerApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4010
+      Protocol: TCP
+  TargetGroupParticipant3LedgerApi:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant3LedgerAPI']]
+      Port: 4020
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant3Ledgerpi:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant3LedgerApi
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant3LedgerApi'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4020
+      Protocol: TCP 
+  TargetGroupParticipant3Navigator:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant3Navigator']]
+      Port: 4300
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant3Navigator:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant3Navigator
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant3Navigator'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4300
+      Protocol: TCP 
+  TargetGroupParticipant2Navigator:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant2Navigator']]
+      Port: 4200
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant2Navigator:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant2Navigator
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant2Navigator'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4200
+      Protocol: TCP 
+  TargetGroupParticipant1Navigator:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['-', [!Ref 'AWS::StackName', 'Participant1Navigator']]
+      Port: 4100
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref 'VPC'
+  AlbListenerParticipant1Navigator:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroupParticipant1Navigator
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref 'TargetGroupParticipant1Navigator'
+          Type: 'forward'
+      LoadBalancerArn: !Ref 'PublicLoadBalancer'
+      Port: 4100
+      Protocol: TCP
+
+  #ECS service discovery
+  PrivateNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: canton.io
+      Vpc: !Ref 'VPC'
+      Tags: 
+        - Key: Name
+          Value: canton domain
+  DiscoveryServiceDomain1:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: domain1
+      NamespaceId: !Ref PrivateNamespace
+  DiscoveryServiceDomain2:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: domain2
+      NamespaceId: !Ref PrivateNamespace
+  DiscoveryServiceParticipant1:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: Participant1
+      NamespaceId: !Ref PrivateNamespace
+  DiscoveryServiceParticipant2:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: Participant2
+      NamespaceId: !Ref PrivateNamespace
+  DiscoveryServiceParticipant3:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig: 
+        FailureThreshold: 1
+      Name: Participant3
+      NamespaceId: !Ref PrivateNamespace
+
+  #ECS
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join [ '_', [ !Ref 'AWS::StackName' , ECSTaskExecutionRole ]]
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskExecutionRolePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                - 'ssmmessages:CreateControlChannel'
+                - 'ssmmessages:CreateDataChannel'
+                - 'ssmmessages:OpenControlChannel'
+                - 'ssmmessages:OpenDataChannel'
+                # Allow the ECS tasks to upload logs to CloudWatch
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: '*'
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join [ '_', [ !Ref 'AWS::StackName' , TaskRole ]] 
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: AmazonECSTaskRolePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                # Allow the ECS Tasks to EFS
+                - 'elasticfilesystem:CreateFileSystem'
+                - 'elasticfilesystem:CreateMountTarget'
+                - 'elasticfilesystem:DescribeAccessPoints'
+                - 'elasticfilesystem:DescribeFileSystems'
+                # Allow the ECS tasks to upload logs to CloudWatch
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+                # Allow the ECS Tasks to RDS
+                - 'rds:CreateDBInstance'
+                - 'rds:Describe*'
+                # Allow the ECS Tasks to SSM
+                - 'ssmmessages:CreateControlChannel'
+                - 'ssmmessages:CreateDataChannel'
+                - 'ssmmessages:OpenControlChannel'
+                - 'ssmmessages:OpenDataChannel'  
+                # Rules which allow ECS to update load balancers on your behalf
+                # with the information sabout how to send traffic to your containers
+                - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+                - 'elasticloadbalancing:DeregisterTargets'
+                - 'elasticloadbalancing:Describe*'
+                - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+                - 'elasticloadbalancing:RegisterTargets'                              
+              Resource: '*'
+
+  ecsInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn:
+    - TaskRole
+    - ECSTaskExecutionRole
+    Properties:
+      GroupName: !Join [ '_', [ !Ref 'AWS::StackName' , ECSSecurityGroup ]] 
+      GroupDescription: Web and canton from anywhere to ECS Auto Scaling Instances
+      VpcId: !Ref 'VPC'
+      Tags:
+          - Key: Name
+            Value: ecsInstanceSecurityGroup      
+      SecurityGroupIngress:
+            - CidrIp: 0.0.0.0/0
+              FromPort: 3000
+              IpProtocol: tcp
+              ToPort: 3000
+            - CidrIp: 0.0.0.0/0
+              FromPort: 3001
+              IpProtocol: tcp
+              ToPort: 3001
+            - CidrIp: 0.0.0.0/0
+              FromPort: 3010
+              IpProtocol: tcp
+              ToPort: 3010
+            - CidrIp: 0.0.0.0/0
+              FromPort: 3011
+              IpProtocol: tcp
+              ToPort: 3011
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4000
+              IpProtocol: tcp
+              ToPort: 4000
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4001
+              IpProtocol: tcp
+              ToPort: 4001
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4010
+              IpProtocol: tcp
+              ToPort: 4010                            
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4011
+              IpProtocol: tcp
+              ToPort: 4011
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4020
+              IpProtocol: tcp
+              ToPort: 4020
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4021
+              IpProtocol: tcp
+              ToPort: 4021
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4100
+              IpProtocol: tcp
+              ToPort: 4100
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4200
+              IpProtocol: tcp
+              ToPort: 4200
+            - CidrIp: 0.0.0.0/0
+              FromPort: 4300
+              IpProtocol: tcp
+              ToPort: 4300   
+
+  ecsTaskDefinitionDomain1:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - LambdaCreateConfigEfs
+    - InvokeLambdaCreateConfigEfs
+    Properties: 
+      ContainerDefinitions: 
+      - Name: domain1
+        Command: ["daemon","--config","/shared/domain1/canton.conf"]
+        Cpu: 2048
+        Memory: 4096
+        MemoryReservation: 4096
+        Image: digitalasset/canton-community:0.22.0
+        Essential: true
+        PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+            - ContainerPort: 3001
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/domainOne
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+        Environment:
+          - Name: PUBLIC_API_PORT
+            Value: 3000
+          - Name: ADMIN_API_PORT
+            Value: 3001
+          - Name: JAVA_OPTS
+            Value: "-Xmx2G"
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      Family: EcsTaskCantonDomain1
+      Memory: 4096
+      Cpu: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities: 
+        - FARGATE
+      Tags: 
+        - Key: Name
+          Value: cantonTaskDomain1
+      Volumes: 
+        - Name: cantonVolume
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref AccessPointCantonValume
+            FilesystemId: !Ref cantonVolume
+            TransitEncryption: "ENABLED"
+
+  ecsTaskDefinitionDomain2:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - LambdaCreateConfigEfs
+    - InvokeLambdaCreateConfigEfs
+    Properties: 
+      ContainerDefinitions: 
+      - Name: domain2
+        Command: ["daemon","--config","/shared/domain2/canton.conf"]
+        Cpu: 2048
+        Memory: 4096
+        MemoryReservation: 4096
+        Image: digitalasset/canton-community:0.22.0
+        Essential: true
+        PortMappings:
+            - ContainerPort: 3010
+              Protocol: tcp
+            - ContainerPort: 3011
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/domainTwo
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+        Environment:
+          - Name: PUBLIC_API_PORT
+            Value: 3010
+          - Name: ADMIN_API_PORT
+            Value: 3011
+          - Name: JAVA_OPTS
+            Value: "-Xmx2G"
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      Family: EcsTaskCantonDomain2
+      Memory: 4096
+      Cpu: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities: 
+        - FARGATE
+      Tags: 
+        - Key: Name
+          Value: cantonTaskDomain2
+      Volumes: 
+        - Name: cantonVolume
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref AccessPointCantonValume
+            FilesystemId: !Ref cantonVolume
+            TransitEncryption: "ENABLED"
+
+  ecsTaskDefinitionParticipant1:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - LambdaCreateConfigEfs
+    - InvokeLambdaCreateConfigEfs
+    Properties: 
+      ContainerDefinitions: 
+      - Name: participant1
+        Command: ["daemon","--config","/shared/participant1/canton.conf","--bootstrap","/shared/participant1/bootstrap.canton"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/canton-community:0.22.0
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4000
+              Protocol: tcp
+            - ContainerPort: 4001
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant1
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+        Environment:
+          - Name: PUBLIC_API_PORT
+            Value: 4000
+          - Name: ADMIN_API_PORT
+            Value: 4001
+          - Name: JAVA_OPTS
+            Value: "-Xmx2G"
+      - Name: participant1navigator
+        Command: ["daml","ledger","navigator","--host","127.0.0.1","--port","4000","--port","4100"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/daml-sdk:1.11.1
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4100
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant1navigator
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      Family: EcsTaskCantonParticipant1
+      Memory: 4096
+      Cpu: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities: 
+        - FARGATE
+      Tags: 
+        - Key: Name
+          Value: cantonTaskParticipant1
+      Volumes: 
+        - Name: cantonVolume
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref AccessPointCantonValume
+            FilesystemId: !Ref cantonVolume
+            TransitEncryption: "ENABLED"
+
+  ecsTaskDefinitionParticipant2:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - LambdaCreateConfigEfs
+    - InvokeLambdaCreateConfigEfs
+    Properties: 
+      ContainerDefinitions: 
+      - Name: participant2
+        Command: ["daemon","--config","/shared/participant2/canton.conf","--bootstrap","/shared/participant2/bootstrap.canton"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/canton-community:0.22.0
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4010
+              Protocol: tcp
+            - ContainerPort: 4011
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant2
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+        Environment:
+          - Name: PUBLIC_API_PORT
+            Value: 4010
+          - Name: ADMIN_API_PORT
+            Value: 4011
+          - Name: JAVA_OPTS
+            Value: "-Xmx2G"
+      - Name: participant2navigator
+        Command: ["daml","ledger","navigator","--host","127.0.0.1","--port","4010","--port","4200"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/daml-sdk:1.11.1
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4200
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant2navigator
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs            
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      Family: EcsTaskCantonParticipant2
+      Memory: 4096
+      Cpu: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities: 
+        - FARGATE
+      Tags: 
+        - Key: Name
+          Value: cantonTaskParticipant2
+      Volumes: 
+        - Name: cantonVolume
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref AccessPointCantonValume
+            FilesystemId: !Ref cantonVolume
+            TransitEncryption: "ENABLED"
+
+  ecsTaskDefinitionParticipant3:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - TaskRole
+    - LambdaCreateConfigEfs
+    - InvokeLambdaCreateConfigEfs
+    Properties: 
+      ContainerDefinitions: 
+      - Name: participant3
+        Command: ["daemon","--config","/shared/participant3/canton.conf","--bootstrap","/shared/participant3/bootstrap.canton"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/canton-community:0.22.0
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4020
+              Protocol: tcp
+            - ContainerPort: 4021
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant3
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs
+        Environment:
+          - Name: PUBLIC_API_PORT
+            Value: 4020
+          - Name: ADMIN_API_PORT
+            Value: 4021
+          - Name: JAVA_OPTS
+            Value: "-Xmx2G"
+      - Name: participant3navigator
+        Command: ["daml","ledger","navigator","--host","127.0.0.1","--port","4020","--port","4300"]
+        Cpu: 1024
+        Memory: 2048
+        MemoryReservation: 2048
+        Image: digitalasset/daml-sdk:1.11.1
+        Essential: true
+        PortMappings:
+            - ContainerPort: 4300
+              Protocol: tcp
+        MountPoints:
+          - ContainerPath: /shared
+            SourceVolume: cantonVolume
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: /ecs/canton/participant3navigator
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: ecs             
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      Family: EcsTaskCantonParticipant3
+      Memory: 4096
+      Cpu: 2048
+      NetworkMode: awsvpc
+      RequiresCompatibilities: 
+        - FARGATE
+      Tags: 
+        - Key: Name
+          Value: cantonTaskParticipant3
+      Volumes: 
+        - Name: cantonVolume
+          EFSVolumeConfiguration:
+            AuthorizationConfig: 
+              AccessPointId: !Ref AccessPointCantonValume
+            FilesystemId: !Ref cantonVolume
+            TransitEncryption: "ENABLED"
+
+  ecsCluster:
+    Type: AWS::ECS::Cluster
+    DeletionPolicy: Delete
+    Properties: 
+      ClusterName: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]] 
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled      
+      Configuration:
+        ExecuteCommandConfiguration:
+            Logging: DEFAULT      
+      Tags: 
+        - Key: Name
+          Value: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]] 
+
+
+  ecsServiceDomain1:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - ecsTaskDefinitionDomain1
+    - PublicLoadBalancer
+    - DiscoveryServiceDomain1
+    - AlbListenerDomain1AdminApi
+    - AlbListenerParticipant1AdminApi
+    - InvokeLambdaCreateDB
+    - InvokeLambdaCreateConfigEfs
+    - ecsCluster
+    Properties: 
+      Cluster: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]]
+      DeploymentConfiguration: 
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups: 
+            - !Ref DatabaseSecurityGroup
+            - !Ref MountTargetSecurityGroup
+            - !Ref ecsInstanceSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnetOne
+            - !Ref PrivateSubnetTwo
+      SchedulingStrategy: REPLICA
+      ServiceName: EcsServiceCantonDomain1
+      DeploymentController:
+        Type: ECS
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceDomain1.Arn
+          Port: 3000       
+      LoadBalancers:
+        - ContainerName: domain1
+          ContainerPort: 3000
+          TargetGroupArn: !Ref 'TargetGroupDomain1PublicApi'
+        - ContainerName: domain1
+          ContainerPort: 3001
+          TargetGroupArn: !Ref 'TargetGroupDomain1AdminApi'
+      Tags: 
+        - Key: Name
+          Value: EcsServiceCantonDomain1
+      TaskDefinition: !Ref ecsTaskDefinitionDomain1
+
+  ecsServiceDomain2:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - ecsTaskDefinitionDomain2
+    - PublicLoadBalancer
+    - DiscoveryServiceDomain2
+    - AlbListenerDomain2AdminApi
+    - AlbListenerParticipant2AdminApi
+    - InvokeLambdaCreateDB
+    - InvokeLambdaCreateConfigEfs
+    - ecsCluster
+    Properties: 
+      Cluster: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]]
+      DeploymentConfiguration: 
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups: 
+            - !Ref DatabaseSecurityGroup
+            - !Ref MountTargetSecurityGroup
+            - !Ref ecsInstanceSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnetOne
+            - !Ref PrivateSubnetTwo
+      SchedulingStrategy: REPLICA
+      ServiceName: EcsServiceCantonDomain2
+      DeploymentController:
+        Type: ECS
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceDomain2.Arn
+          Port: 3010       
+      LoadBalancers:
+        - ContainerName: domain2
+          ContainerPort: 3010
+          TargetGroupArn: !Ref 'TargetGroupDomain2PublicApi'
+        - ContainerName: domain2
+          ContainerPort: 3011
+          TargetGroupArn: !Ref 'TargetGroupDomain2AdminApi'
+      Tags: 
+        - Key: Name
+          Value: EcsServiceCantonDomain2
+      TaskDefinition: !Ref ecsTaskDefinitionDomain2
+
+  ecsServiceParticipant1:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - ecsTaskDefinitionParticipant1
+    - PublicLoadBalancer
+    - AlbListenerParticipant1Ledgerpi
+    - AlbListenerParticipant1AdminApi
+    - InvokeLambdaCreateDB
+    - InvokeLambdaCreateConfigEfs
+    - ecsServiceDomain1
+    - ecsCluster
+    Properties: 
+      Cluster: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]]
+      DeploymentConfiguration: 
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+          AwsvpcConfiguration:
+            SecurityGroups: 
+              - !Ref DatabaseSecurityGroup
+              - !Ref MountTargetSecurityGroup
+              - !Ref ecsInstanceSecurityGroup
+            Subnets:
+              - !Ref PrivateSubnetOne
+              - !Ref PrivateSubnetTwo
+      SchedulingStrategy: REPLICA
+      ServiceName: EcsServiceCantonParticipant1
+      DeploymentController:
+        Type: ECS
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceParticipant1.Arn
+          Port: 4000         
+      LoadBalancers:
+        - ContainerName: participant1
+          ContainerPort: 4000
+          TargetGroupArn: !Ref 'TargetGroupParticipant1LedgerApi'
+        - ContainerName: participant1
+          ContainerPort: 4001
+          TargetGroupArn: !Ref 'TargetGroupParticipant1AdminApi'
+        - ContainerName: participant1navigator
+          ContainerPort: 4100
+          TargetGroupArn: !Ref 'TargetGroupParticipant1Navigator'
+      Tags: 
+        - Key: Name
+          Value: EcsServiceCantonParticipant1
+      TaskDefinition: !Ref ecsTaskDefinitionParticipant1
+
+  ecsServiceParticipant2:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - ecsTaskDefinitionParticipant2
+    - PublicLoadBalancer
+    - AlbListenerParticipant2Ledgerpi
+    - AlbListenerParticipant2AdminApi
+    - InvokeLambdaCreateDB
+    - InvokeLambdaCreateConfigEfs
+    - ecsServiceDomain1
+    - ecsServiceDomain2
+    Properties: 
+      Cluster: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]]
+      DeploymentConfiguration: 
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+          AwsvpcConfiguration:
+            SecurityGroups: 
+              - !Ref DatabaseSecurityGroup
+              - !Ref MountTargetSecurityGroup
+              - !Ref ecsInstanceSecurityGroup
+            Subnets:
+              - !Ref PrivateSubnetOne
+              - !Ref PrivateSubnetTwo
+      SchedulingStrategy: REPLICA
+      ServiceName: EcsServiceCantonParticipant2
+      DeploymentController:
+        Type: ECS
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceParticipant2.Arn
+          Port: 4010         
+      LoadBalancers:
+        - ContainerName: participant2
+          ContainerPort: 4010
+          TargetGroupArn: !Ref 'TargetGroupParticipant2LedgerApi'
+        - ContainerName: participant2
+          ContainerPort: 4011
+          TargetGroupArn: !Ref 'TargetGroupParticipant2AdminApi'
+        - ContainerName: participant2navigator
+          ContainerPort: 4200
+          TargetGroupArn: !Ref 'TargetGroupParticipant2Navigator'
+      Tags: 
+        - Key: Name
+          Value: EcsServiceCantonParticipant2
+      TaskDefinition: !Ref ecsTaskDefinitionParticipant2
+
+  ecsServiceParticipant3:
+    Type: AWS::ECS::Service
+    DependsOn:
+    - ecsTaskDefinitionParticipant3
+    - PublicLoadBalancer
+    - AlbListenerParticipant3Ledgerpi
+    - AlbListenerParticipant3AdminApi
+    - InvokeLambdaCreateDB
+    - InvokeLambdaCreateConfigEfs
+    - ecsServiceDomain2
+    Properties: 
+      Cluster: !Join [ '_', [ !Ref 'AWS::StackName' , Cluster ]]
+      DeploymentConfiguration: 
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+          AwsvpcConfiguration:
+            SecurityGroups: 
+              - !Ref DatabaseSecurityGroup
+              - !Ref MountTargetSecurityGroup
+              - !Ref ecsInstanceSecurityGroup
+            Subnets:
+              - !Ref PrivateSubnetOne
+              - !Ref PrivateSubnetTwo
+      SchedulingStrategy: REPLICA
+      ServiceName: EcsServiceCantonParticipant3
+      DeploymentController:
+        Type: ECS
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceParticipant3.Arn
+          Port: 4020          
+      LoadBalancers:
+        - ContainerName: participant3
+          ContainerPort: 4020
+          TargetGroupArn: !Ref 'TargetGroupParticipant3LedgerApi'
+        - ContainerName: participant3
+          ContainerPort: 4021
+          TargetGroupArn: !Ref 'TargetGroupParticipant3AdminApi'
+        - ContainerName: participant3navigator
+          ContainerPort: 4300
+          TargetGroupArn: !Ref 'TargetGroupParticipant3Navigator'
+      Tags: 
+        - Key: Name
+          Value: EcsServiceCantonParticipant3
+      TaskDefinition: !Ref ecsTaskDefinitionParticipant3
+
+Outputs:
+  LoadBalancerUrl:
+    Description: The URL of the NLB
+    Value: !GetAtt PublicLoadBalancer.DNSName
+  domain1Public:
+    Description: Domain one public api port
+    Value: 3000
+  domain1Admin:
+    Description: Domain one Admin api port
+    Value: 3001
+  domain2Public:
+    Description: Domain two public api port
+    Value: 3010
+  domain2Admin:
+    Description: Domain two Admin api port
+    Value: 3011
+  Participant1Public:
+    Description: Participant one public api port
+    Value: 4000
+  Participant1Admin:
+    Description: Participant one Admin api port
+    Value: 4001
+  Participant1Navigator:
+    Description: Participant one navigator api port
+    Value: 4100     
+  Participant2Public:
+    Description: Participant two public api port
+    Value: 4010
+  Participant2Admin:
+    Description: Participant two Admin api port
+    Value: 4011
+  Participant2Navigator:
+    Description: Participant two navigator api port
+    Value: 4200      
+  Participant3Public:
+    Description: Participant three public api port
+    Value: 4020
+  Participant3Admin:
+    Description: Participant three Admin api port
+    Value: 4021
+  Participant3Navigator:
+    Description: Participant three navigator api port
+    Value: 4300      
