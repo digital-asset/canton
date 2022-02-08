@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
@@ -71,7 +71,8 @@ class PeriodicAcknowledgements(
   private def scheduleNextUpdate(): Unit = {
     clock
       .scheduleAfter(_ => update(), interval.toJava)
-      .foreach(_ => scheduleNextUpdate())
+      .map(_ => scheduleNextUpdate())
+      .discard[FutureUnlessShutdown[Unit]]
   }
 
   @VisibleForTesting

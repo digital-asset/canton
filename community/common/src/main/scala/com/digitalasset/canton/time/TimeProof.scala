@@ -46,6 +46,8 @@ case class TimeProof private (
     with HasCryptographicEvidence {
   def timestamp: CantonTimestamp = deliver.timestamp
 
+  def traceContext: TraceContext = event.traceContext
+
   override def pretty: Pretty[TimeProof.this.type] = prettyOfClass(
     unnamedParam(_.timestamp)
   )

@@ -277,9 +277,7 @@ class DomainTopologyDispatcher(
                   s"Waiting $old due to topology change delay before resuming dispatching"
                 )
                 EitherT.right(
-                  FutureUnlessShutdown.outcomeF(
-                    clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
-                  )
+                  clock.scheduleAfter(_ => (), param.topologyChangeDelay.duration)
                 )
               } else empty
             })

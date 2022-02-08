@@ -482,7 +482,7 @@ trait MockClock {
         Threading.sleep(duration.toMillis)
         logger.debug("Done waiting")
         task(CantonTimestamp.Epoch)
-        Future.unit
+        FutureUnlessShutdown.unit
     }
   }
 }

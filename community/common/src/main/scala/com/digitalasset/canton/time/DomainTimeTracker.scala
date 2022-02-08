@@ -22,9 +22,8 @@ import com.digitalasset.canton.util._
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.PriorityBlockingQueue
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.AtomicReference
 import scala.Ordering.Implicits._
-import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 /** Configuration for the domain time tracker.
@@ -127,31 +126,24 @@ class DomainTimeTracker(
       PriorityBlockingQueueUtil.DefaultInitialCapacity,
       AwaitingTick.ordering,
     )
-  // should be updated while holding `lock` to synchronize with `pendingTicks`
-  private val waitingForTimeProof = new AtomicBoolean()
 
+  /** Ensures that changes to [[timestampRef]] and [[pendingTicks]] happen atomically */
   private val lock: AnyRef = new Object
+
   private def withLock[A](fn: => A): A = {
     blocking {
       lock.synchronized { fn }
     }
   }
 
-  private val latestTimestampRef: AtomicReference[Option[Received[CantonTimestamp]]] =
-    new AtomicReference[Option[Received[CantonTimestamp]]](None)
-  private val latestTimeProofRef: AtomicReference[Option[Received[TimeProof]]] =
-    new AtomicReference[Option[Received[TimeProof]]]
-  // we're unable to cancel an update once scheduled, so if we decide to schedule an earlier update than an update already
-  // scheduled we update this to the earlier value and then check this value when the scheduled task is run
-  private val nextScheduledUpdate: AtomicReference[Option[CantonTimestamp]] =
-    new AtomicReference[Option[CantonTimestamp]](None)
-  private val nextTimestampPromiseRef: AtomicReference[Option[Promise[CantonTimestamp]]] =
-    new AtomicReference(None)
-  private val nextTimeProofPromiseRef: AtomicReference[Option[Promise[TimeProof]]] =
-    new AtomicReference(None)
-
   // the maximum timestamp we can support waiting for without causing an overflow
   private val maxPendingTick = CantonTimestamp.MaxValue.minus(config.observationLatency.unwrap)
+
+  private val timestampRef: AtomicReference[LatestAndNext[CantonTimestamp]] =
+    new AtomicReference[LatestAndNext[CantonTimestamp]](LatestAndNext.empty)
+
+  private val timeProofRef: AtomicReference[LatestAndNext[TimeProof]] =
+    new AtomicReference[LatestAndNext[TimeProof]](LatestAndNext.empty)
 
   // kick off the scheduling to ensure we see timestamps at least occasionally
   ensureMinObservationDuration()
@@ -159,7 +151,7 @@ class DomainTimeTracker(
   /** Fetch the latest timestamp we have observed from the domain.
     * Note this isn't restored on startup so will be empty until the first event after starting is seen.
     */
-  def latestTime: Option[CantonTimestamp] = latestTimestampRef.get.map(_.value)
+  def latestTime: Option[CantonTimestamp] = timestampRef.get().latest.map(_.value)
 
   /** Fetches a recent domain timestamp.
     * If the latest received event has been received within the given `freshnessBound` (measured on the participant clock) this domain timestamp
@@ -167,17 +159,21 @@ class DomainTimeTracker(
     * If a sufficiently fresh timestamp is unavailable then a request for a time proof will be made, however
     * the returned future will be resolved by the first event after this call (which may not necessarily be
     * the response to our time proof request).
+    *
+    * @return The future completes with the domain's timestamp of the event.
+    *         So if the participant's local clock is ahead of the domain clock,
+    *         the timestamp may be earlier than now minus the freshness bound.
     */
   def fetchTime(freshnessBound: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero)(implicit
       traceContext: TraceContext
   ): Future[CantonTimestamp] =
-    fetch(freshnessBound, latestTimestampRef, nextTimestampPromiseRef, requiresTimeProof = false)
+    fetch(freshnessBound, timestampRef, requiresTimeProof = false)
 
   /** Similar to `fetchTime` but will only return time proof. */
   def fetchTimeProof(freshnessBound: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero)(
       implicit traceContext: TraceContext
   ): Future[TimeProof] =
-    fetch(freshnessBound, latestTimeProofRef, nextTimeProofPromiseRef, requiresTimeProof = true)
+    fetch(freshnessBound, timeProofRef, requiresTimeProof = true)
 
   /** Register that we want to observe a domain time.
     * The tracker will attempt to make sure that we observe a sequenced event with this timestamp or greater.
@@ -186,16 +182,8 @@ class DomainTimeTracker(
     * observation latency. If a greater value is provided a warning will be logged but no error will be
     * thrown or returned.
     */
-  def requestTick(ts: CantonTimestamp)(implicit traceContext: TraceContext): Unit = requestTicks(
-    Seq(ts)
-  )
-
-  private def requestTimeProof()(implicit traceContext: TraceContext): Unit = {
-    withLock {
-      waitingForTimeProof.set(true)
-    }
-    maybeScheduleUpdate()
-  }
+  def requestTick(ts: CantonTimestamp)(implicit traceContext: TraceContext): Unit =
+    requestTicks(Seq(ts))
 
   /** Register that we want to observe domain times.
     * The tracker will attempt to make sure that we observe a sequenced event with the given timestamps or greater.
@@ -234,11 +222,12 @@ class DomainTimeTracker(
   def awaitTick(
       ts: CantonTimestamp
   )(implicit traceContext: TraceContext): Option[Future[CantonTimestamp]] = {
-    if (latestTimestampRef.get().exists(_.value >= ts)) {
-      logger.debug(s"No await time for ${ts} as we are already at ${latestTimestampRef.get()} ")
+    val latest = timestampRef.get().latest
+    if (latest.exists(_.value >= ts)) {
+      logger.debug(s"No await time for ${ts} as we are already at $latest")
       None
     } else {
-      logger.debug(s"Await time for ${ts} as we are at ${latestTimestampRef.get().map(_.value)} ")
+      logger.debug(s"Await time for ${ts} as we are at ${latest.map(_.value)} ")
       // wait for this timestamp to be observed
       val promise = Promise[CantonTimestamp]()
       withLock {
@@ -253,12 +242,8 @@ class DomainTimeTracker(
   def wrapHandler[Env](
       handler: OrdinaryApplicationHandler[Env]
   ): OrdinaryApplicationHandler[Env] = { tracedEvents =>
-    tracedEvents.withTraceContext { _ => events =>
-      // currently all actions from events are synchronous and do not return errors so this simple processing is safe.
-      // for timestamps we could just take the latest event in batch, however as we're also looking for time proofs
-      // we supply every event sequentially.
-      // this could likely be optimised to just process the latest time proof and timestamp from the batch if required.
-      events.foreach(update)
+    tracedEvents.withTraceContext { implicit batchTraceContext => events =>
+      update(events)
 
       // call the wrapped handler
       handler(tracedEvents)
@@ -266,84 +251,88 @@ class DomainTimeTracker(
   }
 
   @VisibleForTesting
-  private[time] def update(event: OrdinarySequencedEvent[_]): Unit = {
-    implicit val traceContext: TraceContext = event.traceContext
+  private[time] def update(events: Seq[OrdinarySequencedEvent[_]])(implicit
+      batchTraceContext: TraceContext
+  ): Unit = {
+    withLock {
+      def updateOne(event: OrdinarySequencedEvent[_]): Unit = {
+        val oldTimestamp =
+          timestampRef.getAndSet(LatestAndNext(received(event.timestamp).some, None))
+        oldTimestamp.next.foreach(_.trySuccess(event.timestamp))
 
-    latestTimestampRef.set(received(event.timestamp).some)
-    nextTimestampPromiseRef.getAndSet(None).foreach(_.trySuccess(event.timestamp))
-
-    TimeProof.fromEventO(event).foreach { proof =>
-      latestTimeProofRef.set(received(proof).some)
-      nextTimeProofPromiseRef.getAndSet(None).foreach(_.trySuccess(proof))
-      withLock {
-        waitingForTimeProof.set(false)
+        TimeProof.fromEventO(event).foreach { proof =>
+          val oldTimeProof = timeProofRef.getAndSet(LatestAndNext(received(proof).some, None))
+          oldTimeProof.next.foreach(_.trySuccess(proof))
+          timeRequestSubmitter.handleTimeProof(proof)
+        }
       }
-    }
 
-    timeRequestSubmitter.handle(event)
-    removeTicks(event.timestamp)
+      @SuppressWarnings(Array("org.wartremover.warts.While"))
+      def removeTicks(ts: CantonTimestamp): Unit = {
+        // remove pending ticks up to and including this timestamp
+        while (Option(pendingTicks.peek()).exists(_.ts <= ts)) {
+          val removed = pendingTicks.poll()
+          // complete any futures waiting for them
+          removed.complete()
+        }
+      }
+
+      // currently all actions from events are synchronous and do not return errors so this simple processing is safe.
+      // for timestamps we could just take the latest event in batch, however as we're also looking for time proofs
+      // we supply every event sequentially.
+      // this could likely be optimised to just process the latest time proof and timestamp from the batch if required.
+      events.foreach(updateOne)
+      events.lastOption.foreach(event => removeTicks(event.timestamp))
+    }
     maybeScheduleUpdate()
   }
 
   private def fetch[A](
       freshnessBound: NonNegativeFiniteDuration,
-      latestRef: AtomicReference[Option[Received[A]]],
-      nextPromiseRef: AtomicReference[Option[Promise[A]]],
+      latestAndNextRef: AtomicReference[LatestAndNext[A]],
       requiresTimeProof: Boolean,
   )(implicit traceContext: TraceContext): Future[A] = {
     val now = clock.now
     // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.
     val receivedWithin = now.minus(freshnessBound.unwrap)
-    val latest = latestRef.get()
 
-    latest match {
-      case Some(Received(value, receivedAt)) if receivedAt >= receivedWithin =>
-        Future.successful(value)
-      case _ =>
-        // ensure we have a pending promise that will be appropriately resolved when the next suitable event is observed
-        val future = nextPromiseRef
-          .updateAndGet {
-            case existing @ Some(_) => existing
-            case None => Some(Promise[A]())
-          }
-          .getOrElse(
+    val (future, needUpdate) = withLock {
+      val newState = latestAndNextRef.updateAndGet { latestAndNext =>
+        latestAndNext.latest match {
+          case Some(Received(_value, receivedAt)) if receivedAt >= receivedWithin =>
+            latestAndNext
+          case _latest => latestAndNext.withNextSet
+        }
+      }
+      newState.latest match {
+        case Some(Received(value, receivedAt)) if receivedAt >= receivedWithin =>
+          Future.successful(value) -> false
+        case _ =>
+          val promise = newState.next.getOrElse(
             ErrorUtil.internalError(
               new IllegalStateException("Should have set to a promise in prior block")
             )
           )
-          .future
 
-        // if we're looking for a time proof then just set our flag so we just immediately request a time proof.
-        // otherwise if looking for a timestamp we don't care what domain time we're looking for (just the next),
-        // so just register a pending tick for the earliest point.
-        // we use MinValue rather than Epoch so it will still be considered far before "now" when initially started
-        // using the simclock.
-        if (requiresTimeProof) requestTimeProof()
-        else requestTick(CantonTimestamp.MinValue)
-
-        future
-    }
-  }
-
-  /** The earliest timestamp that we want to observe in domain time. */
-  private def earliestTick: Option[CantonTimestamp] = Option(pendingTicks.peek()).map(_.ts)
-
-  @SuppressWarnings(Array("org.wartremover.warts.While"))
-  private def removeTicks(ts: CantonTimestamp): Unit = {
-    withLock {
-      // remove pending ticks up to and including this timestamp
-      while (Option(pendingTicks.peek()).exists(_.ts <= ts)) {
-        val removed = pendingTicks.poll()
-        // complete any futures waiting for them
-        removed.complete()
+          // if we're looking for a time proof then just request one; no need to call `maybeScheduleUpdate()`
+          // as the TimeProofRequestSubmitter itself retries if it doesn't get one soon enough.
+          // otherwise if looking for a timestamp we don't care what domain time we're looking for (just the next),
+          // so just register a pending tick for the earliest point.
+          // we use MinValue rather than Epoch so it will still be considered far before "now" when initially started
+          // using the simclock.
+          if (requiresTimeProof) timeRequestSubmitter.fetchTimeProof()
+          else pendingTicks.put(new AwaitingTick(CantonTimestamp.MinValue))
+          promise.future -> !requiresTimeProof
       }
     }
+    if (needUpdate) maybeScheduleUpdate()
+    future
   }
 
   /** When we expect to observe the earliest timestamp in local time. */
   @VisibleForTesting
-  private[time] def earliestExpectedObservationTime: Option[CantonTimestamp] =
-    earliestTick.map(_.add(config.observationLatency.unwrap))
+  private[time] def earliestExpectedObservationTime(): Option[CantonTimestamp] =
+    Option(withLock(pendingTicks.peek())).map(_.ts.add(config.observationLatency.unwrap))
 
   /** Local time of when we'd like to see the next event produced.
     * If we are waiting to observe a timestamp, this value will be the greater of:
@@ -354,53 +343,52 @@ class DomainTimeTracker(
     * However if the domain is far behind but regularly producing events we will wait until we haven't
     * witnessed an event for the patience duration.
     */
-  private def nextScheduledCheck: Option[CantonTimestamp] = {
+  private def nextScheduledCheck(): Option[CantonTimestamp] = {
     // if we're not waiting for an event, then we don't need to see one
-    earliestExpectedObservationTime.map { expectedEvent =>
-      latestTimestampRef.get.fold(expectedEvent)(
-        _.receivedAt.add(config.patienceDuration.unwrap).max(expectedEvent)
-      )
+    earliestExpectedObservationTime().map { expectedEvent =>
+      timestampRef
+        .get()
+        .latest
+        .fold(expectedEvent)(
+          _.receivedAt.add(config.patienceDuration.unwrap).max(expectedEvent)
+        )
     }
   }
 
-  /** After the state has been updated call this to determine whether a scheduled update is required.
+  /** we're unable to cancel an update once scheduled, so if we decide to schedule an earlier update than an update already
+    * scheduled we update this to the earlier value and then check this value when the scheduled task is run
+    */
+  private val nextScheduledUpdate: AtomicReference[Option[CantonTimestamp]] =
+    new AtomicReference[Option[CantonTimestamp]](None)
+
+  /** After [[pendingTicks]] or [[timestampRef]] have been updated, call this to determine whether a scheduled update is required.
     * It will be scheduled if there isn't an existing or earlier update pending.
     */
   private def maybeScheduleUpdate()(implicit traceContext: TraceContext): Unit = {
-    @tailrec
-    def tryScheduleNextUpdate(now: CantonTimestamp, scheduleTime: CantonTimestamp): Boolean = {
-      val current = nextScheduledUpdate.get()
-
-      // check if we've already got a scheduled task for the future which is at this time or lower
-      // we do this to avoid scheduling a ton of tasks on the clock
-      if (current.exists(ts => ts > now && ts <= scheduleTime)) false
-      else {
-        // we're the new scheduled task so can now go schedule with our clock
-        if (nextScheduledUpdate.compareAndSet(current, scheduleTime.some)) true
-        // the existing scheduled task changed since our check so try again
-        else tryScheduleNextUpdate(now, scheduleTime)
-      }
-    }
 
     def updateNow(): Unit = {
-      // fine to repeatedly call without guards as it the submitter will make no there is no more than one request in-flight at once
-      timeRequestSubmitter.fetchTimeProof().discard[Future[TimeProof]]
+      // Fine to repeatedly call without guards as the submitter will make no more than one request in-flight at once
+      // The next call to update will complete the promise in `timestampRef.get().next`.
+      timeRequestSubmitter.fetchTimeProof()
     }
 
-    // just immediately request a proof if we know we want one
-    if (waitingForTimeProof.get()) updateNow()
-    else {
-      nextScheduledCheck foreach { updateBy =>
-        // if we've already surpassed when we wanted to see a time, just ask for one
-        // means that we're waiting on a timestamp and we're not receiving regular updates
-        val now = clock.now
+    nextScheduledCheck() foreach { updateBy =>
+      // if we've already surpassed when we wanted to see a time, just ask for one
+      // means that we're waiting on a timestamp and we're not receiving regular updates
+      val now = clock.now
 
-        if (updateBy <= now) updateNow()
-        else if (tryScheduleNextUpdate(now, updateBy)) {
+      if (updateBy <= now) updateNow()
+      else {
+        def updateCondition(current: Option[CantonTimestamp]): Boolean =
+          !current.exists(ts => ts > now && ts <= updateBy)
+        val current = nextScheduledUpdate.getAndUpdate { current =>
+          if (updateCondition(current)) updateBy.some else current
+        }
+        if (updateCondition(current)) {
           // schedule next update
-          addToFlush(s"scheduled update at $updateBy")(
-            clock.scheduleAt(_ => maybeScheduleUpdate(), updateBy)
-          )
+          val nextF = clock.scheduleAt(_ => maybeScheduleUpdate(), updateBy).unwrap
+          addToFlush(s"scheduled update at $updateBy")(nextF)
+          FutureUtil.doNotAwait(nextF, s"scheduled update at $updateBy failed")
         }
       }
     }
@@ -421,7 +409,7 @@ class DomainTimeTracker(
     val minObservationDuration = config.minObservationDuration.duration
     def performUpdate(expectedUpdateBy: CantonTimestamp): Unit =
       performUnlessClosing {
-        val lastObserved = latestTimestampRef.get().map(_.receivedAt)
+        val lastObserved = timestampRef.get().latest.map(_.receivedAt)
 
         // did we see an event within the observation window
         if (lastObserved.exists(_ >= expectedUpdateBy.minus(minObservationDuration))) {
@@ -443,12 +431,8 @@ class DomainTimeTracker(
 
     def scheduleNextUpdate(): Unit =
       performUnlessClosing {
-        val expectUpdateBy =
-          latestTimestampRef
-            .get()
-            .fold(clock.now)(_.receivedAt)
-            .add(minObservationDuration)
-            .immediateSuccessor
+        val latestTimestamp = timestampRef.get().latest.fold(clock.now)(_.receivedAt)
+        val expectUpdateBy = latestTimestamp.add(minObservationDuration).immediateSuccessor
 
         val _ = clock.scheduleAt(performUpdate, expectUpdateBy)
       }.onShutdown(())
@@ -470,8 +454,21 @@ object DomainTimeTracker {
     implicit val ordering: Ordering[AwaitingTick] = Ordering.by(_.ts)
   }
 
-  /** Keep track of a value, and when we received said value */
-  case class Received[A](value: A, receivedAt: CantonTimestamp)
+  /** Keep track of a value, and when we received said value, measured on the participant's clock */
+  case class Received[+A](value: A, receivedAt: CantonTimestamp)
+
+  /** Keep track of the latest value received and a promise to complete when the next one arrives
+    * It is not a case class so that equality is object identity (equality on promises is anyway object identity).
+    */
+  class LatestAndNext[A](val latest: Option[Received[A]], val next: Option[Promise[A]]) {
+    def withNextSet: LatestAndNext[A] =
+      next.fold(LatestAndNext(latest, Promise[A]().some))(_ => this)
+  }
+  object LatestAndNext {
+    def apply[A](latest: Option[Received[A]], next: Option[Promise[A]]): LatestAndNext[A] =
+      new LatestAndNext(latest, next)
+    def empty[A]: LatestAndNext[A] = LatestAndNext(None, None)
+  }
 
   def apply(
       config: DomainTimeTrackerConfig,
