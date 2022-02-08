@@ -1,0 +1,217 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.integration.tests.release
+
+import better.files.File
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.console.BufferedProcessLogger
+import org.scalatest.wordspec.FixtureAnyWordSpec
+import org.scalatest.{Outcome, SuiteMixin}
+
+import scala.sys.process._
+
+/** The `CliIntegrationTest` tests Canton command line options by instantiating a Canton binary in a new process with
+  * the to-be-tested CLI options as arguments.
+  * Before being able to run these tests locally, you need to execute `sbt bundle`.
+  */
+class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixin {
+
+  override protected def withFixture(test: OneArgTest): Outcome = test(new BufferedProcessLogger)
+
+  override type FixtureParam = BufferedProcessLogger
+
+  val cantonDir = "enterprise/app/target/release/canton"
+  val cantonBin = s"$cantonDir/bin/canton"
+  val resourceDir = "community/app/src/test/resources"
+  val simpleConf = "community/app/src/pack/examples/01-simple-topology/simple-topology.conf"
+  val unsupportedProtocolVersionConfig =
+    "enterprise/app/src/test/resources/unsupported-protocol-version.conf"
+  // this warning is potentially thrown when starting Canton with --no-tty
+  val ttyWarning =
+    "WARN  org.jline - Unable to create a system terminal, creating a dumb terminal (enable debug logging for more information)"
+  val jsonTtyWarning =
+    "\"message\":\"Unable to create a system terminal, creating a dumb terminal (enable debug logging for more information)\",\"logger_name\":\"org.jline\",\"thread_name\":\"main\",\"level\":\"WARN\""
+
+  // Message printed out by the bootstrap script if Canton is started successfully
+  val successMsg = "The last emperor is always the worst."
+  val cantonShouldStartFlags =
+    s"--verbose --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton"
+
+  "Calling Canton" should {
+
+    "print out the help message when using the --help flag" in { processLogger =>
+      s"$cantonBin --help" ! processLogger
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("Usage: canton [daemon|run|generate] [options] <args>..."),
+      )
+    }
+
+    "print out the help message when using no flag" in { processLogger =>
+      s"$cantonBin" ! processLogger
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("Usage: canton [daemon|run|generate] [options] <args>..."),
+        shouldSucceed = false,
+      )
+    }
+
+    "successfully start and exit after using a run script" in { processLogger =>
+      s"$cantonBin run $resourceDir/scripts/run.canton --config $simpleConf --verbose --no-tty" ! processLogger
+      checkOutput(processLogger, shouldContain = Seq(successMsg), shouldSucceed = false)
+    }
+
+    "successfully start and auto-connect to local domains" in { processLogger =>
+      s"""$cantonBin daemon 
+           |--bootstrap $resourceDir/scripts/startup.canton 
+           |-C canton.parameters.manual-start=no 
+           |--auto-connect-local 
+           |--config $simpleConf --verbose --no-tty""".stripMargin ! processLogger
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("connected: list(true, true)", successMsg),
+      )
+    }
+
+    "print out the Canton version when using the --version flag" in { processLogger =>
+      s"$cantonBin --version" ! processLogger
+      checkOutput(processLogger, shouldContain = Seq("Canton", "Daml Libraries"))
+    }
+
+    "successfully start a Canton node when using a mix of a --config and -C config" in {
+      processLogger =>
+        s"$cantonBin --config $simpleConf -C canton.participants.participant1.parameters.admin-workflow.bong-test-max-level=9000 $cantonShouldStartFlags" ! processLogger
+        checkOutput(processLogger, shouldContain = Seq(successMsg))
+    }
+
+    "successfully start a Canton node when configured only using -C" in { processLogger =>
+      s"$cantonBin -C canton.participants.participant1.storage.type=memory -C canton.participants.participant1.admin-api.port=5012 -C canton.participants.participant1.ledger-api.port=5011 -C canton.domains.domain1.public-api.port=5018 -C canton.domains.domain1.admin-api.port=5019 -C canton.domains.domain1.storage.type=memory $cantonShouldStartFlags" ! processLogger
+      checkOutput(processLogger, shouldContain = Seq(successMsg))
+    }
+
+    "return an appropriate error when an invalid config is used" in { processLogger =>
+      s"$cantonBin --config $simpleConf --config $unsupportedProtocolVersionConfig" ! processLogger
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("unsupported-protocol-version.conf", "42.0.0"),
+        shouldSucceed = false,
+      )
+    }
+
+    "change logging directory, log level and log format when using the appropriate CLI flags" in {
+      processLogger =>
+        s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton --log-file-name log/new-name.log --log-level-canton DEBUG --log-encoder json" ! processLogger
+
+        checkOutput(processLogger, shouldContain = Seq(successMsg))
+        val logFile = File("log/new-name.log")
+        assert(logFile.exists)
+        val contents = logFile.contentAsString
+        assert(contents.contains("\"level\":\"DEBUG\""))
+        assert(contents.contains(",\"message\":\"Starting Canton version "))
+    }
+
+    "run with log last errors disabled" in { processLogger =>
+      s"$cantonBin --log-last-errors=false --config $simpleConf $cantonShouldStartFlags" ! processLogger
+      checkOutput(
+        processLogger,
+        shouldContain = Seq(successMsg),
+      )
+    }
+
+    "log last errors in separate file" in { processLogger =>
+      s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error.canton --log-file-name log/canton-without-debug.log" ! processLogger
+
+      // Make sure the main log file does not contain debug-level log entries
+      val logFile = File("log/canton-without-debug.log")
+      val logContents = logFile.contentAsString
+      assert(!logContents.contains("some logging debug event"))
+      assert(logContents.contains("some logging error"))
+
+      val lastErrorsLogFile = File("log/canton_errors.log")
+      lastErrorsLogFile.lineCount shouldEqual 4
+      val errorContents = lastErrorsLogFile.contentAsString
+      // Errors file must include debug output
+      List("some logging debug event", "some logging error").foreach(errorContents.contains)
+    }
+
+    "dynamically set log level with log last errors enabled" in { processLogger =>
+      s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error-dynamic.canton --log-file-name log/canton-partial-debug.log" ! processLogger
+
+      val logFile = File("log/canton-partial-debug.log")
+      val logContents = logFile.contentAsString
+
+      assert(!logContents.contains("some logging debug event"))
+      assert(logContents.contains("final logging debug event"))
+
+      val lastErrorsLogFile = File("log/canton_errors.log")
+      lastErrorsLogFile.lineCount shouldEqual 6
+      val errorContents = lastErrorsLogFile.contentAsString
+      // Errors file must include debug output
+      List(
+        "some logging debug event",
+        "some logging error",
+        "final logging debug event",
+        "final logging error",
+      )
+        .foreach(errorContents.contains)
+    }
+
+    "turn a local config into a remote" in { processLogger =>
+      s"$cantonBin generate remote-config --config $simpleConf " ! processLogger
+      Seq("remote-participant1.conf", "remote-participant2.conf", "remote-mydomain.conf").foreach {
+        check =>
+          val fl = File(check)
+          assert(fl.exists, s"$check is missing")
+      }
+    }
+
+    "let the demo run in the enterprise release" in { processLogger =>
+      val ret = Process(
+        Seq(
+          "bin/canton",
+          "-Ddemo-test=2",
+          "run",
+          "demo/demo.sc",
+          "--debug",
+          "-c",
+          "demo/demo.conf",
+        ),
+        Some(new java.io.File(cantonDir)),
+      ) ! processLogger
+      logger.debug(s"The process has ended now with $ret")
+      val out = processLogger.output()
+      logger.debug("Stdout is\n" + out)
+      out should include(successMsg)
+
+    }
+
+  }
+
+  private def checkOutput(
+      logger: BufferedProcessLogger,
+      shouldContain: Seq[String] = Seq(),
+      shouldNotContain: Seq[String] = Seq(),
+      shouldSucceed: Boolean = true,
+  ): Unit = {
+    // Filter out false positives in help message for last-errors option
+    val filters = List(
+      jsonTtyWarning,
+      ttyWarning,
+      "last_errors",
+      "last-errors",
+      // slow ExecutionContextMonitor warnings
+      "WARN  c.d.c.c.ExecutionContextMonitor - Execution context",
+    )
+    val log = filters
+      .foldLeft(logger.output()) { case (log, filter) =>
+        log.replace(filter, "")
+      }
+      .toLowerCase
+    shouldContain.foreach(str => assert(log.contains(str.toLowerCase())))
+    shouldNotContain.foreach(str => assert(!log.contains(str.toLowerCase())))
+    val undesirables = Seq("warn", "error", "exception")
+    if (shouldSucceed) undesirables.foreach(str => assert(!log.contains(str.toLowerCase())))
+  }
+
+}

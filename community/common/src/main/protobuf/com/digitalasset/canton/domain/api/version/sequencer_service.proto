@@ -1,0 +1,13 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.domain.api.version;
+
+import "com/digitalasset/canton/domain/api/v0/sequencer_service.proto";
+
+message VersionedSubmissionRequest {
+  oneof version {
+    com.digitalasset.canton.domain.api.v0.SubmissionRequest v0 = 1;
+  }
+}

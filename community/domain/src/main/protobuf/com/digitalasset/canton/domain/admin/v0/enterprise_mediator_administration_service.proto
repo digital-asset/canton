@@ -1,0 +1,22 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.domain.admin.v0;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// administration service for mediator instances
+service EnterpriseMediatorAdministrationService {
+
+  // Remove unnecessary data from the Mediator
+  rpc Prune (MediatorPruningRequest) returns (google.protobuf.Empty);
+
+}
+
+message MediatorPruningRequest {
+  // timestamp to prune for
+  google.protobuf.Timestamp timestamp = 1;
+}

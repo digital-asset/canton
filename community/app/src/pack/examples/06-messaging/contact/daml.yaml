@@ -1,0 +1,15 @@
+sdk-version: 2.0.0-snapshot.20220204.9165.0.225c58f4
+sandbox-options: 
+- --wall-clock-time
+name: contact
+parties: 
+- Alice
+- Bob
+data-dependencies: 
+- ../message/.daml/dist/message-0.0.1.dar
+source: daml
+version: 0.0.1
+dependencies: 
+- daml-prim
+- daml-stdlib
+- daml-script

@@ -1,0 +1,34 @@
+module Contact where
+
+import Daml.Script
+import Message
+
+template Contact
+  with
+    myself : Party
+    other  : Party
+  where
+    signatory myself
+
+    controller myself can
+      nonconsuming Send: () with
+          message: Text
+        do
+          create Message with 
+            sender = myself
+            receiver = other
+            message = message
+          pure ()
+
+contactTest = script do
+  alice <- allocateParty "alice"
+  bob <- allocateParty "bob"
+
+  contact <- submit alice do
+    createCmd Contact with myself = alice; other = bob
+
+  submit alice do
+    exerciseCmd contact Send with message = "Hi Bob!"
+
+  submit alice do
+    exerciseCmd contact Send with message = "How are you doing?"

@@ -1,0 +1,102 @@
+#cloud-config
+
+# TEMPLATE WARNING: The Canton deployment template will replace aspects of this cloud-init file to match settings and resources it is using.
+# This file is a cloud-init cloud config file: https://cloudinit.readthedocs.io/en/latest/topics/format.html#cloud-config-data
+# It is run when the virtual machine first boots to install and initialize canton: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/using-cloud-init
+# Note the ordering of the directives below do not define the order of execution on first boot
+users:
+  - default
+  - name: canton-app
+    shell: /sbin/nologin
+
+apt:
+  openjdk: ppa:openjdk-r/ppa
+
+apt_update:
+
+packages:
+  - jq              # for fetching vault secrets
+  - docker.io       # for running canton
+
+write_files:
+  - path: /etc/canton/canton.conf
+    permissions: 0640
+    encoding: b64
+    content: __CANTON_CONF__
+  - path: /etc/canton/canton.bootstrap
+    permissions: 0640
+    encoding: b64
+    content: __CANTON_BOOTSTRAP__
+  - path: /etc/canton-azure/canton.env
+    permissions: 0600 # this contains secrets so should only be read by the app, and is written by the below update-env.sh script
+    content: "" # intentionally empty - content populated by the `update-env.sh` script however file needs to exist for systemd to start the unit
+  - path: /opt/canton-azure/update-env.sh
+    permissions: 0555
+    content: |
+      #!/usr/bin/env bash
+
+      set -e
+
+      # variables to be replaced by the ARM template on deployment
+      VAULT="__VAULT__"
+      DB_SECRET_KEY="__DB_SECRET_KEY__"
+      ENV_SECRET_KEY="__ENV_SECRET_KEY__"
+
+      # use the local metadata service to authenticate this VM with azure: https://docs.microsoft.com/en-us/azure/active-directory/managed-identities-azure-resources/how-to-use-vm-token
+      TOKEN=$(curl -s -H Metadata:true "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net" | jq -r .access_token)
+      # fetch the configured secret connection string from our vault
+      CONNECTION_STRING=$(curl -s "https://$VAULT.vault.azure.net/secrets/$DB_SECRET_KEY?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN" | jq -r .value)
+      ADDITIONAL_ENV=$(curl -s "https://$VAULT.vault.azure.net/secrets/$ENV_SECRET_KEY?api-version=2016-10-01" -H "Authorization: Bearer $TOKEN" | jq -r .value)
+
+      # env file that will be loaded by systemd before starting the canton process
+      echo "CANTON_DB_URL=$CONNECTION_STRING" > /etc/canton-azure/canton.env
+      # append additional environment variables if available
+      if [[ -n "$ADDITIONAL_ENV" ]]; then
+        echo "$ADDITIONAL_ENV" >> /etc/canton-azure/canton.env
+      fi
+
+
+  - path: /etc/systemd/system/canton.service
+    permissions: 0644
+    content: |
+      [Unit]
+      Description=Canton
+      After=docker.service
+      Requires=docker.service
+
+      [Service]
+      Type=simple
+      EnvironmentFile=/etc/canton-azure/canton.env
+      ExecStartPre=/opt/canton-azure/update-env.sh
+      ExecStartPre=-/usr/bin/docker exec %N stop
+      ExecStartPre=-/usr/bin/docker rm %N
+      ExecStartPre=/usr/bin/docker pull digitalasset/canton-community:__CANTON_VERSION__
+      ExecStart=/usr/bin/docker run --rm --name %N \
+        -v /etc/canton:/canton/azure \
+        -v /var/opt/canton/log:/canton/log \
+        --env-file /etc/canton-azure/canton.env \
+        -p "127.0.0.1:8080:8080" -p "127.0.0.1:8081:8081" \
+        digitalasset/canton-community:__CANTON_VERSION__ \
+        daemon \
+          --config /canton/azure/canton.conf \
+          --bootstrap /canton/azure/canton.bootstrap
+      Restart=on-failure
+
+      [Install]
+      WantedBy=default.target
+
+runcmd:
+  - mkdir -p /tmp/canton
+  - mkdir -p /opt/canton
+  - mkdir -p /var/opt/canton/log
+  - chown canton-app /var/opt/canton/log
+  - chmod 755 /var/opt/canton/log
+  # although cloud-init supports setting an owner when writing files in the write_files module,
+  # ubuntu happens to order module execution so user creation happens after write_files 🤦‍♀️
+  # https://bugs.launchpad.net/cloud-init/+bug/1486113
+  - chown canton-app /etc/canton/canton.conf /etc/canton/canton.bootstrap /etc/canton-azure/canton.env
+  - systemctl daemon-reload
+  - systemctl enable docker.service
+  - systemctl start docker.service
+  - systemctl enable canton.service
+  - systemctl start canton.service

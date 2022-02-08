@@ -1,0 +1,36 @@
+-- Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Divulgence where
+
+import Daml.Script
+import Iou
+
+template DivulgeIouByExercise
+  with
+    payer: Party
+    divulgee: Party
+  where
+    signatory divulgee
+    controller payer can
+      nonconsuming Divulge : () with ref : ContractId Iou
+        do 
+          iou <- fetch ref
+          return  ()
+    controller payer can
+      nonconsuming NotDivulge : () with ref : ContractId Iou
+        do 
+          return ()
+
+
+aliceDivulgesHerIouToBob =
+  script do
+    bank <- allocateParty "Bank"
+    bob <- allocateParty "Bob"
+    alice <- allocateParty "Alice"
+    iou <- submit bank do
+        createCmd $ Iou { payer = bank; owner = alice; amount = Amount {value = 1.0; currency = "USD"}; viewers = [] }
+    req <- submit bob do 
+        createCmd $ DivulgeIouByExercise with payer = bank; divulgee = bob
+    submit bank do exerciseCmd req NotDivulge with ref = iou
+    submit bank do exerciseCmd req Divulge with ref = iou

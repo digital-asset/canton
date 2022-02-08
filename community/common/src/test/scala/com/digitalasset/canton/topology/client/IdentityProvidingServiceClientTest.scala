@@ -1,0 +1,119 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.topology.client
+
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantAttributes,
+  ParticipantPermission,
+  TrustLevel,
+}
+import com.digitalasset.canton.{BaseTest, LfPartyId}
+import org.scalatest.wordspec.AsyncWordSpec
+
+import scala.Ordered.orderingToOrdered
+import scala.concurrent.{ExecutionContext, Future}
+
+class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest {
+
+  import DefaultTestIdentities._
+
+  "party topology snapshot client" should {
+    lazy val topology = Map(
+      party1.toLf -> Map(
+        participant1 -> ParticipantAttributes(
+          ParticipantPermission.Submission,
+          TrustLevel.Ordinary,
+        ),
+        participant2 -> ParticipantAttributes(
+          ParticipantPermission.Observation,
+          TrustLevel.Ordinary,
+        ),
+      ),
+      party2.toLf -> Map(
+        participant2 -> ParticipantAttributes(
+          ParticipantPermission.Observation,
+          TrustLevel.Ordinary,
+        )
+      ),
+    )
+    lazy val client = new PartyTopologySnapshotClient
+      with BaseTopologySnapshotClient
+      with PartyTopologySnapshotBaseClient {
+      override def activeParticipantsOf(
+          party: LfPartyId
+      ): Future[Map[ParticipantId, ParticipantAttributes]] =
+        Future.successful(topology.getOrElse(party, Map()))
+      override protected implicit def executionContext: ExecutionContext =
+        PartyTopologySnapshotClientTest.this.executionContext
+      override def timestamp: CantonTimestamp = ???
+      override def inspectKnownParties(
+          filterParty: String,
+          filterParticipant: String,
+          limit: Int,
+      ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] =
+        ???
+
+      override def activeParticipantsOfParties(
+          parties: Seq[LfPartyId]
+      ): Future[Map[LfPartyId, Set[ParticipantId]]] = ???
+    }
+
+    "allHaveActiveParticipants should yield correct results" in {
+      for {
+        right1 <- client.allHaveActiveParticipants(Set(party1.toLf)).value
+        right2 <- client.allHaveActiveParticipants(Set(party1.toLf, party2.toLf)).value
+        left1 <- client.allHaveActiveParticipants(Set(party1.toLf, party2.toLf), _.canConfirm).value
+        left2 <- client.allHaveActiveParticipants(Set(party1.toLf, party3.toLf)).value
+        left3 <- client.allHaveActiveParticipants(Set(party3.toLf)).value
+      } yield {
+        right1 shouldBe Right(())
+        right2 shouldBe Right(())
+        left1.left.value shouldBe a[Set[_]]
+        left2.left.value shouldBe a[Set[_]]
+        left3.left.value shouldBe a[Set[_]]
+      }
+    }
+
+    "allHostedOn should yield correct results" in {
+      for {
+        yes1 <- client.allHostedOn(Set(party1.toLf), participant1)
+        yes2 <- client.allHostedOn(Set(party1.toLf), participant2)
+        no1 <- client.allHostedOn(Set(party1.toLf), participant2, _.permission.canConfirm)
+        no2 <- client.allHostedOn(Set(party1.toLf, party3.toLf), participant1)
+        no3 <- client.allHostedOn(
+          Set(party1.toLf, party2.toLf),
+          participant2,
+          _.permission.canConfirm,
+        )
+        yes3 <- client.allHostedOn(
+          Set(party1.toLf, party2.toLf),
+          participant2,
+          _.permission >= ParticipantPermission.Observation,
+        )
+      } yield {
+        yes1 shouldBe true
+        yes2 shouldBe true
+        yes3 shouldBe true
+        no1 shouldBe false
+        no2 shouldBe false
+        no3 shouldBe false
+      }
+    }
+
+    "canConfirm should yield correct results" in {
+      for {
+        yes1 <- client.canConfirm(participant1, party1.toLf)
+        no1 <- client.canConfirm(participant1, party1.toLf, TrustLevel.Vip)
+        no2 <- client.canConfirm(participant2, party1.toLf)
+      } yield {
+        yes1 shouldBe true
+        no1 shouldBe false
+        no2 shouldBe false
+      }
+    }
+  }
+
+}

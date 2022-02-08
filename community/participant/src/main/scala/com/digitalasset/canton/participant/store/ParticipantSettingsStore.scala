@@ -1,0 +1,81 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.participant.store
+
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.admin.ResourceLimits
+import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
+import com.digitalasset.canton.participant.store.db.DbParticipantSettingsStore
+import com.digitalasset.canton.participant.store.memory.InMemoryParticipantSettingsStore
+import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.tracing.TraceContext
+
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future}
+
+/** Read-only interface for [[ParticipantSettingsStore]] */
+trait ParticipantSettingsLookup {
+
+  /** @return the current settings
+    * @throws java.lang.IllegalStateException if [[ParticipantSettingsStore.refreshCache]] has not previously been run successfully
+    */
+  def settings: Settings
+}
+
+/** Stores misc settings for a participant.
+  * Allows clients to read settings without accessing the database.
+  * In turn, a client needs to call `refreshCache` before reading settings.
+  */
+trait ParticipantSettingsStore extends ParticipantSettingsLookup {
+
+  /** A cache for the max number of dirty requests.
+    * It is updated in the following situations:
+    * - Before and after a write (successful or not).
+    * - Through [[refreshCache]]. (Clients are requested to call [[refreshCache]] before reading any value.)
+    */
+  protected val cache: AtomicReference[Option[Settings]] = new AtomicReference(None)
+
+  override final def settings: Settings =
+    cache
+      .get()
+      .getOrElse(
+        throw new IllegalStateException(
+          "You need to initialize the cache before querying settings."
+        )
+      )
+
+  def writeResourceLimits(resourceLimits: ResourceLimits)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  /** Insert the given max deduplication time provided unless a max deduplication time has been set previously. */
+  def insertMaxDeduplicationTime(maxDeduplicationTime: NonNegativeFiniteDuration)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  /** Insert the setting for whether the participant provides unique-contract-key semantics. */
+  def insertUniqueContractKeysMode(uniqueContractKeys: Boolean)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
+
+  def refreshCache()(implicit traceContext: TraceContext): Future[Unit]
+}
+
+object ParticipantSettingsStore {
+  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
+      executionContext: ExecutionContext
+  ): ParticipantSettingsStore = {
+    storage match {
+      case _: MemoryStorage => new InMemoryParticipantSettingsStore(loggerFactory)
+      case storage: DbStorage => new DbParticipantSettingsStore(storage, loggerFactory)
+    }
+  }
+
+  case class Settings(
+      resourceLimits: ResourceLimits = ResourceLimits.noLimit,
+      maxDeduplicationTime: Option[NonNegativeFiniteDuration] = None,
+      uniqueContractKeys: Option[Boolean] = None,
+  )
+}

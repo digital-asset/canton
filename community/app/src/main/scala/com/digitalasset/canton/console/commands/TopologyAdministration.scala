@@ -1,0 +1,966 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.console.commands
+
+import java.util.concurrent.atomic.AtomicReference
+import cats.syntax.either._
+import cats.syntax.traverseFilter._
+import com.digitalasset.canton.DomainId
+import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
+import com.digitalasset.canton.admin.api.client.data._
+import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.console.{
+  AdminCommandRunner,
+  ConsoleCommandResult,
+  ConsoleEnvironment,
+  ConsoleMacros,
+  FeatureFlag,
+  FeatureFlagFilter,
+  Help,
+  Helpful,
+}
+import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose, X509Certificate}
+import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.admin.grpc.BaseQuery
+import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
+import com.google.protobuf.ByteString
+import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery}
+
+class TopologyAdministrationGroup(
+    runner: AdminCommandRunner,
+    topologyQueueStatus: => Option[TopologyQueueStatus],
+    val consoleEnvironment: ConsoleEnvironment,
+    val loggerFactory: NamedLoggerFactory,
+) extends Helpful
+    with FeatureFlagFilter {
+
+  import runner._
+
+  // small cache to avoid repetitive calls to fetchId (as the id is immutable once set)
+  protected val idCache = new AtomicReference[Option[UniqueIdentifier]](None)
+  private def fetchId(): Option[UniqueIdentifier] =
+    idCache
+      .updateAndGet {
+        case None =>
+          consoleEnvironment.run {
+            adminCommand(TopologyAdminCommands.Init.GetId())
+          }
+        case x => x
+      }
+  private[console] def clearCache(): Unit = {
+    idCache.set(None)
+  }
+
+  private[console] def idHelper[T](name: String, apply: UniqueIdentifier => T): T =
+    fetchId().fold(
+      throw new IllegalStateException(
+        s"Unable to get uid of $name. Has the node been started and is it initialized?"
+      )
+    )(apply)
+
+  @Help.Summary("Initialize the node with a unique identifier")
+  @Help.Description("""Every node in Canton is identified using a unique identifier, which is composed
+      |from a user-chosen string and a fingerprint of a signing key. The signing key is the root key of
+      |said namespace.
+      |During initialisation, we have to pick such a unique identifier.
+      |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
+      |option to false.
+      |Automatic node initialisation is usually turned off to preseve the identity of a participant or domain
+      |node (during major version upgrades) or if the topology transactions are managed through
+      |a different topology manager than the one integrated into this node.""")
+  def init_id(identifier: Identifier, fingerprint: Fingerprint): UniqueIdentifier =
+    consoleEnvironment.run {
+      adminCommand(TopologyAdminCommands.Init.InitId(identifier.unwrap, fingerprint.unwrap))
+    }
+
+  @Help.Summary("Upload signed topology transaction")
+  @Help.Description(
+    """Topology transactions can be issued with any topology manager. In some cases, such
+      |transactions need to be copied manually between nodes. This function allows for
+      |uploading previously exported topology transaction into the authorized store (which is
+      |the name of the topology managers transaction store."""
+  )
+  def load_transaction(bytes: ByteString): Unit =
+    consoleEnvironment.run {
+      adminCommand(
+        TopologyAdminCommands.Write.AddSignedTopologyTransaction(bytes)
+      )
+    }
+
+  @Help.Summary("Topology synchronisation helpers", FeatureFlag.Preview)
+  @Help.Group("Synchronisation Helpers")
+  object synchronisation {
+
+    @Help.Summary("Check if the topology processing of a node is idle")
+    @Help.Description("""Topology transactions pass through a set of queues before becoming effective on a domain.
+        |This function allows to check if all the queues are empty.
+        |While both domain and participant nodes support similar queues, there is some ambiguity around 
+        |the participant queues. While the domain does really know about all in-flight transactions at any
+        |point in time, a participant won't know about the state of any transaction that is currently being processed
+        |by the domain topology dispatcher.""")
+    def is_idle(): Boolean =
+      topologyQueueStatus
+        .forall(_.isIdle) // report un-initialised as idle to not break manual init process
+
+    @Help.Summary("Wait until the topology processing of a node is idle")
+    @Help.Description("""This function waits until the `is_idle()` function returns true.""")
+    def await_idle(
+        timeout: TimeoutDuration = consoleEnvironment.commandTimeouts.bounded
+    ): Unit =
+      ConsoleMacros.utils.retry_until_true(timeout)(
+        is_idle(),
+        s"topology queue status never became idle ${topologyQueueStatus} after ${timeout}",
+      )
+
+    /** run a topology change command synchronized and wait until the node becomes idle again */
+    private[console] def run[T](timeout: Option[TimeoutDuration])(func: => T): T = {
+      val ret = func
+      timeout.foreach(await_idle)
+      ret
+    }
+  }
+
+  @Help.Summary("Inspect topology stores")
+  @Help.Group("Topology stores")
+  object stores extends Helpful {
+    @Help.Summary("List available topology stores")
+    @Help.Description("""Topology transactions are stored in these stores. There are the following stores:
+        |
+        |"Authorized" - The authorized store is the store of a topology manager. Updates to the topology state are made
+        | by adding new transactions to the "Authorized" store. Both the participant and the domain nodes topology manager
+        | have such a store.
+        | A participant node will distribute all the content in the Authorized store to the domains it is connected to.
+        | The domain node will distribute the content of the Authorized store through the sequencer to the domain members
+        | in order to create the authoritative topology state on a domain (which is stored in the store named using the domain-id),
+        | such that every domain member will have the same view on the topology state on a particular domain.
+        |
+        |"<domain-id> - The domain store is the authorized topology state on a domain. A participant has one store for each
+        | domain it is connected to. The domain has exactly one store with its domain-id.
+        |
+        |"Requested" - A domain can be configured such that when participant tries to register a topology transaction with
+        | the domain, the transaction is placed into the "Requested" store such that it can be analysed and processed with
+        | user defined process.
+        |""")
+    def list(): Seq[String] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListStores()
+        )
+      }
+  }
+
+  @Help.Summary("Manage namespace delegations")
+  @Help.Group("Namespace delegations")
+  object namespace_delegations extends Helpful {
+
+    @Help.Summary("Change namespace delegation")
+    @Help.Description(
+      """Delegates the authority to authorize topology transactions in a certain namespace to a certain
+      |key. The keys are referred to using their fingerprints. They need to be either locally generated or have been
+      |previously imported.
+    ops: Either Add or Remove the delegation.
+    signedBy: Optional fingerprint of the authorizing key. The authorizing key needs to be either the authorizedKey
+              for root certificates. Otherwise, the signedBy key needs to refer to a previously authorized key, which
+              means that we use the signedBy key to refer to a locally available CA.
+    authorizedKey: Fingerprint of the key to be authorized. If signedBy equals authorizedKey, then this transaction
+                   corresponds to a self-signed root certificate. If the keys differ, then we get an intermediate CA.
+    isRootDelegation: If set to true (default = false), the authorized key will be allowed to issue NamespaceDelegations.
+    synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node"""
+    )
+    def authorize(
+        ops: TopologyChangeOp,
+        namespace: Fingerprint,
+        authorizedKey: Fingerprint,
+        isRootDelegation: Boolean = false,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write
+            .AuthorizeNamespaceDelegation(ops, signedBy, namespace, authorizedKey, isRootDelegation)
+        )
+      })
+
+    @Help.Summary("List namespace delegation transactions")
+    @Help.Description("""List the namespace delegation transaction present in the stores. Namespace delegations
+        |are topology transactions that permission a key to issue topology transactions within
+        |a certain namespace.
+
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterNamespace: Filter for namespaces starting with the given filter string.
+        """)
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterNamespace: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListNamespaceDelegationResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListNamespaceDelegation(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterNamespace,
+          )
+        )
+      }
+
+  }
+
+  @Help.Summary("Manage identifier delegations")
+  @Help.Group("Identifier delegations")
+  object identifier_delegations extends Helpful {
+
+    @Help.Summary("Change identifier delegation")
+    @Help.Description("""Delegates the authority of a certain identifier to a certain key. This corresponds to a normal
+       |certificate which binds identifier to a key. The keys are referred to using their fingerprints.
+       |They need to be either locally generated or have been previously imported.
+    ops: Either Add or Remove the delegation.
+    signedBy: Refers to the optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
+    authorizedKey: Fingerprint of the key to be authorized.
+    synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node    
+       """)
+    def authorize(
+        ops: TopologyChangeOp,
+        identifier: UniqueIdentifier,
+        authorizedKey: Fingerprint,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write
+            .AuthorizeIdentifierDelegation(ops, signedBy, identifier, authorizedKey)
+        )
+      })
+
+    @Help.Summary("List identifier delegation transactions")
+    @Help.Description("""List the identifier delegation transaction present in the stores. Identifier delegations
+        |are topology transactions that permission a key to issue topology transactions for a certain
+        |unique identifier.
+
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterUid: Filter for unique identifiers starting with the given filter string.
+        |""")
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterUid: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListIdentifierDelegationResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListIdentifierDelegation(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterUid,
+          )
+        )
+      }
+
+  }
+
+  @Help.Summary("Manage owner to key mappings")
+  @Help.Group("Owner to key mappings")
+  object owner_to_key_mappings extends Helpful {
+
+    @Help.Summary("Change an owner to key mapping")
+    @Help.Description("""Change a owner to key mapping. A key owner is anyone in the system that needs a key-pair known
+      |to all members (participants, mediator, sequencer, topology manager) of a domain.
+    ops: Either Add or Remove the key mapping update.
+    signedBy: Optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
+    ownerType: Role of the following owner (Participant, Sequencer, Mediator, DomainIdentityManager)
+    owner: Unique identifier of the owner.
+    key: Fingerprint of key
+    purposes: The purposes of the owner to key mapping.
+    force: removing the last key is dangerous and must therefore be manually forced
+    synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node 
+    """)
+    def authorize(
+        ops: TopologyChangeOp,
+        keyOwner: KeyOwner,
+        key: Fingerprint,
+        purpose: KeyPurpose,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        force: Boolean = false,
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write
+            .AuthorizeOwnerToKeyMapping(ops, signedBy, keyOwner, key, purpose, force)
+        )
+      })
+
+    @Help.Summary("List owner to key mapping transactions")
+    @Help.Description("""List the owner to key mapping transactions present in the stores. Owner to key mappings
+        |are topology transactions defining that a certain key is used by a certain key owner.
+        |Key owners are participants, sequencers, mediators and domains.
+
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterKeyOwnerType: Filter for a particular type of key owner (KeyOwnerCode).
+        filterKeyOwnerUid: Filter for key owners unique identifier starting with the given filter string.
+        filterKeyPurpose: Filter for keys with a particular purpose (Encryption or Signing)
+        |""")
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterKeyOwnerType: Option[KeyOwnerCode] = None,
+        filterKeyOwnerUid: String = "",
+        filterKeyPurpose: Option[KeyPurpose] = None,
+        filterSigningKey: String = "",
+    ): Seq[ListOwnerToKeyMappingResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListOwnerToKeyMapping(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterKeyOwnerType,
+            filterKeyOwnerUid,
+            filterKeyPurpose,
+          )
+        )
+      }
+
+  }
+  @Help.Summary("Manage party to participant mappings")
+  @Help.Group("Party to participant mappings")
+  object party_to_participant_mappings extends Helpful {
+
+    @Help.Summary("Change party to participant mapping", FeatureFlag.Preview)
+    @Help.Description("""Change the association of a party to a participant. If both identifiers are in the same namespace, then the
+        |request-side is Both. If they differ, then we need to say whether the request comes from the
+        |party (RequestSide.From) or from the participant (RequestSide.To). And, we need the matching request
+        |of the other side.
+        |Please note that this is a preview feature due to the fact that inhomogeneous topologies can not yet be properly
+        |represented on the Ledger API.
+      ops: Either Add or Remove the mapping
+      signedBy: Refers to the optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
+      party: The unique identifier of the party we want to map to a participant.
+      participant: The unique identifier of the participant to which the party is supposed to be mapped.
+      side: The request side (RequestSide.From if we the transaction is from the perspective of the party, RequestSide.To from the participant.)
+      privilege: The privilege of the given participant which allows us to restrict an association (e.g. Confirmation or Observation).
+      replaceExisting: If true (default), replace any existing mapping with the new setting
+      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node      
+      """)
+    def authorize(
+        ops: TopologyChangeOp,
+        party: PartyId,
+        participant: ParticipantId,
+        side: RequestSide = RequestSide.Both,
+        permission: ParticipantPermission = ParticipantPermission.Submission,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        replaceExisting: Boolean = true,
+    ): ByteString =
+      check(FeatureFlag.Preview)(synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write.AuthorizePartyToParticipant(
+            ops,
+            signedBy,
+            side,
+            party,
+            participant,
+            permission,
+            replaceExisting = replaceExisting,
+          )
+        )
+      }))
+
+    @Help.Summary("List party to participant mapping transactions")
+    @Help.Description(
+      """List the party to participant mapping transactions present in the stores. Party to participant mappings
+        |are topology transactions used to allocate a party to a certain participant. The same party can be allocated
+        |on several participants with different privileges.
+        |A party to participant mapping has a request-side that identifies whether the mapping is authorized by the
+        |party, by the participant or by both. In order to have a party be allocated to a given participant, we therefore
+        |need either two transactions (one with RequestSide.From, one with RequestSide.To) or one with RequestSide.Both.
+
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterParty: Filter for parties starting with the given filter string.
+        filterParticipant: Filter for participants starting with the given filter string.
+        filterRequestSide: Optional filter for a particular request side (Both, From, To).
+        |"""
+    )
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterParty: String = "",
+        filterParticipant: String = "",
+        filterRequestSide: Option[RequestSide] = None,
+        filterPermission: Option[ParticipantPermission] = None,
+        filterSigningKey: String = "",
+    ): Seq[ListPartyToParticipantResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListPartyToParticipant(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterParty,
+            filterParticipant,
+            filterRequestSide,
+            filterPermission,
+          )
+        )
+      }
+  }
+  @Help.Summary("Inspect all topology transactions at once")
+  @Help.Group("All Transactions")
+  object all extends Helpful {
+    @Help.Summary("List all transaction")
+    @Help.Description(
+      """List all topology transactions in a store, independent of the particular type. This method is useful for
+      |exporting entire states.
+
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        |"""
+    )
+    def list(
+        filterStore: String = AuthorizedStore.filterName,
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+    ): StoredTopologyTransactions[TopologyChangeOp] = consoleEnvironment.run {
+      adminCommand(
+        TopologyAdminCommands.Read.ListAll(
+          BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey = "")
+        )
+      )
+    }
+  }
+
+  @Help.Summary("Inspect participant domain states")
+  @Help.Group("Participant Domain States")
+  object participant_domain_states extends Helpful {
+
+    @Help.Summary("List participant domain states")
+    @Help.Description("""List the participant domain transactions present in the stores. Participant domain states
+        |are topology transactions used to permission a participant on a given domain.
+        |A participant domain state has a request-side that identifies whether the mapping is authorized by the
+        |participant (From), by the domain (To) or by both (Both).
+        |In order to use a participant on a domain, both have to authorize such a mapping. This means that by
+        |authorizing such a topology transaction, a participant acknowledges its presence on a domain, whereas
+        |a domain permissions the participant on that domain.
+        |
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterDomain: Filter for domains starting with the given filter string.
+        filterParticipant: Filter for participants starting with the given filter string.
+        |""")
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterDomain: String = "",
+        filterParticipant: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListParticipantDomainStateResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListParticipantDomainState(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterDomain,
+            filterParticipant,
+          )
+        )
+      }
+
+    @Help.Summary("Change participant domain states")
+    @Help.Description("""Change the association of a participant to a domain.
+        |In order to activate a participant on a domain, we need both authorisation: the participant authorising
+        |its uid to be present on a particular domain and the domain to authorise the presence of a participant
+        |on said domain.
+        |If both identifiers are in the same namespace, then the request-side can be Both. If they differ, then
+        |we need to say whether the request comes from the domain (RequestSide.From) or from the participant
+        |(RequestSide.To). And, we need the matching request of the other side.
+      ops: Either Add or Remove the mapping
+      signedBy: Refers to the optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
+      domain: The unique identifier of the domain we want the participant to join.
+      participant: The unique identifier of the participant.
+      side: The request side (RequestSide.From if we the transaction is from the perspective of the domain, RequestSide.To from the participant.)
+      permission: The privilege of the given participant which allows us to restrict an association (e.g. Confirmation or Observation). Will use the lower of if different between To/From.
+      trustLevel: The trust level of the participant on the given domain. Will use the lower of if different between To/From.
+      replaceExisting: If true (default), replace any existing mapping with the new setting
+      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node      
+      """)
+    def authorize(
+        ops: TopologyChangeOp,
+        domain: DomainId,
+        participant: ParticipantId,
+        side: RequestSide,
+        permission: ParticipantPermission = ParticipantPermission.Submission,
+        trustLevel: TrustLevel = TrustLevel.Ordinary,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        replaceExisting: Boolean = true,
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write.AuthorizeParticipantDomainState(
+            ops,
+            signedBy,
+            side,
+            domain,
+            participant,
+            permission,
+            trustLevel,
+            replaceExisting = replaceExisting,
+          )
+        )
+      })
+
+    @Help.Summary("Returns true if the given participant is currently active on the given domain")
+    @Help.Description(
+      """Active means that the participant has been granted at least observation rights on the domain
+                     |and that the participant has registered a domain trust certificate"""
+    )
+    def active(domainId: DomainId, participantId: ParticipantId): Boolean = {
+      val (notBlocked, from, to) =
+        list(
+          filterStore = domainId.filterString,
+          filterParticipant = participantId.filterString,
+        ).iterator
+          .map(x => (x.item.side, x.item.permission))
+          .foldLeft((true, false, false)) {
+            case ((false, _, _), _) | ((_, _, _), (_, ParticipantPermission.Disabled)) =>
+              (false, false, false)
+            case (_, (RequestSide.Both, _)) => (true, true, true)
+            case ((_, _, to), (RequestSide.From, _)) => (true, true, to)
+            case ((_, from, _), (RequestSide.To, _)) => (true, from, true)
+          }
+      notBlocked && from && to
+    }
+  }
+
+  @Help.Summary("Inspect mediator domain states")
+  @Help.Group("Mediator Domain States")
+  object mediator_domain_states extends Helpful {
+
+    @Help.Summary("List mediator domain states")
+    @Help.Description("""List the mediator domain transactions present in the stores. Mediator domain states
+        |are topology transactions used to permission a mediator on a given domain.
+        |A mediator domain state has a request-side that identifies whether the mapping is authorized by the
+        |mediator (From), by the domain (To) or by both (Both).
+        |In order to use a mediator on a domain, both have to authorize such a mapping. This means that by
+        |authorizing such a topology transaction, a mediator acknowledges its presence on a domain, whereas
+        |a domain permissions the mediator on that domain.
+        |
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterDomain: Filter for domains starting with the given filter string.
+        filterMediator Filter for mediators starting with the given filter string.
+        |""")
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterDomain: String = "",
+        filterMediator: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListMediatorDomainStateResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListMediatorDomainState(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterDomain,
+            filterMediator,
+          )
+        )
+      }
+
+    @Help.Summary("Change mediator domain states")
+    @Help.Description("""Change the association of a mediator to a domain.
+        |In order to activate a mediator on a domain, we need both authorisation: the mediator authorising
+        |its uid to be present on a particular domain and the domain to authorise the presence of a mediator
+        |on said domain.
+        |If both identifiers are in the same namespace, then the request-side can be Both. If they differ, then
+        |we need to say whether the request comes from the domain (RequestSide.From) or from the mediator
+        |(RequestSide.To). And, we need the matching request of the other side.
+      ops: Either Add or Remove the mapping
+      signedBy: Refers to the optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
+      domain: The unique identifier of the domain we want the mediator to join.
+      mediator: The unique identifier of the mediator.
+      side: The request side (RequestSide.From if we the transaction is from the perspective of the domain, RequestSide.To from the mediator.)
+      replaceExisting: If true (default), replace any existing mapping with the new setting
+      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node
+      """)
+    def authorize(
+        ops: TopologyChangeOp,
+        domain: DomainId,
+        mediator: MediatorId,
+        side: RequestSide,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        replaceExisting: Boolean = true,
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write.AuthorizeMediatorDomainState(
+            ops,
+            signedBy,
+            side,
+            domain,
+            mediator,
+            replaceExisting = replaceExisting,
+          )
+        )
+      })
+  }
+
+  @Help.Summary("Inspect legal identities", FeatureFlag.Preview)
+  @Help.Group("Legal Identities")
+  object legal_identities {
+
+    @Help.Summary("List legal identities", FeatureFlag.Preview)
+    @Help.Description(
+      """List the legal identities associated with a unique identifier. A legal identity allows to establish a link between
+        |an unique identifier and some external evidence of legal identity. Currently, the only type of evidence supported
+        |are X509 certificates. Except for the CCF integration that requires participants to possess a valid X509 certificate,
+        |legal identities have no functional use within the system. They are purely informational.
+        |
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterUid: Filter for unique identifiers starting with the given filter string.
+        |"""
+    )
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterUid: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListSignedLegalIdentityClaimResult] =
+      check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Read
+              .ListSignedLegalIdentityClaim(
+                BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+                filterUid,
+              )
+          )
+        }
+      }
+
+    @Help.Summary("List legal identities with X509 certificates", FeatureFlag.Preview)
+    @Help.Description("""List the X509 certificates used as legal identities associated with a unique identifier.
+        |A legal identity allows to establish a link between an unique identifier and some external
+        |evidence of legal identity. Currently, the only X509 certificate are supported as evidence.
+        |Except for the CCF integration that requires participants to possess a valid X509 certificate,
+        |legal identities have no functional use within the system. They are purely informational.
+        |
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+        filterUid: Filter for unique identifiers starting with the given filter string.
+        |""")
+    def list_x509(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterUid: String = "",
+        filterSigningKey: String = "",
+    ): Seq[(UniqueIdentifier, X509Certificate)] =
+      check(FeatureFlag.Preview) {
+
+        val lst =
+          list(filterStore, useStateStore, timeQuery, operation, filterUid, filterSigningKey)
+        val res = lst.traverseFilter { claim =>
+          claim.item.evidence match {
+            case X509Cert(cert) => X509Certificate.fromPem(cert).map(x => Some((claim.item.uid, x)))
+            case _ => Right(None)
+          }
+        }
+        consoleEnvironment.run {
+          ConsoleCommandResult.fromEither(res.leftMap(_.toString))
+        }
+      }
+
+    @Help.Summary("Generate a signed legal identity claim", FeatureFlag.Preview)
+    def generate(claim: LegalIdentityClaim): SignedLegalIdentityClaim =
+      check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write.GenerateSignedLegalIdentityClaim(claim)
+          )
+        }
+      }
+
+    @Help.Summary(
+      "Generate a signed legal identity claim for a specific X509 certificate",
+      FeatureFlag.Preview,
+    )
+    def generate_x509(
+        uid: UniqueIdentifier,
+        certificateId: CertificateId,
+    ): SignedLegalIdentityClaim =
+      check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          adminCommand(
+            TopologyAdminCommands.Write.GenerateX509IdentityClaim(uid, certificateId)
+          )
+        }
+      }
+
+    @Help.Summary("Authorize a legal identity claim transaction", FeatureFlag.Preview)
+    def authorize(
+        ops: TopologyChangeOp,
+        claim: SignedLegalIdentityClaim,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ByteString = check(FeatureFlag.Preview) {
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write.AuthorizeSignedLegalIdentityClaim(ops, signedBy, claim)
+        )
+      })
+    }
+
+  }
+
+  @Help.Summary("Manage package vettings")
+  @Help.Group("Vetted Packages")
+  object vetted_packages extends Helpful {
+
+    @Help.Summary("Change package vettings")
+    @Help.Description("""A participant will only process transactions that reference packages that all involved participants have
+        |vetted previously. Vetting is done by registering a respective topology transaction with the domain,
+        |which can then be used by other participants to verify that a transaction is only using
+        |vetted packages.
+        |Note that all referenced and dependent packages must exist in the package store.
+        |By default, only vetting transactions adding new packages can be issued. Removing package vettings
+        |and issuing package vettings for other participants (if their identity is controlled through this
+        |participants topology manager) or for packages that do not exist locally can only be run using
+        |the force = true flag. However, these operations are dangerous and can lead to the situation of a
+        |participant being unable to process transactions.
+      ops: Either Add or Remove the vetting.
+      participant: The unique identifier of the participant that is vetting the package.
+      packageIds: The lf-package ids to be vetted.
+      signedBy: Refers to the fingerprint of the authorizing key which in turn must be authorized by a valid, locally existing certificate.
+      |  If none is given, a key is automatically determined.
+      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node       
+      force: Flag to enable dangerous operations (default false). Great power requires great care.
+      """)
+    def authorize(
+        ops: TopologyChangeOp,
+        participant: ParticipantId,
+        packageIds: Seq[PackageId],
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+        force: Boolean = false,
+    ): ByteString =
+      synchronisation.run(synchronize)(consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write
+            .AuthorizeVettedPackages(ops, signedBy, participant, packageIds, force)
+        )
+      })
+
+    @Help.Summary("List package vetting transactions")
+    @Help.Description(
+      """List the package vetting transactions present in the stores. Participants must vet Daml packages and submitters
+        |must ensure that the receiving participants have vetted the package prior to submitting a transaction (done
+        |automatically during submission and validation). Vetting is done by authorizing such topology transactions
+        |and registering with a domain.
+        |
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+
+        filterParticipant: Filter for participants starting with the given filter string.
+        |"""
+    )
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        operation: Option[TopologyChangeOp] = None,
+        filterParticipant: String = "",
+        filterSigningKey: String = "",
+    ): Seq[ListVettedPackagesResult] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListVettedPackages(
+            BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
+            filterParticipant,
+          )
+        )
+      }
+
+  }
+
+  @Help.Summary("Manage domain parameters changes", FeatureFlag.Preview)
+  @Help.Group("Domain Parameters Changes")
+  object domain_parameters_changes extends Helpful {
+    @Help.Summary("Change domain parameters")
+    @Help.Description("""Authorize a transaction to change parameters of the domain.
+      domainId: Id of the domain affected by the change.
+      newParameters: New value of the domain parameters.
+      signedBy: Refers to the fingerprint of the authorizing key which in turn must be authorized by a valid, locally existing certificate.
+                If none is given, a key is automatically determined.
+      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node
+      """)
+    def authorize(
+        domainId: DomainId,
+        newParameters: DynamicDomainParameters,
+        signedBy: Option[Fingerprint] = None,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): ByteString = synchronisation.run(synchronize)(
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Write
+            .AuthorizeDomainParametersChange(signedBy, domainId, newParameters)
+        )
+      }
+    )
+
+    @Help.Summary("Get the latest domain parameters change")
+    @Help.Description("""Get the latest domain parameters change for the domain.
+      domainId: Id of the domain.
+      """)
+    def get_latest(domainId: DomainId): DynamicDomainParameters =
+      list(filterStore = domainId.filterString)
+        .sortBy(_.context.validFrom)(implicitly[Ordering[java.time.Instant]].reverse)
+        .headOption
+        .map(_.item)
+        .getOrElse(
+          throw new IllegalStateException("No dynamic domain parameters found in the domain")
+        )
+
+    @Help.Summary("List domain parameters changes transactions")
+    @Help.Description(
+      """List the domain parameters change transactions present in the stores for the specific domain.
+        filterStore: Filter for topology stores starting with the given filter string (Authorized, <domain-id>, Requested)
+        useStateStore: If true (default), only properly authorized transactions that are part of the state will be selected.
+        timeQuery: The time query allows to customize the query by time. The following options are supported:
+                   TimeQuery.HeadState (default): The most recent known state.
+                   TimeQuery.Snapshot(ts): The state at a certain point in time.
+                   TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
+        filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
+        |"""
+    )
+    def list(
+        filterStore: String = "",
+        useStateStore: Boolean = true,
+        timeQuery: TimeQuery = TimeQuery.HeadState,
+        filterSigningKey: String = "",
+    ): Seq[ListDomainParametersChangeResult] = {
+      val baseQuery = BaseQuery(
+        filterStore = filterStore,
+        useStateStore = useStateStore,
+        timeQuery = timeQuery,
+        ops = None,
+        filterSigningKey = filterSigningKey,
+      )
+
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.ListDomainParametersChanges(baseQuery)
+        )
+      }
+    }
+  }
+}

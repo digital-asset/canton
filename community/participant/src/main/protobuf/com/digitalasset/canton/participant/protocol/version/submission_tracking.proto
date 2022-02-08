@@ -1,0 +1,14 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.protocol.version;
+
+import "com/digitalasset/canton/participant/protocol/v0/submission_tracking.proto";
+
+message VersionedSubmissionTrackingData {
+  oneof version {
+    com.digitalasset.canton.participant.protocol.v0.SubmissionTrackingData v0 = 1;
+  }
+}

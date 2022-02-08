@@ -1,0 +1,400 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.participant.store.db
+
+import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.syntax.foldable._
+import cats.syntax.list._
+import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.metrics.MetricHandle.GaugeM
+import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.participant.RequestCounter
+import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
+import com.digitalasset.canton.store.IndexedDomain
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.EitherUtil.RichEitherIterable
+import com.digitalasset.canton.util.{BatchAggregator, MonadUtil}
+import com.digitalasset.canton.util.Thereafter.syntax._
+import com.github.blemale.scaffeine.AsyncCache
+import io.functionmeta.functionFullName
+import slick.jdbc.GetResult
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
+
+class DbContractStore(
+    storage: DbStorage,
+    domainIdIndexed: IndexedDomain,
+    maxContractIdSqlInListSize: PositiveNumeric[Int],
+    cacheConfig: CacheConfig,
+    dbQueryBatcherConfig: BatchAggregatorConfig,
+    override protected val timeouts: ProcessingTimeout,
+    protected val loggerFactory: NamedLoggerFactory,
+)(protected implicit val ec: ExecutionContext)
+    extends ContractStore
+    with FlagCloseable
+    with NamedLogging {
+
+  import DbStorage.Implicits._
+  import storage.api._
+  import storage.converters._
+
+  private val profile = storage.profile
+  private val domainId = domainIdIndexed.index
+
+  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+    storage.metrics.loadGaugeM("contract-store")
+
+  override protected[store] def logger: TracedLogger = super.logger
+
+  private implicit val storedContractGetResult: GetResult[StoredContract] = GetResult { r =>
+    val contractId = r.<<[LfContractId]
+    val contractInstance = r.<<[SerializableRawContractInstance]
+    val metadata = r.<<[ContractMetadata]
+    val ledgerCreateTime = r.<<[CantonTimestamp]
+    val requestCounter = r.<<[RequestCounter]
+    val creatingTransactionIdO = r.<<[Option[TransactionId]]
+
+    val contract = SerializableContract(contractId, contractInstance, metadata, ledgerCreateTime)
+    StoredContract(contract, requestCounter, creatingTransactionIdO)
+  }
+
+  private val cache: AsyncCache[LfContractId, Option[StoredContract]] =
+    cacheConfig.buildScaffeine().buildAsync[LfContractId, Option[StoredContract]]()
+
+  private val batchAggragator = {
+    val processor: BatchAggregator.Processor[LfContractId, Option[StoredContract]] =
+      new BatchAggregator.Processor[LfContractId, Option[StoredContract]] {
+        override val kind: String = "request"
+        override def logger: TracedLogger = DbContractStore.this.logger
+
+        override def executeBatch(ids: NonEmptyList[Traced[LfContractId]])(implicit
+            traceContext: TraceContext
+        ): Future[Iterable[Option[StoredContract]]] = {
+          processingTime.metric.event {
+            storage.sequentialQueryAndCombine(lookupQueries(ids.map(_.value)), functionFullName)(
+              traceContext
+            )
+          }
+        }
+
+        override def prettyItem: Pretty[LfContractId] = implicitly
+      }
+    BatchAggregator(
+      processor,
+      dbQueryBatcherConfig,
+      Some(storage.metrics.loadGaugeM("contract-store-query-batcher")),
+    )
+  }
+
+  private def lookupQueries(
+      ids: NonEmptyList[LfContractId]
+  ): Iterable[DbAction.ReadOnly[Seq[Option[StoredContract]]]] = {
+    import DbStorage.Implicits.BuilderChain._
+
+    DbStorage.toInClauses("contract_id", ids, maxContractIdSqlInListSize).map {
+      case (idGroup, inClause) =>
+        (sql"""select contract_id, instance, metadata, ledger_create_time, request_counter, creating_transaction_id
+          from contracts
+          where domain_id = $domainId and """ ++ inClause)
+          .as[StoredContract]
+          .map { storedContracts =>
+            val foundContracts =
+              storedContracts
+                .map(storedContract => (storedContract.contractId, storedContract))
+                .toMap
+            idGroup.map(foundContracts.get)
+          }
+    }
+  }
+
+  def lookup(
+      id: LfContractId
+  )(implicit traceContext: TraceContext): OptionT[Future, StoredContract] = {
+    def get(): Future[Option[StoredContract]] =
+      performUnlessClosingF(batchAggragator.run(id))
+        .onShutdown(
+          throw DbContractStore.AbortedDueToShutdownException(
+            s"Shutdown in progress, unable to fetch contract $id"
+          )
+        )
+
+    OptionT(cache.getFuture(id, _ => get()).recover {
+      case e: DbContractStore.AbortedDueToShutdownException =>
+        logger.info(e.getMessage)
+        None // TODO(Error handling) Consider propagating the shutdown info further instead of converting to None
+    })
+  }
+
+  override def find(
+      filterId: Option[String],
+      filterPackage: Option[String],
+      filterTemplate: Option[String],
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[List[SerializableContract]] =
+    processingTime.metric.event {
+
+      import DbStorage.Implicits.BuilderChain._
+
+      // If filter is set returns a conjunctive (`and` prepended) constraint on attribute `name`.
+      // Otherwise empty sql action.
+      def createConjunctiveFilter(name: String, filter: Option[String]): SQLActionBuilderChain =
+        filter
+          .map { f =>
+            sql" and #$name " ++ (f match {
+              case rs if rs.startsWith("!") => sql"= ${rs.drop(1)}" // Must be equal
+              case rs if rs.startsWith("^") => sql"""like ${rs.drop(1) + "%"}""" // Starts with
+              case rs => sql"""like ${"%" + rs + "%"}""" // Contains
+            })
+          }
+          .getOrElse(sql" ")
+
+      val contractsBaseQuery =
+        sql"select contract_id, instance, metadata, ledger_create_time, request_counter, creating_transaction_id from contracts"
+      val where = sql" where "
+      val domainConstraint = sql" domain_id = $domainId "
+      val pkgFilter = createConjunctiveFilter("package_id", filterPackage)
+      val templateFilter = createConjunctiveFilter("template_id", filterTemplate)
+      val coidFilter = createConjunctiveFilter("contract_id", filterId)
+      val limitFilter = sql" #${storage.limit(limit)}"
+
+      val contractsQuery = contractsBaseQuery ++ where ++
+        domainConstraint ++ pkgFilter ++ templateFilter ++ coidFilter ++ limitFilter
+
+      storage
+        .query(contractsQuery.as[StoredContract], functionFullName)
+        .map(_.map(_.contract).toList)
+    }
+
+  override def storeCreatedContracts(
+      requestCounter: RequestCounter,
+      transactionId: TransactionId,
+      creations: Seq[SerializableContract],
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.metric.event {
+      storeElements(
+        creations,
+        StoredContract.fromCreatedContract(_, requestCounter, transactionId),
+      )
+    }
+
+  override def storeDivulgedContracts(
+      requestCounter: RequestCounter,
+      divulgences: Seq[SerializableContract],
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.metric.event {
+      storeElements(
+        divulgences,
+        StoredContract.fromDivulgedContract(_, requestCounter),
+      )
+    }
+
+  // Not to be called directly: use contractsCache
+  private def contractInsert(storedContract: StoredContract): DbAction.WriteOnly[Int] = {
+    val contractId = storedContract.contractId
+    val contract = storedContract.contract.rawContractInstance
+    val metadata = storedContract.contract.metadata
+    val ledgerCreateTime = storedContract.contract.ledgerCreateTime
+    val requestCounter = storedContract.requestCounter
+    val creatingTransactionId = storedContract.creatingTransactionIdO
+    val template = storedContract.contract.contractInstance.unversioned.template
+    val packageId = template.packageId
+    val templateId = template.qualifiedName.toString
+
+    // TODO(M40): Figure out if we should check that the contract instance remains the same and whether we should update the instance if not.
+    // The instance payload is not being updated as uploading this payload on a previously set field is problematic for Oracle when it exceeds 32KB
+    // NOTE : By not updating the instance payload the DbContractStore differs from the implementation of the
+    // InMemoryContractStore (used for testing) which replaces created and divulged contract in full.
+    profile match {
+      case _: DbStorage.Profile.Postgres =>
+        sqlu"""insert into contracts as c (
+                 domain_id, contract_id, instance, metadata, 
+                 ledger_create_time, request_counter, creating_transaction_id, package_id, template_id)
+               values ($domainId, $contractId, $contract, $metadata, 
+                 $ledgerCreateTime, $requestCounter, $creatingTransactionId, $packageId, $templateId)
+               on conflict(domain_id, contract_id) do update 
+                 set
+                   metadata = $metadata,
+                   ledger_create_time = $ledgerCreateTime,
+                   request_counter = $requestCounter,
+                   creating_transaction_id = $creatingTransactionId,
+                   package_id = $packageId,
+                   template_id = $templateId
+                 where (c.creating_transaction_id is null and ($creatingTransactionId is not null or c.request_counter < $requestCounter)) or 
+                       (c.creating_transaction_id is not null and $creatingTransactionId is not null and c.request_counter < $requestCounter)"""
+      case _: DbStorage.Profile.H2 =>
+        sqlu"""merge into contracts
+               using dual
+               on (domain_id = $domainId and contract_id = ${storedContract.contract.contractId})
+               when matched and (
+                 (creating_transaction_id is null and ($creatingTransactionId is not null or request_counter < $requestCounter)) or
+                 (creating_transaction_id is not null and $creatingTransactionId is not null and request_counter < $requestCounter)
+               ) then
+                 update set
+                   metadata = $metadata,
+                   ledger_create_time = $ledgerCreateTime,
+                   request_counter = $requestCounter,
+                   creating_transaction_id = $creatingTransactionId,
+                   package_id = $packageId,
+                   template_id = $templateId
+               when not matched then
+                insert
+                 (domain_id, contract_id, instance, metadata,
+                  ledger_create_time, request_counter, creating_transaction_id, package_id, template_id)
+                 values ($domainId, $contractId, $contract, $metadata,
+                  $ledgerCreateTime, $requestCounter, $creatingTransactionId, $packageId, $templateId)"""
+      case _: DbStorage.Profile.Oracle =>
+        sqlu"""merge into contracts 
+               using dual
+               on (domain_id = $domainId and contract_id = ${storedContract.contract.contractId})
+               when matched then 
+                 update set
+                   metadata = $metadata,
+                   ledger_create_time = $ledgerCreateTime,
+                   request_counter = $requestCounter,
+                   creating_transaction_id = $creatingTransactionId,
+                   package_id = $packageId,
+                   template_id = $templateId
+                 where (creating_transaction_id is null and ($creatingTransactionId is not null or request_counter < $requestCounter)) or 
+                       (creating_transaction_id is not null and $creatingTransactionId is not null and request_counter < $requestCounter)
+               when not matched then 
+                insert
+                 (domain_id, contract_id, instance, metadata, 
+                  ledger_create_time, request_counter, creating_transaction_id, package_id, template_id)
+                 values ($domainId, $contractId, $contract, $metadata, 
+                  $ledgerCreateTime, $requestCounter, $creatingTransactionId, $packageId, $templateId)"""
+    }
+  }
+
+  def deleteContract(
+      id: LfContractId
+  )(implicit traceContext: TraceContext): EitherT[Future, UnknownContract, Unit] =
+    processingTime.metric
+      .eitherTEvent {
+        lookupE(id)
+          .flatMap { _ =>
+            EitherT.right[UnknownContract](
+              storage.update_(
+                sqlu"delete from contracts where contract_id = $id and domain_id = $domainId",
+                functionFullName,
+              )
+            )
+          }
+      }
+      .thereafter(_ => cache.synchronous().invalidate(id))
+
+  override def deleteIgnoringUnknown(
+      contractIds: Iterable[LfContractId]
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    import DbStorage.Implicits.BuilderChain._
+
+    contractIds.toList.toNel
+      .map { contractIds =>
+        val inClauses =
+          DbStorage.toInClauses_("contract_id", contractIds, maxContractIdSqlInListSize)
+        MonadUtil.sequentialTraverse_(inClauses) { inClause =>
+          processingTime.metric.event {
+            storage.update_(
+              (sql"""delete from contracts where domain_id = $domainId and """ ++ inClause).asUpdate,
+              functionFullName,
+            )
+          }
+        }
+      }
+      .getOrElse(Future.unit)
+      .thereafter(_ => cache.synchronous().invalidateAll(contractIds))
+  }
+
+  override def deleteDivulged(
+      upTo: RequestCounter
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val query = profile match {
+      case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
+        (sql"""select contract_id from contracts
+                 where domain_id = $domainId and request_counter <= $upTo and creating_transaction_id is null""")
+      case _: DbStorage.Profile.Oracle =>
+        // Here we use exactly the same expression as in idx_contracts_request_counter
+        // to make sure the index is used.
+        sql"""select contract_id from contracts
+                 where (case when creating_transaction_id is null then domain_id end) = $domainId and 
+                       (case when creating_transaction_id is null then request_counter end) <= $upTo"""
+    }
+
+    processingTime.metric.event(storage.query(query.as[LfContractId], functionFullName)).flatMap {
+      contractIds =>
+        deleteIgnoringUnknown(contractIds)
+    }
+  }
+
+  override def lookupStakeholders(ids: Set[LfContractId])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, UnknownContracts, Map[LfContractId, Set[LfPartyId]]] =
+    ids.toList.toNel match {
+      case None => EitherT.rightT(Map.empty)
+
+      case Some(idsNel) =>
+        EitherT(
+          idsNel.toList
+            .traverse(id => lookupContract(id).toRight(id).value)
+            .map(_.collectRight)
+            .map { contracts =>
+              Either.cond(
+                contracts.sizeCompare(ids) == 0,
+                contracts
+                  .map(contract => contract.contractId -> contract.metadata.stakeholders)
+                  .toMap,
+                UnknownContracts(ids -- contracts.map(_.contractId).toSet),
+              )
+            }
+        )
+    }
+
+  private def storeElements[A](elements: Seq[A], fn: A => StoredContract)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): Future[Unit] = {
+
+    // Why "queryAndUpdateUnsafe"?
+    // - As these queries cause heavy load, they would cause a congestion in the writeDb.
+    //   Therefore, they should be executed on the readDb.
+    // - Contracts won't be deleted as part of crash recovery. So this won't interfere with crash recovery.
+    // - It won't interfere with pruning, because pruning does only delete contracts created by clean requests and
+    //   this method will only write contracts from dirty requests.
+    // - TODO(M40): Double check whether it is still sound to go through the general db.
+    elements.traverse_ { element =>
+      val contract = fn(element)
+      storage
+        .queryAndUpdateUnsafe(contractInsert(contract), functionFullName)
+        .map { affectedRowsCount =>
+          if (affectedRowsCount > 0)
+            cache.put(contract.contractId, Future(Option(contract)))
+          else
+            cache.synchronous().invalidate(contract.contractId)
+        }
+        .thereafter {
+          case Failure(_) => cache.synchronous().invalidate(contract.contractId)
+          case Success(_) => ()
+        }
+    }
+  }
+
+  override def contractCount()(implicit traceContext: TraceContext): Future[Int] =
+    processingTime.metric.event {
+      storage.query(sql"select count(*) from contracts".as[Int].head, functionFullName)
+    }
+}
+
+object DbContractStore {
+  case class AbortedDueToShutdownException(message: String) extends RuntimeException(message)
+}

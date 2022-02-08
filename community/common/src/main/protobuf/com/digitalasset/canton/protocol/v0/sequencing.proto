@@ -1,0 +1,158 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.v0;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/wrappers.proto";
+
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/v0/trace_context.proto";
+
+// Messages for sequencing
+message SequencedEvent {
+    int64 counter = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    string domain_id = 3;
+    google.protobuf.StringValue message_id = 4; // Optional: Present for DeliverError, present for the sender of a Deliver.
+    CompressedBatch batch = 5; // Optional: Present for Deliver, absent for DeliverError
+    DeliverErrorReason deliver_error_reason = 6; // Optional: Present for DeliverError, absent for other events
+}
+
+message PossiblyIgnoredSequencedEvent {
+    int64 counter = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    com.digitalasset.canton.v0.TraceContext trace_context = 3;
+    bool is_ignored = 4;
+    SignedContent underlying = 5; // Optional if is_ignored == true, required otherwise
+}
+
+// Protobuf has a hard limit on the nesting depth of messages, so this message could potentially hit
+// the nesting depth limit. However this probably won't be an issue any time soon.
+message RecipientsTree {
+    repeated string recipients = 1;
+    repeated com.digitalasset.canton.protocol.v0.RecipientsTree children = 2;
+}
+
+message Recipients {
+    repeated RecipientsTree recipients_tree = 1;
+}
+
+message Envelope {
+    bytes content = 1;
+    com.digitalasset.canton.protocol.v0.Recipients recipients = 2;
+}
+
+message CompressedBatch {
+    enum CompressionAlgorithm {
+        None = 0;
+        Gzip = 1;
+    }
+
+    CompressionAlgorithm algorithm = 1;
+    bytes compressedBatch = 2;
+}
+
+message Batch {
+    repeated Envelope envelopes = 1;
+}
+
+message SignedContent {
+    google.protobuf.BytesValue content = 1;
+    com.digitalasset.canton.crypto.v0.Signature signature = 2;
+    google.protobuf.Timestamp timestamp_of_signing_key = 3;
+}
+
+message DeliverErrorReason {
+    oneof reason {
+        // The batch content could not be read, likely caused by a serialization or versioning issue.
+        string batch_invalid = 1;
+        // The batch was content was readable but the sequencer application decided the request was not correct,
+        // examples could be recipients not being registered or values in the request being incorrect.
+        string batch_refused = 2;
+    }
+}
+
+message ServiceAgreement {
+    string id = 1; // A unique identifier of an agreement within a domain, which must change when the legal text changes
+    string legal_text = 2;
+}
+
+message StaticDomainParameters {
+    google.protobuf.Duration reconciliation_interval = 1;
+    uint32 max_rate_per_participant = 2;
+    uint32 max_inbound_message_size = 3;
+    bool unique_contract_keys = 4;
+    repeated com.digitalasset.canton.crypto.v0.SigningKeyScheme required_signing_key_schemes = 5;
+    repeated com.digitalasset.canton.crypto.v0.EncryptionKeyScheme required_encryption_key_schemes = 6;
+    repeated com.digitalasset.canton.crypto.v0.SymmetricKeyScheme required_symmetric_key_schemes = 7;
+    repeated com.digitalasset.canton.crypto.v0.HashAlgorithm required_hash_algorithms = 8;
+    repeated com.digitalasset.canton.crypto.v0.CryptoKeyFormat required_crypto_key_formats = 9;
+    string protocol_version = 10;
+}
+
+message DynamicDomainParameters {
+    google.protobuf.Duration participant_response_timeout = 1;
+    google.protobuf.Duration mediator_reaction_timeout = 2;
+    google.protobuf.Duration transfer_exclusivity_timeout = 3;
+    google.protobuf.Duration topology_change_delay = 4;
+    google.protobuf.Duration ledger_time_record_time_tolerance = 5;
+}
+
+// Messages for performing a version handshake with a sequencer service
+// Reused between sequencer services
+message Handshake {
+    message Request {
+        repeated string client_protocol_versions = 1;
+        google.protobuf.StringValue minimum_protocol_version = 2;
+    }
+
+    message Response {
+        string server_version = 1;
+        oneof value {
+            Success success = 2;
+            Failure failure = 3;
+        }
+    }
+
+    message Success { }
+
+    message Failure {
+        string reason = 1;
+    }
+}
+
+// Client configuration for how members should connect to the sequencer of a domain.
+message SequencerConnection {
+    oneof type {
+        Http http = 1;
+        Grpc grpc = 2;
+    }
+
+    message Http {
+        // Primary read and write address
+        string host = 1;
+        uint32 port = 2;
+        // Server certificate of the HTTP sequencer
+        google.protobuf.BytesValue certificate = 3;
+        // Read host & port allow optionally specifying a separate endpoint for performing read operations against a replica.
+        // Usually they have the same values as the primary address.
+        string readHost = 4;
+        uint32 readPort = 5;
+    }
+
+    message Grpc {
+        // connection information to sequencer (http[s]://<host>:<port>")
+        repeated string connections = 1;
+        // Should the connection use TLS?
+        bool transportSecurity = 2;
+        google.protobuf.BytesValue customTrustCertificates = 3;
+    }
+}
+
+enum ApiType {
+    Grpc = 0;
+    Http = 1;
+}

@@ -1,0 +1,677 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.config
+
+import java.io.File
+import java.util.UUID
+import cats.Order
+import cats.syntax.either._
+import cats.syntax.option._
+import cats.syntax.traverse._
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InvalidLengthString
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.util.NoCopy
+import io.circe.{Decoder, Encoder}
+import pureconfig.{ConfigReader, ConfigWriter}
+import pureconfig.error.{CannotConvert, FailureReason}
+import slick.jdbc.{GetResult, SetParameter}
+import com.digitalasset.canton.util.ShowUtil._
+
+/** Encapsulates those classes and their utility methods which enforce a given invariant via the use of require. */
+object RequireTypes {
+  final case class Port(private val n: Int) extends Ordered[Port] with PrettyPrinting with NoCopy {
+    def unwrap: Int = n
+    require(
+      n >= Port.minValidPort && n <= Port.maxValidPort,
+      s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} (inclusive) are allowed.",
+    )
+
+    def +(n: Int): Port = Port.tryCreate(this.unwrap + n)
+    override def compare(that: Port): Int = this.unwrap compare that.unwrap
+
+    override def pretty: Pretty[Port] = prettyOfString(_ => n.toString)
+  }
+
+  object Port {
+    val (minValidPort, maxValidPort) = (0, scala.math.pow(2, 16).toInt - 1)
+    private[this] def apply(n: Int): Port =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+    def create(n: Int): Either[InvariantViolation, Port] = {
+      Either.cond(
+        n >= Port.minValidPort && n <= Port.maxValidPort,
+        new Port(n),
+        InvariantViolation(
+          s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} are allowed."
+        ),
+      )
+    }
+
+    def tryCreate(n: Int): Port = {
+      new Port(n)
+    }
+
+    implicit val encodeInstant: Encoder[Port] = Encoder.encodeInt.contramap[Port](_.unwrap)
+    implicit val decodeInstant: Decoder[Port] =
+      Decoder.decodeInt.emap(int => Port.create(int).leftMap(_.toString))
+
+    lazy implicit val portReader: ConfigReader[Port] = {
+      ConfigReader.fromString[Port] { str =>
+        def err(message: String) =
+          CannotConvert(str, Port.getClass.getName, message)
+
+        Either
+          .catchOnly[NumberFormatException](str.toInt)
+          .leftMap[FailureReason](error => err(error.getMessage))
+          .flatMap(n => create(n).leftMap(_ => InvalidPort(n)))
+      }
+    }
+
+    final case class InvalidPort(n: Int) extends FailureReason {
+      override def description: String =
+        s"Unable to create Port as value $n was given, but only values between ${Port.minValidPort} and ${Port.maxValidPort} are allowed"
+    }
+  }
+
+  sealed trait RefinedNumeric[T] extends Ordered[RefinedNumeric[T]] with PrettyPrinting {
+    protected def value: T
+    implicit def num: Numeric[T]
+
+    def unwrap: T = value
+
+    override def compare(that: RefinedNumeric[T]): Int = num.compare(value, that.value)
+    override def pretty: Pretty[RefinedNumeric[T]] = prettyOfString(_ => value.toString)
+  }
+
+  sealed abstract case class NonNegativeNumeric[T](value: T)(implicit val num: Numeric[T])
+      extends RefinedNumeric[T] {
+    import num._
+
+    def +(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value + other.value)
+    def tryAdd(other: T) = NonNegativeNumeric.tryCreate(value + other)
+  }
+
+  type NonNegativeInt = NonNegativeNumeric[Int]
+
+  object NonNegativeNumeric {
+    def tryCreate[T](t: T)(implicit num: Numeric[T]): NonNegativeNumeric[T] =
+      create(t).valueOr(err => throw new IllegalArgumentException(err.error))
+
+    def create[T](
+        t: T
+    )(implicit num: Numeric[T]): Either[InvariantViolation, NonNegativeNumeric[T]] = {
+      Either.cond(
+        num.compare(t, num.zero) >= 0,
+        new NonNegativeNumeric(t) {},
+        InvariantViolation(
+          s"Received the negative $t as argument, but we require a non-negative value here."
+        ),
+      )
+    }
+
+    implicit val readNonNegativeInt: GetResult[NonNegativeInt] = GetResult { r =>
+      NonNegativeInt.tryCreate(r.nextInt())
+    }
+
+    implicit val readNonNegativeIntOption: GetResult[Option[NonNegativeInt]] = GetResult { r =>
+      r.nextIntOption().map(NonNegativeInt.tryCreate)
+    }
+
+    implicit def writeNonNegativeNumeric[T](implicit
+        f: SetParameter[T]
+    ): SetParameter[NonNegativeNumeric[T]] =
+      (s, pp) => {
+        pp >> s.unwrap
+      }
+
+    implicit def writeNonNegativeNumericOption[T](implicit
+        f: SetParameter[Option[T]]
+    ): SetParameter[Option[NonNegativeNumeric[T]]] = (s, pp) => {
+      pp >> s.map(_.unwrap)
+    }
+
+    implicit def nonNegativeNumericReader[T](implicit
+        num: Numeric[T]
+    ): ConfigReader[NonNegativeNumeric[T]] = {
+      ConfigReader.fromString[NonNegativeNumeric[T]] { str =>
+        def err(message: String) =
+          CannotConvert(str, NonNegativeNumeric.getClass.getName, message)
+
+        num
+          .parseString(str)
+          .toRight[FailureReason](err("Cannot convert `str` to numeric"))
+          .flatMap(n => Either.cond(num.compare(n, num.zero) >= 0, tryCreate(n), NegativeValue(n)))
+      }
+    }
+
+    final case class NegativeValue[T](t: T) extends FailureReason {
+      override def description: String =
+        s"The value you gave for this configuration setting ($t) was negative, but we require a non-negative value for this configuration setting"
+    }
+  }
+
+  object NonNegativeInt {
+    def create(n: Int): Either[InvariantViolation, NonNegativeInt] = NonNegativeNumeric.create(n)
+    def tryCreate(n: Int): NonNegativeInt = NonNegativeNumeric.tryCreate(n)
+  }
+
+  sealed abstract case class PositiveNumeric[T](value: T)(implicit val num: Numeric[T])
+      extends RefinedNumeric[T] {
+    import num._
+
+    def +(other: PositiveNumeric[T]) = PositiveNumeric.tryCreate(value + other.value)
+    def tryAdd(other: T) = PositiveNumeric.tryCreate(value + other)
+  }
+
+  type PositiveInt = PositiveNumeric[Int]
+
+  object PositiveInt {
+    def create(n: Int): Either[InvariantViolation, PositiveInt] = PositiveNumeric.create(n)
+    def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
+  }
+
+  object PositiveNumeric {
+    def tryCreate[T](t: T)(implicit num: Numeric[T]): PositiveNumeric[T] =
+      create(t).valueOr(err => throw new IllegalArgumentException(err.error))
+
+    def create[T](
+        t: T
+    )(implicit num: Numeric[T]): Either[InvariantViolation, PositiveNumeric[T]] = {
+      Either.cond(
+        num.compare(t, num.zero) > 0,
+        new PositiveNumeric(t) {},
+        InvariantViolation(
+          s"Received the non-positive $t as argument, but we require a positive value here."
+        ),
+      )
+    }
+
+    implicit def positiveNumericReader[T](implicit
+        num: Numeric[T]
+    ): ConfigReader[PositiveNumeric[T]] = {
+      ConfigReader.fromString[PositiveNumeric[T]] { str =>
+        def err(message: String) =
+          CannotConvert(str, PositiveNumeric.getClass.getName, message)
+
+        num
+          .parseString(str)
+          .toRight[FailureReason](err("Cannot convert `str` to numeric"))
+          .flatMap(n =>
+            Either.cond(num.compare(n, num.zero) >= 0, tryCreate(n), NonPositiveValue(n))
+          )
+      }
+    }
+
+    final case class NonPositiveValue[T](t: T) extends FailureReason {
+      override def description: String =
+        s"The value you gave for this configuration setting ($t) was non-positive, but we require a positive value for this configuration setting"
+    }
+  }
+
+  final case class ExistingFile(private val file: File) extends NoCopy {
+    def unwrap: File = file
+    require(file.exists(), s"Unable to create ExistingFile as non-existing file $file was given.")
+  }
+
+  object ExistingFile {
+    private[this] def apply(file: File): ExistingFile =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+    def create(file: File): Either[InvariantViolation, ExistingFile] = {
+      Either.cond(
+        file.exists,
+        new ExistingFile(file),
+        InvariantViolation(
+          s"The specified file $file does not exist/was not found. Please specify an existing file"
+        ),
+      )
+    }
+
+    def tryCreate(file: File): ExistingFile = {
+      new ExistingFile(file)
+    }
+
+    def tryCreate(path: String): ExistingFile = {
+      new ExistingFile(new File(path))
+    }
+
+    lazy implicit val existingFileReader: ConfigReader[ExistingFile] = {
+      ConfigReader.fromString[ExistingFile] { str =>
+        def err(message: String) =
+          CannotConvert(str, ExistingFile.getClass.getName, message)
+
+        Either
+          .catchOnly[NullPointerException](new File(str))
+          .leftMap[FailureReason](error => err(error.getMessage))
+          .flatMap(f => create(f).leftMap(_ => NonExistingFile(f)))
+      }
+    }
+
+    final case class NonExistingFile(file: File) extends FailureReason {
+      override def description: String =
+        s"The specified file $file does not exist/was not found. Please specify an existing file"
+    }
+  }
+
+  final case class NonEmptyString(private val str: String) extends NoCopy {
+    def unwrap: String = str
+    require(str.nonEmpty, s"Unable to create a NonEmptyString as the empty string $str was given.")
+  }
+
+  object NonEmptyString {
+    private[this] def apply(str: String): NonEmptyString =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+    def create(str: String): Either[InvariantViolation, NonEmptyString] = {
+      Either.cond(
+        str.nonEmpty,
+        new NonEmptyString(str),
+        InvariantViolation(s"Unable to create a NonEmptyString as the empty string $str was given."),
+      )
+    }
+
+    def tryCreate(str: String): NonEmptyString = {
+      new NonEmptyString(str)
+    }
+
+    lazy implicit val nonEmptyStringReader: ConfigReader[NonEmptyString] = {
+      ConfigReader.fromString[NonEmptyString] { str =>
+        Either.cond(str.nonEmpty, new NonEmptyString(str), EmptyString(str))
+      }
+    }
+
+    final case class EmptyString(str: String) extends FailureReason {
+      override def description: String =
+        s"The value you gave for this configuration setting ('$str') was the empty string, but we require a non-empty string for this configuration setting"
+    }
+  }
+
+  /** This trait wraps a String that is limited to a certain maximum length.
+    * Classes implementing this trait expose `create` and `tryCreate` methods to safely (and non-safely) construct
+    * such a String.
+    *
+    * The canonical use case for LengthLimitedString's is ensuring that we don't write too long strings into the database:
+    * Oracle has a length-limit of 1000 Unicode characters for the ordinary String type `NVARCHAR2` and we are trying to avoid
+    * the use of CLOB (as it has pitfalls regarding implicits).
+    * This validation generally occurs on the server side and not on the client side. Concretely, this means that the
+    * Admin API and Ledger API gRPC services is the point where we validate that the received Protobuf Strings are not too long
+    * (and convert them into `LengthLimitedString`s). On the client side, e.g. at the console, we generally take normal String types.
+    * The console command `set_display_name` and service `GrpcPartyNameManagementService` validating `request.displayName` illustrate this.
+    *
+    * As a rule of thumb: whenever you want to create a column that uses a NVARCHAR2 in Oracle, the value you write to
+    * it should use a LengthLimitedString.
+    *
+    * Some more background on the Oracle issues:
+    * NVARCHAR and NVARCHAR2 have both by default a 4000 byte limit, but unicode uses 4-bytes per character (and nvarchar2 uses unicode)
+    * Therefore, NVARCHAR has a limit of 4000 and NVARCHAR2 has a limit of 1000 characters
+    * If need be, we can extend this to 32 KB by setting the Oracle database string size to 'extended mode' (ALTER SYSTEM SET MAX_STRING_SIZE=EXTENDED)
+    *
+    * CLOB is only used for the following values (none are indices):
+    * - V1_1 source_description
+    * - v4 agreement_text
+    * - v8 ignore_reason
+    * - v13 connection_uri
+    * - v28_1 error_message
+    */
+  sealed trait LengthLimitedString extends NoCopy {
+    def str: String
+    def maxLength: Int
+    // optionally give a name for the type of String you are attempting to validate for nicer error messages
+    def name: Option[String] = None
+
+    // overwriting equals here to improve console UX - see e.g. issue i7071 for context
+    @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
+    def canEqual(a: Any): Boolean = a.isInstanceOf[LengthLimitedString] || a.isInstanceOf[String]
+
+    override def equals(that: Any): Boolean =
+      that match {
+        case that: LengthLimitedString =>
+          that.canEqual(this) && this.str == that.str && this.maxLength == that.maxLength
+        case that: String => that.canEqual(this) && this.str == that
+        case _ => false
+      }
+
+    override def hashCode(): Int = str.hashCode()
+
+    require(
+      str.length <= maxLength,
+      s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
+        .getOrElse("string")} of length ${str.length} ('$str') was given",
+    )
+    require(
+      maxLength > 0 && maxLength <= LengthLimitedString.maxOracleStringLength,
+      s"MaxLength needs to be positive and smaller equal than ${LengthLimitedString.maxOracleStringLength} but was $maxLength",
+    )
+    def unwrap: String = str
+    def toProtoPrimitive: String = str
+
+    def tryConcatenate(that: LengthLimitedString): LengthLimitedStringVar =
+      new LengthLimitedStringVar(this.unwrap + that.unwrap, this.maxLength + that.maxLength)()
+
+    def tryConcatenate(that: String): LengthLimitedStringVar =
+      new LengthLimitedStringVar(this.unwrap + that, this.maxLength + that.length)()
+
+    override def toString: String = str
+  }
+
+  object LengthLimitedString {
+    // Max length of unicode strings we can save as String types in Oracle columns - this can be increased to
+    // 1000 for NVARCHAR2 but we set it to 300 for now since we don't need a higher limit and rather want to stay on the
+    // conservative side
+    val maxOracleStringLength = 300
+    // In general, if you would create a case class that would simply wrap a `LengthLimitedString`, use a type alias instead
+    // Some very frequently-used classes (like `Identifier` or `DomainAlias`) are however given their 'own' case class
+    // despite essentially being a wrapper around `LengthLimitedString255` (because the documentation UX is nicer this way,
+    // and one can e.g. write `Fingerprint.tryCreate` instead of `LengthLimitedString68.tryCreate`)
+    type InstanceName = String185
+    type DisplayName = String255
+    type TopologyRequestId = String255
+    type DarName = String255
+    type SequencerStoreId = String255
+
+    def errorMsg(tooLongStr: String, maxLength: Int, name: Option[String] = None): String =
+      s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
+        .getOrElse("string")} of length ${tooLongStr.length} ('${tooLongStr.limit(maxLength + 50)}.') was given"
+
+    val defaultMaxLength = 255
+    private[this] def apply(str: String): LengthLimitedString =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+    def tryCreate(str: String, maxLength: Int, name: Option[String] = None): LengthLimitedString = {
+      new LengthLimitedStringVar(str, maxLength)(name)
+    }
+
+    def getUuid: String36 = String36.tryCreate(UUID.randomUUID().toString)
+
+    def create(
+        str: String,
+        maxLength: Int,
+        name: Option[String] = None,
+    ): Either[String, LengthLimitedString] = {
+      Either.cond(
+        str.length <= maxLength,
+        new LengthLimitedStringVar(str, maxLength)(name),
+        errorMsg(str, maxLength, name),
+      )
+    }
+    def fromProtoPrimitive(
+        str: String,
+        name: Option[String] = None,
+    ): ParsingResult[LengthLimitedString] =
+      LengthLimitedString.create(str, defaultMaxLength, name).leftMap(InvariantViolation)
+
+    // Should be used rarely - most of the time SetParameter[String255] etc.
+    // (defined through LengthLimitedStringCompanion) should be used
+    implicit val setParameterLengthLimitedString: SetParameter[LengthLimitedString] = (v, pp) =>
+      pp.setString(v.unwrap)
+    // Commented out so this function never accidentally throws
+//    implicit def getResultLengthLimitedString: GetResult[LengthLimitedString] =
+//      throw new UnsupportedOperationException(
+//        "Avoid attempting to read a generic LengthLimitedString from the database, as this may lead to unexpected " +
+//          "equality-comparisons (since a LengthLimitedString comparison also includes the maximum length and not only the string-content). " +
+//          "Instead refactor your code to expect a specific LengthLimitedString when reading from the database (e.g. via GetResult[String255]). " +
+//          "If you really need this functionality, then you can add this method again. ")
+
+    implicit val orderingLengthLimitedString: Ordering[LengthLimitedString] =
+      Ordering.by[LengthLimitedString, String](_.str)
+    implicit val lengthLimitedStringOrder: Order[LengthLimitedString] =
+      Order.by[LengthLimitedString, String](_.str)
+
+    final case class InvalidLengthString(str: String) extends FailureReason {
+      override def description: String =
+        s"The string you gave for this configuration setting ('$str') had size ${str.length}, but we require a string with length <= $defaultMaxLength for this configuration setting"
+    }
+  }
+
+  /** Limit used for enum names. */
+  final case class String3(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String3.maxLength
+  }
+
+  object String3 extends LengthLimitedStringCompanion[String3] {
+    override def maxLength: Int = 3
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String3 = new String3(
+      str
+    )(name)
+  }
+
+  /** Limit used by a UUID. */
+  final case class String36(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String36.maxLength
+  }
+
+  object String36 extends LengthLimitedStringCompanion[String36] {
+    override def maxLength: Int = 36
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String36 =
+      new String36(str)(name)
+  }
+
+  /** Limit used by a hash (SHA256 in particular) in a [[com.digitalasset.canton.topology.UniqueIdentifier]].
+    *
+    * @see com.digitalasset.canton.topology.UniqueIdentifier for documentation on its origin
+    */
+  final case class String68(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String68.maxLength
+  }
+
+  object String68 extends LengthLimitedStringCompanion[String68] {
+    override def maxLength: Int = 68
+
+    override def factoryMethod(str: String)(name: Option[String]): String68 =
+      new String68(str)(name)
+  }
+
+  /** Limit used by a [[com.digitalasset.canton.sequencing.protocol.MessageId]]. */
+  final case class String73(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String73.maxLength
+  }
+
+  object String73 extends LengthLimitedStringCompanion[String73] {
+    override def maxLength: Int = 73
+
+    override protected def factoryMethod(str: String)(name: Option[String]): String73 =
+      new String73(str)(name)
+  }
+
+  /** Limit used by [[com.digitalasset.canton.topology.Identifier]].
+    *
+    * @see com.digitalasset.canton.topology.Identifier for documentation on its origin
+    */
+  final case class String185(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String185.maxLength
+  }
+
+  object String185 extends LengthLimitedStringCompanion[String185] {
+    override def maxLength: Int = 185
+
+    override def factoryMethod(str: String)(name: Option[String]): String185 =
+      new String185(str)(name)
+  }
+
+  /** Default [[LengthLimitedString]] that should be used when in doubt.
+    * 255 was chosen as it is also the limit used in the upstream code for, e.g., LedgerStrings in the upstream code
+    *
+    * @param name optionally set it to improve the error message. It is given as an extra argument, so the automatically generated `equals`-method doesn't use it for comparison
+    */
+  final case class String255(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String255.maxLength
+  }
+
+  object String255 extends LengthLimitedStringCompanion[String255] {
+    val empty: String255 = String255.tryCreate("")
+    override def maxLength = 255
+
+    override def factoryMethod(str: String)(name: Option[String]): String255 =
+      new String255(str)(name)
+  }
+
+  /** Longest limited-length strings that have been needed so far.
+    * Typical use case: when a 255-length identifier is combined
+    * with other short suffixes or prefixes to further specialize them.
+    *
+    * @see com.digitalasset.canton.store.db.SequencerClientDiscriminator
+    * @see com.digitalasset.canton.crypto.KeyName
+    */
+  final case class String300(str: String)(override val name: Option[String] = None)
+      extends LengthLimitedString {
+    override def maxLength: Int = String300.maxLength
+  }
+
+  object String300 extends LengthLimitedStringCompanion[String300] {
+    val empty: String300 = String300.tryCreate("")
+    override def maxLength = 300
+
+    override def factoryMethod(str: String)(name: Option[String]): String300 =
+      new String300(str)(name)
+  }
+
+  final case class LengthLimitedStringVar(override val str: String, maxLength: Int)(
+      override val name: Option[String] = None
+  ) extends LengthLimitedString
+  object LengthLimitedStringVar {
+    private[this] def apply(str: String): LengthLimitedStringVar =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+  }
+
+  /** Trait that implements method commonly needed in the companion object of a [[LengthLimitedString]] */
+  trait LengthLimitedStringCompanion[A <: LengthLimitedString] {
+
+    /** The maximum string length. Should not be overwritten with `val` to avoid initialization issues. */
+    def maxLength: Int
+
+    /** Factory method for creating a string.
+      * @throws java.lang.IllegalArgumentException if `str` is longer than [[maxLength]]
+      */
+    protected def factoryMethod(str: String)(name: Option[String]): A
+
+    def create(str: String, name: Option[String] = None): Either[String, A] =
+      Either.cond(
+        str.length <= maxLength,
+        factoryMethod(str)(name),
+        LengthLimitedString.errorMsg(str, maxLength, name),
+      )
+
+    private[this] def apply(str: String): A =
+      throw new UnsupportedOperationException("Use create or tryCreate methods")
+
+    def tryCreate(str: String, name: Option[String] = None): A = {
+      factoryMethod(str)(name)
+    }
+
+    def fromProtoPrimitive(str: String, name: String): ParsingResult[A] =
+      create(str, Some(name)).leftMap(InvariantViolation)
+
+    implicit val lengthLimitedStringOrder: Order[A] =
+      Order.by[A, String](_.str)
+
+    implicit val encodeLengthLimitedString: Encoder[A] =
+      Encoder.encodeString.contramap[A](_.unwrap)
+
+    implicit val setParameterLengthLimitedString: SetParameter[A] = (v, pp) =>
+      pp.setString(v.unwrap)
+    implicit val getResultLengthLimitedString: GetResult[A] =
+      GetResult(r => tryCreate(r.nextString()))
+
+    implicit val setParameterOptLengthLimitedString: SetParameter[Option[A]] = (v, pp) =>
+      pp.setStringOption(v.map(_.unwrap))
+    implicit val getResultOptLengthLimitedString: GetResult[Option[A]] =
+      GetResult(r => r.nextStringOption().map(tryCreate(_)))
+
+    implicit val lengthLimitedStringReader: ConfigReader[A] = {
+      ConfigReader.fromString[A] { str =>
+        Either.cond(
+          str.nonEmpty && str.length <= maxLength,
+          factoryMethod(str)(None),
+          InvalidLengthString(str),
+        )
+      }
+    }
+
+    implicit val lengthLimitedStringWriter: ConfigWriter[A] = ConfigWriter.toString(_.unwrap)
+  }
+
+  /** Trait for case classes that are a wrapper around a [[LengthLimitedString]].
+    * @see com.digitalasset.canton.crypto.CertificateId for an example
+    */
+  trait LengthLimitedStringWrapper {
+    protected val str: LengthLimitedString
+    def unwrap: String = str.unwrap
+    def toProtoPrimitive: String = str.unwrap
+    override def toString: String = unwrap
+    // overwriting equals here to improve console UX - see e.g. issue i7071 for context
+    @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
+    def canEqual(a: Any): Boolean =
+      a.isInstanceOf[LengthLimitedStringWrapper] || a.isInstanceOf[String]
+
+    override def equals(that: Any): Boolean =
+      that match {
+        case that: LengthLimitedStringWrapper =>
+          that.canEqual(this) && this.getClass == that.getClass && this.str == that.str
+        case that: String => that.canEqual(this) && this.unwrap == that
+        case _ => false
+      }
+
+    override def hashCode(): Int = unwrap.hashCode()
+  }
+
+  /** Trait that implements utility methods to avoid boilerplate in the companion object of a case class that wraps a
+    * [[LengthLimitedString]] type using [[LengthLimitedStringWrapper]].
+    *
+    * @see com.digitalasset.canton.crypto.CertificateId for an example
+    */
+  trait LengthLimitedStringWrapperCompanion[
+      A <: LengthLimitedString,
+      Wrapper <: LengthLimitedStringWrapper,
+  ] {
+
+    def instanceName: String
+    protected def companion: LengthLimitedStringCompanion[A]
+    protected def factoryMethodWrapper(str: A): Wrapper
+
+    def create(str: String): Either[String, Wrapper] =
+      companion.create(str, instanceName.some).map(factoryMethodWrapper)
+
+    def tryCreate(str: String): Wrapper = factoryMethodWrapper(
+      companion.tryCreate(str, instanceName.some)
+    )
+
+    def fromProtoPrimitive(str: String): ParsingResult[Wrapper] =
+      companion.fromProtoPrimitive(str, instanceName).map(factoryMethodWrapper)
+
+    implicit val wrapperOrder: Order[Wrapper] =
+      Order.by[Wrapper, String](_.unwrap)
+
+    implicit val encodeWrapper: Encoder[Wrapper] =
+      Encoder.encodeString.contramap[Wrapper](_.unwrap)
+
+    // Instances for slick (db) queries
+    implicit val setParameterWrapper: SetParameter[Wrapper] = (v, pp) =>
+      pp.setString(v.toProtoPrimitive)
+    implicit val getResultWrapper: GetResult[Wrapper] = GetResult(r =>
+      fromProtoPrimitive(r.nextString()).valueOr(err =>
+        throw new DbDeserializationException(err.toString)
+      )
+    )
+
+    implicit val setParameterOptionWrapper: SetParameter[Option[Wrapper]] = (v, pp) =>
+      pp.setStringOption(v.map(_.toProtoPrimitive))
+    implicit val getResultOptionWrapper: GetResult[Option[Wrapper]] = GetResult { r =>
+      r.nextStringOption()
+        .traverse(fromProtoPrimitive)
+        .valueOr(err => throw new DbDeserializationException(err.toString))
+    }
+  }
+}

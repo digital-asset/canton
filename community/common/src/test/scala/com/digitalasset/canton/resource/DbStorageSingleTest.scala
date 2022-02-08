@@ -1,0 +1,127 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.resource
+
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.CommunityDbConfig.Postgres
+import com.digitalasset.canton.config.{DbConfig, DefaultProcessingTimeouts}
+import com.digitalasset.canton.metrics.CommonMockMetrics
+import com.digitalasset.canton.store.db.DbStorageSetup
+import com.digitalasset.canton.store.db.DbStorageSetup.Config.PostgresBasicConfig
+import com.typesafe.config.ConfigFactory
+import org.scalatest.wordspec.AsyncWordSpec
+
+import scala.jdk.CollectionConverters._
+
+trait DbStorageSingleTest extends AsyncWordSpec with BaseTest {
+
+  def baseConfig: DbConfig
+  def modifyUser(user: String): DbConfig
+  def modifyPassword(password: String): DbConfig
+  def modifyPort(port: Int): DbConfig
+  def modifyDatabaseName(dbName: String): DbConfig
+
+  "DbStorage" should {
+
+    "config should not leak confidential data" in {
+      val stinky = "VERYSTINKYPASSWORD"
+      (modifyPassword(stinky).toString) should not include (stinky)
+    }
+
+    "connect on correct config" in {
+      val config = baseConfig
+      DbStorageSingle
+        .create(
+          config,
+          connectionPoolForParticipant = false,
+          None,
+          CommonMockMetrics.dbStorage,
+          DefaultProcessingTimeouts.testing,
+          loggerFactory,
+        )
+        .value shouldBe a[DbStorageSingle]
+    }
+
+    "fail on invalid credentials" in {
+      val config = modifyUser("foobar")
+      loggerFactory.suppressWarningsAndErrors {
+        DbStorageSingle
+          .create(
+            config,
+            connectionPoolForParticipant = false,
+            None,
+            CommonMockMetrics.dbStorage,
+            DefaultProcessingTimeouts.testing,
+            loggerFactory,
+          )
+          .left
+          .value shouldBe a[String]
+      }
+    }
+
+    "fail on invalid database" in {
+      val config = modifyDatabaseName("foobar")
+      loggerFactory.suppressWarningsAndErrors {
+        DbStorageSingle
+          .create(
+            config,
+            connectionPoolForParticipant = false,
+            None,
+            CommonMockMetrics.dbStorage,
+            DefaultProcessingTimeouts.testing,
+            loggerFactory,
+          )
+          .left
+          .value shouldBe a[String]
+      }
+    }
+
+    "fail on invalid port" in {
+      val config = modifyPort(14001)
+      loggerFactory.suppressWarningsAndErrors {
+        DbStorageSingle
+          .create(
+            config,
+            connectionPoolForParticipant = false,
+            None,
+            CommonMockMetrics.dbStorage,
+            DefaultProcessingTimeouts.testing,
+            loggerFactory,
+          )
+          .left
+          .value shouldBe a[String]
+      }
+    }
+  }
+
+}
+
+class DbStorageSingleTestPostgres extends DbStorageSingleTest {
+
+  private lazy val setup = DbStorageSetup.postgresFunctionalTestSetup(loggerFactory)
+
+  private def modifyConfig(config: PostgresBasicConfig): Postgres = {
+    val defaultConfig = DbStorageSetup.Config.pgConfig(config)
+    // Disable connection pooling to speed up detection of invalid DB configuration
+    defaultConfig.copy(
+      config = ConfigFactory
+        .parseMap(Map("connectionPool" -> "disabled").asJava)
+        .withFallback(defaultConfig.config)
+    )
+  }
+
+  def baseConfig: Postgres = modifyConfig(setup.basicConfig)
+
+  def modifyUser(userName: String): Postgres =
+    modifyConfig(setup.basicConfig.copy(username = userName))
+
+  def modifyPassword(password: String): Postgres =
+    modifyConfig(setup.basicConfig.copy(password = password))
+
+  def modifyPort(port: Int): Postgres =
+    modifyConfig(setup.basicConfig.copy(port = port))
+
+  def modifyDatabaseName(dbName: String): Postgres =
+    modifyConfig(setup.basicConfig.copy(dbName = dbName))
+}
