@@ -1,0 +1,169 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.time
+
+import cats.data.EitherT
+import cats.syntax.functor._
+import cats.syntax.option._
+import cats.syntax.traverse._
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, HasProtoV0}
+import com.digitalasset.canton.DomainId
+import com.google.protobuf.empty.Empty
+import io.grpc.Status
+
+import scala.concurrent.{ExecutionContext, Future}
+
+/** Admin service to expose the time of domains to a participant and other nodes */
+class GrpcDomainTimeService(
+    lookupTimeTracker: Option[DomainId] => Either[String, DomainTimeTracker],
+    protected val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends v0.DomainTimeServiceGrpc.DomainTimeService
+    with NamedLogging {
+
+  override def fetchTime(requestP: v0.FetchTimeRequest): Future[v0.FetchTimeResponse] =
+    TraceContext.fromGrpcContext { implicit traceContext =>
+      handle {
+        for {
+          request <- EitherT
+            .fromEither[Future](FetchTimeRequest.fromProto(requestP))
+            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+          timeTracker <- EitherT
+            .fromEither[Future](lookupTimeTracker(request.domainIdO))
+            .leftMap(Status.INVALID_ARGUMENT.withDescription)
+          timestamp <- EitherT.right[Status](timeTracker.fetchTime(request.freshnessBound))
+        } yield FetchTimeResponse(timestamp).toProtoV0
+      }
+    }
+
+  override def awaitTime(requestP: v0.AwaitTimeRequest): Future[Empty] =
+    TraceContext.fromGrpcContext { implicit traceContext =>
+      handle {
+        for {
+          request <- EitherT
+            .fromEither[Future](AwaitTimeRequest.fromProto(requestP))
+            .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+          timeTracker <- EitherT
+            .fromEither[Future](lookupTimeTracker(request.domainIdO))
+            .leftMap(Status.INVALID_ARGUMENT.withDescription)
+          _ = logger.debug(
+            s"Waiting for domain [${request.domainIdO}] to reach time ${request.timestamp} (is at ${timeTracker.latestTime})"
+          )
+          _ <- EitherT.liftF(
+            timeTracker
+              .awaitTick(request.timestamp)
+              .fold(Future.unit)(_.void)
+          )
+        } yield Empty()
+      }
+    }
+
+  private def handle[A](handler: EitherT[Future, Status, A]): Future[A] =
+    EitherTUtil.toFuture(handler.leftMap(_.asRuntimeException()))
+}
+
+case class FetchTimeRequest(domainIdO: Option[DomainId], freshnessBound: NonNegativeFiniteDuration)
+    extends HasProtoV0[v0.FetchTimeRequest] {
+  override def toProtoV0: v0.FetchTimeRequest =
+    v0.FetchTimeRequest(domainIdO.map(_.toProtoPrimitive), freshnessBound.toProtoPrimitive.some)
+}
+
+object FetchTimeRequest {
+  def fromProto(
+      requestP: v0.FetchTimeRequest
+  ): ParsingResult[FetchTimeRequest] =
+    for {
+      domainIdO <- requestP.domainId.traverse(DomainId.fromProtoPrimitive(_, "domainId"))
+      freshnessBound <- ProtoConverter.parseRequired(
+        NonNegativeFiniteDuration.fromProtoPrimitive("freshnessBound"),
+        "freshnessBound",
+        requestP.freshnessBound,
+      )
+    } yield FetchTimeRequest(domainIdO, freshnessBound)
+}
+
+case class FetchTimeResponse(timestamp: CantonTimestamp) extends HasProtoV0[v0.FetchTimeResponse] {
+  override def toProtoV0: v0.FetchTimeResponse =
+    v0.FetchTimeResponse(timestamp.toProtoPrimitive.some)
+}
+
+object FetchTimeResponse {
+  def fromProto(
+      requestP: v0.FetchTimeResponse
+  ): ParsingResult[FetchTimeResponse] =
+    for {
+      timestamp <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoPrimitive,
+        "timestamp",
+        requestP.timestamp,
+      )
+    } yield FetchTimeResponse(timestamp)
+}
+
+case class AwaitTimeRequest(domainIdO: Option[DomainId], timestamp: CantonTimestamp)
+    extends HasProtoV0[v0.AwaitTimeRequest] {
+  override def toProtoV0: v0.AwaitTimeRequest =
+    v0.AwaitTimeRequest(domainIdO.map(_.toProtoPrimitive), timestamp.toProtoPrimitive.some)
+}
+
+object AwaitTimeRequest {
+  def fromProto(
+      requestP: v0.AwaitTimeRequest
+  ): ParsingResult[AwaitTimeRequest] =
+    for {
+      domainIdO <- requestP.domainId.traverse(DomainId.fromProtoPrimitive(_, "domainId"))
+      timestamp <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoPrimitive,
+        "timestamp",
+        requestP.timestamp,
+      )
+    } yield AwaitTimeRequest(domainIdO, timestamp)
+}
+
+object GrpcDomainTimeService {
+
+  /** To use the time service for a participant a DomainId must be specified as a participant can be connected to many domains */
+  def forParticipant(
+      timeTrackerLookup: DomainId => Option[DomainTimeTracker],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): GrpcDomainTimeService = {
+    new GrpcDomainTimeService(
+      domainIdO =>
+        for {
+          domainId <- domainIdO.toRight(
+            "Domain id must be specified to lookup a time on a participant"
+          )
+          timeTracker <- timeTrackerLookup(domainId).toRight(
+            s"Time tracker for domain $domainId not found"
+          )
+        } yield timeTracker,
+      loggerFactory,
+    )
+  }
+
+  /** Domain entities have a constant domain id so always have the same time tracker and cannot fetch another */
+  def forDomainEntity(
+      domainId: DomainId,
+      timeTracker: DomainTimeTracker,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): GrpcDomainTimeService = {
+    new GrpcDomainTimeService(
+      // allow none or the actual domainId to return the time tracker
+      domainIdO =>
+        for {
+          _ <- EitherUtil.condUnitE(
+            domainIdO.forall(_ == domainId),
+            "Provided domain id does not match running domain",
+          )
+        } yield timeTracker,
+      loggerFactory,
+    )
+  }
+}

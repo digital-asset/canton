@@ -1,0 +1,56 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.domain.admin.v0;
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "com/digitalasset/canton/domain/admin/v0/sequencer_initialization_service.proto";
+
+// administration service for enterprise feature supporting sequencer instances
+service EnterpriseSequencerAdministrationService {
+
+  // Remove data from the Sequencer
+  rpc Prune (Pruning.Request) returns (Pruning.Response);
+
+  // fetch a snapshot of the sequencer state based on the given timestamp
+  rpc Snapshot(Snapshot.Request) returns (Snapshot.Response);
+
+  // Disable members at the sequencer. Will prevent existing and new instances from connecting, and permit removing their data.
+  rpc DisableMember(DisableMemberRequest) returns (google.protobuf.Empty);
+}
+
+message Pruning {
+  message Request {
+    google.protobuf.Timestamp timestamp = 1;
+  }
+
+  message Response {
+    // description of what was removed
+    string details = 1;
+  }
+}
+
+message Snapshot {
+  message Request {
+    google.protobuf.Timestamp timestamp = 1;
+  }
+  message Response {
+    oneof value {
+      Success success = 1;
+      Failure failure = 2;
+    }
+  }
+  message Success {
+    com.digitalasset.canton.domain.admin.v0.SequencerSnapshot state = 1;
+  }
+  message Failure {
+    string reason = 1;
+  }
+}
+
+message DisableMemberRequest {
+  string member = 1;
+}

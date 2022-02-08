@@ -1,0 +1,205 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.participant.store
+
+import cats.data.{EitherT, OptionT}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LocalOffset
+import com.digitalasset.canton.participant.protocol.CausalityUpdate
+import com.digitalasset.canton.participant.store.db.DbSingleDimensionEventLog
+import com.digitalasset.canton.participant.store.memory.InMemorySingleDimensionEventLog
+import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TransactionEventId}
+import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
+import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.{DomainId, LedgerTransactionId, checked}
+import slick.jdbc.SetParameter
+
+import scala.collection.SortedMap
+import scala.concurrent.{ExecutionContext, Future}
+
+/** Read-only interface of [[SingleDimensionEventLog]] */
+trait SingleDimensionEventLogLookup {
+  def eventAt(offset: LocalOffset)(implicit
+      traceContext: TraceContext
+  ): OptionT[Future, TimestampedEventAndCausalChange]
+
+  def lookupEventRange(
+      fromInclusive: Option[LocalOffset],
+      toInclusive: Option[LocalOffset],
+      fromTimestampInclusive: Option[CantonTimestamp],
+      toTimestampInclusive: Option[CantonTimestamp],
+      limit: Option[Int],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]]
+}
+
+/** An event log for a single domain or for a domain-independent events (such as package uploads).
+  * Supports out-of-order publication of events.
+  */
+trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLogLookup {
+  this: NamedLogging =>
+
+  protected implicit def executionContext: ExecutionContext
+
+  def id: Id
+
+  /** Publishes an event and the change in causality state associated with the event.
+    * @return [[scala.Left$]] if an event with the same event ID has been published with a different (unpruned)
+    *         [[com.digitalasset.canton.participant.LocalOffset]]. Returns the conflicting event.
+    * @throws java.lang.IllegalArgumentException if a different event has already been published with the same
+    *                                            [[com.digitalasset.canton.participant.LocalOffset]]
+    */
+  def insertUnlessEventIdClash(event: TimestampedEvent, causalityUpdate: Option[CausalityUpdate])(
+      implicit traceContext: TraceContext
+  ): EitherT[Future, TimestampedEvent, Unit] = EitherT {
+    insertsUnlessEventIdClash(Seq(TimestampedEventAndCausalChange(event, causalityUpdate))).map {
+      _.headOption.getOrElse(
+        ErrorUtil.internalError(
+          new RuntimeException(
+            "insertsUnlessEventIdClash returned an empty sequence for a singleton list"
+          )
+        )
+      )
+    }
+  }
+
+  /** Publishes many events.
+    * @return For each event in `events` in the same order:
+    *         [[scala.Left$]] of the conficting event
+    *         if an event with the same event ID has been published with a different (unpruned)
+    *         [[com.digitalasset.canton.participant.LocalOffset]].
+    *         [[scala.Right$]] if the event has been successfully inserted or has already been present in the event log
+    * @throws java.lang.IllegalArgumentException if a different event has already been published with the same
+    *                                            [[com.digitalasset.canton.participant.LocalOffset]]
+    *                                            as one of the events in `events`.
+    */
+  def insertsUnlessEventIdClash(events: Seq[TimestampedEventAndCausalChange])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[Either[TimestampedEvent, Unit]]]
+
+  /** Publishes an event and fails upon an event ID clash.
+    * @throws java.lang.IllegalArgumentException if a different event has already been published with the same
+    *                                            [[com.digitalasset.canton.participant.LocalOffset]] or
+    *                                            an event with the same [[com.digitalasset.canton.participant.sync.TimestampedEvent.EventId]]
+    *                                            has been published with a different (unpruned) [[com.digitalasset.canton.participant.LocalOffset]].
+    */
+  def insert(event: TimestampedEvent, causalityUpdate: Option[CausalityUpdate])(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    insertUnlessEventIdClash(event, causalityUpdate).valueOr(eventWithSameId =>
+      ErrorUtil.internalError(
+        new IllegalArgumentException(
+          show"Unable to insert event, as the eventId id ${event.eventId.showValue} has " +
+            show"already been inserted with offset ${eventWithSameId.localOffset}."
+        )
+      )
+    )
+
+  def storeTransferUpdate(causalityUpdate: CausalityUpdate)(implicit tc: TraceContext): Future[Unit]
+
+  def prune(beforeAndIncluding: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]
+
+  // TODO(#6959) Move to SingleDimesionEventLogLookup
+  def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset]
+
+  // TODO(#6959) Move to SingleDimesionEventLogLookup
+  def eventById(eventId: EventId)(implicit
+      traceContext: TraceContext
+  ): OptionT[Future, TimestampedEventAndCausalChange]
+
+  def eventByTransactionId(transactionId: LedgerTransactionId)(implicit
+      traceContext: TraceContext
+  ): OptionT[Future, TimestampedEventAndCausalChange] =
+    eventById(TransactionEventId(transactionId))
+
+  /** Returns whether there exists an event in the event log with an [[com.digitalasset.canton.participant.LocalOffset]]
+    * of at most `localOffset` whose timestamp is at least `timestamp`.
+    *
+    * In an event logs where timestamps need not increase with offsets,
+    * this can be used to check that whether there are events with lower offsets and larger timestamps.
+    */
+  // TODO(#6959) This method seems to be unused. Consider deleting it.
+  def existsBetween(timestampInclusive: CantonTimestamp, localOffsetInclusive: LocalOffset)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean]
+
+  /** Deletes all events whose request counter is at least `inclusive`.
+    * This operation need not execute atomically.
+    */
+  def deleteSince(inclusive: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]
+}
+
+sealed trait EventLogId extends PrettyPrinting with Product with Serializable {
+  def index: Int
+}
+
+object EventLogId {
+
+  implicit val setParameterNamespace: SetParameter[EventLogId] = (v, pp) => pp.setInt(v.index)
+
+  def fromDbLogIdOT(context: String, indexedStringStore: IndexedStringStore)(index: Int)(implicit
+      ec: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): OptionT[Future, EventLogId] =
+    if (index <= 0) {
+      OptionT.some(checked {
+        // This is safe to call, because index <= 0
+        ParticipantEventLogId.tryCreate(index)
+      })
+    } else
+      IndexedDomain.fromDbIndexOT(context, indexedStringStore)(index).map(DomainEventLogId)
+
+  case class DomainEventLogId(id: IndexedDomain) extends EventLogId {
+    override def pretty: Pretty[DomainEventLogId] = prettyOfParam(_.id.item)
+
+    override def index: Int = id.index
+
+    def domainId: DomainId = id.item
+
+  }
+
+  def forDomain(indexedStringStore: IndexedStringStore)(id: DomainId)(implicit
+      ec: ExecutionContext
+  ): Future[DomainEventLogId] =
+    IndexedDomain.indexed(indexedStringStore)(id).map(DomainEventLogId)
+
+  sealed abstract case class ParticipantEventLogId(override val index: Int) extends EventLogId {
+    require(
+      index <= 0,
+      s"Illegal index $index. The index must not be positive to prevent clashes with domain event log ids.",
+    )
+
+    override def pretty: Pretty[ParticipantEventLogId] = prettyOfClass(param("index", _.index))
+  }
+
+  object ParticipantEventLogId {
+
+    /** @throws java.lang.IllegalArgumentException if `index > 0`.
+      */
+    def tryCreate(index: Int): ParticipantEventLogId = new ParticipantEventLogId(index) {}
+  }
+}
+
+object SingleDimensionEventLog {
+
+  def apply[Id <: EventLogId](
+      id: Id,
+      storage: Storage,
+      indexedStringStore: IndexedStringStore,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): SingleDimensionEventLog[Id] =
+    storage match {
+      case _: MemoryStorage => new InMemorySingleDimensionEventLog[Id](id, loggerFactory)
+      case dbStorage: DbStorage =>
+        new DbSingleDimensionEventLog[Id](id, dbStorage, indexedStringStore, loggerFactory)
+    }
+
+}

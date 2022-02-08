@@ -1,0 +1,142 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.participant.store.db
+
+import cats.data.EitherT
+import com.digitalasset.canton.DomainId
+import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.MetricHandle.GaugeM
+import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.participant.store.ServiceAgreementStore
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.tracing.TraceContext
+import io.functionmeta.functionFullName
+
+import scala.concurrent.{ExecutionContext, Future}
+
+class DbServiceAgreementStore(storage: DbStorage, val loggerFactory: NamedLoggerFactory)(implicit
+    ec: ExecutionContext
+) extends ServiceAgreementStore
+    with NamedLogging {
+
+  import ServiceAgreementStore._
+  import storage.api._
+
+  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+    storage.metrics.loadGaugeM("service-agreement-store")
+
+  private def getAgreementText(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+  ): DbAction.ReadOnly[Option[String]] =
+    sql"select agreement_text from service_agreements where domain_id = $domainId and agreement_id = $agreementId"
+      .as[String]
+      .headOption
+
+  private def insertAgreement(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+      agreementText: String,
+  ): DbAction.WriteOnly[Unit] = {
+    val insert = storage.profile match {
+      case _: DbStorage.Profile.Oracle =>
+        sqlu"""insert
+               /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( service_agreements ( agreement_id, domain_id ) ) */
+              into service_agreements values ($domainId, $agreementId, $agreementText)"""
+      case _ =>
+        sqlu"insert into service_agreements values ($domainId, $agreementId, $agreementText) on conflict do nothing"
+    }
+    insert.map(_ => ())
+  }
+
+  private def insertAcceptedAgreementQuery(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+  ): DbAction.WriteOnly[Unit] = {
+    val insertStatement = storage.profile match {
+      case _: DbStorage.Profile.Oracle =>
+        sqlu"""insert
+               /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( accepted_agreements ( agreement_id, domain_id ) ) */
+              into accepted_agreements values ($domainId, $agreementId)"""
+      case _ =>
+        sqlu"insert into accepted_agreements values ($domainId, $agreementId) on conflict do nothing"
+    }
+    insertStatement.map(_ => ())
+  }
+
+  private def getAcceptedAgreement(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+  ): DbAction.ReadOnly[Option[ServiceAgreementId]] =
+    sql"select agreement_id from accepted_agreements where domain_id = $domainId and agreement_id = $agreementId"
+      .as[ServiceAgreementId]
+      .headOption
+
+  def containsAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] = processingTime.metric.event {
+    storage.querySingle(getAgreementText(domainId, agreementId), functionFullName).isDefined
+  }
+
+  def getAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, ServiceAgreementStoreError, String] =
+    processingTime.metric.eitherTEvent {
+      storage
+        .querySingle(getAgreementText(domainId, agreementId), functionFullName)
+        .toRight(UnknownServiceAgreement(domainId, agreementId))
+    }
+
+  def storeAgreement(domainId: DomainId, agreementId: ServiceAgreementId, agreementText: String)(
+      implicit traceContext: TraceContext
+  ): EitherT[Future, ServiceAgreementStoreError, Unit] =
+    processingTime.metric.eitherTEvent {
+      EitherT.right(
+        storage.update_(insertAgreement(domainId, agreementId, agreementText), functionFullName)
+      )
+    }
+
+  def listAgreements(implicit
+      traceContext: TraceContext
+  ): Future[Seq[(DomainId, ServiceAgreement)]] =
+    processingTime.metric.event {
+      storage.query(
+        sql"select domain_id, agreement_id, agreement_text from service_agreements"
+          .as[(DomainId, ServiceAgreement)],
+        functionFullName,
+      )
+    }
+
+  def insertAcceptedAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, ServiceAgreementStoreError, Unit] =
+    processingTime.metric.eitherTEvent {
+      for {
+        contains <- EitherT.right(containsAgreement(domainId, agreementId))
+        _ <- EitherT.cond[Future](contains, (), UnknownServiceAgreement(domainId, agreementId))
+        _ <- EitherT.right(
+          storage.update_(insertAcceptedAgreementQuery(domainId, agreementId), functionFullName)
+        )
+      } yield ()
+    }
+
+  def listAcceptedAgreements(
+      domainId: DomainId
+  )(implicit traceContext: TraceContext): Future[Seq[ServiceAgreementId]] =
+    processingTime.metric.event {
+      storage.query(
+        sql"select agreement_id from accepted_agreements where domain_id = $domainId"
+          .as[ServiceAgreementId],
+        functionFullName,
+      )
+    }
+
+  def containsAcceptedAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] = processingTime.metric.event {
+    storage.querySingle(getAcceptedAgreement(domainId, agreementId), functionFullName).isDefined
+  }
+}

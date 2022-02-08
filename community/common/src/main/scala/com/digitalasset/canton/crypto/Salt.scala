@@ -1,0 +1,144 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.crypto
+
+import cats.data.EitherT
+import cats.syntax.either._
+import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
+import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
+import com.google.protobuf.ByteString
+
+import scala.concurrent.{ExecutionContext, Future}
+
+/** Indicates the algorithm used to generate and derive salts. */
+sealed trait SaltAlgorithm extends Product with Serializable with PrettyPrinting {
+  def toProtoOneOf: v0.Salt.Algorithm
+  def length: Long
+}
+
+object SaltAlgorithm {
+
+  /** Uses an HMAC algorithm as a pseudo-random function to generate/derive salts. */
+  case class Hmac(hmacAlgorithm: HmacAlgorithm) extends SaltAlgorithm {
+    override def toProtoOneOf: v0.Salt.Algorithm = v0.Salt.Algorithm.Hmac(hmacAlgorithm.toProtoEnum)
+    override def length: Long = hmacAlgorithm.hashAlgorithm.length
+    override def pretty: Pretty[Hmac] = prettyOfClass(
+      param("hmacAlgorithm", _.hmacAlgorithm.name.unquoted)
+    )
+  }
+
+  def fromProtoOneOf(
+      field: String,
+      saltAlgorithmP: v0.Salt.Algorithm,
+  ): ParsingResult[SaltAlgorithm] =
+    saltAlgorithmP match {
+      case v0.Salt.Algorithm.Empty => Left(ProtoDeserializationError.FieldNotSet(field))
+      case v0.Salt.Algorithm.Hmac(hmacAlgorithmP) =>
+        HmacAlgorithm.fromProtoEnum("hmac", hmacAlgorithmP).map(Hmac)
+    }
+}
+
+/** A (pseudo-)random salt used for hashing to prevent pre-computed hash attacks.
+  *
+  * The algorithm that was used to generate/derive the salt is kept to support the verification of the salt generation.
+  */
+final case class Salt private (private val salt: ByteString, private val algorithm: SaltAlgorithm)
+    extends HasProtoV0[v0.Salt]
+    with PrettyPrinting
+    with NoCopy {
+
+  require(!salt.isEmpty, "Salt must not be empty")
+  require(
+    salt.size() == algorithm.length,
+    s"Salt size ${salt.size()} must match salt algorithm length ${algorithm.length}",
+  )
+
+  override def toProtoV0: v0.Salt = v0.Salt(salt = salt, algorithm = algorithm.toProtoOneOf)
+
+  def toByteString: ByteString = toProtoV0.toByteString
+
+  /** Returns the raw salt used for hashing, must NOT be used for serialization. */
+  def unwrap: ByteString = salt
+
+  override val pretty: Pretty[Salt] = prettyOfParam(_.salt)
+}
+
+object Salt {
+  private[this] def apply(bytes: ByteString, algorithm: SaltAlgorithm): Salt =
+    throw new UnsupportedOperationException("Use the generate methods instead")
+
+  private[crypto] def create(bytes: ByteString, algorithm: SaltAlgorithm): Either[SaltError, Salt] =
+    Either.cond(
+      !bytes.isEmpty && bytes.size() == algorithm.length,
+      new Salt(bytes, algorithm),
+      SaltError.InvalidSaltCreation(bytes, algorithm),
+    )
+
+  /** Derives a salt from a `seed` salt and an `index`. */
+  def deriveSalt(seed: Salt, index: Int, hmacOps: HmacOps): Either[SaltError, Salt] = {
+    deriveSalt(seed, DeterministicEncoding.encodeInt(index), hmacOps)
+  }
+
+  def tryDeriveSalt(seed: Salt, index: Int, hmacOps: HmacOps): Salt = {
+    deriveSalt(seed, index, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
+  }
+
+  /** Derives a salt from a `seed` salt and `bytes` using an HMAC as a pseudo-random function. */
+  def deriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Either[SaltError, Salt] =
+    for {
+      pseudoSecret <- HmacSecret
+        .create(seed.toByteString)
+        .leftMap(SaltError.HmacGenerationError)
+      saltAlgorithm = SaltAlgorithm.Hmac(hmacOps.defaultHmacAlgorithm)
+      hmac <- hmacOps
+        .hmacWithSecret(pseudoSecret, bytes, saltAlgorithm.hmacAlgorithm)
+        .leftMap(SaltError.HmacGenerationError)
+      salt <- create(hmac.unwrap, saltAlgorithm)
+    } yield salt
+
+  def tryDeriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Salt =
+    deriveSalt(seed, bytes, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
+
+  /** Generates a salt from the given `bytes` using HMAC with a stored HMAC secret as pseudo-random function. */
+  def generate(bytes: ByteString, hmacPrivateOps: HmacPrivateOps)(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, SaltError, Salt] = {
+    val saltAlgorithm = SaltAlgorithm.Hmac(hmacPrivateOps.defaultHmacAlgorithm)
+    hmacPrivateOps
+      .hmac(bytes, saltAlgorithm.hmacAlgorithm)
+      .leftMap(SaltError.HmacGenerationError)
+      .flatMap(hmac => create(hmac.unwrap, saltAlgorithm).toEitherT)
+  }
+
+  def fromProtoV0(saltP: v0.Salt): ParsingResult[Salt] =
+    for {
+      saltAlgorithm <- SaltAlgorithm.fromProtoOneOf("algorithm", saltP.algorithm)
+      salt <- create(saltP.salt, saltAlgorithm).leftMap(err =>
+        ProtoDeserializationError.CryptoDeserializationError(
+          DeserializationError(err.toString, saltP.toByteString)
+        )
+      )
+    } yield salt
+}
+
+sealed trait SaltError extends Product with Serializable with PrettyPrinting
+
+object SaltError {
+  case class InvalidSaltCreation(bytes: ByteString, algorithm: SaltAlgorithm) extends SaltError {
+    override def pretty: Pretty[InvalidSaltCreation] =
+      prettyOfClass(
+        param("bytes", _.bytes),
+        param("algorithm", _.algorithm),
+      )
+  }
+
+  case class HmacGenerationError(error: HmacError) extends SaltError {
+    override def pretty: Pretty[HmacGenerationError] = prettyOfClass(
+      param("error", _.error)
+    )
+  }
+}

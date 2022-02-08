@@ -1,0 +1,33 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.admin.v0;
+
+// Canton-internal pruning service that prunes only canton state, but leaves the ledger-api
+// state unpruned.
+service PruningService {
+
+    // Prune the participant specifying the offset before and at which ledger transactions
+    // should be removed. Only returns when the potentially long-running prune request ends
+    // successfully or with one of the following errors:
+    // - ``INVALID_ARGUMENT``: if the payload, particularly the offset is malformed or missing
+    // - ``INTERNAL``: if the participant has encountered a failure and has potentially
+    //   applied pruning partially. Such cases warrant verifying the participant health before
+    //   retrying the prune with the same (or a larger, valid) offset. Successful retries
+    //   after such errors ensure that different components reach a consistent pruning state.
+    // - ``FAILED_PRECONDITION``: if the participant is not yet able to prune at the specified
+    //   offset or if pruning is invoked on a participant running the Community Edition.
+    rpc Prune (PruneRequest) returns (PruneResponse);
+
+}
+
+message PruneRequest {
+    // Inclusive offset up to which the ledger is to be pruned.
+    string prune_up_to = 1;
+}
+
+message PruneResponse {
+    // Empty for now, but may contain fields in the future
+}

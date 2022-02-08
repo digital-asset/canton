@@ -1,0 +1,25 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.version;
+
+import "com/digitalasset/canton/protocol/v0/topology.proto";
+
+message VersionedLegalIdentityClaim {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.LegalIdentityClaim v0 = 1;
+  }
+}
+
+message VersionedTopologyTransaction {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TopologyTransaction v0 = 1;
+  }
+}
+
+message VersionedSignedTopologyTransaction {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SignedTopologyTransaction v0 = 1;
+  }
+}

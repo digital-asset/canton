@@ -1,0 +1,15 @@
+{
+  "name": "canton-aws-quickstart-create-dbs",
+  "version": "1.0.0",
+  "description": "AWS lambda function for creating databases for the quickstart deployment",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Canton Team <canton@digitalasset.com>",
+  "dependencies": {
+    "cfn-response": "^1.0.1",
+    "cfn-response-async": "^1.0.0",
+    "pg": "^8.5.1"
+  }
+}

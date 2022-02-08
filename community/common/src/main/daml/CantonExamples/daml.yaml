@@ -1,0 +1,18 @@
+sdk-version: 2.0.0-snapshot.20220204.9165.0.225c58f4
+name: CantonExamples
+parties: 
+- Alice
+- Bob
+- Carol
+- David
+exposed-modules: 
+- CantonExamples
+- Iou
+- Paint
+- Swap
+source: .
+version: 1.0.0
+dependencies: 
+- daml-prim
+- daml-stdlib
+- daml-script

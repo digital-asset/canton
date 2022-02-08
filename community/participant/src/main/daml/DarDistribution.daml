@@ -1,0 +1,66 @@
+-- Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module DarDistribution where
+
+import Daml.Script
+
+template AcceptedDar
+  with
+    darOwner : Party
+    recipient : Party
+    hash : Text
+  where
+    signatory recipient
+    observer darOwner
+
+    controller darOwner can
+      AcknowledgeAcceptance : () do return ()
+
+template RejectedDar
+  with
+    darOwner : Party
+    recipient : Party
+    hash : Text
+    reason : Text
+  where
+    signatory recipient
+    observer darOwner
+
+    controller darOwner can
+      AcknowledgeRejection : () do return ()
+
+template ShareDar
+  with
+    owner : Party
+    recipient : Party
+    hash : Text
+    name : Text
+    content : Text -- base64 encoded binary
+  where
+    signatory owner
+    observer recipient
+    
+    controller recipient can
+      Accept : ContractId AcceptedDar
+        do
+          create AcceptedDar with
+            darOwner = owner
+            recipient = recipient
+            hash = hash
+
+      Reject : ContractId RejectedDar
+        with
+          reason : Text
+        do
+          create RejectedDar with
+            darOwner = owner
+            recipient = recipient
+            hash = hash
+            reason = reason
+
+shareDar = script do
+    [alice, bob] <- mapA allocateParty ["Alice", "Bob"]
+    share <- submit alice $ createCmd ShareDar with owner = alice, recipient = bob, name = "Test Dar", hash = "Hash1234", content = "Daml Dar Content"
+    acceptance <- submit bob $ exerciseCmd share Accept
+    submit alice $ exerciseCmd acceptance AcknowledgeAcceptance

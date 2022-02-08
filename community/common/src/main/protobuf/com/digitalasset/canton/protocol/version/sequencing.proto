@@ -1,0 +1,45 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.version;
+
+import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+
+message VersionedSequencedEvent {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SequencedEvent v0 = 1;
+  }
+}
+
+message VersionedBatch {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.CompressedBatch v0 = 1;
+  }
+}
+
+message VersionedStaticDomainParameters {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.StaticDomainParameters v0 = 1;
+  }
+}
+
+
+message VersionedDynamicDomainParameters {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.DynamicDomainParameters v0 = 1;
+  }
+}
+
+
+message VersionedSignedContent {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SignedContent v0 = 1;
+  }
+}
+
+message VersionedSequencerConnection {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SequencerConnection v0 = 1;
+  }
+}

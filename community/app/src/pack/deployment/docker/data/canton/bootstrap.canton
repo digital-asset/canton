@@ -1,0 +1,86 @@
+// define your parties here (hint, display name)
+val localParties : Seq[(String, String)] = Seq()
+
+// define your domain connections here
+val domainConnections : Seq[(String, String, Int, Boolean)] = Seq()
+
+// ------------------------------------------------------
+// don't change unless you know what you are doing
+// ------------------------------------------------------
+val logger = org.slf4j.LoggerFactory.getLogger("console")
+val myparticipant = participants.local.head
+console.set_command_timeout(3.minutes)
+
+logger.info("hello world!")
+val myParties = (localParties ++ sys.env.getOrElse("CANTON_ALLOCATE_PARTIES", "").split(";").toList.filter(_.nonEmpty).map(x => (x,x))).map {
+  case (party, hint) =>
+    val matching = myparticipant.parties.hosted().map(_.party.toLf).find(_.startsWith(party + "::"))
+    matching match {
+        case None => logger.info(s"Adding party $party")
+            val tt = myparticipant.parties.enable(party, Some(hint))
+            (party, tt.toLf)
+        case Some(existing) => (party, existing)
+    }
+}.toList
+
+val registered = myparticipant.domains.list_registered().map(_._1.domain.unwrap)
+val domainsFromEnv = sys.env.getOrElse("CANTON_CONNECT_DOMAINS", "").split(";").map(_.split("#")).map(x => (x(0), x(1))).zipWithIndex.map(y => (y._1._1, y._1._2, y._2, true)).toList
+(domainConnections ++ domainsFromEnv).foreach {
+  case (alias, url, priority, active) =>
+    if(!registered.contains(alias) && active) {
+        myparticipant.domains.connect(alias, url, priority = priority)
+    }
+}
+
+val baseDir = os.Path("data", base=os.pwd)
+val dars = os.walk(baseDir).filter(x => x.ext == "dar").sorted
+dars.foreach { dar =>
+    logger.info(s"Uploading dar ${dar}")
+    myparticipant.dars.upload(dar.toString)
+}
+
+// if there is a domain connection, check that it is running
+if(myparticipant.domains.list_registered().nonEmpty) {
+    utils.retry_until_true {
+        myparticipant.domains.list_connected().nonEmpty
+    }
+    myparticipant.health.ping(myparticipant.id)
+}
+
+// create jwt access token
+import com.daml.ledger.api.auth.{CustomDamlJWTPayload, AuthServiceJWTCodec}
+import com.daml.jwt.JwtSigner
+import com.daml.jwt.domain.{DecodedJwt, Jwt}
+import com.digitalasset.canton.util.TextFileUtil
+def buildUnsafeJwtToken(participantId: String, applicationId: String, secret: String, admin: Boolean, readAs: List[String], actAs: List[String]): String = {
+    val payload = CustomDamlJWTPayload(
+      Some(participantId),
+      Some(participantId),
+      Some(applicationId),
+      Some(java.time.Instant.now().plusSeconds(31536000)),
+      admin = admin,
+      readAs = readAs,
+      actAs = actAs,
+    )
+    // stolen from com.daml.ledger.api.auth.Main
+    val jwtPayload = AuthServiceJWTCodec.compactPrint(payload)
+    val jwtHeader  = s"""{"alg": "HS256", "typ": "JWT"}"""
+    val signed: Jwt = JwtSigner.HMAC256
+      .sign(DecodedJwt(jwtHeader, jwtPayload), secret)
+      .valueOr(err => throw new RuntimeException(err.message))
+    signed.value
+}
+
+myParties.foreach {
+  case (hint, pid) =>
+    TextFileUtil.writeStringToFile(
+        new java.io.File(s"data/shared/${hint}.jwt"),
+        buildUnsafeJwtToken(myparticipant.id.uid.id.unwrap, "testing", "secret", true, List(pid), List(pid))
+    )
+}
+
+TextFileUtil.writeStringToFile(
+    new java.io.File(s"data/shared/parties.txt"),
+    myParties.map(x => x._1 + " " + x._2).mkString("\n") + "\n"
+)
+

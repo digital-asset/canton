@@ -1,0 +1,176 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.participant.admin.v0;
+
+import "google/protobuf/empty.proto";
+
+service PackageService {
+
+    // List all Daml-LF archives on the participant node - return their hashes
+    rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
+
+    // Lists all the modules in package on the participant node
+    rpc ListPackageContents (ListPackageContentsRequest) returns (ListPackageContentsResponse);
+
+    // List all DARs on the participant node - return their hashes and filenames
+    rpc ListDars(ListDarsRequest) returns (ListDarsResponse);
+
+    // Upload a DAR file and all packages inside to the participant node
+    rpc UploadDar (UploadDarRequest) returns (UploadDarResponse);
+
+    rpc RemovePackage (RemovePackageRequest) returns (RemovePackageResponse);
+
+    // Obtain a DAR file by hash -- for inspection & download
+    rpc GetDar(GetDarRequest) returns (GetDarResponse);
+
+    // Share a DAR with another participant
+    rpc Share(ShareRequest) returns (google.protobuf.Empty);
+
+    // List requests this participant has made to share DARs with another participant
+    rpc ListShareRequests(google.protobuf.Empty) returns (ListShareRequestsResponse);
+
+    // List offers to share a DAR that this participant has received
+    rpc ListShareOffers(google.protobuf.Empty) returns (ListShareOffersResponse);
+
+    // Accept a DAR sharing offer (this will install the DAR into the participant)
+    rpc AcceptShareOffer(AcceptShareOfferRequest) returns (google.protobuf.Empty);
+
+    // Reject a DAR sharing offer
+    rpc RejectShareOffer(RejectShareOfferRequest) returns (google.protobuf.Empty);
+
+    // Add party to our DAR distribution whitelist
+    rpc WhitelistAdd(WhitelistChangeRequest) returns (google.protobuf.Empty);
+
+    // Remove party from our DAR distribution whitelist
+    rpc WhitelistRemove(WhitelistChangeRequest) returns (google.protobuf.Empty);
+
+    // List all parties currently on the whitelist
+    rpc WhitelistList(google.protobuf.Empty) returns (WhitelistListResponse);
+}
+
+message ListPackageContentsRequest {
+    string package_id = 1;
+}
+
+message ListPackageContentsResponse {
+    repeated ModuleDescription modules = 1;
+}
+
+message RemovePackageRequest {
+    string package_id = 1;
+    bool force = 2;
+}
+
+message RemovePackageResponse {
+    google.protobuf.Empty success = 1;
+}
+
+message ModuleDescription {
+    string name = 1;
+}
+
+message ListPackagesRequest {
+    int32 limit = 1;
+}
+
+message ListPackagesResponse {
+    repeated PackageDescription package_descriptions = 1;
+}
+
+message ListDarsRequest {
+    int32 limit = 1;
+}
+
+message ListDarsResponse {
+    repeated DarDescription dars = 1;
+}
+
+message DarDescription {
+    string hash = 1;
+    string name = 2;
+}
+
+message UploadDarRequest {
+    bytes data = 1;
+    string filename = 2;
+    // if set to true, we'll register the vetting topology transactions with the idm
+    bool vet_all_packages = 3;
+    // if set to true, we'll wait until the vetting transaction has been observed by this participant on all connected domains
+    bool synchronize_vetting = 4;
+}
+
+message UploadDarResponse {
+    oneof value {
+        Success success = 1;
+        Failure failure = 2;
+    }
+    message Success {
+        string hash = 1;
+    }
+    message Failure {
+        string reason = 1;
+    }
+}
+
+message GetDarRequest {
+    string hash = 1;
+}
+
+message GetDarResponse {
+    bytes data = 1;
+    string name = 2;
+}
+
+message PackageDescription {
+    string package_id = 1;
+    string source_description = 3;
+}
+
+message ShareRequest {
+    string dar_hash = 1;
+    string recipient_id = 2;
+}
+
+message ListShareRequestsResponse {
+    repeated Item share_requests = 1;
+
+    message Item {
+        string id = 1;
+        string dar_hash = 2;
+        string recipient_id = 3;
+        string name = 4;
+    }
+}
+
+message ListShareOffersResponse {
+    repeated Item share_offers = 1;
+
+    message Item {
+        string id = 1;
+        string dar_hash = 2;
+        string owner_id = 3;
+        string name = 4;
+    }
+}
+
+message AcceptShareOfferRequest {
+    string id = 1;
+}
+
+message RejectShareOfferRequest {
+    string id = 1;
+    // informational message explaining why we decided to reject the DAR
+    // can be empty
+    string reason = 2;
+}
+
+message WhitelistChangeRequest {
+    string party_id = 1;
+}
+
+message WhitelistListResponse {
+    repeated string party_ids = 1;
+}

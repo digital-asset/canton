@@ -1,0 +1,20 @@
+import better.files._
+
+val createDamlAppDir = File(sys.props.get("create-daml-app-dir").getOrElse("create-daml-app"))
+
+val createDamlAppDar = createDamlAppDir / ".daml" / "dist" / "create-daml-app-0.1.0.dar"
+
+// check that files exist where we expect them
+createDamlAppDir.exists || sys.error(s"please setup the create-daml-app example in the current working directly under ${createDamlAppDir}")
+
+createDamlAppDar.exists || sys.error(s"please run daml build in the create-daml-app folder to build the dar file ${createDamlAppDar}")
+
+// setup parties and connect participants to domain
+Seq(("Alice", participant1), ("Bob", participant2)).foreach {
+  case (party, participant) =>
+    participant.parties.enable(party)
+    participant.domains.connect_local(mydomain)
+}
+
+// upload dar file to participants
+participants.all.dars.upload(createDamlAppDar.pathAsString)

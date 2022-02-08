@@ -1,0 +1,145 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.version;
+
+import "com/digitalasset/canton/protocol/v0/synchronization.proto";
+
+message VersionedSerializableContract {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SerializableContract v0 = 1;
+  }
+}
+
+message VersionedContractMetadata {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SerializableContract.Metadata v0 = 1;
+  }
+}
+
+message VersionedSignedProtocolMessage {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SignedProtocolMessage v0 = 1;
+  }
+}
+
+message VersionedTransferOutCommonData {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferOutCommonData v0 = 1;
+  }
+}
+
+message VersionedTransferOutView {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferOutView v0 = 1;
+  }
+}
+
+message VersionedTransferViewTree {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferViewTree v0 = 1;
+  }
+}
+
+message VersionedTransferInCommonData {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferInCommonData v0 = 1;
+  }
+}
+
+message VersionedTransferInView {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferInView v0 = 1;
+  }
+}
+
+message VersionedTransferResult {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransferResult v0 = 1;
+  }
+}
+
+message VersionedLightTransactionViewTree {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.LightTransactionViewTree v0 = 1;
+  }
+}
+
+message VersionedInformeeTree {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.InformeeTree v0 = 1;
+  }
+}
+
+message VersionedFullInformeeTree {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.FullInformeeTree v0 = 1;
+  }
+}
+
+message VersionedVerdict {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.Verdict v0 = 1;
+  }
+}
+
+message VersionedSubmitterMetadata {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.SubmitterMetadata v0 = 1;
+  }
+}
+
+message VersionedCommonMetadata {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.CommonMetadata v0 = 1;
+  }
+}
+
+message VersionedParticipantMetadata {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.ParticipantMetadata v0 = 1;
+  }
+}
+
+message VersionedViewCommonData {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.ViewCommonData v0 = 1;
+  }
+}
+
+message VersionedViewParticipantData {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.ViewParticipantData v0 = 1;
+  }
+}
+
+message VersionedMediatorResponse {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.MediatorResponse v0 = 1;
+  }
+}
+
+message VersionedMalformedMediatorRequestResult {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.MalformedMediatorRequestResult v0 = 1;
+  }
+}
+
+message VersionedAcsCommitment {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.AcsCommitment v0 = 1;
+  }
+}
+
+message VersionedTransactionResultMessage {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TransactionResultMessage v0 = 1;
+  }
+}
+
+message VersionedCausalityUpdate{
+  oneof version {
+    com.digitalasset.canton.protocol.v0.CausalityUpdate v0 = 1;
+  }
+}
