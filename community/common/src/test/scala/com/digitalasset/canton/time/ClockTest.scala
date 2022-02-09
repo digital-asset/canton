@@ -47,23 +47,23 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     }
 
     "allow task to be scheduled in future" in {
-      val task1 = sim.scheduleAt(testTask(_), sim.uniqueTime().plusSeconds(1))
+      val task1 = sim.scheduleAt(testTask(_), sim.uniqueTime().plusSeconds(1)).onShutdown(fail())
       testExecution(task1, sim.uniqueTime().plusSeconds(2))
     }
 
     "ensure that tasks are executed in proper order" in {
       val now = sim.uniqueTime()
-      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(3))
-      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(1))
+      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(3)).onShutdown(fail())
+      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(1)).onShutdown(fail())
       testExecution(task2, now.plusSeconds(2))
       testExecution(task1, now.plusSeconds(4))
     }
 
     "ensure that multiple tasks are executed, again in proper order" in {
       val now = sim.uniqueTime()
-      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(5))
-      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(3))
-      val task3 = sim.scheduleAt(testTask(_), now.plusSeconds(1))
+      val task1 = sim.scheduleAt(testTask(_), now.plusSeconds(5)).onShutdown(fail())
+      val task2 = sim.scheduleAt(testTask(_), now.plusSeconds(3)).onShutdown(fail())
+      val task3 = sim.scheduleAt(testTask(_), now.plusSeconds(1)).onShutdown(fail())
       testExecution(task3, now.plusSeconds(4))
       val res = Await.ready(task2, timeout.value)
       assert(res.isCompleted)
@@ -72,7 +72,7 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
     "ensure that a task scheduled for now executes" in {
       val now = sim.uniqueTime()
-      val task = sim.scheduleAt(testTask(_), now)
+      val task = sim.scheduleAt(testTask(_), now).onShutdown(fail())
       val res = Await.ready(task, timeout.value)
       assert(res.isCompleted)
     }
@@ -128,21 +128,24 @@ class ClockTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
     "scheduling one task works and completes" in {
       val now = sut.uniqueTime()
-      val task1 = sut.scheduleAt(testTask(_), now.plusMillis(50))
+      val task1 = sut.scheduleAt(testTask(_), now.plusMillis(50)).onShutdown(fail())
       assert(Await.ready(task1, timeout.value).isCompleted)
     }
 
     "scheduling of three tasks works and completes" in {
       val now = sut.uniqueTime()
       val tasks = Seq(
-        sut.scheduleAt(testTask(_), now.plusMillis(50)),
-        sut.scheduleAt(testTask(_), now.plusMillis(20)),
-        sut.scheduleAt(testTask(_), now),
-        sut.scheduleAt(testTask(_), now.minusMillis(1000)),
-        sut.scheduleAfter(testTask(_), java.time.Duration.ofMillis(55)),
+        sut.scheduleAt(testTask, now.plusMillis(50)),
+        sut.scheduleAt(testTask, now.plusMillis(20)),
+        sut.scheduleAt(testTask, now),
+        sut.scheduleAt(testTask, now.minusMillis(1000)),
+        sut.scheduleAfter(testTask, java.time.Duration.ofMillis(55)),
       )
       tasks.zipWithIndex.foreach { case (task, index) =>
-        assert(Await.ready(task, timeout.value).isCompleted, s"task ${index} did not complete")
+        assert(
+          Await.ready(task.onShutdown(fail()), timeout.value).isCompleted,
+          s"task ${index} did not complete",
+        )
       }
     }
 

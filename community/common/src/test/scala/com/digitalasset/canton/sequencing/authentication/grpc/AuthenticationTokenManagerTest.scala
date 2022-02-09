@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.implicits._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
@@ -22,7 +23,7 @@ import scala.concurrent.{Future, Promise}
 object AuthenticationTokenManagerTest extends org.mockito.MockitoSugar with ArgumentMatchersSugar {
   val mockClock = mock[Clock]
   when(mockClock.scheduleAt(any[CantonTimestamp => Unit], any[CantonTimestamp]))
-    .thenReturn(Future.unit)
+    .thenReturn(FutureUnlessShutdown.unit)
 }
 
 class AuthenticationTokenManagerTest extends AsyncWordSpec with BaseTest {
@@ -138,7 +139,7 @@ class AuthenticationTokenManagerTest extends AsyncWordSpec with BaseTest {
     when(clockMock.scheduleAt(any[CantonTimestamp => Unit], any[CantonTimestamp]))
       .thenAnswer[CantonTimestamp => Unit, CantonTimestamp] { case (action, _) =>
         retryMe.getAndUpdate(_ => Some(action)) shouldBe empty
-        Future.unit
+        FutureUnlessShutdown.unit
       }
 
     val (tokenManager, obtainMock, _) = setup(Some(clockMock))

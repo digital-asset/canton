@@ -7,7 +7,6 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.ShowUtil._
-
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 

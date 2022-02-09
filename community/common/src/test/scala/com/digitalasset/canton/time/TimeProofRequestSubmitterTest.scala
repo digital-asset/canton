@@ -9,7 +9,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String73
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, SignedContent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -66,20 +65,23 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
       promise
     }
 
-    def mkTimeProofEvent(seconds: Int): OrdinaryProtocolEvent =
-      OrdinarySequencedEvent(
-        SignedContent(
-          Deliver.create(
-            0L,
-            CantonTimestamp.ofEpochSecond(seconds.toLong),
-            DefaultTestIdentities.domainId,
-            Some(MessageId(String73(s"tick-$seconds")())),
-            Batch.empty,
-          ),
-          SymbolicCrypto.emptySignature,
-          None,
-        )
-      )(traceContext)
+    def mkTimeProof(seconds: Int): TimeProof = {
+      val event =
+        OrdinarySequencedEvent(
+          SignedContent(
+            Deliver.create(
+              0L,
+              CantonTimestamp.ofEpochSecond(seconds.toLong),
+              DefaultTestIdentities.domainId,
+              Some(MessageId(String73(s"tick-$seconds")())),
+              Batch.empty,
+            ),
+            SymbolicCrypto.emptySignature,
+            None,
+          )
+        )(traceContext)
+      TimeProof.fromEventO(event).value
+    }
 
     override def close(): Unit = timeRequestSubmitter.close()
   }
@@ -102,21 +104,14 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
 
       val nextRequestP = waitForNextRequest()
       // should trigger a request
-      val request1 = timeRequestSubmitter.fetchTimeProof()
+      timeRequestSubmitter.fetchTimeProof()
       // should now just reuse the pending prior request
-      val request2 = timeRequestSubmitter.fetchTimeProof()
-      val timeProofEvent = mkTimeProofEvent(0)
-      timeRequestSubmitter.handle(timeProofEvent)
+      timeRequestSubmitter.fetchTimeProof()
+      timeRequestSubmitter.handleTimeProof(mkTimeProof(0))
 
       for {
-        result1 <- request1
-        result2 <- request2
         _ <- nextRequestP
-      } yield {
-        result1.timestamp shouldBe timeProofEvent.timestamp
-        result2.timestamp shouldBe timeProofEvent.timestamp
-        callCount.get() shouldBe 1
-      }
+      } yield callCount.get() shouldBe 1
     }
 
     "retry request if an appropriate event is not witnessed within our custom max-sequencing-duration" in {
@@ -124,7 +119,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
         import env._
 
         val request1F = waitForNextRequest()
-        val eventF = timeRequestSubmitter.fetchTimeProof() // kicks off getting a time event
+        timeRequestSubmitter.fetchTimeProof() // kicks off getting a time event
 
         for {
           _ <- timeRequestSubmitter.flush()
@@ -136,26 +131,29 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
           // now expect that a new request is made
           _ <- timeRequestSubmitter.flush()
           _ <- request2F
-          // if a time event is now witnessed we'll get the result provided
-          _ = timeRequestSubmitter.handle(mkTimeProofEvent(0))
-          event <- eventF
-        } yield event.timestamp.getEpochSecond shouldBe 0
+          // if a time event is now witnessed we don't make another request
+          _ = timeRequestSubmitter.handleTimeProof(mkTimeProof(0))
+          _ = clock.advance(config.maxSequencingDelay.unwrap.plusMillis(1))
+          _ <- timeRequestSubmitter.flush()
+        } yield callCount.get() shouldBe 2
     }
 
     "avoid more than one pending request when a time event is witnessed and new request started during the max-sequencing duration" in {
       env =>
         import env._
 
-        val event1F = timeRequestSubmitter.fetchTimeProof()
+        timeRequestSubmitter.fetchTimeProof()
+        val callCountAtStart = callCount.get()
 
         for {
           _ <- timeRequestSubmitter.flush()
           // immediately witness an event
-          _ = timeRequestSubmitter.handle(mkTimeProofEvent(0))
-          event1 <- event1F // we should have received our time event
+          _ = timeRequestSubmitter.handleTimeProof(mkTimeProof(0))
+          _ <- timeRequestSubmitter.flush()
+          callCountNoRequest = callCount.get()
           // then immediately start a new request
           request2F = waitForNextRequest()
-          event2F = timeRequestSubmitter.fetchTimeProof()
+          _ = timeRequestSubmitter.fetchTimeProof()
           // that should have started a new request
           _ <- timeRequestSubmitter.flush()
           _ <- request2F
@@ -166,7 +164,10 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
           _ = clock.advance(config.maxSequencingDelay.unwrap)
           _ <- timeRequestSubmitter.flush()
           callCountAfter = callCount.get()
-        } yield callCountAfter shouldBe (callCountBefore + 1)
+        } yield {
+          callCountNoRequest shouldBe callCountAtStart
+          callCountAfter shouldBe (callCountBefore + 1)
+        }
     }
   }
 }

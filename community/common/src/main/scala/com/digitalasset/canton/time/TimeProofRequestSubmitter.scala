@@ -11,16 +11,15 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.admin.v0
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureUtil.logOnFailure
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Backoff, Success}
-import com.digitalasset.canton.util.{HasFlushFuture, HasProtoV0}
+import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, HasProtoV0, retry}
 import com.google.common.annotations.VisibleForTesting
 
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future}
 
 /** @param initialRetryDelay The initial retry delay if the request to send a sequenced event fails
   * @param maxRetryDelay The max retry delay if the request to send a sequenced event fails
@@ -62,7 +61,7 @@ object TimeProofRequestConfig {
     } yield TimeProofRequestConfig(initialRetryDelay, maxRetryDelay, maxSequencingDelay)
 }
 
-/** Use [[fetchTimeProof]] to fetch a time proof we observe from the sequencer via [[handle]].
+/** Use [[fetchTimeProof]] to fetch a time proof we observe from the sequencer via [[handleTimeProof]].
   * Will batch fetch calls so there is only a single request occurring at any point.
   *
   * The submission of this request to the sequencer is slightly more involved than usual as we do not rely at all
@@ -76,18 +75,17 @@ object TimeProofRequestConfig {
   */
 trait TimeProofRequestSubmitter extends AutoCloseable {
 
-  /** Returns a future that will be completed with the next received time proof received by the handler.
-    * The [[TimeProofRequestSubmitter]] will attempt to produce a time event by calling send on the domain sequencer
-    * however will resolve the returned future with the first time proof it witnesses (not necessarily the one
+  /** The [[TimeProofRequestSubmitter]] will attempt to produce a time proof by calling send on the domain sequencer.
+    * It will stop requesting a time proof with the first time proof it witnesses (not necessarily the one
     * it requested).
     * Ensures that only a single request is in progress at a time regardless of how many times it is called.
     * Is safe to call frequently without causing many requests to the sequencer.
-    * If the component is shutdown the returned future will currently remain pending.
+    * If the component is shutdown it stops requesting a time proof.
     */
-  def fetchTimeProof()(implicit traceContext: TraceContext): Future[TimeProof]
+  def fetchTimeProof()(implicit traceContext: TraceContext): Unit
 
-  /** Update state based on events observed from the sequencer */
-  def handle(event: OrdinarySequencedEvent[_]): Unit
+  /** Update state based on time proof events observed from the sequencer */
+  def handleTimeProof(proof: TimeProof): Unit
 }
 
 private[time] class TimeProofRequestSubmitterImpl(
@@ -101,47 +99,27 @@ private[time] class TimeProofRequestSubmitterImpl(
     with NamedLogging
     with FlagCloseable
     with HasFlushFuture {
+  import com.digitalasset.canton.time.TimeProofRequestSubmitterImpl._
 
-  private val lock: AnyRef = new Object
-  private def withLock[A](fn: => A): A = blocking { lock.synchronized { fn } }
-  // updates must be coordinated with the above lock
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private var currentRequest: Option[Promise[TimeProof]] = None
+  private val currentRequestToken: AtomicReference[Token] =
+    new AtomicReference[Token](NoCurrentRequest)
 
-  override def fetchTimeProof()(implicit traceContext: TraceContext): Future[TimeProof] =
-    withLock {
-      currentRequest.fold({
-        val newRequest = Promise[TimeProof]()
-        currentRequest = newRequest.some
-        requestTime(newRequest)
-        newRequest.future
-      })(_.future)
-    }
-
-  override def handle(event: OrdinarySequencedEvent[_]): Unit = {
-    implicit val traceContext: TraceContext = event.traceContext
-
-    // we only need to update the request if we have a time event that could change its state
-    TimeProof.fromEventO(event).foreach { proof =>
-      withLock {
-        currentRequest.fold(()) { request =>
-          logger.debug(s"Received $proof")
-          // trySuccess as may have already been resolved due to shutdown
-          request.trySuccess(proof)
-          currentRequest = None
-        }
-      }
+  override def fetchTimeProof()(implicit traceContext: TraceContext): Unit = {
+    val newToken = new Object
+    if (currentRequestToken.compareAndSet(NoCurrentRequest, newToken)) {
+      sendRequestIfPending(newToken)
     }
   }
 
-  private def requestTime(
-      requestP: Promise[TimeProof]
-  )(implicit traceContext: TraceContext): Unit = {
-    def stillPending: Boolean =
-      !isClosing && withLock {
-        // are we still the active request
-        currentRequest.contains(requestP)
-      }
+  override def handleTimeProof(proof: TimeProof): Unit = {
+    val token = currentRequestToken.getAndSet(NoCurrentRequest)
+    if (token != NoCurrentRequest) {
+      logger.debug(s"Received $proof")(proof.traceContext)
+    }
+  }
+
+  private def sendRequestIfPending(token: Token)(implicit traceContext: TraceContext): Unit = {
+    def stillPending: Boolean = !isClosing && currentRequestToken.get() == token
 
     /* Make the request or short circuit if we're no longer waiting a time event */
     def mkRequest(): Future[Either[SendAsyncClientError, Unit]] =
@@ -152,46 +130,42 @@ private[time] class TimeProofRequestSubmitterImpl(
         } else Future.successful(Right(()))
       }.onShutdown(Right(()))
 
-    /* Keep retrying sending the request until it's sent or we no longer need to */
-    def eventuallySendRequest(): Future[Unit] = {
-      import Success.either
-      val retrySendTimeRequest = Backoff(
-        logger,
-        this,
-        Int.MaxValue,
-        config.initialRetryDelay.toScala,
-        config.maxRetryDelay.toScala,
-        "request current time",
-      )
+    def eventuallySendRequest(): Unit = addToFlush(
+      s"sendRequestIfPending scheduled ${config.maxSequencingDelay} after ${clock.now}"
+    ) {
+      {
+        import Success.either
+        val retrySendTimeRequest = Backoff(
+          logger,
+          this,
+          retry.Forever,
+          config.initialRetryDelay.toScala,
+          config.maxRetryDelay.toScala,
+          "request current time",
+        )
 
-      retrySendTimeRequest(mkRequest(), AllExnRetryable) flatMap { _ =>
-        // if we still care about the outcome (we could have witnessed a recent time while sending the request),
-        // then schedule retrying a new request.
-        // this will short circuit if a new timestamp is not needed at that point.
-        if (stillPending) {
-          // intentionally don't wait for future - error logging is added inside addRunRequest
-          val _ = clock.scheduleAfter(
-            _ => {
-              addRunRequest()
-            },
-            config.maxSequencingDelay.unwrap,
-          )
+        retrySendTimeRequest(mkRequest(), AllExnRetryable) map { _ =>
+          // if we still care about the outcome (we could have witnessed a recent time while sending the request),
+          // then schedule retrying a new request.
+          // this will short circuit if a new timestamp is not needed at that point.
+          if (stillPending) {
+            // intentionally don't wait for future
+            FutureUtil.doNotAwait(
+              clock
+                .scheduleAfter(
+                  _ => eventuallySendRequest(),
+                  config.maxSequencingDelay.unwrap,
+                )
+                .onShutdown(()),
+              "requesting current domain time",
+            )
+          }
         }
-
-        Future.unit
       }
     }
 
-    def addRunRequest(): Unit =
-      addToFlush(s"requestTime scheduled ${config.maxSequencingDelay} after ${clock.now}") {
-        logOnFailure(
-          eventuallySendRequest(),
-          "requesting current domain time",
-        )
-      }
-
     // initial kick off
-    addRunRequest()
+    eventuallySendRequest()
   }
 
   @VisibleForTesting
@@ -212,4 +186,9 @@ object TimeProofRequestSubmitter {
       sequencerClient.timeouts,
       loggerFactory,
     )
+}
+
+object TimeProofRequestSubmitterImpl {
+  private[TimeProofRequestSubmitterImpl] type Token = AnyRef
+  private[TimeProofRequestSubmitterImpl] val NoCurrentRequest: Token = new Object
 }

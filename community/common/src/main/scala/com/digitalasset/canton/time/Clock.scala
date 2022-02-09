@@ -11,7 +11,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ClockErrorGroup
 import com.digitalasset.canton.error.CantonError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle, UnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.time.Clock.SystemClockRunningBackwards
@@ -26,7 +27,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.{Callable, PriorityBlockingQueue, TimeUnit}
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise}
-import scala.util.Random
+import scala.util.{Random, Try}
 
 /** A clock returning the current time, but with a twist: it always
   * returns unique timestamps. If two calls are made to the same clock
@@ -50,21 +51,23 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
 
   protected case class Queued(action: CantonTimestamp => Unit, timestamp: CantonTimestamp) {
 
-    val promise = Promise[Unit]()
+    val promise = Promise[UnlessShutdown[Unit]]()
 
     def run(now: CantonTimestamp): Unit =
-      promise.success(
-        action(now)
-      )
+      promise.complete(Try(UnlessShutdown.Outcome(action(now))))
 
   }
 
   protected def addToQueue(queue: Queued): Unit
 
-  /** thread safe weakly monotonistic time: each timestamp will be either equal or increasing */
+  /** thread safe weakly monotonistic time: each timestamp will be either equal or increasing
+    * May go backwards across restarts.
+    */
   final def monotonicTime(): CantonTimestamp = internalMonotonicTime(0)
 
-  /** thread safe strongly monotonistic increasing time: each timestamp will be unique */
+  /** thread safe strongly monotonistic increasing time: each timestamp will be unique
+    * May go backwards across restarts.
+    */
   final def uniqueTime(): CantonTimestamp = internalMonotonicTime(1)
 
   private def internalMonotonicTime(minSpacingMicros: Long): CantonTimestamp = {
@@ -101,53 +104,65 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
     *
     * same as other schedule method, except it expects a differential time amount
     */
-  def scheduleAfter(action: CantonTimestamp => Unit, delta: Duration): Future[Unit] = {
+  def scheduleAfter(
+      action: CantonTimestamp => Unit,
+      delta: Duration,
+  ): FutureUnlessShutdown[Unit] =
     scheduleAt(action, now.add(delta))
-  }
 
   /** thread-safely schedule an action to be executed in the future
+    * actions need not execute in the order of their timestamps.
     *
     * @param action action to run at the given timestamp (passing in the timestamp for when the task was scheduled)
     * @param timestamp timestamp when to run the task
     * @return a future for the given task
     */
-  def scheduleAt(action: CantonTimestamp => Unit, timestamp: CantonTimestamp): Future[Unit] = {
+  def scheduleAt(
+      action: CantonTimestamp => Unit,
+      timestamp: CantonTimestamp,
+  ): FutureUnlessShutdown[Unit] = {
     val queued = Queued(action, timestamp)
     if (!now.isBefore(timestamp)) {
       queued.run(now)
     } else {
       addToQueue(queued)
     }
-    queued.promise.future
+    FutureUnlessShutdown(queued.promise.future)
   }
 
   // flush the task queue, stopping once we hit a task in the future
-  protected def flush(): Option[CantonTimestamp] = {
+  @tailrec
+  private def doFlush(): Option[CantonTimestamp] = {
     val queued = Option(tasks.poll())
     queued match {
       // if no task present, do nothing
       case None => None
-      case Some(item) => {
+      case Some(item) =>
         // if task is present but in the future, put it back
         val currentTime = now
-        if (item.timestamp.isAfter(currentTime)) {
+        if (item.timestamp > currentTime) {
           tasks.add(item)
-          Some(item.timestamp)
+          // If the clock was advanced concurrently while this call was checking the task's time against now
+          // then the task will not `run` until the next call to `flush`. So if we see that the time was advanced
+          // rerun `flush()`.
+          if (now >= item.timestamp) doFlush()
+          else Some(item.timestamp)
         } else {
           // otherwise execute task and iterate
           item.run(currentTime)
-          flush()
+          doFlush()
         }
-      }
     }
   }
+
+  protected def flush(): Option[CantonTimestamp] = doFlush()
 
   protected def failTasks(): Unit = {
     @tailrec def go(): Unit =
       Option(tasks.poll()) match {
         case None => ()
         case Some(item) =>
-          item.promise.failure(new InterruptedException)
+          item.promise.success(AbortedDueToShutdown)
           go()
       }
     go()
@@ -263,16 +278,13 @@ class WallClock(
   private def scheduleNext(timestamp: CantonTimestamp): Unit = {
     if (running.get()) {
       // update next flush reference if this timestamp is before the current scheduled
-      val current = nextFlush.getAndUpdate({
-        case Some(ts) if ts < timestamp => Some(ts)
-        case _ => Some(timestamp)
-      })
-      // only schedule if either there is no next scheduled or if next is too far out in the future
-      val needsSchedule = current match {
-        case Some(ts) => ts > timestamp
-        case None => true
+      val newTimestamp = Some(timestamp)
+      def updateCondition(current: Option[CantonTimestamp]): Boolean =
+        current.forall(_ > timestamp)
+      val current = nextFlush.getAndUpdate { old =>
+        if (updateCondition(old)) newTimestamp else old
       }
-
+      val needsSchedule = updateCondition(current)
       if (needsSchedule) {
         // add one ms as we will process all tasks up to now() which means that if we use ms precision,
         // we need to set it to the next ms such that we include all tasks within the same ms
@@ -283,11 +295,8 @@ class WallClock(
               // mark that this flush has been executed before starting the flush,
               // (if something else is queued after our flush but before re-scheduling, it will
               // succeed in scheduling instead of this thread).
-              nextFlush.updateAndGet({
-                // we only set it to None if nextFlush matches this one
-                case Some(`timestamp`) => None
-                case x => x
-              })
+              // we only set it to None if nextFlush matches this one
+              nextFlush.compareAndSet(newTimestamp, None)
               flush().foreach(scheduleNext)
             }
           },
@@ -345,6 +354,8 @@ class SimClock(
     value.set(start)
     last.set(start)
   }
+
+  override def toString: String = s"SimClock($now)"
 }
 
 class RemoteClock(

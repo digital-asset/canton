@@ -25,12 +25,11 @@ class MockTimeRequestSubmitter extends TimeProofRequestSubmitter {
   def resetHasRequestedTime(): Unit = hasRequestedRef.set(false)
 
   val fetchResult = Promise[TimeProof]()
-  override def fetchTimeProof()(implicit traceContext: TraceContext): Future[TimeProof] = {
+  override def fetchTimeProof()(implicit traceContext: TraceContext): Unit = {
     hasRequestedRef.set(true)
-    fetchResult.future
   }
 
-  override def handle(event: OrdinarySequencedEvent[_]): Unit = ()
+  override def handleTimeProof(proof: TimeProof): Unit = ()
   override def close(): Unit = ()
 }
 
@@ -88,10 +87,10 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
       new DomainTimeTracker(config, clock, requestSubmitter, timeouts, loggerFactory)
 
     def observeTimeProof(epochSecs: Int): Future[Unit] =
-      Future.successful(timeTracker.update(timeProofEvent(ts(epochSecs))))
+      Future.successful(timeTracker.update(Seq(timeProofEvent(ts(epochSecs)))))
 
     def observeTimestamp(epochSecs: Int): Future[Unit] =
-      Future.successful(timeTracker.update(otherEvent(ts(epochSecs))))
+      Future.successful(timeTracker.update(Seq(otherEvent(ts(epochSecs)))))
 
     def advanceTo(epochSeconds: Int): Future[Unit] = {
       clock.advanceTo(ts(epochSeconds))
@@ -189,7 +188,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           s"Ignoring request for 3 ticks from ${CantonTimestamp.MaxValue.minusSeconds(2)} to ${CantonTimestamp.MaxValue} as they are too large"
         )),
       )
-      timeTracker.earliestExpectedObservationTime shouldBe None
+      timeTracker.earliestExpectedObservationTime() shouldBe None
 
       // the upper bound is the time - observationLatency
       loggerFactory.assertLogs(
@@ -198,7 +197,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           "as they are too large"
         )),
       )
-      timeTracker.earliestExpectedObservationTime shouldBe None
+      timeTracker.earliestExpectedObservationTime() shouldBe None
 
       // but slightly below that should be suitable for tracking (despite being practically useless given it's in 9999)
       loggerFactory.assertLogs(
@@ -212,7 +211,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           "as they are too large"
         )),
       )
-      timeTracker.earliestExpectedObservationTime.isDefined shouldBe true
+      timeTracker.earliestExpectedObservationTime().isDefined shouldBe true
     }
   }
 
@@ -304,7 +303,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
           awaitO = timeTracker.awaitTick(ts(10))
         } yield {
           awaitO shouldBe None
-          timeTracker.earliestExpectedObservationTime shouldBe None
+          timeTracker.earliestExpectedObservationTime() shouldBe None
         }
     }
   }

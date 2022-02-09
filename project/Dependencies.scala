@@ -13,7 +13,7 @@ object Dependencies {
 
   lazy val akka_version = "2.6.18"
   lazy val akka_http_version = "10.2.4"
-  lazy val grpc_version = "1.41.0"
+  lazy val grpc_version = "1.44.0"
   lazy val logback_version = "1.2.8"
   lazy val slf4j_version = "1.7.29"
   lazy val log4j_version = "2.17.0"
@@ -96,7 +96,7 @@ object Dependencies {
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
   // pick the version of boring ssl from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
-  lazy val netty_boring_ssl = "io.netty" % "netty-tcnative-boringssl-static" % "2.0.40.Final"
+  lazy val netty_boring_ssl = "io.netty" % "netty-tcnative-boringssl-static" % "2.0.46.Final"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
 
