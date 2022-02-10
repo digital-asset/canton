@@ -6,6 +6,7 @@ package com.digitalasset
 import com.daml.ledger.configuration
 import com.daml.lf.command
 import com.daml.lf.data.{IdString, Ref, Time}
+import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 
 import scala.annotation.nowarn
@@ -56,6 +57,9 @@ package object canton {
 
   type LfValue = Value
   val LfValue: Value.type = Value
+
+  type LfVersioned[T] = Versioned[T]
+  val LfVersioned: Versioned.type = Versioned
 
   // Lf commands for use by lf engine.reinterpret
   type LfCommand = command.Command

@@ -54,7 +54,9 @@ object CommandDeduplicationError extends InjectionErrorGroup {
   case class DeduplicationPeriodStartsTooEarlyErrorWithOffset(
       changeId: ChangeId,
       requestedPeriod: DeduplicationPeriod,
-      earliest_offset: String, // machine readable field for the earliest supported offset
+      // machine readable field for the earliest supported offset;
+      // must be the same as com.daml.error.definitions.LedgerApiErrors.EarliestOffsetMetadataKey
+      earliest_offset: String,
   ) extends TransactionErrorImpl(
         "Deduplication period starts too early. The error metadata field earliest_offset contains the earliest deduplication offset currently allowed.",
         // This error is generated only after in-flight submission checking and therefore reported asynchronously,

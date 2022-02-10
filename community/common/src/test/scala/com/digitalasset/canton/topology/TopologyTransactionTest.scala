@@ -21,6 +21,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
   private val pubKey2 = SymbolicCrypto.signingPublicKey("key2")
   private val uid = UniqueIdentifier.tryFromProtoPrimitive("da::tluafed")
   private val uid2 = UniqueIdentifier.tryFromProtoPrimitive("da2::tluafed")
+  private val defaultDynamicDomainParameters = TestDomainParameters.defaultDynamic
 
   def testConversion[Op <: TopologyChangeOp, M <: TopologyMapping](
       builder: M => TopologyTransaction[Op],
@@ -48,7 +49,6 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
   "topology transaction serialization & deserialization is identity" when {
     "namespace delegation" should {
-
       val ns1 = NamespaceDelegation(Namespace(fingerprint), pubKey, true)
       val ns2 = NamespaceDelegation(Namespace(fingerprint2), pubKey2, true)
       testConversion(TopologyStateUpdate.createAdd, TopologyStateUpdate.fromByteString)(
@@ -93,8 +93,8 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
     }
     "domain parameters change" should {
       testConversion(DomainGovernanceTransaction.apply, DomainGovernanceTransaction.fromByteString)(
-        DomainParametersChange(DomainId(uid), TestDomainParameters.defaultDynamic),
-        Some(DomainParametersChange(DomainId(uid), TestDomainParameters.defaultDynamic)),
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
+        Some(DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)),
       )
     }
   }

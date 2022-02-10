@@ -7,6 +7,7 @@ import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{SequencerId, TestingIdentityFactory, TestingTopology}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -14,24 +15,29 @@ import com.digitalasset.canton.version.ProtocolVersion
 object TestDomainParameters {
   def identityFactory(
       loggerFactory: NamedLoggerFactory,
+      clock: Clock,
       transformDefaults: DynamicDomainParameters => DynamicDomainParameters =
         identity[DynamicDomainParameters],
   ) = TestingIdentityFactory(
     TestingTopology(),
     loggerFactory,
-    transformDefaults(TestDomainParameters.defaultDynamic),
+    transformDefaults(DynamicDomainParameters.initialValues(clock)),
   )
 
   def domainSyncCryptoApi(
       domainId: DomainId,
       loggerFactory: NamedLoggerFactory,
+      clock: Clock,
       transformDefaults: DynamicDomainParameters => DynamicDomainParameters =
         identity[DynamicDomainParameters],
   ): DomainSyncCryptoClient =
-    identityFactory(loggerFactory, transformDefaults).forOwnerAndDomain(
+    identityFactory(loggerFactory, clock, transformDefaults).forOwnerAndDomain(
       SequencerId(domainId),
       domainId,
     )
+
+  val defaultDynamic: DynamicDomainParameters =
+    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.ofMillis(250))
 
   // Uses SymbolicCrypto for the configured crypto schemes
   val defaultStatic: StaticDomainParameters = StaticDomainParameters(
@@ -46,13 +52,4 @@ object TestDomainParameters {
     requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
     protocolVersion = ProtocolVersion.current,
   )
-
-  val defaultDynamic: DynamicDomainParameters = DynamicDomainParameters(
-    participantResponseTimeout = DynamicDomainParameters.defaultParticipantResponseTimeout,
-    mediatorReactionTimeout = DynamicDomainParameters.defaultMediatorReactionTimeout,
-    transferExclusivityTimeout = DynamicDomainParameters.defaultTransferExclusivityTimeout,
-    topologyChangeDelay = DynamicDomainParameters.defaultTopologyChangeDelay,
-    ledgerTimeRecordTimeTolerance = DynamicDomainParameters.defaultLedgerTimeRecordTimeTolerance,
-  )
-
 }

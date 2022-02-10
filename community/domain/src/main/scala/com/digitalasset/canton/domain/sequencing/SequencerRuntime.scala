@@ -16,10 +16,10 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.admin.v0.{
   SequencerAdministrationServiceGrpc,
+  SequencerVersionServiceGrpc,
   TopologyBootstrapServiceGrpc,
 }
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.api.v0.SequencerVersionServiceGrpc
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.{
   SequencerAuthenticationServerInterceptor,
@@ -340,7 +340,7 @@ class SequencerRuntime(
     register(
       SequencerVersionServiceGrpc
         .bindService(
-          new GrpcSequencerVersionService(staticDomainParameters.protocolVersion),
+          new GrpcSequencerVersionService(staticDomainParameters.protocolVersion, loggerFactory),
           executionContext,
         )
     )
@@ -408,8 +408,10 @@ class SequencerRuntime(
     import scala.jdk.CollectionConverters._
 
     register(
-      v0.SequencerVersionServiceGrpc
-        .bindService(new GrpcSequencerVersionService(staticDomainParameters.protocolVersion), ec)
+      SequencerVersionServiceGrpc.bindService(
+        new GrpcSequencerVersionService(staticDomainParameters.protocolVersion, loggerFactory),
+        ec,
+      )
     )
 
     register(

@@ -6,16 +6,29 @@ package com.digitalasset.canton.admin.api.client.data
 import java.time.Instant
 import cats.syntax.either._
 import cats.syntax.traverse._
+
+import com.daml.ledger.api.v1.admin.user_management_service.Right.Kind
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.participant.admin.{v0 => participantAdminV0}
+import com.daml.ledger.api.v1.admin.user_management_service.{
+  ListUsersResponse => ProtoListUsersResponse,
+  Right => ProtoUserRight,
+  User => ProtoLedgerApiUser,
+}
+import com.daml.ledger.api.v1.admin.metering_report_service.{
+  GetMeteringReportResponse,
+  ParticipantMeteringReport,
+  ApplicationMeteringReport => ProtoApplicationMeteringReport,
+}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.{DomainAlias, DomainId, ProtoDeserializationError}
+import com.digitalasset.canton.{DomainAlias, DomainId, LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 /** A tagged class used to return exported private keys */
@@ -272,6 +285,103 @@ object ListConnectedDomainsResult {
       domainId = domainId,
       healthy = healthy,
     )
+
+  }
+}
+
+case class LedgerApiUser(id: String, primaryParty: Option[LfPartyId])
+
+object LedgerApiUser {
+  def fromProtoV0(
+      value: ProtoLedgerApiUser
+  ): ParsingResult[LedgerApiUser] = {
+    val ProtoLedgerApiUser(id, primaryParty) = value
+    Option
+      .when(primaryParty.nonEmpty)(primaryParty)
+      .traverse(LfPartyId.fromString)
+      .leftMap { err =>
+        ProtoDeserializationError.ValueConversionError("primaryParty", err)
+      }
+      .map { primaryPartyO =>
+        LedgerApiUser(id, primaryPartyO)
+      }
+  }
+}
+
+case class UserRights(actAs: Set[LfPartyId], readAs: Set[LfPartyId], participantAdmin: Boolean)
+object UserRights {
+  def fromProtoV0(
+      values: Seq[ProtoUserRight]
+  ): ParsingResult[UserRights] = {
+    Right(values.map(_.kind).foldLeft(UserRights(Set(), Set(), false)) {
+      case (acc, Kind.Empty) => acc
+      case (acc, Kind.ParticipantAdmin(value)) => acc.copy(participantAdmin = true)
+      case (acc, Kind.CanActAs(value)) =>
+        acc.copy(actAs = acc.actAs + LfPartyId.assertFromString(value.party))
+      case (acc, Kind.CanReadAs(value)) =>
+        acc.copy(readAs = acc.readAs + LfPartyId.assertFromString(value.party))
+    })
+  }
+}
+
+case class ListLedgerApiUsersResult(users: Seq[LedgerApiUser], nextPageToken: String)
+
+object ListLedgerApiUsersResult {
+  def fromProtoV0(
+      value: ProtoListUsersResponse,
+      filterUser: String,
+  ): ParsingResult[ListLedgerApiUsersResult] = {
+    val ProtoListUsersResponse(protoUsers, nextPageToken) = value
+    protoUsers.traverse(LedgerApiUser.fromProtoV0).map { users =>
+      ListLedgerApiUsersResult(users.filter(_.id.startsWith(filterUser)), nextPageToken)
+    }
+  }
+}
+
+case class ApplicationMeteringReport(applicationId: String, eventCount: Long)
+
+object ApplicationMeteringReport {
+  def fromProtoV0(
+      value: ProtoApplicationMeteringReport
+  ): ParsingResult[ApplicationMeteringReport] = {
+    val ProtoApplicationMeteringReport(applicationId, eventCount) = value
+    Right(ApplicationMeteringReport(applicationId, eventCount))
+  }
+}
+
+case class LedgerMeteringReport(
+    from: CantonTimestamp,
+    to: CantonTimestamp,
+    reports: Seq[ApplicationMeteringReport],
+)
+
+object LedgerMeteringReport {
+
+  def fromProtoV0(
+      value: GetMeteringReportResponse
+  ): ParsingResult[LedgerMeteringReport] = {
+    val GetMeteringReportResponse(requestO, participantReportO, reportGenerationTimeO) = value
+
+    for {
+      request <- ProtoConverter.required("request", requestO)
+      from <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoPrimitive,
+        "requestfrom",
+        request.from,
+      )
+      participantReport <- ProtoConverter.required("participantReport", participantReportO)
+      ParticipantMeteringReport(
+        _,
+        toActualP,
+        reportsP,
+      ) = participantReport
+      toActual <- ProtoConverter.parseRequired(
+        CantonTimestamp.fromProtoPrimitive,
+        "participantReport.toActual",
+        toActualP,
+      )
+      reports <- reportsP.traverse(ApplicationMeteringReport.fromProtoV0)
+    } yield LedgerMeteringReport(from, toActual, reports)
 
   }
 }

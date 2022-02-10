@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerServiceGrpc.SequencerServiceStub
-import com.digitalasset.canton.domain.api.v0.SequencerVersionServiceGrpc.SequencerVersionServiceStub
+import com.digitalasset.canton.domain.api.v0.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -49,7 +49,7 @@ class GrpcSequencerClientTransport(
     extends SequencerClientTransport
     with NamedLogging {
 
-  private val versionServiceClient = new SequencerVersionServiceStub(channel)
+  private val sequencerConnectServiceClient = new SequencerConnectServiceStub(channel)
   private val sequencerServiceClient = clientAuth(new SequencerServiceStub(channel))
   private val noLoggingShutdownErrorsLogPolicy: GrpcError => TracedLogger => TraceContext => Unit =
     err =>
@@ -70,7 +70,7 @@ class GrpcSequencerClientTransport(
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
     for {
       responseP <- CantonGrpcUtil
-        .sendGrpcRequest(versionServiceClient, "sequencer")(
+        .sendGrpcRequest(sequencerConnectServiceClient, "sequencer")(
           _.handshake(request.toProtoV0),
           requestDescription = "handshake",
           logger = logger,

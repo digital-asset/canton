@@ -87,7 +87,7 @@ case class TestingTopology(
       DynamicDomainParameters.WithValidity(
         validFrom = CantonTimestamp.Epoch,
         validUntil = None,
-        parameters = TestDomainParameters.defaultDynamic,
+        parameters = DefaultTestIdentities.defaultDynamicDomainParameters,
       )
     ),
 ) {
@@ -285,7 +285,7 @@ class TestingIdentityFactory(
   private def domainParametersChangeTx(ts: CantonTimestamp): DynamicDomainParameters =
     dynamicDomainParameters.collect { case dp if dp.isValidAt(ts) => dp.parameters } match {
       case dp :: Nil => dp
-      case Nil => TestDomainParameters.defaultDynamic
+      case Nil => DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
       case _ => throw new IllegalStateException(s"Multiple domain parameters are valid at $ts")
     }
 
@@ -475,25 +475,29 @@ class TestingOwnerWithKeys(
       )
     )
 
+    private val defaultDomainParameters = TestDomainParameters.defaultDynamic
+
     val dpc1 = mkDmGov(
       DomainParametersChange(
         DomainId(uid),
-        TestDomainParameters.defaultDynamic
-          .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
+        defaultDomainParameters.copy(participantResponseTimeout =
+          NonNegativeFiniteDuration.ofSeconds(1)
+        ),
       ),
       namespaceKey,
     )
     val dpc1Updated = mkDmGov(
       DomainParametersChange(
         DomainId(uid),
-        TestDomainParameters.defaultDynamic
-          .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2)),
+        defaultDomainParameters.copy(participantResponseTimeout =
+          NonNegativeFiniteDuration.ofSeconds(2)
+        ),
       ),
       namespaceKey,
     )
 
     val dpc2 =
-      mkDmGov(DomainParametersChange(DomainId(uid2), TestDomainParameters.defaultDynamic), key2)
+      mkDmGov(DomainParametersChange(DomainId(uid2), defaultDomainParameters), key2)
   }
 
   def mkTrans[Op <: TopologyChangeOp](
@@ -605,4 +609,6 @@ object DefaultTestIdentities {
   val (participant2, party2) = createParticipantAndParty(2)
   val (participant3, party3) = createParticipantAndParty(3)
 
+  val defaultDynamicDomainParameters =
+    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
 }

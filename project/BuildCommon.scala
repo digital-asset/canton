@@ -138,6 +138,7 @@ object BuildCommon {
   def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): Unit = {
     import scala.sys.process.Process
     val processLogger = new DamlPlugin.BufferedLogger
+    log.debug(s"Running ${command}")
     val exitCode = Process(command) ! processLogger
     if (exitCode != 0) {
       log.error(processLogger.output())

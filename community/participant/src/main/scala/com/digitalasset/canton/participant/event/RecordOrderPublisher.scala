@@ -109,7 +109,9 @@ class RecordOrderPublisher(
   )(implicit traceContext: TraceContext): Future[Unit] =
     if (eventO.isEmpty && updateO.isEmpty) Future.unit
     else {
-      logger.debug(s"Schedule publication of event with request counter $requestCounter")
+      logger.debug(
+        s"Schedule publication for request counter $requestCounter: event = ${eventO.isDefined}, causality update = ${updateO.isDefined}"
+      )
       for {
         _unit <- eventO.fold(
           // There is no [[TimestampedEvent]], so this publication represents a transfer

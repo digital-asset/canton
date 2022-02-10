@@ -25,7 +25,10 @@ class TopologyChangeOpTest extends AnyWordSpec with BaseTest with HasExecutionCo
     addSignedTx.reverse.asInstanceOf[SignedTopologyTransaction[Remove]]
 
   private lazy val replaceSignedTx: SignedTopologyTransaction[Replace] = factory.mkDmGov(
-    DomainParametersChange(DomainId(uid), TestDomainParameters.defaultDynamic),
+    DomainParametersChange(
+      DomainId(uid),
+      TestDomainParameters.defaultDynamic,
+    ),
     factory.SigningKeys.key1,
   )
 

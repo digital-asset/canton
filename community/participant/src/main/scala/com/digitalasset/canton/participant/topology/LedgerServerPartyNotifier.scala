@@ -217,7 +217,7 @@ class LedgerServerPartyNotifier(
         logger.debug(show"Pushing ${metadata.partyId} on ${targetParticipantId} to ledger server")
         val event = LedgerSyncEvent.PartyAddedToParticipant(
           metadata.partyId.toLf,
-          metadata.displayName.map(_.unwrap).getOrElse(metadata.partyId.uid.id.unwrap),
+          metadata.displayName.map(_.unwrap).getOrElse(""),
           targetParticipantId.toLf,
           ParticipantEventPublisher.now.toLf,
           LedgerSubmissionId.fromString(metadata.submissionId).toOption,

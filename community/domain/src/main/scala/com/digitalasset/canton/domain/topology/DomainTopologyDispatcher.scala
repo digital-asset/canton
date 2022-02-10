@@ -488,7 +488,7 @@ object DomainTopologyDispatcher {
 
   }
 
-  def flushSequencerWithTimeProof(
+  private def flushSequencerWithTimeProof(
       timeTracker: DomainTimeTracker,
       targetClient: DomainTopologyClient,
   )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] = for {

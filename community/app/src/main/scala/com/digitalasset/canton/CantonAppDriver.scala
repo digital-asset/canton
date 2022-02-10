@@ -8,7 +8,7 @@ import cats.data.NonEmptyList
 import cats.syntax.either._
 import ch.qos.logback.classic.{Logger, LoggerContext}
 import ch.qos.logback.core.status.{ErrorStatus, Status, StatusListener, WarnStatus}
-import com.digitalasset.canton.cli.{Cli, Command}
+import com.digitalasset.canton.cli.{Cli, Command, LogFileAppender}
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.{CantonConfig, ConfigErrors, Generate}
 import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
@@ -33,11 +33,6 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
   // properties being considered
   val cliOptions = Cli.parse(args).getOrElse(sys.exit(1))
   cliOptions.installLogging()
-  if (!cliOptions.logFileAppend && cliOptions.logFileRolling) {
-    logger.warn(
-      "Ignoring log file truncation request, as it only works with flat log files, but here we use rolling log files."
-    )
-  }
 
   // Fail, if the log configuration cannot be read.
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -70,6 +65,16 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
     }
 
   logger.info(s"Starting Canton version ${ReleaseVersion.current}")
+  if (cliOptions.logTruncate) {
+    cliOptions.logFileAppender match {
+      case LogFileAppender.Rolling =>
+        logger.warn(
+          "Ignoring log file truncation request, as it only works with flat log files, but here we use rolling log files."
+        )
+      case LogFileAppender.Flat =>
+      case LogFileAppender.Off =>
+    }
+  }
 
   // Now that at least one line has been logged, deregister the killingStatusManager so that
   // Canton does not die on a warning status.

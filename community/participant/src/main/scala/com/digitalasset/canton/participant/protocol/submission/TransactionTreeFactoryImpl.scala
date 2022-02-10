@@ -496,7 +496,8 @@ class TransactionTreeFactoryImpl(
                   checked(trySuffixNode(state)(nodeId -> lfNode))
                 ) match {
                   case None => // LookupByKey node
-                    val _ = resolvedKeysInCore.getOrElseUpdate(gk, FreeKey(maintainers))
+                    val _ =
+                      resolvedKeysInCore.getOrElseUpdate(gk, FreeKey(maintainers)(lfNode.version))
                     val previous = resolvedKeysInView.getOrElseUpdate(gk, None)
                     previous.foreach { coid =>
                       // TODO(M40) This check does not detect when an earlier create node has assigned the key
@@ -508,7 +509,8 @@ class TransactionTreeFactoryImpl(
                     val someCid = Some(cid)
                     // Could be a contract created in the same view, so DAMLe will resolve that itself
                     if (!createdInView.contains(cid)) {
-                      val _ = resolvedKeysInCore.getOrElseUpdate(gk, AssignedKey(cid))
+                      val _ =
+                        resolvedKeysInCore.getOrElseUpdate(gk, AssignedKey(cid)(lfNode.version))
                       val previous = resolvedKeysInView.getOrElseUpdate(gk, someCid)
                       if (!previous.contains(cid)) {
                         addToDivergingKeys(gk, Set(previous, someCid))

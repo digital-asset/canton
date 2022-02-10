@@ -15,7 +15,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.tracing.TraceContext
@@ -100,7 +100,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       new InMemoryStoreWithTimeAdvancement(loggerFactory) // allows setting time advancements
     val writerStore = SequencerWriterStore.singleInstance(store)
     val clock = new SimClock(loggerFactory = loggerFactory)
-    val signingTolerance = NonNegativeFiniteDuration.ofSeconds(30)
+
+    val domainParameters = DynamicDomainParameters.initialValues(clock)
     val eventSignaller = new MockEventSignaller
 
     // explicitly pass a real execution context so shutdowns don't deadlock while Await'ing completion of the done
@@ -110,7 +111,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         SequencerWriterSource(
           testWriterConfig,
           highAvailabilityConfig,
-          TestDomainParameters.domainSyncCryptoApi(DefaultTestIdentities.domainId, loggerFactory),
+          TestDomainParameters.domainSyncCryptoApi(
+            DefaultTestIdentities.domainId,
+            loggerFactory,
+            clock,
+          ),
           writerStore,
           clock,
           eventSignaller,
@@ -236,9 +241,13 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   "signing tolerance" should {
-    def sendWithSigningTimestamp(nowish: CantonTimestamp, signingTimestamp: CantonTimestamp)(
-        implicit env: Env
-    ): Future[StoreEvent[Payload]] = {
+    def sendWithSigningTimestamp(
+        nowish: CantonTimestamp,
+        validSigningTimestamp: CantonTimestamp,
+        invalidSigningTimestamp: CantonTimestamp,
+    )(implicit
+        env: Env
+    ): Future[Seq[StoreEvent[Payload]]] = {
       import env._
 
       clock.advanceTo(nowish)
@@ -250,27 +259,44 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           messageId1,
           Set.empty,
           payload1,
-          Some(signingTimestamp),
+          Some(validSigningTimestamp),
+        )
+        deliver2 = DeliverStoreEvent.ensureSenderReceivesEvent(
+          aliceId,
+          messageId2,
+          Set.empty,
+          payload1,
+          Some(invalidSigningTimestamp),
         )
         _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver1))
+        _ = offerDeliverOrFail(Presequenced.alwaysValid(deliver2))
         _ <- completeFlow()
         events <- store.readEvents(aliceId)
       } yield {
-        events should have size (1)
-        events.headOption.map(_.event).value
+        events should have size (2)
+        events.map(_.event)
       }
     }
 
     "cause errors if way ahead of valid signing window" in withEnv() { implicit env =>
-      import env._
       val nowish = CantonTimestamp.Epoch.plusSeconds(10)
-      val signingTimestamp =
-        nowish.plusSeconds((signingTolerance.toScala * 2).toSeconds)
+
+      // upper bound is inclusive
+      val margin = NonNegativeFiniteDuration.ofMillis(1)
+      val validSigningTimestamp = nowish
 
       for {
-        event <- sendWithSigningTimestamp(nowish, signingTimestamp)
+        events <- sendWithSigningTimestamp(
+          nowish,
+          validSigningTimestamp = validSigningTimestamp,
+          invalidSigningTimestamp = validSigningTimestamp + margin,
+        )
       } yield {
-        inside(event) { case DeliverErrorStoreEvent(_, `messageId1`, message, _) =>
+        inside(events(0)) { case event: DeliverStoreEvent[Payload] =>
+          event.messageId shouldBe messageId1
+        }
+
+        inside(events(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
           message should (include("Invalid signing timestamp")
             and include("The signing timestamp must be before or at "))
         }
@@ -280,13 +306,23 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     "cause errors if way behind the valid signing window" in withEnv() { implicit env =>
       import env._
       val nowish = CantonTimestamp.Epoch.plusSeconds(60)
-      val signingTimestamp =
-        nowish.minusSeconds((signingTolerance.toScala * 2).toSeconds)
+
+      // lower bound is exclusive
+      val margin = NonNegativeFiniteDuration.ofMillis(1)
+      val invalidSigningTimestamp = nowish - domainParameters.sequencerSigningTolerance
 
       for {
-        event <- sendWithSigningTimestamp(nowish, signingTimestamp)
+        events <- sendWithSigningTimestamp(
+          nowish,
+          validSigningTimestamp = invalidSigningTimestamp + margin,
+          invalidSigningTimestamp = invalidSigningTimestamp,
+        )
       } yield {
-        inside(event) { case DeliverErrorStoreEvent(_, `messageId1`, message, _) =>
+        inside(events(0)) { case event: DeliverStoreEvent[Payload] =>
+          event.messageId shouldBe messageId1
+        }
+
+        inside(events(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
           message should (include("Invalid signing timestamp")
             and include("The signing timestamp must be strictly after "))
         }

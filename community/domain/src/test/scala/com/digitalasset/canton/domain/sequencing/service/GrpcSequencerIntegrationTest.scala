@@ -65,14 +65,14 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
     with Matchers {
   implicit val actorSystem = AkkaUtil.createActorSystem("GrpcSequencerIntegrationTest")
   val sequencer = mock[Sequencer]
-  val participant = ParticipantId("testing")
-  val domainId = DefaultTestIdentities.domainId
-  val cryptoApi =
+  private val participant = ParticipantId("testing")
+  private val domainId = DefaultTestIdentities.domainId
+  private val cryptoApi =
     TestingTopology().withParticipants(participant).build().forOwnerAndDomain(participant, domainId)
-  val clock = new SimClock(loggerFactory = loggerFactory)
-  val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
+  private val clock = new SimClock(loggerFactory = loggerFactory)
+  private val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
   def timeouts = DefaultProcessingTimeouts.testing
-  val service =
+  private val service =
     new GrpcSequencerService(
       sequencer,
       DomainTestMetrics.sequencer,
@@ -95,10 +95,14 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
       NonNegativeInt.tryCreate(10000000),
       timeouts,
     )
-  val versionService = new GrpcSequencerVersionService(
-    TestDomainParameters.defaultStatic.protocolVersion
+  private val connectService = new GrpcSequencerConnectService(
+    domainId = domainId,
+    staticDomainParameters = TestDomainParameters.defaultStatic,
+    cryptoApi = cryptoApi,
+    loggerFactory = loggerFactory,
   )
-  val authService = new SequencerAuthenticationService {
+
+  private val authService = new SequencerAuthenticationService {
     override def challenge(request: v0.Challenge.Request): Future[v0.Challenge.Response] =
       for {
         fingerprints <- cryptoApi.ips.currentSnapshotApproximation
@@ -129,19 +133,19 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         )
       )
   }
-  val serverPort = UniquePortGenerator.forDomainTests.next
+  private val serverPort = UniquePortGenerator.forDomainTests.next
   logger.debug(s"Using port ${serverPort} for integration test")
-  val server = NettyServerBuilder
+  private val server = NettyServerBuilder
     .forPort(serverPort.unwrap)
-    .addService(v0.SequencerVersionServiceGrpc.bindService(versionService, ec))
+    .addService(v0.SequencerConnectServiceGrpc.bindService(connectService, ec))
     .addService(v0.SequencerServiceGrpc.bindService(service, ec))
     .addService(v0.SequencerAuthenticationServiceGrpc.bindService(authService, ec))
     .build()
     .start()
 
-  val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
-  val sendTrackerStore = new InMemorySendTrackerStore()
-  val connection =
+  private val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
+  private val sendTrackerStore = new InMemorySendTrackerStore()
+  private val connection =
     GrpcSequencerConnection(NonEmptyList.one(Endpoint("localhost", serverPort)), false, None)
 
   val client = Await

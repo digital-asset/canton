@@ -215,12 +215,6 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
       maxRetries: Int,
   )(implicit traceContext: TraceContext): Future[A]
 
-  protected[canton] def runWriteUnsafe[A](
-      action: DbAction.All[A],
-      operationName: String,
-      maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A]
-
   /** Read-only query, possibly transactional */
   def query[A](
       action: DbAction.ReadTransactional[A],
@@ -288,17 +282,6 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
   )(implicit traceContext: TraceContext): Future[A] =
     runWrite(action, operationName, maxRetries)
 
-  /** Write action that is executed on the generalDb without explicit write locking.
-    * In an HA setup, this generally leads to a better performance,
-    * but it may occur that this method still writes to the db shortly after the node has become passive.
-    * Use this method only if you are sure that this cannot corrupt the database.
-    */
-  def queryAndUpdateUnsafe[A](
-      action: DBIOAction[A, NoStream, Effect.All],
-      operationName: String,
-      maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext): Future[A] =
-    runWriteUnsafe(action, operationName, maxRetries)
 }
 
 object DbStorage {

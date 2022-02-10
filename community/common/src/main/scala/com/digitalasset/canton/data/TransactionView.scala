@@ -554,8 +554,8 @@ case class ViewParticipantData private (
         )
         val templateId = inputContract.contract.contractInstance.unversioned.template
         val cmd = if (byKey) {
-          val key = inputContract.contract.metadata.maybeKeyWithMaintainers
-            .map(_.globalKey.key)
+          val key = inputContract.contract.metadata.maybeKey
+            .map(_.key)
             .getOrElse(
               throw InvalidViewParticipantData(
                 "Flag byKey set on an exercise of a contract without key."
@@ -586,8 +586,8 @@ case class ViewParticipantData private (
         )
         val templateId = inputContract.contract.contractInstance.unversioned.template
         val cmd = if (byKey) {
-          val key = inputContract.contract.metadata.maybeKeyWithMaintainers
-            .map(_.globalKey.key)
+          val key = inputContract.contract.metadata.maybeKey
+            .map(_.key)
             .getOrElse(
               throw InvalidViewParticipantData(
                 "Flag byKey set on a fetch of a contract without key."
@@ -626,7 +626,7 @@ case class ViewParticipantData private (
       coreInputs = coreInputs.values.map(_.toProtoV0).toSeq,
       createdCore = createdCore.map(_.toProtoV0),
       archivedFromSubviews = archivedFromSubviews.toSeq.map(_.toProtoPrimitive),
-      resolvedKeys = resolvedKeys.toList.map { case (k, cid) => ResolvedKey(k, cid).toProtoV0 },
+      resolvedKeys = resolvedKeys.toList.map { case (k, res) => ResolvedKey(k, res).toProtoV0 },
       actionDescription = Some(actionDescription.toProtoV0),
       rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV0),
       salt = Some(salt.toProtoV0),

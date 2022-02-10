@@ -551,13 +551,12 @@ class CantonSyncService(
             .leftMap[SubmissionResult] {
               case IdentityManagerParentError(e) if e.code == MappingAlreadyExists =>
                 reject(
-                  show"The party $partyId is already allocated on this node",
+                  show"Party already exists: party $partyId is already allocated on this node",
                   SubmissionResult.Acknowledged,
                 )
               case IdentityManagerParentError(e) =>
                 reject(e.cause, SubmissionResult.Acknowledged)
               case e =>
-                logger.debug(s"BAAH $e")
                 reject(e.toString, TransactionError.internalError(e.toString))
             }
 
@@ -580,7 +579,7 @@ class CantonSyncService(
 
       result.fold(
         l => {
-          logger.warn(
+          logger.info(
             s"Failed to allocate party $partyName::${participantId.uid.namespace}: ${l.toString}"
           )
           l

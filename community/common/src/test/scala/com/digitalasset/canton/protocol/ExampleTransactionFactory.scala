@@ -13,6 +13,7 @@ import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.{
   ValueContractId,
@@ -92,6 +93,12 @@ object ExampleTransactionFactory {
 
   val veryDeepContractInstance: LfContractInst =
     LfContractInst(templateId, veryDeepVersionedValue, "")
+
+  def globalKeyWithMaintainers(
+      key: LfGlobalKey = defaultGlobalKey,
+      maintainers: Set[LfPartyId] = Set.empty,
+  ): Versioned[LfGlobalKeyWithMaintainers] =
+    LfVersioned(transactionVersion, LfGlobalKeyWithMaintainers(key, maintainers))
 
   def fetchNode(
       cid: LfContractId,
@@ -268,7 +275,9 @@ object ExampleTransactionFactory {
       ContractMetadata.tryCreate(
         node.signatories,
         node.stakeholders,
-        node.key.map(LfTransactionUtil.tryGlobalKeyWithMaintainers(node.templateId, _)),
+        node.key.map(
+          LfTransactionUtil.tryGlobalKeyWithMaintainers(node.templateId, _, node.version)
+        ),
       ),
     )
 

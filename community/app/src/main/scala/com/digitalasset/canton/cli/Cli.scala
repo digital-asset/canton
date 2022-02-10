@@ -9,6 +9,19 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.buildinfo.BuildInfo
 import scopt.OptionParser
 
+sealed trait LogFileAppender
+object LogFileAppender {
+  object Rolling extends LogFileAppender
+  object Flat extends LogFileAppender
+  object Off extends LogFileAppender
+}
+
+sealed trait LogEncoder
+object LogEncoder {
+  object Plain extends LogEncoder
+  object Json extends LogEncoder
+}
+
 /** CLI Options
   * @param configFiles Configuration files to load
   * @param command Command specification to perform a particular action
@@ -23,12 +36,12 @@ case class Cli(
     levelRoot: Option[Level] = None,
     levelCanton: Option[Level] = None,
     levelStdout: Level = Level.WARN,
-    logFileRolling: Boolean = true,
+    logFileAppender: LogFileAppender = LogFileAppender.Rolling,
     logFileRollingPattern: Option[String] = None,
     logFileHistory: Option[Int] = None,
-    logFileAppend: Boolean = true,
+    logTruncate: Boolean = false,
     logFileName: Option[String] = None,
-    logFormatJson: Boolean = false,
+    logEncoder: LogEncoder = LogEncoder.Plain,
     logLastErrors: Boolean = true,
     logLastErrorsFileName: Option[String] = None,
     logImmediateFlush: Option[Boolean] = None,
@@ -53,7 +66,7 @@ case class Cli(
 
     setLevel(Some(levelStdout), "LOG_LEVEL_STDOUT")
 
-    System.setProperty("LOG_FILE_APPEND", logFileAppend.toString)
+    System.setProperty("LOG_FILE_APPEND", (!logTruncate).toString)
 
     Seq(
       "LOG_FILE_FLAT",
@@ -70,14 +83,22 @@ case class Cli(
     logLastErrorsFileName.foreach(System.setProperty("LOG_LAST_ERRORS_FILE_NAME", _))
     logFileHistory.foreach(x => System.setProperty("LOG_FILE_HISTORY", x.toString))
     logFileRollingPattern.foreach(System.setProperty("LOG_FILE_ROLLING_PATTERN", _))
-    if (logFileRolling)
-      System.setProperty("LOG_FILE_ROLLING", "true").discard
-    else
-      System.setProperty("LOG_FILE_FLAT", "true").discard
+    logFileAppender match {
+      case LogFileAppender.Rolling =>
+        System.setProperty("LOG_FILE_ROLLING", "true").discard
+      case LogFileAppender.Flat =>
+        System.setProperty("LOG_FILE_FLAT", "true").discard
+      case LogFileAppender.Off =>
+    }
     if (logLastErrors)
       System.setProperty("LOG_LAST_ERRORS", "true").discard
-    if (logFormatJson)
-      System.setProperty("LOG_FORMAT_JSON", "true").discard
+
+    logEncoder match {
+      case LogEncoder.Plain =>
+      case LogEncoder.Json =>
+        System.setProperty("LOG_FORMAT_JSON", "true").discard
+    }
+
     logImmediateFlush.foreach(f => System.setProperty("LOG_IMMEDIATE_FLUSH", f.toString))
   }
 
@@ -172,7 +193,7 @@ object Cli {
 
     opt[Unit]("log-truncate")
       .text("Truncate log file on startup.")
-      .action((_, cli) => cli.copy(logFileAppend = false))
+      .action((_, cli) => cli.copy(logTruncate = true))
 
     implicit val levelRead: scopt.Read[Level] = scopt.Read.reads(Level.valueOf)
     opt[Level]("log-level-root")
@@ -195,9 +216,9 @@ object Cli {
       .valueName("rolling(default)|flat|off>")
       .action((typ, cli) =>
         typ.toLowerCase match {
-          case "rolling" => cli.copy(logFileRolling = true)
-          case "off" => cli.copy(logFileAppend = false)
-          case "flat" => cli.copy(logFileRolling = false)
+          case "rolling" => cli.copy(logFileAppender = LogFileAppender.Rolling)
+          case "off" => cli.copy(logFileAppender = LogFileAppender.Off)
+          case "flat" => cli.copy(logFileAppender = LogFileAppender.Flat)
           case _ =>
             throw new IllegalArgumentException(
               s"Invalid command line argument: unknown log-file-appender $typ"
@@ -220,8 +241,8 @@ object Cli {
     opt[String]("log-encoder")
       .text("Log encoder: plain|json")
       .action {
-        case ("json", cli) => cli.copy(logFormatJson = true)
-        case ("plain", cli) => cli
+        case ("json", cli) => cli.copy(logEncoder = LogEncoder.Json)
+        case ("plain", cli) => cli.copy(logEncoder = LogEncoder.Plain)
         case (other, _) => throw new IllegalArgumentException(s"Unsupported logging encoder $other")
       }
 
@@ -240,7 +261,7 @@ object Cli {
         profile.toLowerCase match {
           case "container" =>
             cli.copy(
-              logFileRolling = true,
+              logFileAppender = LogFileAppender.Rolling,
               logFileHistory = Some(10),
               logFileRollingPattern = Some("yyyy-MM-dd-HH"),
               levelStdout = Level.DEBUG,

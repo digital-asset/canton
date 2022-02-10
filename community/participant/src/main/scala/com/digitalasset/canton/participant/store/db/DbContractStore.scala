@@ -364,18 +364,10 @@ class DbContractStore(
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[Unit] = {
-
-    // Why "queryAndUpdateUnsafe"?
-    // - As these queries cause heavy load, they would cause a congestion in the writeDb.
-    //   Therefore, they should be executed on the readDb.
-    // - Contracts won't be deleted as part of crash recovery. So this won't interfere with crash recovery.
-    // - It won't interfere with pruning, because pruning does only delete contracts created by clean requests and
-    //   this method will only write contracts from dirty requests.
-    // - TODO(M40): Double check whether it is still sound to go through the general db.
     elements.traverse_ { element =>
       val contract = fn(element)
       storage
-        .queryAndUpdateUnsafe(contractInsert(contract), functionFullName)
+        .queryAndUpdate(contractInsert(contract), functionFullName)
         .map { affectedRowsCount =>
           if (affectedRowsCount > 0)
             cache.put(contract.contractId, Future(Option(contract)))

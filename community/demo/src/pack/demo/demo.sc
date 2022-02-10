@@ -35,7 +35,7 @@ val location = sys.env.getOrElse("DEMO_ROOT", "demo")
 val noPhoneHome = sys.env.keys.exists(_ == "NO_PHONE_HOME")
 
 // start all nodes before starting the ui (the ui requires this)
-val (maxWaitForPruning, bankingConnection, medicalConnection) = (ReferenceDemoScript.computeMaxWaitForPruning(medical.config.domainParameters), banking.sequencerConnection, medical.sequencerConnection)
+val (maxWaitForPruning, bankingConnection, medicalConnection) = (ReferenceDemoScript.computeMaxWaitForPruning, banking.sequencerConnection, medical.sequencerConnection)
 val loggerFactory = consoleEnvironment.environment.loggerFactory
 
 val script = new ReferenceDemoScript(participants.all,

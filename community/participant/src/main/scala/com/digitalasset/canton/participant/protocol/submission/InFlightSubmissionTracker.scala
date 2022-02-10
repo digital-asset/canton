@@ -384,7 +384,6 @@ class InFlightSubmissionTracker(
       EventLogId.forDomain(multiDomainEventLog.indexedStringStore)(domainId).flatMap { eventLogId =>
         localOffsets
           .traverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
-            // TODO(#6301) batch the query
             multiDomainEventLog.globalOffsetFor(eventLogId, localOffset).map { optPublicationInfo =>
               optPublicationInfo.map { case (globalOffset, publicationTime) =>
                 val info = inFlight.referenceBySequencingInfo

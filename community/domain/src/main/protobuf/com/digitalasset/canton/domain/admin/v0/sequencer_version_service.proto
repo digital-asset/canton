@@ -3,10 +3,9 @@
 
 syntax = "proto3";
 
-package com.digitalasset.canton.domain.api.v0;
+package com.digitalasset.canton.domain.admin.v0;
 
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
-
 
 // Service allowing a Domain node to initialize the sequencer instance.
 // Should typically only be exposed to the domain node and not all clients

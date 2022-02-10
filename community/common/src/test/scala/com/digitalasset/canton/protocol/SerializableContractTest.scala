@@ -24,8 +24,12 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
       val metadata = ContractMetadata.tryCreate(
         signatories = Set(alice),
         stakeholders = Set(alice, bob),
-        maybeKeyWithMaintainers =
-          Some(LfGlobalKeyWithMaintainers(LfGlobalKey(templateId, Value.ValueUnit), Set(alice))),
+        maybeKeyWithMaintainers = Some(
+          ExampleTransactionFactory.globalKeyWithMaintainers(
+            LfGlobalKey(templateId, Value.ValueUnit),
+            Set(alice),
+          )
+        ),
       )
 
       val sci = ExampleTransactionFactory.asSerializable(

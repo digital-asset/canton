@@ -12,10 +12,11 @@ import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
 import com.digitalasset.canton.demo.Step.{Action, Noop}
 import com.digitalasset.canton.demo.model.{ai => ME, doctor => M}
-import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -541,7 +542,14 @@ class ReferenceDemoScript(
 }
 
 object ReferenceDemoScript {
-  def computeMaxWaitForPruning(parameters: DomainParametersConfig): Duration =
-    parameters.mediatorReactionTimeout.unwrap.plus(parameters.participantResponseTimeout.unwrap)
+  def computeMaxWaitForPruning: Duration = {
+    val defaultDynamicDomainParameters = DynamicDomainParameters.initialValues(topologyChangeDelay =
+      NonNegativeFiniteDuration.ofMillis(250)
+    )
+    val mediatorReactionTimeout = defaultDynamicDomainParameters.mediatorReactionTimeout
+    val participantResponseTimeout = defaultDynamicDomainParameters.participantResponseTimeout
+
+    mediatorReactionTimeout.unwrap.plus(participantResponseTimeout.unwrap)
+  }
 
 }
