@@ -13,8 +13,9 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class MediatorTest extends AnyWordSpec with BaseTest {
   def parametersWith(participantResponseTimeout: NonNegativeFiniteDuration) =
-    TestDomainParameters.defaultDynamic
-      .copy(participantResponseTimeout = participantResponseTimeout)
+    TestDomainParameters.defaultDynamic.copy(participantResponseTimeout =
+      participantResponseTimeout
+    )
 
   val defaultTimeout = NonNegativeFiniteDuration.ofSeconds(10)
   val defaultParameters = parametersWith(defaultTimeout)

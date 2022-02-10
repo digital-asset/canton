@@ -8,7 +8,7 @@ import cats.syntax.either._
 import com.daml.lf.data._
 import com.daml.lf.transaction.{Node, TransactionVersion}
 import com.daml.lf.value.Value
-import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.{LfPartyId, LfValue, LfVersioned}
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol._
 
@@ -48,17 +48,21 @@ object LfTransactionUtil {
       LfGlobalKeyWithMaintainers(LfGlobalKey(templateId, value), keyWithMaintainers.maintainers)
     )
 
-  /** Convert `keyWithMaintainers` to a [[com.digitalasset.canton.protocol.package.LfGlobalKeyWithMaintainers]], throwing an
+  /** Convert `keyWithMaintainers` to a versioned [[com.digitalasset.canton.protocol.package.LfGlobalKeyWithMaintainers]], throwing an
     * [[java.lang.IllegalArgumentException]] if `keyWithMaintainers` has a key
     * that contains a contract ID.
     */
   def tryGlobalKeyWithMaintainers(
       templateId: LfTemplateId,
       keyWithMaintainers: LfKeyWithMaintainers,
-  ): LfGlobalKeyWithMaintainers =
-    LfGlobalKeyWithMaintainers(
-      LfGlobalKey(templateId, assertNoContractIdInKey(keyWithMaintainers.key)),
-      keyWithMaintainers.maintainers,
+      version: LfTransactionVersion,
+  ): LfVersioned[LfGlobalKeyWithMaintainers] =
+    LfVersioned(
+      version,
+      LfGlobalKeyWithMaintainers(
+        LfGlobalKey(templateId, assertNoContractIdInKey(keyWithMaintainers.key)),
+        keyWithMaintainers.maintainers,
+      ),
     )
 
   def fromGlobalKeyWithMaintainers(global: LfGlobalKeyWithMaintainers): LfKeyWithMaintainers =
@@ -77,7 +81,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nf.signatories,
               nf.stakeholders,
-              nf.key.map(k => tryGlobalKeyWithMaintainers(nf.templateId, k)),
+              nf.key.map(tryGlobalKeyWithMaintainers(nf.templateId, _, nf.version)),
             ),
           )
         )
@@ -89,7 +93,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nx.signatories,
               nx.stakeholders,
-              nx.key.map(tryGlobalKeyWithMaintainers(nx.templateId, _)),
+              nx.key.map(tryGlobalKeyWithMaintainers(nx.templateId, _, nx.version)),
             ),
           )
         )
@@ -101,7 +105,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nl.keyMaintainers,
               nl.keyMaintainers,
-              Some(tryGlobalKeyWithMaintainers(nl.templateId, nl.key)),
+              Some(tryGlobalKeyWithMaintainers(nl.templateId, nl.key, nl.version)),
             ),
           )
         )
@@ -138,7 +142,7 @@ object LfTransactionUtil {
             ContractMetadata.tryCreate(
               nc.signatories,
               nc.stakeholders,
-              nc.key.map(tryGlobalKeyWithMaintainers(nc.coinst.template, _)),
+              nc.key.map(tryGlobalKeyWithMaintainers(nc.coinst.template, _, nc.version)),
             ),
           )
         )
@@ -310,6 +314,11 @@ object LfTransactionUtil {
     checkNoContractIdInKey(key).valueOr(cid =>
       throw new IllegalArgumentException(s"Key contains contract Id $cid")
     )
+
+  def checkNoContractIdInKey(
+      key: LfVersioned[LfValue]
+  ): Either[LfContractId, LfVersioned[LfValue]] =
+    checkNoContractIdInKey(key.unversioned).map(LfVersioned(key.version, _))
 
   /** Given internally consistent transactions, compute their consumed contract ids. */
   def consumedContractIds(transactions: Iterable[LfVersionedTransaction]): Set[LfContractId] =

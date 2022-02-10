@@ -7,12 +7,76 @@ import ammonite.interp.Interpreter
 import ammonite.runtime.Frame
 import ammonite.util.Res.{Exception, Failing, Failure, Success}
 import ammonite.util._
+import com.digitalasset.canton.console.HeadlessConsole.{
+  HeadlessConsoleError,
+  convertAmmoniteResult,
+  createInterpreter,
+  initializePredef,
+  runCode,
+}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
 import os.PathConvertible._
+import cats.syntax.either._
 
 import java.io.File
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import scala.util.Try
+
+class HeadlessConsole(
+    consoleEnvironment: ConsoleEnvironment,
+    transformer: Main => Main = identity,
+    logger: TracedLogger,
+) extends AutoCloseable {
+
+  val (lock, baseOptions) =
+    AmmoniteConsoleConfig.create(
+      consoleEnvironment.environment.config.parameters.console,
+      predefCode = "",
+      welcomeBanner = None,
+      isRepl = false,
+      logger,
+    )
+
+  private val interpreterO = new AtomicReference[Option[Interpreter]](None)
+  private val currentLine = new AtomicInteger(10000000)
+
+  def init(): Either[HeadlessConsoleError, Unit] = {
+    val options = transformer(baseOptions)
+    for {
+      interpreter <- Try(createInterpreter(options)).toEither.leftMap(e =>
+        HeadlessConsole.RuntimeError("Failed to initialize console", e)
+      )
+      _ <- initializePredef(interpreter, consoleEnvironment.bindings.toIndexedSeq, logger)
+    } yield {
+      interpreterO.set(Some(interpreter))
+    }
+  }
+
+  def runModule(code: String, path: Option[File] = None): Either[HeadlessConsoleError, Unit] =
+    for {
+      interpreter <- interpreterO
+        .get()
+        .toRight(HeadlessConsole.CompileError("Interpreter is not initialized"))
+      _ <- runCode(interpreter, code, path, logger)
+    } yield ()
+
+  def runLine(line: String): Either[HeadlessConsoleError, Unit] = for {
+    interpreter <- interpreterO
+      .get()
+      .toRight(HeadlessConsole.CompileError("Interpreter is not initialized"))
+    _ <- convertAmmoniteResult(
+      interpreter
+        .processExec(line, currentLine.incrementAndGet(), () => ()),
+      logger,
+    )
+  } yield ()
+
+  override def close(): Unit = {
+    lock.release()
+  }
+}
 
 /** Creates an interpreter but with matching bindings to the InteractiveConsole for running scripts non-interactively
   */
@@ -37,33 +101,21 @@ object HeadlessConsole extends NoTracing {
     }
   }
 
-  def apply(
+  def run(
       consoleEnvironment: ConsoleEnvironment,
       code: String,
       path: Option[File] = None,
       transformer: Main => Main = identity,
       logger: TracedLogger,
   ): Either[HeadlessConsoleError, Unit] = {
-
-    val (lock, baseOptions) =
-      AmmoniteConsoleConfig.create(
-        consoleEnvironment.environment.config.parameters.console,
-        predefCode = "",
-        welcomeBanner = None,
-        isRepl = false,
-        logger,
-      )
-
-    val options = transformer(baseOptions)
-
+    val console = new HeadlessConsole(consoleEnvironment, transformer, logger)
     try {
-      val interpreter = createInterpreter(options)
       for {
-        _ <- initializePredef(interpreter, consoleEnvironment.bindings.toIndexedSeq, logger)
-        _ <- runCode(interpreter, code, path, logger)
+        _ <- console.init()
+        _ <- console.runModule(code, path)
       } yield ()
     } finally {
-      lock.release()
+      console.close()
     }
   }
 
@@ -130,7 +182,8 @@ object HeadlessConsole extends NoTracing {
       logger: TracedLogger,
   ): Either[HeadlessConsoleError, Unit] =
     result match {
-      case Success(_) => Right(())
+      case Success(_) =>
+        Right(())
       case failing: Failing => Left(convertAmmoniteError(failing, logger))
       case unexpected =>
         logger.error("Unexpected result from ammonite: {}", unexpected)

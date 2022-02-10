@@ -372,6 +372,8 @@ class SuppressingLogger private[logging] (
   def pollRecordedLogEntry(timeout: FiniteDuration = pollTimeout): Option[LogEntry] =
     Option(recordedLogEntries.poll(timeout.length, timeout.unit))
 
+  def fetchRecordedLogEntries: Seq[LogEntry] = recordedLogEntries.asScala.toSeq
+
   /** Use this only in very early stages of development.
     * Try to use [[assertLogs]] instead which lets you specify the specific messages that you expected to suppress.
     * This avoids the risk of hiding unrelated warnings and errors.

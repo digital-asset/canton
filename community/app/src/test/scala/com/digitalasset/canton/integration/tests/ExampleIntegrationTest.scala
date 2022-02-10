@@ -28,6 +28,7 @@ abstract class ExampleIntegrationTest(configPaths: File*)
     extends CommunityIntegrationTest
     with IsolatedCommunityEnvironments
     with HasConsoleScriptRunner {
+
   override lazy val environmentDefinition: CommunityEnvironmentDefinition =
     CommunityEnvironmentDefinition
       .fromFiles(configPaths: _*)

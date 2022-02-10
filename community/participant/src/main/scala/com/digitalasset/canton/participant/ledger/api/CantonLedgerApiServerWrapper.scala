@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.implicits._
 import com.codahale.metrics.SharedMetricRegistries
+import com.daml.api.util.TimeProvider
 import com.daml.caching
 import com.daml.ledger.api.health.HealthChecks
 import com.daml.ledger.api.v1.experimental_features.{
@@ -295,6 +296,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                 PersistentUserManagementStore.cached(
                   dbSupport = dbSupport,
                   metrics = metrics,
+                  timeProvider = TimeProvider.UTC,
                   cacheExpiryAfterWriteInSeconds =
                     config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
                   maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,

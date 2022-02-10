@@ -132,7 +132,7 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       val errorStream = new ByteArrayOutputStream()
 
       // run headless but direct stderr to a captured stream
-      val result = HeadlessConsole(
+      val result = HeadlessConsole.run(
         consoleEnvironment,
         input,
         path = None,

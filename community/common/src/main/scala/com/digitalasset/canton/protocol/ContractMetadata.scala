@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
@@ -24,7 +25,7 @@ import com.digitalasset.canton.{LfPartyId, checked}
 case class ContractMetadata private (
     signatories: Set[LfPartyId],
     stakeholders: Set[LfPartyId],
-    maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
+    maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
 ) extends HasVersionedWrapper[VersionedContractMetadata]
     with HasProtoV0[v0.SerializableContract.Metadata]
     with PrettyPrinting {
@@ -40,6 +41,9 @@ case class ContractMetadata private (
       )
   }
 
+  def maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers] =
+    maybeKeyWithMaintainersVersioned.map(_.unversioned)
+
   def maybeKey: Option[LfGlobalKey] = maybeKeyWithMaintainers.map(_.globalKey)
 
   def maintainers: Set[LfPartyId] =
@@ -52,7 +56,11 @@ case class ContractMetadata private (
     v0.SerializableContract.Metadata(
       nonMaintainerSignatories = (signatories -- maintainers).toList,
       nonSignatoryStakeholders = (stakeholders -- signatories).toList,
-      key = maybeKey.map(GlobalKeySerialization.assertToProto),
+      key = maybeKeyWithMaintainersVersioned.map(x =>
+        GlobalKeySerialization.assertToProto(
+          x.map(keyWithMaintainers => keyWithMaintainers.globalKey)
+        )
+      ),
       maintainers = maintainers.toSeq,
     )
   }
@@ -76,21 +84,21 @@ object ContractMetadata
   private def apply(
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
-      maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
+      maybeKeyWithMaintainers: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
   ): ContractMetadata =
     throw new UnsupportedOperationException("Use the other factory methods instead")
 
   def tryCreate(
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
-      maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
+      maybeKeyWithMaintainers: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
   ): ContractMetadata =
     new ContractMetadata(signatories, stakeholders, maybeKeyWithMaintainers)
 
   def create(
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],
-      maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers],
+      maybeKeyWithMaintainers: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
   ): Either[String, ContractMetadata] =
     Either
       .catchOnly[InvalidContractMetadata](
@@ -127,7 +135,7 @@ object ContractMetadata
       _ <- Either.cond(maintainersList.isEmpty || keyO.isDefined, (), FieldNotSet("Metadata.key"))
     } yield {
       val maintainers = maintainersList.toSet
-      val keyWithMaintainersO = keyO.map(key => LfGlobalKeyWithMaintainers(key, maintainers))
+      val keyWithMaintainersO = keyO.map(_.map(LfGlobalKeyWithMaintainers(_, maintainers)))
       val signatories = maintainers ++ nonMaintainerSignatories.toSet
       val stakeholders = signatories ++ nonSignatoryStakeholders.toSet
       checked(ContractMetadata.tryCreate(signatories, stakeholders, keyWithMaintainersO))

@@ -17,9 +17,8 @@ class ContractMetadataTest extends AnyWordSpec with BaseTest {
             Set.empty,
             Set(ExampleTransactionFactory.submitter),
             Some(
-              LfGlobalKeyWithMaintainers(
-                ExampleTransactionFactory.defaultGlobalKey,
-                Set(ExampleTransactionFactory.submitter),
+              ExampleTransactionFactory.globalKeyWithMaintainers(
+                maintainers = Set(ExampleTransactionFactory.submitter)
               )
             ),
           )
@@ -44,9 +43,8 @@ class ContractMetadataTest extends AnyWordSpec with BaseTest {
           ExampleTransactionFactory.observer,
         ),
         Some(
-          LfGlobalKeyWithMaintainers(
-            ExampleTransactionFactory.defaultGlobalKey,
-            Set(ExampleTransactionFactory.submitter),
+          ExampleTransactionFactory.globalKeyWithMaintainers(
+            maintainers = Set(ExampleTransactionFactory.submitter)
           )
         ),
       )

@@ -40,12 +40,6 @@ class DbStorageSingle private (
       maxRetries: Int,
   )(implicit traceContext: TraceContext): Future[A] = run(operationName, maxRetries)(db.run(action))
 
-  override protected[canton] def runWriteUnsafe[A](
-      action: DbAction.All[A],
-      operationName: String,
-      maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] = runWrite(action, operationName, maxRetries)
-
   override def onClosed(): Unit = {
     db.close()
   }

@@ -51,14 +51,15 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
   private lazy val factory = new ExampleTransactionFactory()(domainId = domainId)
   private lazy val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
   private lazy val alwaysReadyCheck = MediatorReadyCheck.alwaysReady(loggerFactory)
+
+  private lazy val initialDomainParameters = TestDomainParameters.defaultDynamic
+
   private lazy val defaultDynamicDomainParameters: List[DynamicDomainParameters.WithValidity] =
     List(
       DynamicDomainParameters.WithValidity(
         CantonTimestamp.Epoch,
         None,
-        TestDomainParameters.defaultDynamic.copy(participantResponseTimeout =
-          participantResponseTimeout
-        ),
+        initialDomainParameters.copy(participantResponseTimeout = participantResponseTimeout),
       )
     )
 
@@ -197,14 +198,16 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         DynamicDomainParameters.WithValidity(
           CantonTimestamp.Epoch,
           Some(CantonTimestamp.ofEpochSecond(5)),
-          TestDomainParameters.defaultDynamic
-            .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(4)),
+          initialDomainParameters.copy(participantResponseTimeout =
+            NonNegativeFiniteDuration.ofSeconds(4)
+          ),
         ),
         DynamicDomainParameters.WithValidity(
           CantonTimestamp.ofEpochSecond(5),
           None,
-          TestDomainParameters.defaultDynamic
-            .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(6)),
+          initialDomainParameters.copy(participantResponseTimeout =
+            NonNegativeFiniteDuration.ofSeconds(6)
+          ),
         ),
       )
 

@@ -6,8 +6,10 @@ package com.digitalasset.canton.domain.sequencing.admin.client
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.admin.v0.SequencerInitializationServiceGrpc
-import com.digitalasset.canton.domain.api.v0.SequencerVersionServiceGrpc
+import com.digitalasset.canton.domain.admin.v0.{
+  SequencerInitializationServiceGrpc,
+  SequencerVersionServiceGrpc,
+}
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

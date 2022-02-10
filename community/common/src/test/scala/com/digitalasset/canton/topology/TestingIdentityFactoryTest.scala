@@ -14,7 +14,7 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoError,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
@@ -42,7 +42,7 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
   private val domainParameters1 = DynamicDomainParameters.WithValidity(
     CantonTimestamp.Epoch,
     Some(CantonTimestamp.ofEpochSecond(10)),
-    increaseParticipantResponseTimeout(TestDomainParameters.defaultDynamic),
+    increaseParticipantResponseTimeout(defaultDynamicDomainParameters),
   )
 
   private val domainParameters2 = DynamicDomainParameters.WithValidity(
@@ -137,7 +137,7 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
 
         val transitionTs = domainParameters1.validUntil.value
 
-        getParameters(CantonTimestamp.Epoch) shouldBe TestDomainParameters.defaultDynamic
+        getParameters(CantonTimestamp.Epoch) shouldBe defaultDynamicDomainParameters
         getParameters(transitionTs.minusMillis(1)) shouldBe domainParameters1.parameters
 
         getParameters(transitionTs) shouldBe domainParameters1.parameters // validFrom is exclusive

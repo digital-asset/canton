@@ -115,17 +115,7 @@ class DbSequencedEventStore(
     else
       processingTime.metric.event {
         withLock(
-          // Uses queryAndUpdateUnsafe because
-          // - SimpleDBIO has Effect.All
-          // - This is executed in a bottleneck. It runs much faster, if it runs on the general db.
-          // - It is sound to run it on the general db, because we trust the sequencer to always deliver the same event for
-          //   a given sequencer counter and the query is therefore idempotent.
-          //
-          // - Caveat: if the passive participant is executing this query while the active participant is unignoring
-          //   events, we may end up with gaps in sequencer counters. So in the long run, it would be better to go back
-          //   to queryAndUpdate.
-          //
-          storage.queryAndUpdateUnsafe(bulkInsertQuery(events), functionFullName).void,
+          storage.queryAndUpdate(bulkInsertQuery(events), functionFullName).void,
           functionFullName,
         )
       }

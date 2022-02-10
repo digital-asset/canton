@@ -13,7 +13,7 @@ import com.daml.lf.engine._
 import com.daml.lf.interpretation.{Error => LfInterpretationError}
 import com.daml.lf.language.Ast.Package
 import com.daml.lf.transaction.Versioned
-import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfPartyId, LfVersioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -58,7 +58,11 @@ object DAMLe {
               )
         )
         .map(safeKeyWithMaintainers =>
-          ContractMetadata.tryCreate(signatories, stakeholders, safeKeyWithMaintainers)
+          ContractMetadata.tryCreate(
+            signatories,
+            stakeholders,
+            safeKeyWithMaintainers.map(LfVersioned(instance.version, _)),
+          )
         )
     }
   }

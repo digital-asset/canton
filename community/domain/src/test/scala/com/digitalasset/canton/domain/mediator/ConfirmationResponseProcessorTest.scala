@@ -51,6 +51,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
   private val notSignificantCounter: SequencerCounter = 0L
 
+  private val initialDomainParameters = TestDomainParameters.defaultDynamic
+
   val participantResponseTimeout = NonNegativeFiniteDuration.ofMillis(100L)
 
   "ConfirmationResponseProcessor" should {
@@ -80,8 +82,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     val identityFactory = TestingIdentityFactory(
       topology,
       loggerFactory,
-      dynamicDomainParameters = TestDomainParameters.defaultDynamic
-        .copy(participantResponseTimeout = participantResponseTimeout),
+      dynamicDomainParameters =
+        initialDomainParameters.copy(participantResponseTimeout = participantResponseTimeout),
     )
 
     val domainSyncCryptoApi: DomainSyncCryptoClient =
@@ -160,7 +162,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       Set(mediatorId),
     )
     lazy val identityFactory2 =
-      TestingIdentityFactory(topology2, loggerFactory, TestDomainParameters.defaultDynamic)
+      TestingIdentityFactory(topology2, loggerFactory, initialDomainParameters)
     lazy val domainSyncCryptoApi2: DomainSyncCryptoClient =
       identityFactory2.forOwnerAndDomain(SequencerId(domainId), domainId)
 
@@ -241,9 +243,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
       val mockTopologySnapshot = mock[TopologySnapshot]
       when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
-        .thenReturn(
-          Future.successful(TestDomainParameters.defaultDynamic)
-        )
+        .thenReturn(Future.successful(initialDomainParameters))
 
       when(mockSnapshot.verifySignature(any[Hash], any[KeyOwner], any[Signature]))
         .thenReturn(EitherT.rightT(()))
@@ -326,7 +326,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val identityFactory3 = TestingIdentityFactory(
         topology3,
         loggerFactory,
-        dynamicDomainParameters = TestDomainParameters.defaultDynamic,
+        dynamicDomainParameters = initialDomainParameters,
       )
       val domainSyncCryptoApi3 = identityFactory3.forOwnerAndDomain(mediatorId, domainId)
       val sut = new Fixture(domainSyncCryptoApi3)

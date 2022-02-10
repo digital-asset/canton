@@ -419,10 +419,7 @@ class DbActiveContractStore(
     }
     EitherT.right(
       for {
-        // It is safe to run this prune query as unsafe on the general executor because it is idempotent and we do not
-        // want it to unnecessarily lock for other queries interacting with the active contracts table, particularly
-        // when running in HA mode
-        nrPruned <- storage.queryAndUpdateUnsafe(query, functionFullName)
+        nrPruned <- storage.queryAndUpdate(query, functionFullName)
       } yield {
         logger.info(
           s"Pruned at least $nrPruned entries from the ACS of domain $domainId older or equal to $beforeAndIncluding"

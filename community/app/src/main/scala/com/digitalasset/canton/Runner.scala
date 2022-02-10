@@ -179,7 +179,7 @@ object ConsoleScriptRunner extends NoTracing {
     for {
       scriptCode <- cantonScript.read()
 
-      _ <- HeadlessConsole(
+      _ <- HeadlessConsole.run(
         consoleEnvironment,
         scriptCode,
         cantonScript.path,

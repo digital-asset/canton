@@ -23,9 +23,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.{
   DomainServiceGrpc,
   SequencerInitializationServiceGrpc,
+  SequencerVersionServiceGrpc,
 }
 import com.digitalasset.canton.domain.admin.{grpc => admingrpc}
-import com.digitalasset.canton.domain.api.v0.SequencerVersionServiceGrpc
 import com.digitalasset.canton.domain.config._
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.initialization.{
@@ -57,7 +57,7 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
-import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.resource.{CommunityStorageFactory, Storage, StorageFactory}
 import com.digitalasset.canton.sequencing.client.{grpc => _, _}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
@@ -138,7 +138,7 @@ class DomainNodeBootstrap(
         initialized <- initializeTopologyManagerIdentity(
           name,
           legalIdentityHook,
-          config.domainParameters.toDynamicDomainParameters,
+          DynamicDomainParameters.initialValues(clock),
         )
         (nodeId, topologyManager, ns) = initialized
         domainId = DomainId(nodeId.identity)
@@ -291,7 +291,7 @@ class DomainNodeBootstrap(
   ): EitherT[Future, String, Unit] =
     for {
       versionService <- EitherT.rightT[Future, String](
-        new GrpcSequencerVersionService(protocolVersion)
+        new GrpcSequencerVersionService(protocolVersion, loggerFactory)
       )
       initializationService = new GrpcSequencerInitializationService(
         SequencerKeyInitialization.ensureKeyExists(crypto),
@@ -302,9 +302,7 @@ class DomainNodeBootstrap(
         .addService(
           SequencerInitializationServiceGrpc.bindService(initializationService, executionContext)
         )
-        .addService(
-          SequencerVersionServiceGrpc.bindService(versionService, executionContext)
-        )
+        .addService(SequencerVersionServiceGrpc.bindService(versionService, executionContext))
     } yield ()
 
   override protected def initialize(id: NodeId): EitherT[Future, String, Unit] = {

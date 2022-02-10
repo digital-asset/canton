@@ -4,7 +4,6 @@
 package com.digitalasset.canton.config
 
 import cats.data.{Validated, ValidatedNel}
-import cats.syntax.traverse._
 import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
@@ -22,15 +21,7 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
   type Validation = CantonCommunityConfig => ValidatedNel[String, Unit]
 
   override protected val validations: List[Validation] =
-    List[Validation](
-      noDuplicateStorage,
-      atLeastOneNode,
-    ) ++ genericValidations[CantonCommunityConfig]
-
-  private[config] def genericValidations[C <: CantonConfig]: List[C => ValidatedNel[String, Unit]] =
-    List(
-      failOnSimClockWithNonZeroTopologyChangeDelay
-    )
+    List[Validation](noDuplicateStorage, atLeastOneNode)
 
   /** Group node configs by db access to find matching db storage configs.
     * Overcomplicated types used are to work around that at this point nodes could have conflicting names so we can't just
@@ -102,29 +93,6 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
           Validated.invalidNel(s"Nodes ${formatNodeList(nodes)} share same DB access: $dbAccess")
         case _ => Validated.validNel(())
       }
-  }
-
-  private def failOnSimClockWithNonZeroTopologyChangeDelay(
-      config: CantonConfig
-  ): ValidatedNel[String, Unit] = {
-    def check(str: String): ValidatedNel[String, Unit] = {
-      config.domains.values.toList
-        .traverse { domain =>
-          Validated.condNel(domain.domainParameters.topologyChangeDelay.duration.isZero, (), str)
-        }
-        .map(_ => ())
-    }
-    (config.parameters.nonStandardConfig, config.parameters.clock) match {
-      case (true, _) | (_, ClockConfig.WallClock(_)) => Valid
-      case (_, ClockConfig.SimClock) =>
-        check(
-          "Using sim-clock with non-zero topology-change-delay requires non-standard config mode."
-        )
-      case (_, ClockConfig.RemoteClock(_)) =>
-        check(
-          "Using remote-clock with non-zero topology-change-delay requires non-standard config mode."
-        )
-    }
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))

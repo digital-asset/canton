@@ -5,10 +5,10 @@ package com.digitalasset.canton.console
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Future, TimeUnit}
-
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.util.ErrorUtil
 import org.scalactic.source
 import org.scalatest.Assertion
 import org.scalatest.Inspectors._
@@ -29,6 +29,18 @@ class TestConsoleOutput(override val loggerFactory: NamedLoggerFactory)
     new java.util.concurrent.LinkedBlockingQueue[String]()
 
   private val recording: AtomicBoolean = new AtomicBoolean(false)
+
+  def startRecording(): Unit = {
+    ErrorUtil.requireArgument(!recording.getAndSet(true), "already recording!")
+    messageQueue.clear()
+  }
+
+  def stopRecording(): Seq[String] = {
+    ErrorUtil.requireArgument(recording.getAndSet(false), "have not been recording!")
+    val ret = messageQueue.asScala.toList
+    messageQueue.clear()
+    ret
+  }
 
   override def info(message: String): Unit = {
     if (recording.get())

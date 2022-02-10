@@ -41,6 +41,7 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{
+  DynamicDomainParameters,
   RequestAndRootHashMessage,
   RequestId,
   RootHash,
@@ -58,7 +59,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
-import com.digitalasset.canton.time.{DomainTimeTracker, WallClock}
+import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
 import com.google.protobuf.ByteString
@@ -121,7 +122,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val requestSc = 0L
   private val resultSc = 1L
   private val rc = 0L
-  private val parameters = TestDomainParameters.defaultDynamic
+  private val parameters = DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
 
   private type TestInstance =
     ProtocolProcessor[
@@ -350,7 +351,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val crypto2 = TestingIdentityFactory(
         TestingTopology(mediators = Set.empty),
         loggerFactory,
-        TestDomainParameters.defaultDynamic,
+        parameters,
       ).forOwnerAndDomain(participant, domain)
       val (sut, persistent, ephemeral) = testProcessingSteps(crypto = crypto2)
       val res = sut.submit(1).value.futureValue

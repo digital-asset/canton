@@ -12,6 +12,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   OtherError,
   ValueDeserializationError,
 }
+import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.LfHashSyntax._
@@ -222,12 +223,13 @@ object ActionDescription {
           version <- lfVersionfromProtoVersioned(versionP)
         } yield FetchActionDescription(inputContractId, actors, byKey, version)
 
-      case LookupByKey(v0.ActionDescription.LookupByKeyActionDescription(keyP, versionP)) =>
+      case LookupByKey(v0.ActionDescription.LookupByKeyActionDescription(keyP)) =>
         for {
-          key <- ProtoConverter.required("key", keyP).flatMap(GlobalKeySerialization.fromProtoV0)
-          version <- lfVersionfromProtoVersioned(versionP)
+          key <- ProtoConverter
+            .required("key", keyP)
+            .flatMap(GlobalKeySerialization.fromProtoV0(_))
           actionDescription <- LookupByKeyActionDescription
-            .create(key, version)
+            .create(key.unversioned, key.version)
             .leftMap(err => OtherError(err.message))
         } yield actionDescription
 
@@ -402,7 +404,7 @@ object ActionDescription {
 
     private val serializedKey =
       GlobalKeySerialization
-        .toProto(key, version)
+        .toProto(LfVersioned(version, key))
         .valueOr(err => throw InvalidActionDescription(s"Failed to serialize key: $err"))
 
     override def byKey: Boolean = true
@@ -412,8 +414,7 @@ object ActionDescription {
     protected override def toProtoDescription: v0.ActionDescription.Description =
       v0.ActionDescription.Description.LookupByKey(
         v0.ActionDescription.LookupByKeyActionDescription(
-          key = Some(serializedKey),
-          version = version.protoValue,
+          key = Some(serializedKey)
         )
       )
 

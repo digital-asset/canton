@@ -94,7 +94,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
     val metadata00 = ContractMetadata.tryCreate(
       signatories = Set(alice),
       stakeholders = Set(alice),
-      Some(LfGlobalKeyWithMaintainers(key00, Set(alice))),
+      Some(ExampleTransactionFactory.globalKeyWithMaintainers(key00, Set(alice))),
     )
     val metadata1 =
       ContractMetadata.tryCreate(signatories = Set(alice), stakeholders = Set(alice), None)

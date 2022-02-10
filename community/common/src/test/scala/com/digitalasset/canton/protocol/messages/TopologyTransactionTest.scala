@@ -25,6 +25,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
       .signingKey(managerId)
       .futureValue
       .getOrElse(sys.error("no key"))
+  private val defaultDynamicDomainParameters = TestDomainParameters.defaultDynamic
 
   def mk[T <: TopologyStateUpdateMapping](
       mapping: T
@@ -119,10 +120,10 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
     "domain parameters change" should {
       val dmp1 = DomainGovernanceTransaction(
-        DomainParametersChange(DomainId(uid), TestDomainParameters.defaultDynamic)
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)
       )
       val dmp2 = DomainGovernanceTransaction(
-        DomainParametersChange(DomainId(uid), TestDomainParameters.defaultDynamic)
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)
       )
       runTest(dmp1, dmp2)
     }

@@ -24,7 +24,7 @@ message TransferId {
 
 message GlobalKey {
     bytes template_id = 1;
-    bytes key = 2; // TODO(oliver, #2720): change to hash string from value proto serialization which is not stable
+    bytes key = 2;
 }
 
 message SerializableContract {
@@ -311,7 +311,6 @@ message ActionDescription {
 
     message LookupByKeyActionDescription {
         GlobalKey key = 1;
-        string version = 2;
     }
 }
 

@@ -16,6 +16,24 @@ import com.daml.ledger.api.v1.admin.participant_pruning_service.ParticipantPruni
 import com.daml.ledger.api.v1.admin.participant_pruning_service._
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
 import com.daml.ledger.api.v1.admin.party_management_service._
+import com.daml.ledger.api.v1.admin.user_management_service.{
+  CreateUserRequest,
+  CreateUserResponse,
+  DeleteUserRequest,
+  DeleteUserResponse,
+  GrantUserRightsRequest,
+  GrantUserRightsResponse,
+  ListUserRightsRequest,
+  ListUserRightsResponse,
+  ListUsersRequest,
+  ListUsersResponse,
+  RevokeUserRightsRequest,
+  RevokeUserRightsResponse,
+  User,
+  UserManagementServiceGrpc,
+  Right => UserRight,
+}
+import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.daml.ledger.api.v1.command_completion_service.CommandCompletionServiceGrpc.CommandCompletionServiceStub
 import com.daml.ledger.api.v1.command_completion_service._
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandServiceStub
@@ -59,6 +77,12 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.CommandCompletionService.GrpcErrorStatus
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
+import com.digitalasset.canton.admin.api.client.data.{
+  LedgerApiUser,
+  LedgerMeteringReport,
+  ListLedgerApiUsersResult,
+  UserRights,
+}
 import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -70,6 +94,14 @@ import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import com.google.protobuf.empty.Empty
 import io.grpc._
 import io.grpc.stub.StreamObserver
+import cats.syntax.either._
+import com.daml.ledger.api.v1.admin.metering_report_service.{
+  GetMeteringReportRequest,
+  GetMeteringReportResponse,
+  MeteringReportServiceGrpc,
+}
+import com.daml.ledger.api.v1.admin.metering_report_service.MeteringReportServiceGrpc.MeteringReportServiceStub
+import com.digitalasset.canton.data.CantonTimestamp
 
 import java.time.Instant
 import java.util.UUID
@@ -776,6 +808,210 @@ object LedgerApiCommands {
         service.prune(request)
 
       override def handleResponse(response: PruneResponse): Either[String, Unit] = Right(())
+    }
+  }
+
+  object Users {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = UserManagementServiceStub
+
+      override def createService(channel: ManagedChannel): UserManagementServiceStub =
+        UserManagementServiceGrpc.stub(channel)
+    }
+
+    trait HasRights {
+      def actAs: Set[LfPartyId]
+      def readAs: Set[LfPartyId]
+      def participantAdmin: Boolean
+
+      protected def getRights(): Seq[UserRight] = {
+        actAs.toSeq.map(x => UserRight().withCanActAs(UserRight.CanActAs(x))) ++
+          readAs.toSeq.map(x => UserRight().withCanReadAs(UserRight.CanReadAs(x))) ++
+          (if (participantAdmin) Seq(UserRight().withParticipantAdmin(UserRight.ParticipantAdmin()))
+           else Seq())
+      }
+    }
+
+    final case class Create(
+        id: String,
+        actAs: Set[LfPartyId],
+        primaryParty: Option[LfPartyId],
+        readAs: Set[LfPartyId],
+        participantAdmin: Boolean,
+    ) extends BaseCommand[CreateUserRequest, CreateUserResponse, LedgerApiUser]
+        with HasRights {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: CreateUserRequest,
+      ): Future[CreateUserResponse] =
+        service.createUser(request)
+
+      override def createRequest(): Either[String, CreateUserRequest] = Right(
+        CreateUserRequest(
+          user = Some(User(id = id, primaryParty = primaryParty.getOrElse(""))),
+          rights = getRights(),
+        )
+      )
+
+      override def handleResponse(response: CreateUserResponse): Either[String, LedgerApiUser] =
+        ProtoConverter
+          .parseRequired(LedgerApiUser.fromProtoV0, "user", response.user)
+          .leftMap(_.toString)
+
+    }
+
+    final case class Delete(id: String)
+        extends BaseCommand[DeleteUserRequest, DeleteUserResponse, Unit] {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: DeleteUserRequest,
+      ): Future[DeleteUserResponse] =
+        service.deleteUser(request)
+
+      override def createRequest(): Either[String, DeleteUserRequest] = Right(
+        DeleteUserRequest(userId = id)
+      )
+
+      override def handleResponse(response: DeleteUserResponse): Either[String, Unit] = Right(())
+
+    }
+
+    final case class List(filterUser: String, pageToken: String, pageSize: Int)
+        extends BaseCommand[ListUsersRequest, ListUsersResponse, ListLedgerApiUsersResult] {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: ListUsersRequest,
+      ): Future[ListUsersResponse] =
+        service.listUsers(request)
+
+      override def createRequest(): Either[String, ListUsersRequest] = Right(
+        ListUsersRequest(pageToken = pageToken, pageSize = pageSize)
+      )
+
+      override def handleResponse(
+          response: ListUsersResponse
+      ): Either[String, ListLedgerApiUsersResult] =
+        ListLedgerApiUsersResult.fromProtoV0(response, filterUser).leftMap(_.toString)
+
+    }
+
+    object Rights {
+      final case class Grant(
+          id: String,
+          actAs: Set[LfPartyId],
+          readAs: Set[LfPartyId],
+          participantAdmin: Boolean,
+      ) extends BaseCommand[GrantUserRightsRequest, GrantUserRightsResponse, UserRights]
+          with HasRights {
+
+        override def submitRequest(
+            service: UserManagementServiceStub,
+            request: GrantUserRightsRequest,
+        ): Future[GrantUserRightsResponse] =
+          service.grantUserRights(request)
+
+        override def createRequest(): Either[String, GrantUserRightsRequest] = Right(
+          GrantUserRightsRequest(
+            userId = id,
+            rights = getRights(),
+          )
+        )
+
+        override def handleResponse(response: GrantUserRightsResponse): Either[String, UserRights] =
+          UserRights.fromProtoV0(response.newlyGrantedRights).leftMap(_.toString)
+
+      }
+
+      final case class Revoke(
+          id: String,
+          actAs: Set[LfPartyId],
+          readAs: Set[LfPartyId],
+          participantAdmin: Boolean,
+      ) extends BaseCommand[RevokeUserRightsRequest, RevokeUserRightsResponse, UserRights]
+          with HasRights {
+
+        override def submitRequest(
+            service: UserManagementServiceStub,
+            request: RevokeUserRightsRequest,
+        ): Future[RevokeUserRightsResponse] =
+          service.revokeUserRights(request)
+
+        override def createRequest(): Either[String, RevokeUserRightsRequest] = Right(
+          RevokeUserRightsRequest(
+            userId = id,
+            rights = getRights(),
+          )
+        )
+
+        override def handleResponse(
+            response: RevokeUserRightsResponse
+        ): Either[String, UserRights] =
+          UserRights.fromProtoV0(response.newlyRevokedRights).leftMap(_.toString)
+
+      }
+
+      final case class List(id: String)
+          extends BaseCommand[ListUserRightsRequest, ListUserRightsResponse, UserRights] {
+
+        override def submitRequest(
+            service: UserManagementServiceStub,
+            request: ListUserRightsRequest,
+        ): Future[ListUserRightsResponse] =
+          service.listUserRights(request)
+
+        override def createRequest(): Either[String, ListUserRightsRequest] = Right(
+          ListUserRightsRequest(userId = id)
+        )
+
+        override def handleResponse(response: ListUserRightsResponse): Either[String, UserRights] =
+          UserRights.fromProtoV0(response.rights).leftMap(_.toString)
+
+      }
+
+    }
+
+  }
+
+  object Metering {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = MeteringReportServiceStub
+
+      override def createService(channel: ManagedChannel): MeteringReportServiceStub =
+        MeteringReportServiceGrpc.stub(channel)
+    }
+
+    final case class GetReport(
+        from: CantonTimestamp,
+        to: Option[CantonTimestamp],
+        applicationId: Option[String],
+    ) extends BaseCommand[
+          GetMeteringReportRequest,
+          GetMeteringReportResponse,
+          LedgerMeteringReport,
+        ] {
+
+      override def submitRequest(
+          service: MeteringReportServiceStub,
+          request: GetMeteringReportRequest,
+      ): Future[GetMeteringReportResponse] =
+        service.getMeteringReport(request)
+
+      override def createRequest(): Either[String, GetMeteringReportRequest] =
+        Right(
+          GetMeteringReportRequest(
+            from = Some(from.toProtoPrimitive),
+            to = to.map(_.toProtoPrimitive),
+            applicationId = applicationId.getOrElse(""),
+          )
+        )
+
+      override def handleResponse(
+          response: GetMeteringReportResponse
+      ): Either[String, LedgerMeteringReport] =
+        LedgerMeteringReport.fromProtoV0(response).leftMap(_.toString)
     }
   }
 

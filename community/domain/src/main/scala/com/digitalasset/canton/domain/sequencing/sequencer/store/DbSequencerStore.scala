@@ -452,7 +452,7 @@ class DbSequencerStore(
         "insert into sequencer_payloads (id, instance_discriminator, content) values (?, ?, ?)"
 
       storage
-        .queryAndUpdateUnsafe(
+        .queryAndUpdate(
           DbStorage.bulkOperation(insertSql, payloadsToInsert.toList, storage.profile) {
             pp => payload =>
               pp >> payload.id.unwrap
@@ -560,9 +560,6 @@ class DbSequencerStore(
                      |  $postfix
                      |""".stripMargin
 
-    // we really want to make sure that there can be no other writer inserting events with our index
-    // so writes are done using the "safe" connection which is using a lock to ensure it is the only
-    // active writer for that process
     storage.queryAndUpdate(
       DbStorage.bulkOperation_(saveSql, events.toList, storage.profile) { pp => event =>
         setDeliverStoreEventRowParameter(event, pp)

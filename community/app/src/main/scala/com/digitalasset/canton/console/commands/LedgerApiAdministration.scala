@@ -24,6 +24,12 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
+import com.digitalasset.canton.admin.api.client.data.{
+  LedgerApiUser,
+  LedgerMeteringReport,
+  ListLedgerApiUsersResult,
+  UserRights,
+}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
@@ -41,6 +47,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
   RemoteParticipantReference,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.client.DecodeUtil
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.metrics.MetricHandle
@@ -704,6 +711,165 @@ trait BaseLedgerApiAdministration {
               expectedConfigs,
               timeout.asFiniteApproximation,
             )(consoleEnvironment.environment.scheduler)
+          )
+        })
+    }
+
+    @Help.Summary("Manage Ledger Api Users", FeatureFlag.Testing)
+    @Help.Group("Ledger Api Users")
+    object users extends Helpful {
+
+      @Help.Summary("Create a user with the given id", FeatureFlag.Testing)
+      @Help.Description(
+        """Users are used to dynamically managing the rights given to Daml applications. 
+          |They allow us to link a stable local identifier (of an application) with a set of parties.
+          id: the id used to identify the given user 
+          actAs: the set of parties this user is allowed to act as
+          primaryParty: the optional party that should be linked to this user by default
+          readAs: the set of parties this user is allowed to read as
+          participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api 
+          """
+      )
+      def create(
+          id: String,
+          actAs: Set[LfPartyId],
+          primaryParty: Option[LfPartyId] = None,
+          readAs: Set[LfPartyId] = Set(),
+          participantAdmin: Boolean = false,
+      ): LedgerApiUser =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Users.Create(
+              id,
+              actAs,
+              primaryParty,
+              readAs,
+              participantAdmin,
+            )
+          )
+        })
+
+      @Help.Summary("Delete user", FeatureFlag.Testing)
+      @Help.Description("""Delete a user.""")
+      def delete(id: String): Unit =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Users.Delete(
+              id
+            )
+          )
+        })
+
+      @Help.Summary("List users", FeatureFlag.Testing)
+      @Help.Description("""List users of this participant node
+          filterUser: filter results using the given filter string
+          pageToken: used for pagination (the result contains a page token if there are further pages)
+          pageSize: default page size before the filter is applied""")
+      def list(
+          filterUser: String = "",
+          pageToken: String = "",
+          pageSize: Int = 100,
+      ): ListLedgerApiUsersResult =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Users.List(
+              filterUser,
+              pageToken,
+              pageSize,
+            )
+          )
+        })
+
+      @Help.Summary("Manage Ledger Api User Rights", FeatureFlag.Testing)
+      @Help.Group("Ledger Api User Rights")
+      object rights extends Helpful {
+
+        @Help.Summary("Grant new rights to a user", FeatureFlag.Testing)
+        @Help.Description("""Users are used to dynamically managing the rights given to Daml applications. 
+          |This function is used to grant new rights to an existing user.
+          id: the id used to identify the given user 
+          actAs: the set of parties this user is allowed to act as
+          readAs: the set of parties this user is allowed to read as
+          participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api 
+          """)
+        def grant(
+            id: String,
+            actAs: Set[LfPartyId],
+            readAs: Set[LfPartyId] = Set(),
+            participantAdmin: Boolean = false,
+        ): UserRights =
+          check(FeatureFlag.Testing)(consoleEnvironment.run {
+            ledgerApiCommand(
+              LedgerApiCommands.Users.Rights.Grant(
+                id,
+                actAs,
+                readAs,
+                participantAdmin,
+              )
+            )
+          })
+
+        @Help.Summary("Revoke user rights", FeatureFlag.Testing)
+        @Help.Description("""Use to revoke specific rights from a user.           
+          id: the id used to identify the given user 
+          actAs: the set of parties this user should not be allowed to act as
+          readAs: the set of parties this user should not be allowed to read as
+          participantAdmin: if set to true, the participant admin rights will be removed 
+          """)
+        def revoke(
+            id: String,
+            actAs: Set[LfPartyId],
+            readAs: Set[LfPartyId] = Set(),
+            participantAdmin: Boolean = false,
+        ): UserRights =
+          check(FeatureFlag.Testing)(consoleEnvironment.run {
+            ledgerApiCommand(
+              LedgerApiCommands.Users.Rights.Revoke(
+                id,
+                actAs,
+                readAs,
+                participantAdmin,
+              )
+            )
+          })
+
+        @Help.Summary("List rights of a user", FeatureFlag.Testing)
+        @Help.Description("""Lists the rights of a user, or the rights of the current user.""")
+        def list(id: String): UserRights =
+          check(FeatureFlag.Testing)(consoleEnvironment.run {
+            ledgerApiCommand(
+              LedgerApiCommands.Users.Rights.List(
+                id
+              )
+            )
+          })
+
+      }
+
+    }
+
+    @Help.Summary("Retrieve the ledger metering", FeatureFlag.Testing)
+    @Help.Group("Metering")
+    object metering extends Helpful {
+
+      @Help.Summary("Get the ledger metering report", FeatureFlag.Testing)
+      @Help.Description("""Returns the current ledger metering report
+           from: required from timestamp (inclusive)
+           to: optional to timestamp
+           application_id: optional application id to which we want to restrict the report
+          """)
+      def get_report(
+          from: CantonTimestamp,
+          to: Option[CantonTimestamp] = None,
+          applicationId: Option[String] = None,
+      ): LedgerMeteringReport =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Metering.GetReport(
+              from,
+              to,
+              applicationId,
+            )
           )
         })
     }

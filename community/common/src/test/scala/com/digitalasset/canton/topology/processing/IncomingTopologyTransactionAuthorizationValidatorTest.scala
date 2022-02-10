@@ -70,6 +70,8 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val okm1bk5_k1 = mkAdd(OwnerToKeyMapping(participant1, key5), key1)
   val okm1bk5_k4 = mkAdd(OwnerToKeyMapping(participant1, key5), key4)
 
+  val defaultDomainParameters = TestDomainParameters.defaultDynamic
+
   val p1p1B_k2 =
     mkAdd(
       PartyToParticipant(RequestSide.Both, party1b, participant1, ParticipantPermission.Submission),
@@ -87,15 +89,16 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
     )
 
   val dmp1_k2 = mkDmGov(
-    DomainParametersChange(DomainId(uid1a), TestDomainParameters.defaultDynamic),
+    DomainParametersChange(DomainId(uid1a), defaultDomainParameters),
     key2,
   )
 
   val dmp1_k1 = mkDmGov(
     DomainParametersChange(
       DomainId(uid1a),
-      TestDomainParameters.defaultDynamic
-        .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
+      defaultDomainParameters.copy(participantResponseTimeout =
+        NonNegativeFiniteDuration.ofSeconds(1)
+      ),
     ),
     key1,
   )
@@ -103,8 +106,9 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val dmp1_k1_bis = mkDmGov(
     DomainParametersChange(
       DomainId(uid1a),
-      TestDomainParameters.defaultDynamic
-        .copy(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2)),
+      defaultDomainParameters.copy(participantResponseTimeout =
+        NonNegativeFiniteDuration.ofSeconds(2)
+      ),
     ),
     key1,
   )

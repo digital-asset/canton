@@ -633,16 +633,12 @@ trait DomainGovernanceSnapshotLoader extends DomainGovernanceSnapshotClient {
         if (warnOnUsingDefault) {
           logger.warn(s"Un-expectedly using default domain parameters at ${timestamp}")
         }
-        DynamicDomainParameters(
-          participantResponseTimeout = DynamicDomainParameters.defaultParticipantResponseTimeout,
-          mediatorReactionTimeout = DynamicDomainParameters.defaultMediatorReactionTimeout,
-          transferExclusivityTimeout = DynamicDomainParameters.defaultTransferExclusivityTimeout,
+
+        DynamicDomainParameters.initialValues(
           // we must use zero as default change delay parameter, as otherwise static time tests will not work
           // however, once the domain has published the initial set of domain parameters, the zero time will be
           // adjusted.
-          topologyChangeDelay = DynamicDomainParameters.topologyChangeDelayIfAbsent,
-          ledgerTimeRecordTimeTolerance =
-            DynamicDomainParameters.defaultLedgerTimeRecordTimeTolerance,
+          topologyChangeDelay = DynamicDomainParameters.topologyChangeDelayIfAbsent
         )
     }
 

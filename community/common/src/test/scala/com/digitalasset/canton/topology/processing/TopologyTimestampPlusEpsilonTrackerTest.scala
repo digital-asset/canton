@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.DomainParametersChange
@@ -32,7 +32,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       val tx = crypto.mkDmGov(
         DomainParametersChange(
           DefaultTestIdentities.domainId,
-          TestDomainParameters.defaultDynamic.copy(topologyChangeDelay = topologyChangeDelay),
+          DynamicDomainParameters.initialValues(topologyChangeDelay),
         ),
         crypto.SigningKeys.key1,
       )

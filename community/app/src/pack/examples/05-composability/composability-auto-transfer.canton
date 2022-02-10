@@ -1,5 +1,15 @@
 // Composability tutorial part 1 - auto transfers section
 
+// update parameters
+iou.service.update_dynamic_parameters(
+  _.copy(transferExclusivityTimeout = TimeoutDuration.Zero)
+) // disables automatic transfer-in
+
+paint.service.update_dynamic_parameters(
+  _.copy(transferExclusivityTimeout = TimeoutDuration.ofSeconds(2))
+)
+
+// connect participants to the domain
 participant1.domains.connect_local(iou)
 participant2.domains.connect_local(iou)
 participant3.domains.connect_local(iou)

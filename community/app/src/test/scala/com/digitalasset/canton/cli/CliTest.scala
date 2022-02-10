@@ -60,11 +60,11 @@ class CliTest extends AnyWordSpec with BaseTest {
           "--auto-connect-local -C canton.parameters.manual-start=yes --log-truncate --log-level-root=DEBUG --log-level-canton=DEBUG --log-level-stdout=ERROR --log-file-appender=rolling --log-file-name=log/wurst.log --log-file-rolling-history=20 --log-file-rolling-pattern=YYYY-mm-dd-HH --log-last-errors=false"
         )
         val cli = maybeCli.value
-        cli.logFileAppend shouldBe false
+        cli.logFileAppender shouldBe LogFileAppender.Rolling
         cli.levelRoot shouldBe Some(Level.DEBUG)
         cli.levelCanton shouldBe Some(Level.DEBUG)
         cli.levelStdout shouldBe Level.ERROR
-        cli.logFileRolling shouldBe true
+        cli.logTruncate shouldBe true
         cli.logFileName should contain("log/wurst.log")
         cli.logFileHistory should contain(20)
         cli.logFileRollingPattern should contain("YYYY-mm-dd-HH")

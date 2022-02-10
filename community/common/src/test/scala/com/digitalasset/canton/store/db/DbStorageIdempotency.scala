@@ -40,14 +40,5 @@ class DbStorageIdempotency(
       underlying.runWrite(action, operationName + "-2", maxRetries)
     }
 
-  override protected[canton] def runWriteUnsafe[A](
-      action: All[A],
-      operationName: String,
-      maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] =
-    underlying.runWriteUnsafe(action, operationName + "-1", maxRetries).flatMap { _ =>
-      underlying.runWriteUnsafe(action, operationName + "-2", maxRetries)
-    }
-
   override def isActive: Boolean = underlying.isActive
 }

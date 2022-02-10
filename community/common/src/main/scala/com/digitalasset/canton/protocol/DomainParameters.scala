@@ -19,11 +19,16 @@ import com.digitalasset.canton.protocol.version.{
 import com.digitalasset.canton.protocol.{v0 => protoV0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
+import com.digitalasset.canton.time.{
+  Clock,
+  NonNegativeFiniteDuration,
+  PositiveSeconds,
+  RemoteClock,
+  SimClock,
+}
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
 import com.digitalasset.canton.version.ProtocolVersion
 
-import java.time.Duration
 import scala.Ordered.orderingToOrdered
 
 final case class StaticDomainParameters(
@@ -82,9 +87,7 @@ object StaticDomainParameters
   val defaultMaxRatePerParticipant: NonNegativeInt =
     NonNegativeInt.tryCreate(1000000) // yeah, sure.
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
-  val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds(
-    Duration.ofSeconds(60)
-  )
+  val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.ofSeconds(60)
 
   override def fromProtoVersioned(
       domainParametersP: VersionedStaticDomainParameters
@@ -173,6 +176,40 @@ object StaticDomainParameters
   }
 }
 
+/** @param participantResponseTimeout the amount of time (w.r.t. the sequencer clock) that a participant may take
+  *                                   to validate a command and send a response.
+  *                                   Once the timeout has elapsed for a request,
+  *                                   the mediator will discard all responses for that request.
+  *                                   Choose a lower value to reduce the time to reject a command in case one of the
+  *                                   involved participants has high load / operational problems.
+  *                                   Choose a higher value to reduce the likelihood of commands being rejected
+  *                                   due to timeouts.
+  * @param mediatorReactionTimeout the maximum amount of time (w.r.t. the sequencer clock) that the mediator may take
+  *                                to validate the responses for a request and broadcast the result message.
+  *                                The mediator reaction timeout starts when the confirmation response timeout has elapsed.
+  *                                If the mediator does not send a result message within that timeout,
+  *                                participants must rollback the transaction underlying the request.
+  *                                Chooses a lower value to reduce the time to learn whether a command
+  *                                has been accepted.
+  *                                Choose a higher value to reduce the likelihood of commands being rejected
+  *                                due to timeouts.
+  * @param transferExclusivityTimeout this timeout affects who can initiate a transfer-in.
+  *                                   Before the timeout, only the submitter of the transfer-out can initiate the
+  *                                   corresponding transfer-in.
+  *                                   After the timeout, every stakeholder of the contract can initiate a transfer-in,
+  *                                   if it has not yet happened.
+  *                                   Moreover, if this timeout is zero, no automatic transfer-ins will occur.
+  *                                   Choose a low value, if you want to lower the time that contracts can be inactive
+  *                                   due to ongoing transfers.
+  *                                   TODO(andreas): Choosing a high value currently has no practical benefit, but
+  *                                   will have benefits in a future version.
+  * @param topologyChangeDelay determines the offset applied to the topology transactions before they become active,
+  *                            in order to support parallel transaction processing
+  * @param ledgerTimeRecordTimeTolerance the maximum absolute difference between the ledger time and the
+  *                                      record time of a command.
+  *                                      If the absolute difference would be larger for a command,
+  *                                      then the command must be rejected.
+  */
 final case class DynamicDomainParameters(
     participantResponseTimeout: NonNegativeFiniteDuration,
     mediatorReactionTimeout: NonNegativeFiniteDuration,
@@ -258,20 +295,38 @@ object DynamicDomainParameters
    Values should be synced with the CCF ones:
     enterprise/domain/src/main/cpp/canton/domain/canton_domain_parameters.hpp
    */
-  val defaultParticipantResponseTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-    Duration.ofSeconds(10)
-  )
-  val defaultMediatorReactionTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-    Duration.ofSeconds(10)
-  )
-  val defaultTransferExclusivityTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-    Duration.ofSeconds(60)
-  )
-  val defaultTopologyChangeDelay: NonNegativeFiniteDuration =
+  private val defaultParticipantResponseTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(30)
+  private val defaultMediatorReactionTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(30)
+
+  private val defaultTransferExclusivityTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(60)
+
+  private val defaultTopologyChangeDelay: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofMillis(250)
-  val defaultLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-    Duration.ofSeconds(60)
+  private val defaultTopologyChangeDelayNonStandardClock: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.Zero // SimClock, RemoteClock
+
+  private val defaultLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(60)
+
+  def initialValues(topologyChangeDelay: NonNegativeFiniteDuration) = DynamicDomainParameters(
+    participantResponseTimeout = defaultParticipantResponseTimeout,
+    mediatorReactionTimeout = defaultMediatorReactionTimeout,
+    transferExclusivityTimeout = defaultTransferExclusivityTimeout,
+    topologyChangeDelay = topologyChangeDelay,
+    ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
   )
+
+  def initialValues(clock: Clock): DynamicDomainParameters = {
+    val topologyChangeDelay = clock match {
+      case _: RemoteClock | _: SimClock => defaultTopologyChangeDelayNonStandardClock
+      case _ => defaultTopologyChangeDelay
+    }
+
+    initialValues(topologyChangeDelay)
+  }
 
   // if there is no topology change delay defined (or not yet propagated), we'll use this one
   val topologyChangeDelayIfAbsent: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero

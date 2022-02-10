@@ -99,7 +99,7 @@ class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
       for {
         _ <- fixture.notifier.observedF(ts, ts, genTransaction(party1, participant1)).unwrap
         _ <- fixture.notifier.flush()
-      } yield fixture.evaluate(party1, party1.uid.id.unwrap, participant1.uid.toProtoPrimitive)
+      } yield fixture.evaluate(party1, "", participant1.uid.toProtoPrimitive)
     }
 
     "update display names" in {
@@ -135,7 +135,7 @@ class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
         _ <- fixture.notifier.flush()
       } yield fixture.evaluate(
         participant1.adminParty,
-        participant1.adminParty.uid.id.unwrap,
+        "",
         participant1.uid.toProtoPrimitive,
       )
     }
@@ -146,7 +146,7 @@ class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
         _ <- fixture.notifier.observedF(ts, ts, genTransaction(party1, participant1)).unwrap
         _ <- fixture.notifier.observedF(ts, ts, genTransaction(party1, participant2)).unwrap
         _ <- fixture.notifier.flush()
-      } yield fixture.evaluate(party1, party1.uid.id.unwrap, participant1.uid.toProtoPrimitive)
+      } yield fixture.evaluate(party1, "", participant1.uid.toProtoPrimitive)
 
     }
 

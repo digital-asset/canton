@@ -225,9 +225,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
             metadata = ContractMetadata.tryCreate(
               Set.empty,
               Set.empty,
-              Some(
-                LfGlobalKeyWithMaintainers(ExampleTransactionFactory.defaultGlobalKey, Set.empty)
-              ),
+              Some(ExampleTransactionFactory.globalKeyWithMaintainers()),
             ),
           )
 
@@ -236,7 +234,10 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           createdIds = Seq(createdId),
           coreInputs = Map(absoluteId -> usedContract),
           archivedInSubviews = Set(otherAbsoluteId),
-          resolvedKeys = Map(ExampleTransactionFactory.defaultGlobalKey -> AssignedKey(absoluteId)),
+          resolvedKeys = Map(
+            ExampleTransactionFactory.defaultGlobalKey ->
+              AssignedKey(absoluteId)(ExampleTransactionFactory.transactionVersion)
+          ),
         ).value
 
         ViewParticipantData

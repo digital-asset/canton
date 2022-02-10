@@ -12,6 +12,7 @@ import io.circe.Encoder
 import org.slf4j.event.Level
 
 import java.time.{Duration => JDuration}
+import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -76,6 +77,7 @@ case class TimeoutDuration(duration: Duration) {
 }
 
 object TimeoutDuration {
+  val Zero: TimeoutDuration = TimeoutDuration(Duration.Zero)
 
   implicit val timeoutDurationEncoder: Encoder[TimeoutDuration] =
     Encoder[String].contramap(_.unwrap.toString)
@@ -94,6 +96,21 @@ object TimeoutDuration {
 
   def tryFromJavaDuration(duration: java.time.Duration): TimeoutDuration =
     tryFromDuration(Duration.fromNanos(duration.toNanos))
+
+  def ofMillis(millis: Long): TimeoutDuration =
+    TimeoutDuration(Duration(millis, TimeUnit.MILLISECONDS))
+
+  def ofSeconds(secs: Long): TimeoutDuration =
+    TimeoutDuration(Duration(secs, TimeUnit.SECONDS))
+
+  def ofMinutes(minutes: Long): TimeoutDuration =
+    TimeoutDuration(Duration(minutes, TimeUnit.MINUTES))
+
+  def ofHours(hours: Long): TimeoutDuration =
+    TimeoutDuration(Duration(hours, TimeUnit.HOURS))
+
+  def ofDays(days: Long): TimeoutDuration =
+    TimeoutDuration(Duration(days, TimeUnit.DAYS))
 
   /** Very long timeout that is still within the limits of `FiniteDuration`.
     */

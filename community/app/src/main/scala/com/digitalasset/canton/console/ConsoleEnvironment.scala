@@ -19,7 +19,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
-import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Identifier, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ShowUtil._
@@ -540,6 +540,15 @@ object ConsoleEnvironment {
       */
     implicit val toTimeoutDuration: FiniteDuration => TimeoutDuration =
       TimeoutDuration.tryFromDuration(_)
+
+    implicit def toNonNegativeFiniteDuration(timeoutDuration: TimeoutDuration) =
+      timeoutDuration.duration match {
+        case _: duration.Duration.Infinite =>
+          throw new IllegalArgumentException("Expecting finite duration but Infinite found")
+
+        case duration: FiniteDuration =>
+          NonNegativeFiniteDuration(duration.asJavaApproximation)
+      }
 
   }
 
