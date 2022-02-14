@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.integration
 
+import cats.syntax.option._
+import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.{
   CantonCommunityConfig,
   CommunityDbConfig,
@@ -19,6 +21,8 @@ import scala.reflect.ClassTag
 import scala.util.Random
 
 object CommunityConfigTransforms {
+
+  type CommunityConfigTransform = CantonCommunityConfig => CantonCommunityConfig
 
   /** make the ec monitoring just emit debug messages and not warnings */
   def deadlockDetectionAsDebug(config: CantonCommunityConfig): CantonCommunityConfig =
@@ -45,7 +49,7 @@ object CommunityConfigTransforms {
       case x => x
     }
 
-  def ammoniteWithoutConflicts: CantonCommunityConfig => CantonCommunityConfig =
+  def ammoniteWithoutConflicts: CommunityConfigTransform =
     config =>
       config
         .focus(_.parameters.console.cacheDir)
@@ -64,7 +68,7 @@ object CommunityConfigTransforms {
 
   def updateAllDomainConfigs(
       update: (String, CommunityDomainConfig) => CommunityDomainConfig
-  ): CantonCommunityConfig => CantonCommunityConfig =
+  ): CommunityConfigTransform =
     cantonConfig =>
       cantonConfig
         .focus(_.domains)
@@ -72,13 +76,13 @@ object CommunityConfigTransforms {
 
   def updateAllParticipantConfigs(
       update: (String, CommunityParticipantConfig) => CommunityParticipantConfig
-  ): CantonCommunityConfig => CantonCommunityConfig =
+  ): CommunityConfigTransform =
     cantonConfig =>
       cantonConfig
         .focus(_.participants)
         .modify(_.map { case (pName, pConfig) => (pName, update(pName, pConfig)) })
 
-  def uniqueH2DatabaseNames: CantonCommunityConfig => CantonCommunityConfig = {
+  def uniqueH2DatabaseNames: CommunityConfigTransform = {
     updateAllDomainConfigs { case (nodeName, cfg) =>
       cfg.focus(_.storage).modify(CommunityConfigTransforms.withUniqueDbName(nodeName, _))
     } compose updateAllParticipantConfigs { case (nodeName, cfg) =>
@@ -86,4 +90,27 @@ object CommunityConfigTransforms {
     }
   }
 
+  def uniquePorts: CommunityConfigTransform = {
+
+    def nextPort = UniquePortGenerator.forIntegrationTests.next
+
+    val domainUpdate = updateAllDomainConfigs { case (_, config) =>
+      config
+        .focus(_.publicApi.internalPort)
+        .replace(nextPort.some)
+        .focus(_.adminApi.internalPort)
+        .replace(nextPort.some)
+    }
+
+    val participantUpdate = updateAllParticipantConfigs { case (_, config) =>
+      config
+        .focus(_.ledgerApi.internalPort)
+        .replace(nextPort.some)
+        .focus(_.adminApi.internalPort)
+        .replace(nextPort.some)
+    }
+
+    domainUpdate compose participantUpdate
+
+  }
 }

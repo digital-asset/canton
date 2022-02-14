@@ -100,18 +100,32 @@ object BuildCommon {
     buildSettings ++ globalSettings ++ initDevSettings ++ commandAliases
   }
 
-  def mkTestJob(filter: String => Boolean): Def.Initialize[Task[Unit]] = Def.taskDyn {
-    val selectedTestNames = (Test / definedTests).value
-      .map(_.name)
-      .filter(filter)
-
+  def mkTestJob(
+      filter: String => Boolean,
+      candidates: TaskKey[Seq[TestDefinition]] = (Test / definedTests),
+      scope: InputKey[Unit] = (Test / testOnly),
+      verbose: Boolean = false,
+  ): Def.Initialize[Task[Unit]] = Def.taskDyn {
     val log = streams.value.log
+    val selectedTestNames = candidates.value
+      .map(_.name)
+      .filter { x =>
+        val res = filter(x)
+        if (verbose) {
+          if (res) {
+            log.info(s"RUNNING ${x}")
+          } else {
+            //          log.info(s"IGNORING ${x}")
+          }
+        }
+        res
+      }
     if (selectedTestNames.isEmpty) {
       log.info(s"No tests to run for project ${name.value}.")
       Def.task(())
     } else {
       log.info(s"Running ${selectedTestNames.size} tests in project ${name.value}...")
-      (Test / testOnly).toTask(
+      scope.toTask(
         selectedTestNames.mkString(
           " ",
           " ",

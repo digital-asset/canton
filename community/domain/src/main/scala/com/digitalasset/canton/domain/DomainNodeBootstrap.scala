@@ -28,13 +28,7 @@ import com.digitalasset.canton.domain.admin.v0.{
 import com.digitalasset.canton.domain.admin.{grpc => admingrpc}
 import com.digitalasset.canton.domain.config._
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
-import com.digitalasset.canton.domain.initialization.{
-  DomainNodeSequencerClientFactory,
-  DomainTopologyManagerIdentityInitialization,
-  EmbeddedMediatorInitialization,
-  PublicGrpcServerInitialization,
-  TopologyManagementInitialization,
-}
+import com.digitalasset.canton.domain.initialization._
 import com.digitalasset.canton.domain.mediator.{DomainNodeMediatorFactory, MediatorRuntime}
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.domain.sequencing.admin._
@@ -72,19 +66,13 @@ import com.digitalasset.canton.topology.admin.grpc.{
 }
 import com.digitalasset.canton.topology.client._
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.topology.transaction.{
-  MediatorDomainState,
-  OwnerToKeyMapping,
-  ParticipantAttributes,
-  RequestSide,
-  SignedTopologyTransaction,
-  TopologyChangeOp,
-}
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
+import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
+import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -208,22 +196,24 @@ class DomainNodeBootstrap(
         .await("Closing the admin client connections")(adminClientE.map(_.close()).value)
         .valueOr(err => logger.error(s"Failed to close sequencer admin connection: $err"))
 
-    EitherTUtil.finallyET(() => closeAdminConnections()) {
-      for {
-        adminClient <- adminClientE
-        request = InitRequest(domainId, StoredTopologyTransactions.empty, staticDomainParameters)
-        key <- SequencerInitialization
-          .attemptInitialization(
-            name,
-            parameters.sequencerClient,
-            adminClient,
-            topologyManager,
-            crypto.cryptoPublicStore,
-            request,
-            parameters.processingTimeouts,
-            loggerFactory,
-          )
-      } yield key
+    val result = for {
+      adminClient <- adminClientE
+      request = InitRequest(domainId, StoredTopologyTransactions.empty, staticDomainParameters)
+      key <- SequencerInitialization
+        .attemptInitialization(
+          name,
+          parameters.sequencerClient,
+          adminClient,
+          topologyManager,
+          crypto.cryptoPublicStore,
+          request,
+          parameters.processingTimeouts,
+          loggerFactory,
+        )
+    } yield key
+
+    result.thereafter { _ =>
+      closeAdminConnections()
     }
   }
 

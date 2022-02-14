@@ -81,6 +81,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     logQueryCost = None,
     processingTimeouts = DefaultProcessingTimeouts.testing,
     enablePreviewFeatures = false,
+    nonStandardConfig = false,
     partyChangeNotification = PartyNotificationConfig.Eager,
     adminWorkflow = AdminWorkflowConfig(
       bongTestMaxLevel = 10,

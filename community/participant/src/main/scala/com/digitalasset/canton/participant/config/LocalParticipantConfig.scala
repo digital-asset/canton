@@ -89,6 +89,7 @@ case class ParticipantNodeParameters(
     override val enableAdditionalConsistencyChecks: Boolean,
     override val enablePreviewFeatures: Boolean,
     override val processingTimeouts: ProcessingTimeout,
+    override val nonStandardConfig: Boolean,
     partyChangeNotification: PartyNotificationConfig,
     adminWorkflow: AdminWorkflowConfig,
     maxUnzippedDarSize: Int,

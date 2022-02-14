@@ -537,6 +537,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         event.contractId,
       )
     }
+
   }
 
   @Help.Summary("Logging related commands")
