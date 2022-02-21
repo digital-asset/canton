@@ -22,21 +22,6 @@ import scala.util.{Failure, Success, Try}
   */
 object EitherTUtil {
 
-  /** Runs a `finally block` after `fn` has completed, regardless of whether `fn` has completed successfully or failed.
-    */
-  def finallyET[F[_], E, R](
-      `finally`: () => Unit
-  )(fn: => EitherT[F, E, R])(implicit F: Applicative[F]): EitherT[F, E, R] = {
-    val result = fn
-
-    result.transform(value => {
-      `finally`()
-      value
-    })
-
-    result
-  }
-
   /** Similar to `finallyET` but will only call the provided handler if `fn` returns a left/error or fails. */
   def onErrorOrFailure[A, B](errorHandler: () => Unit)(
       fn: => EitherT[Future, A, B]

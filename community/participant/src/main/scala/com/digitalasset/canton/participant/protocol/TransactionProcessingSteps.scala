@@ -73,6 +73,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
@@ -112,7 +113,6 @@ class TransactionProcessingSteps(
     crypto: DomainSyncCryptoClient,
     storedContractManager: StoredContractManager,
     metrics: TransactionProcessingMetrics,
-    deprecatedErrorConformance: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
@@ -360,6 +360,14 @@ class TransactionProcessingSteps(
       EitherT(result.value.transform {
         case Success(Right(preparedBatch)) => Success(Right(preparedBatch))
         case Success(Left(rejectionCause)) => mkError(rejectionCause)
+        case Failure(PassiveInstanceException(_reason)) =>
+          val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
+            SyncServiceInjectionError.PassiveReplica.Error(
+              applicationId = submitterInfo.applicationId,
+              commandId = submitterInfo.commandId,
+            )
+          )
+          mkError(rejectionCause)
         case Failure(exception) =>
           val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(
             SyncServiceInjectionError.InjectionFailure.Failure(exception)
@@ -918,28 +926,23 @@ class TransactionProcessingSteps(
 
     rejectionReason.logWithContext(Map("requestId" -> pendingTransaction.requestId.toString))
     val rejection =
-      if (deprecatedErrorConformance)
-        rejectionReason.createRejectionDeprecated(
-          TransactionProcessingSteps.RemappedCodesForConformance
-        )
-      else
-        rejectionReason match {
-          // Turn canton-specific DuplicateKey and InconsistentKey errors into generic daml error code for duplicate/inconsistent keys for conformance.
-          // TODO(#7866): As part of mediator privacy work, clean up this ugly error code remapping
-          case duplicateKeyReject: LocalReject.ConsistencyRejections.DuplicateKey.Reject =>
-            LedgerSyncEvent.CommandRejected.FinalReason(
-              LedgerApiErrors.ConsistencyErrors.DuplicateContractKey
-                .Reject(duplicateKeyReject.cause)
-                .rpcStatus(loggingContext.correlationId)
-            )
-          case inconsistentKeyReject: LocalReject.ConsistencyRejections.InconsistentKey.Reject =>
-            LedgerSyncEvent.CommandRejected.FinalReason(
-              LedgerApiErrors.ConsistencyErrors.InconsistentContractKey
-                .Reject(inconsistentKeyReject.cause)
-                .rpcStatus(loggingContext.correlationId)
-            )
-          case reason => reason.createRejection
-        }
+      rejectionReason match {
+        // Turn canton-specific DuplicateKey and InconsistentKey errors into generic daml error code for duplicate/inconsistent keys for conformance.
+        // TODO(#7866): As part of mediator privacy work, clean up this ugly error code remapping
+        case duplicateKeyReject: LocalReject.ConsistencyRejections.DuplicateKey.Reject =>
+          LedgerSyncEvent.CommandRejected.FinalReason(
+            LedgerApiErrors.ConsistencyErrors.DuplicateContractKey
+              .Reject(duplicateKeyReject.cause)
+              .rpcStatus(loggingContext.correlationId)
+          )
+        case inconsistentKeyReject: LocalReject.ConsistencyRejections.InconsistentKey.Reject =>
+          LedgerSyncEvent.CommandRejected.FinalReason(
+            LedgerApiErrors.ConsistencyErrors.InconsistentContractKey
+              .Reject(inconsistentKeyReject.cause)
+              .rpcStatus(loggingContext.correlationId)
+          )
+        case reason => reason.createRejection
+      }
 
     val tse = submitterParticipantSubmitterInfo.map(info =>
       TimestampedEvent(

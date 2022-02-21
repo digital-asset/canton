@@ -236,7 +236,7 @@ trait PrettyInstances {
 
   implicit def prettyLedgerConfiguration: Pretty[configuration.Configuration] = prettyOfClass(
     param("generation", _.generation),
-    param("maxDeduplicationTime", _.maxDeduplicationTime),
+    param("maxDeduplicationDuration", _.maxDeduplicationDuration),
     param("timeModel", _.timeModel),
   )
 

@@ -3,10 +3,13 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import cats.data.{NonEmptyList, OptionT}
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -17,15 +20,17 @@ import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescrip
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.db.DbDamlPackageStore.{DamlPackage, DarRecord}
 import com.digitalasset.canton.protocol.PackageDescription
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
+import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
+import slick.jdbc.TransactionIsolation.Serializable
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbDamlPackageStore(
+    maxContractIdSqlInListSize: PositiveNumeric[Int],
     storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -51,10 +56,11 @@ class DbDamlPackageStore(
 
   private def insertOrUpdatePackage(
       pkg: DamlPackage,
+      darO: Option[DarDescriptor],
       sourceDescription: String,
-  ): DbAction.WriteOnly[Int] =
-    // only update the description if the given one is not empty
-    storage.profile match {
+  ): DbAction.WriteTransactional[Unit] = {
+
+    val insertToPackageStore = (storage.profile match {
       case _: DbStorage.Profile.H2 =>
         if (sourceDescription.nonEmpty)
           sqlu"merge into daml_packages (package_id, data, source_description) values (${pkg.packageId}, ${pkg.data}, ${sourceDescription})"
@@ -80,7 +86,30 @@ class DbDamlPackageStore(
           into daml_packages (package_id, data)
           values (${pkg.packageId}, ${pkg.data})
           """
-    }
+    }).map((_int: Int) => ())
+
+    val insertToDarPackages = darO
+      .map { dar =>
+        val hash = dar.hash.toHexString
+
+        val sql = IdempotentInsert.insertIgnoringConflicts(
+          storage,
+          oracleIgnoreIndex = "dar_packages ( dar_hash_hex, package_id )",
+          insertBuilder =
+            sql"dar_packages(dar_hash_hex, package_id) values ($hash, ${pkg.packageId})",
+        )
+
+        sql.map((_int: Int) => ())
+      }
+
+    insertToDarPackages
+      .fold[DBIOAction[Unit, NoStream, Effect.Transactional with Effect.Write]](
+        ifEmpty = insertToPackageStore
+      )(darPkgsInsert =>
+        insertToPackageStore
+          .andThen(darPkgsInsert)
+      )
+  }
 
   override def append(
       pkgs: List[DamlLf.Archive],
@@ -91,16 +120,26 @@ class DbDamlPackageStore(
   ): Future[Unit] = processingTime.metric.event {
 
     //TODO(i8432): Perform a batch insert for the packages
-    val insertPkgs: List[WriteOnly[Int]] = pkgs.map { archive =>
+    val insertPkgs = pkgs.map { archive =>
       val pkg = DamlPackage(readPackageId(archive), archive.toByteArray)
-      insertOrUpdatePackage(pkg, sourceDescription)
+      insertOrUpdatePackage(pkg, dar.map(_.descriptor), sourceDescription)
     }
 
     val writeDar: List[WriteOnly[Int]] = dar.map(dar => (appendToDarStore(dar))).toList
 
+    // Combine all the operations into a single transaction.
+    // Use Serializable isolation to protect against concurrent deletions from the `dars` or `daml_packages` tables,
+    // which might otherwise cause a constraint violation exception.
+    // This is not a performance-critical operation, and happens rarely, so the isolation level should not be a
+    // performance concern.
+    val writeDarAndPackages = DBIO
+      .seq(writeDar ++ insertPkgs: _*)
+      .transactionally
+      .withTransactionIsolation(Serializable)
+
     storage
       .update_(
-        action = DBIO.seq(writeDar ++ insertPkgs: _*),
+        action = writeDarAndPackages,
         operationName = s"${this.getClass}: append Daml LF archive",
       )
   }
@@ -146,8 +185,60 @@ class DbDamlPackageStore(
       packageId: PackageId
   )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.debug(s"Removing package $packageId")
-    val query = sqlu"delete from daml_packages where package_id = $packageId"
-    storage.update_(query, functionFullName)
+
+    storage.update_(
+      sqlu"""delete from daml_packages where package_id = $packageId """,
+      functionFullName,
+    )
+  }
+
+  override def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(
+      implicit tc: TraceContext
+  ): OptionT[Future, PackageId] = {
+
+    import DbStorage.Implicits.BuilderChain._
+    import com.digitalasset.canton.resource.DbStorage.Implicits.getResultPackageId
+
+    val darHex = removeDar.hash.toLengthLimitedHexString
+
+    def packagesWithoutDar(
+        nonEmptyPackages: NonEmptyList[PackageId]
+    ) = {
+      val queryActions = DbStorage
+        .toInClauses(
+          field = "package_id",
+          values = nonEmptyPackages,
+          maxContractIdSqlInListSize,
+        )
+        .map({ case (_value, inStatement) =>
+          (sql"""
+                  select package_id
+                  from dar_packages result
+                  where
+                  """ ++ inStatement ++ sql"""
+                  and not exists (
+                    select package_id
+                    from dar_packages counterexample
+                    where
+                      result.package_id = counterexample.package_id
+                      and dar_hash_hex != $darHex
+                  )
+                  #${storage.limit(1)}
+                  """).as[LfPackageId]
+        })
+
+      val resultF = for {
+        packages <- storage.sequentialQueryAndCombine(queryActions, functionFullName)
+      } yield {
+        packages.headOption
+      }
+
+      OptionT(resultF)
+    }
+
+    NonEmptyList
+      .fromList(packages)
+      .fold(OptionT.none[Future, PackageId])(packagesWithoutDar)
   }
 
   override def getDar(
@@ -186,6 +277,13 @@ class DbDamlPackageStore(
                 values (${dar.hash.toLengthLimitedHexString}, ${dar.hash}, ${dar.data}, ${dar.name})
               """
     }
+
+  override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
+    storage.update_(
+      sqlu"""delete from dars where hash_hex = ${hash.toHexString}""",
+      functionFullName,
+    )
+  }
 
 }
 

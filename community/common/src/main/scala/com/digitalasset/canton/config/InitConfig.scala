@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.String36
 trait InitConfigBase {
   val autoInit: Boolean
   val instanceIdHint: Option[String36]
+  val startupFailFast: Boolean
 }
 
 /** Configuration for the node's init process
@@ -16,6 +17,14 @@ trait InitConfigBase {
   *                 In particular, it will create a new namespace, and initialize its member id and its keys for signing and encryption.
   *                 If false, the user has to manually perform these steps.
   * @param instanceIdHint if an instance id hint is provided it will be used during initialization to set the instance-id. otherwise a UUID will be used.
+  * @param startupFailFast if true, the node will fail-fast when resources such as the database cannot be connected to
+  *                         if false, the node will wait indefinitely for resources such as the database to come up
   */
-case class InitConfig(autoInit: Boolean = true, instanceIdHint: Option[String36] = None)
-    extends InitConfigBase
+case class InitConfig(
+    autoInit: Boolean = true,
+    instanceIdHint: Option[String36] = None,
+    startupFailFast: Boolean = true,
+) extends InitConfigBase {
+
+  object startupFailsFast
+}

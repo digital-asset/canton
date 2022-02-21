@@ -30,7 +30,7 @@ trait ParticipantSettingsStoreTest
   lazy val resourceLimits4: ResourceLimits =
     ResourceLimits(None, Some(NonNegativeInt.tryCreate(22)))
 
-  lazy val maxDedupTime = NonNegativeFiniteDuration.ofMicros(123456789L)
+  lazy val maxDedupDuration = NonNegativeFiniteDuration.ofMicros(123456789L)
 
   def participantSettingsStore(mk: () => ParticipantSettingsStore): Unit = {
     "resource limits" should {
@@ -106,10 +106,10 @@ trait ParticipantSettingsStoreTest
       }
     }
 
-    "max deduplication time" should {
-      behave like singleInsertion(maxDedupTime, NonNegativeFiniteDuration.Zero)(
-        _.insertMaxDeduplicationTime(_),
-        GenLens[Settings](_.maxDeduplicationTime),
+    "max deduplication duration" should {
+      behave like singleInsertion(maxDedupDuration, NonNegativeFiniteDuration.Zero)(
+        _.insertMaxDeduplicationDuration(_),
+        GenLens[Settings](_.maxDeduplicationDuration),
       )
     }
 

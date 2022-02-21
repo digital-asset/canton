@@ -359,7 +359,7 @@ class ParticipantNodeBootstrap(
           syncDomainPersistentStateManager,
           storage,
           clock,
-          config.ledgerApi.maxDeduplicationTime.some,
+          config.ledgerApi.maxDeduplicationDuration.some,
           cantonParameterConfig.uniqueContractKeys.some,
           cantonParameterConfig.stores,
           metrics,
@@ -373,9 +373,11 @@ class ParticipantNodeBootstrap(
         participantId,
         persistentState,
         clock,
-        maxDeduplicationTime = persistentState.settingsStore.settings.maxDeduplicationTime
+        maxDeduplicationDuration = persistentState.settingsStore.settings.maxDeduplicationDuration
           .getOrElse(
-            ErrorUtil.internalError(new RuntimeException("Max deduplication time is not available"))
+            ErrorUtil.internalError(
+              new RuntimeException("Max deduplication duration is not available")
+            )
           ),
         timeouts = cantonParameterConfig.processingTimeouts,
         loggerFactory,
@@ -388,6 +390,7 @@ class ParticipantNodeBootstrap(
             new InMemoryDamlPackageStore(loggerFactory)
           case pool: DbStorage =>
             new DbDamlPackageStore(
+              cantonParameterConfig.stores.maxItemsInSqlClause,
               pool,
               cantonParameterConfig.processingTimeouts,
               loggerFactory,
@@ -510,7 +513,6 @@ class ParticipantNodeBootstrap(
         clock,
         resourceManagementService,
         cantonParameterConfig,
-        !config.ledgerApi.enableSelfServiceErrorCodes,
         indexedStringStore,
         metrics,
         futureSupervisor,

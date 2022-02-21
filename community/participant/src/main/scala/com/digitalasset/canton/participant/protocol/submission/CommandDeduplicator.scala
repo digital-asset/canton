@@ -140,7 +140,7 @@ class CommandDeduplicatorImpl(
       // and check against the publication time of the definite answer events.
       //
       // Set the baseline to at least the to-be-assigned publication time
-      // so that durations up to the max deduplication time always fall
+      // so that durations up to the max deduplication duration always fall
       // into the unpruned window.
       //
       // By including `clock.now`, it may happen that the assigned publication time is actually lower than

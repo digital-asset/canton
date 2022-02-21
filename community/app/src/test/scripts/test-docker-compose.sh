@@ -112,8 +112,8 @@ cd ../
 # --------------------------------------------------
 USED_VERSION=$(docker-compose exec connect.navigator daml version | grep default | awk '{print $1}')
 if [ "$USED_VERSION" != "$EXPECTED_VERSION" ]; then
-    echo -e "\033[0;31m ⚠️⚠️⚠️ WARNING: Until #8309 is addressed, docker-compose is still referring to SDK version $USED_VERSION, while the project is based on $EXPECTED_VERSION ⚠️⚠️⚠️ \033[0m"
-    # TODO(#8309): daml-repo ("split") releases contain neither the daml-sdk nor the daml-sdk docker images used by this test
+    echo -e "\033[0;31m ⚠️⚠️⚠️ WARNING: Until #8353 is addressed, docker-compose is still referring to SDK version $USED_VERSION, while the project is based on $EXPECTED_VERSION ⚠️⚠️⚠️ \033[0m"
+    # TODO(#8353): daml-repo ("split") releases contain neither the daml-sdk nor the daml-sdk docker images used by this test
     # exit 1
 fi
 

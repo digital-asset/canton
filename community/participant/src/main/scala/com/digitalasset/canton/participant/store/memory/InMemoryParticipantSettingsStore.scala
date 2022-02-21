@@ -23,12 +23,12 @@ class InMemoryParticipantSettingsStore(override protected val loggerFactory: Nam
   ): Future[Unit] =
     updateCache(_.copy(resourceLimits = resourceLimits))
 
-  override def insertMaxDeduplicationTime(maxDeduplicationTime: NonNegativeFiniteDuration)(implicit
-      traceContext: TraceContext
+  override def insertMaxDeduplicationDuration(maxDeduplicationDuration: NonNegativeFiniteDuration)(
+      implicit traceContext: TraceContext
   ): Future[Unit] = updateCache(
     setIfEmpty[NonNegativeFiniteDuration](
-      GenLens[Settings](_.maxDeduplicationTime),
-      maxDeduplicationTime,
+      GenLens[Settings](_.maxDeduplicationDuration),
+      maxDeduplicationDuration,
     )
   )
 

@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import cats.Monoid
+import cats.data.OptionT
+import cats.implicits._
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPackageId
@@ -18,11 +21,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
 import scala.collection.immutable.Seq
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
-class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLoggerFactory)
-    extends DamlPackageStore
+class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLoggerFactory)(implicit
+    ec: ExecutionContext
+) extends DamlPackageStore
     with NamedLogging {
   import DamlPackageStore._
 
@@ -32,6 +36,9 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
   private val darData: concurrent.Map[Hash, (Array[Byte], String255)] =
     new ConcurrentHashMap[Hash, (Array[Byte], String255)].asScala
 
+  private val darPackages: concurrent.Map[Hash, Set[LfPackageId]] =
+    new ConcurrentHashMap[Hash, Set[LfPackageId]].asScala
+
   override def append(
       pkgs: List[DamlLf.Archive],
       sourceDescription: String,
@@ -40,17 +47,22 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
       traceContext: TraceContext
   ): Future[Unit] = {
 
-    pkgs.foreach { pkg =>
-      val packageId = readPackageId(pkg)
+    val pkgIds = pkgs.map(readPackageId)
+
+    pkgs.foreach { pkgArchive =>
+      val packageId = readPackageId(pkgArchive)
       // only update the description if the given one is not empty
       if (sourceDescription.nonEmpty)
-        pkgData.put(packageId, (pkg, sourceDescription))
+        pkgData.put(packageId, (pkgArchive, sourceDescription))
       else
-        pkgData.put(packageId, (pkg, pkgData.get(packageId).map(_._2).getOrElse("default")))
+        pkgData.put(packageId, (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse("default")))
     }
 
     dar.foreach { dar =>
       darData.put(dar.descriptor.hash, (dar.bytes.clone(), dar.descriptor.name))
+      val hash = dar.descriptor.hash
+      val pkgS = pkgIds.toSet
+      darPackages.updateWith(hash)(optSet => Some(optSet.fold(pkgS)(_.union(pkgS))))
     }
 
     Future.unit
@@ -83,7 +95,12 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
   override def removePackage(
       packageId: PackageId
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val _ = pkgData.remove(packageId)
+    darPackages
+      .mapValuesInPlace({ case (_hash, packages) => packages - packageId })
+      .filterInPlace({ case (_hash, packages) => packages.nonEmpty })
+
+    pkgData.remove(packageId)
+
     Future.unit
   }
 
@@ -105,4 +122,19 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
         }
         .to(Seq)
     )
+
+  override def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(
+      implicit tc: TraceContext
+  ): OptionT[Future, PackageId] = {
+    val known = packages.toSet.intersect(Monoid.combineAll(darPackages.toMap.values))
+    val fromAllOtherDars = Monoid.combineAll(darPackages.toMap.removed(removeDar.hash).values)
+    val withoutDar = known.diff(fromAllOtherDars).headOption
+    OptionT.fromOption(withoutDar)
+  }
+
+  override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
+    darPackages.remove(hash)
+    darData.remove(hash)
+    Future.unit
+  }
 }

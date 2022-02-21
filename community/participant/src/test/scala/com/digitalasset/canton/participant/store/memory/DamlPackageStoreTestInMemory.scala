@@ -3,14 +3,9 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.participant.store.DamlPackagesDarsStoreTest
-import org.scalatest.wordspec.AsyncWordSpec
+import com.digitalasset.canton.participant.store.DamlPackageStoreTest
 
-class DamlPackageStoreTestInMemory
-    extends AsyncWordSpec
-    with BaseTest
-    with DamlPackagesDarsStoreTest {
+class DamlPackageStoreTestInMemory extends DamlPackageStoreTest {
   "MemoryDamlPackagesDarsStore" should {
     behave like damlPackageStore(() => new InMemoryDamlPackageStore(loggerFactory))
   }

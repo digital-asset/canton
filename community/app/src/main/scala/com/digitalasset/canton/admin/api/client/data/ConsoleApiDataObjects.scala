@@ -351,7 +351,7 @@ object ApplicationMeteringReport {
 
 case class LedgerMeteringReport(
     from: CantonTimestamp,
-    to: CantonTimestamp,
+    isFinal: Boolean,
     reports: Seq[ApplicationMeteringReport],
 )
 
@@ -372,16 +372,11 @@ object LedgerMeteringReport {
       participantReport <- ProtoConverter.required("participantReport", participantReportO)
       ParticipantMeteringReport(
         _,
-        toActualP,
+        isFinal,
         reportsP,
       ) = participantReport
-      toActual <- ProtoConverter.parseRequired(
-        CantonTimestamp.fromProtoPrimitive,
-        "participantReport.toActual",
-        toActualP,
-      )
       reports <- reportsP.traverse(ApplicationMeteringReport.fromProtoV0)
-    } yield LedgerMeteringReport(from, toActual, reports)
+    } yield LedgerMeteringReport(from, isFinal, reports)
 
   }
 }

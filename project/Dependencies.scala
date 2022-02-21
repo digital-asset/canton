@@ -82,6 +82,7 @@ object Dependencies {
 
   lazy val daml_ledger_api_scalapb = "com.daml" %% "ledger-api-scalapb" % daml_libraries_version
   lazy val da_grpc_bindings_ledger_client = "com.daml" %% "bindings-scala" % daml_libraries_version
+
   lazy val da_akka_bindings = "com.daml" %% "bindings-akka" % daml_libraries_version
   lazy val rs_grpc_akka = "com.daml" %% "rs-grpc-akka" % daml_libraries_version
 

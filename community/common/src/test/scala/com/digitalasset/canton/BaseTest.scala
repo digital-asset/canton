@@ -216,6 +216,13 @@ trait BaseTest
   )(implicit ec: ExecutionContext, position: Position): Future[A] =
     e.fold(fail(clue))(Predef.identity)
 
+  /** Converts an OptionT into a Future, failing in case of a [[scala.Some$]]. */
+  def noneOrFail[A](e: OptionT[Future, A])(
+      clue: String
+  )(implicit ec: ExecutionContext, position: Position): Future[Unit] = {
+    e.fold(())(some => fail(s"$clue, value is $some"))
+  }
+
   /** Converts an Either into a B value, failing in case of a [[scala.Left$]]. */
   def valueOrFail[A, B](e: Either[A, B])(clue: String)(implicit position: Position): B =
     e.fold(x => fail(s"$clue: ${x.toString}"), Predef.identity)

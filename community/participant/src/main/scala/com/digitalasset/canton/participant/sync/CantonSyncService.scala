@@ -53,6 +53,7 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.Mis
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceDomainBecamePassive,
   SyncServiceDomainDisabledUs,
   SyncServiceDomainDisconnect,
   SyncServiceFailedDomainConnection,
@@ -67,6 +68,7 @@ import com.digitalasset.canton.protocol.{
   LfSubmittedTransaction,
   SerializableContractWithWitnesses,
 }
+import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
@@ -124,7 +126,6 @@ class CantonSyncService(
     clock: Clock,
     resourceManagementService: ResourceManagementService,
     parameters: ParticipantNodeParameters,
-    deprecatedErrorConformance: Boolean,
     syncDomainFactory: SyncDomain.Factory[SyncDomain],
     indexedStringStore: IndexedStringStore,
     metrics: ParticipantMetrics,
@@ -141,9 +142,9 @@ class CantonSyncService(
 
   import ShowUtil._
 
-  val maxDeduplicationTime: NonNegativeFiniteDuration =
-    participantNodePersistentState.settingsStore.settings.maxDeduplicationTime
-      .getOrElse(throw new RuntimeException("Max deduplication time is not available"))
+  val maxDeduplicationDuration: NonNegativeFiniteDuration =
+    participantNodePersistentState.settingsStore.settings.maxDeduplicationDuration
+      .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
 
   private val ledgerInitialConditionsInternal = LedgerInitialConditions(
     ledgerId = ledgerId,
@@ -158,7 +159,7 @@ class CantonSyncService(
           maxSkew = max,
         ).getOrElse(throw new RuntimeException("Static config should not fail"))
       },
-      maxDeduplicationTime = maxDeduplicationTime.unwrap,
+      maxDeduplicationDuration = maxDeduplicationDuration.unwrap,
     ),
     initialRecordTime = LedgerSyncRecordTime.Epoch,
   )
@@ -416,6 +417,12 @@ class CantonSyncService(
           Future.successful(ack)
         case Success(Left(submissionError)) =>
           processSubmissionError(submissionError)
+        case Failure(PassiveInstanceException(_reason)) =>
+          val err = SyncServiceInjectionError.PassiveReplica.Error(
+            submitterInfo.applicationId,
+            submitterInfo.commandId,
+          )
+          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus))
         case Failure(exception) =>
           val err = SyncServiceInjectionError.InjectionFailure.Failure(exception)
           err.logWithContext()
@@ -1075,7 +1082,6 @@ class CantonSyncService(
           participantId,
           damle,
           parameters,
-          deprecatedErrorConformance,
           participantNodePersistentState,
           persistent,
           ephemeral,
@@ -1113,6 +1119,10 @@ class CantonSyncService(
           case Success(denied: CloseReason.PermissionDenied) =>
             handleCloseDegradation(syncDomain)(
               SyncServiceDomainDisabledUs.Error(domainAlias, denied.cause)
+            )
+          case Success(CloseReason.BecamePassive) =>
+            handleCloseDegradation(syncDomain)(
+              SyncServiceDomainBecamePassive.Error(domainAlias)
             )
           case Success(error: CloseReason.UnrecoverableError) =>
             if (isClosing)
@@ -1353,11 +1363,14 @@ class CantonSyncService(
     } yield ()
   }
 
-  // TODO(i2232): Health check that returns immediately, i.e. based on check running in the background on a continual basis
+  // Canton assumes that as long as the CantonSyncService is up we are "read"-healthy. We could consider lack
+  // of storage readability as a way to be read-unhealthy, but as participants share the database backend with
+  // the ledger-api-server and indexer, database-non-availability is already flagged upstream.
   override def currentHealth(): HealthStatus = HealthStatus.healthy
 
+  // Write health requires the ability to transact, i.e. connectivity to at least one domain and HA-activeness.
   def currentWriteHealth(): HealthStatus =
-    if (existsReadyDomain) HealthStatus.healthy else HealthStatus.unhealthy
+    if (existsReadyDomain && isActive()) HealthStatus.healthy else HealthStatus.unhealthy
 
   def computeTotalLoad: Int = connectedDomainsMap.foldLeft(0) { case (acc, (_, syncDomain)) =>
     acc + syncDomain.numberOfDirtyRequests()
@@ -1421,7 +1434,6 @@ object CantonSyncService {
         clock: Clock,
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
-        deprecatedErrorConformance: Boolean,
         indexedStringStore: IndexedStringStore,
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1453,7 +1465,6 @@ object CantonSyncService {
         clock: Clock,
         resourceManagementService: ResourceManagementService,
         cantonParameterConfig: ParticipantNodeParameters,
-        deprecatedErrorConformance: Boolean,
         indexedStringStore: IndexedStringStore,
         metrics: ParticipantMetrics,
         futureSupervisor: FutureSupervisor,
@@ -1482,7 +1493,6 @@ object CantonSyncService {
         clock,
         resourceManagementService,
         cantonParameterConfig,
-        deprecatedErrorConformance,
         SyncDomain.DefaultFactory,
         indexedStringStore,
         metrics,
@@ -1600,8 +1610,27 @@ object SyncServiceError extends SyncServiceErrorGroup {
     ) extends CantonError.Impl(
           cause = show"$domain rejected our subscription attempt with permission denied."
         )
-
   }
+
+  @Explanation(
+    "This error is logged when a sync domain is disconnected because the participant became passive."
+  )
+  @Resolution("Fail over to the active participant replica.")
+  object SyncServiceDomainBecamePassive
+      extends ErrorCode(
+        "SYNC_SERVICE_DOMAIN_BECAME_PASSIVE",
+        ErrorCategory.TransientServerFailure,
+      ) {
+
+    override def logLevel: Level = Level.WARN
+
+    case class Error(domain: DomainAlias)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = show"$domain disconnected because participant became passive."
+        )
+  }
+
   @Explanation(
     "This error is logged when a sync domain is unexpectedly disconnected from the Canton " +
       "sync service (after having previously been connected)"

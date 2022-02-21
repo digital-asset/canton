@@ -34,7 +34,7 @@ message ConfigurationChanged {
 message Configuration {
     int64 generation = 1;
     TimeModel time_model = 2;
-    google.protobuf.Duration max_deduplication_time = 3;
+    google.protobuf.Duration max_deduplication_duration = 3;
 }
 
 message TimeModel {

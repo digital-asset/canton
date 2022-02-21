@@ -37,11 +37,11 @@ class DbParticipantSettingsStore(
   private implicit val readSettings: GetResult[Settings] = GetResult { r =>
     val maxDirtyRequests = r.<<[Option[NonNegativeInt]]
     val maxRate = r.<<[Option[NonNegativeInt]]
-    val maxDedupTime = r.<<[Option[NonNegativeFiniteDuration]]
+    val maxDedupDuration = r.<<[Option[NonNegativeFiniteDuration]]
     val uniqueContractKeys = r.<<[Option[Boolean]]
     Settings(
       ResourceLimits(maxDirtyRequests = maxDirtyRequests, maxRate = maxRate),
-      maxDedupTime,
+      maxDedupDuration,
       uniqueContractKeys,
     )
   }
@@ -51,7 +51,7 @@ class DbParticipantSettingsStore(
       processingTime.metric.event {
         for {
           settings <- storage.query(
-            sql"select max_dirty_requests, max_rate, max_deduplication_time, unique_contract_keys from participant_settings"
+            sql"select max_dirty_requests, max_rate, max_deduplication_duration, unique_contract_keys from participant_settings"
               .as[Settings]
               .headOption
               .map(_.getOrElse(Settings())),
@@ -89,10 +89,10 @@ class DbParticipantSettingsStore(
     }
   }
 
-  override def insertMaxDeduplicationTime(maxDeduplicationTime: NonNegativeFiniteDuration)(implicit
-      traceContext: TraceContext
+  override def insertMaxDeduplicationDuration(maxDeduplicationDuration: NonNegativeFiniteDuration)(
+      implicit traceContext: TraceContext
   ): Future[Unit] =
-    insertOrUpdateIfNull("max_deduplication_time", maxDeduplicationTime)
+    insertOrUpdateIfNull("max_deduplication_duration", maxDeduplicationDuration)
 
   override def insertUniqueContractKeysMode(uniqueContractKeys: Boolean)(implicit
       traceContext: TraceContext

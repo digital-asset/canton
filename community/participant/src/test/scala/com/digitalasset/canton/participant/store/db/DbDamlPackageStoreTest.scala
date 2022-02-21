@@ -3,28 +3,33 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.digitalasset.canton.participant.store.DamlPackagesDarsStoreTest
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.participant.store.DamlPackageStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.BaseTest
 import io.functionmeta.functionFullName
-import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-trait DbDamlPackageStoreTest extends AsyncWordSpec with BaseTest with DamlPackagesDarsStoreTest {
+trait DbDamlPackageStoreTest extends DamlPackageStoreTest {
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
     import storage.api._
     storage.update(
-      DBIO.seq(sqlu"truncate table daml_packages", sqlu"truncate table dars"),
+      DBIO.seq(
+        sqlu"delete from dar_packages",
+        sqlu"delete from daml_packages",
+        sqlu"delete from dars",
+      ),
       functionFullName,
     )
   }
 
   "DbDamlPackagesDarsStore" should {
-    behave like damlPackageStore(() => new DbDamlPackageStore(storage, timeouts, loggerFactory))
+    behave like damlPackageStore(() =>
+      new DbDamlPackageStore(PositiveNumeric.tryCreate(2), storage, timeouts, loggerFactory)
+    )
   }
 }
 

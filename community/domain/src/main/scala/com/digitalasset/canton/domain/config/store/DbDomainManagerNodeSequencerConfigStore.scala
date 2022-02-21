@@ -42,11 +42,6 @@ class DbDomainManagerNodeSequencerConfigStore(
   // see create table sql for more details
   private val singleRowLockValue = "X"
 
-  private val limitClause = storage.profile match {
-    case _: DbStorage.Profile.Oracle => "fetch next 1 rows only"
-    case _ => "limit 1"
-  }
-
   override def fetchConfiguration(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Option[DomainNodeSequencerConfig]] =
@@ -55,7 +50,7 @@ class DbDomainManagerNodeSequencerConfigStore(
         .query(
           for {
             connection <-
-              sql"""select sequencer_connection from domain_sequencer_config #$limitClause"""
+              sql"""select sequencer_connection from domain_sequencer_config #${storage.limit(1)}"""
                 .as[SequencerConnection]
                 .headOption
           } yield connection,

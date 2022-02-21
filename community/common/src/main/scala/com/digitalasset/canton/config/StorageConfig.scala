@@ -169,8 +169,7 @@ object CommunityDbConfig {
   case class H2(
       override val config: Config,
       override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] =
-        Seq(DbConfig.postgresH2SharedMigrationsPath, DbConfig.h2MigrationsPath),
+      override val migrationsPaths: Seq[String] = Seq(DbConfig.h2MigrationsPath),
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
   ) extends CommunityDbConfig
@@ -179,8 +178,7 @@ object CommunityDbConfig {
   case class Postgres(
       override val config: Config,
       override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] =
-        Seq(DbConfig.postgresH2SharedMigrationsPath, DbConfig.postgresMigrationsPath),
+      override val migrationsPaths: Seq[String] = Seq(DbConfig.postgresMigrationsPath),
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
       override val cleanOnValidationError: Boolean = false,
@@ -192,7 +190,6 @@ object DbConfig extends NoTracing {
 
   val defaultConnectionTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
 
-  val postgresH2SharedMigrationsPath: String = "classpath:db/migration/canton/postgres_h2_shared"
   val postgresMigrationsPath: String = "classpath:db/migration/canton/postgres"
   val h2MigrationsPath: String = "classpath:db/migration/canton/h2"
   val oracleMigrationPath: String = "classpath:db/migration/canton/oracle"
