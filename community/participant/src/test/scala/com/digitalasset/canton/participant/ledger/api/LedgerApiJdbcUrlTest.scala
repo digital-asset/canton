@@ -17,7 +17,6 @@ class LedgerApiJdbcUrlTest extends AnyWordSpec with BaseTest {
           |user = "participant1"
           |password = "pwd"
           |driver = org.h2.Driver
-          |ApplicationName = canton-participant1
           |""".stripMargin)
 
       result.value shouldBe "jdbc:h2:mem:db1;MODE=PostgreSQL;schema=ledger_api;DB_CLOSE_DELAY=-1;user=participant1;password=pwd"

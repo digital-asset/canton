@@ -77,6 +77,7 @@ case class DomainNodeParameters(
     processingTimeouts: ProcessingTimeout,
     sequencerClient: SequencerClientConfig,
     cachingConfigs: CachingConfigs,
+    nonStandardConfig: Boolean,
 ) extends LocalNodeParameters
 
 trait DomainBaseConfig extends LocalNodeConfig {

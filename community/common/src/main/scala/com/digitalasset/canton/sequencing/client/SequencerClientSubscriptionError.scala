@@ -25,6 +25,12 @@ object SequencerClientSubscriptionError {
       prettyOfObject[ApplicationHandlerShutdown.type]
   }
 
+  /** The application handler returned that it is being passive. */
+  case class ApplicationHandlerPassive(reason: String) extends ApplicationHandlerFailure {
+    override def pretty: Pretty[ApplicationHandlerPassive] =
+      prettyOfClass(param("reason", _.reason.unquoted))
+  }
+
   /** The application handler threw an exception while processing the event (synchronously or asynchronously) */
   case class ApplicationHandlerException(
       exception: Throwable,

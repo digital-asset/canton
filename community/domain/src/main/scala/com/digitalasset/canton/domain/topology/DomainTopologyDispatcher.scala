@@ -491,15 +491,17 @@ object DomainTopologyDispatcher {
   private def flushSequencerWithTimeProof(
       timeTracker: DomainTimeTracker,
       targetClient: DomainTopologyClient,
-  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] = for {
-    // flush the sequencer client with a time-proof. this should ensure that we give the
-    // topology processor time to catch up with any pending submissions
-    timestamp <- timeTracker.fetchTimeProof().map(_.timestamp)
-    // wait until the topology client has seen this timestamp
-    _ <- targetClient
-      .awaitTimestamp(timestamp, waitForEffectiveTime = false)
-      .getOrElse(Future.unit)
-  } yield ()
+  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
+    for {
+      // flush the sequencer client with a time-proof. this should ensure that we give the
+      // topology processor time to catch up with any pending submissions
+      timestamp <- timeTracker.fetchTimeProof().map(_.timestamp)
+      // wait until the topology client has seen this timestamp
+      _ <- targetClient
+        .awaitTimestamp(timestamp, waitForEffectiveTime = false)
+        .getOrElse(Future.unit)
+    } yield ()
+  }
 
 }
 

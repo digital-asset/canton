@@ -13,6 +13,12 @@ import scala.util.{Failure, Success, Try}
 
 object DamlPlugin extends AutoPlugin {
 
+  sealed trait Codegen
+  object Codegen {
+    object Java extends Codegen
+    object Scala extends Codegen
+  }
+
   object autoImport {
     val damlCodeGeneration =
       settingKey[Seq[(File, File, String)]](
@@ -26,7 +32,10 @@ object DamlPlugin extends AutoPlugin {
         "List of directory names used to sort the Daml building by order in this list"
       )
     val damlDarOutput = settingKey[File]("Directory to put generated DAR files in")
-    val damlCodegenOutput = settingKey[File]("Directory to put Scala sources generated from DARs")
+    val damlScalaCodegenOutput =
+      settingKey[File]("Directory to put Scala sources generated from DARs")
+    val damlJavaCodegenOutput =
+      settingKey[File]("Directory to put Java sources generated from DARs")
     val damlCompilerVersion =
       settingKey[String]("The Daml version to use for DAR and code generation")
     val damlLanguageVersions =
@@ -55,7 +64,8 @@ object DamlPlugin extends AutoPlugin {
       damlSourceDirectory := sourceDirectory.value / "daml",
       damlCompileDirectory := target.value / "daml",
       damlDarOutput := resourceManaged.value,
-      damlCodegenOutput := sourceManaged.value / "daml-codegen",
+      damlScalaCodegenOutput := sourceManaged.value / "daml-codegen-scala",
+      damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
       damlGenerateCode := {
@@ -63,7 +73,8 @@ object DamlPlugin extends AutoPlugin {
         damlBuild.value
 
         val settings = damlCodeGeneration.value
-        val outputDirectory = damlCodegenOutput.value
+        val scalaOutputDirectory = damlScalaCodegenOutput.value
+        val javaOutputDirectory = damlJavaCodegenOutput.value
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
 
@@ -71,14 +82,18 @@ object DamlPlugin extends AutoPlugin {
           settings.flatMap {
             // TODO(soren): Derive project directory automatically from DAR file
             case (damlProjectDirectory, darFile, packageName) =>
-              generateCode(
-                log,
-                damlProjectDirectory,
-                darFile,
-                packageName,
-                outputDirectory,
-                damlCompilerVersion.value,
-              )
+              Seq((Codegen.Scala, scalaOutputDirectory))
+                .flatMap { case (codegen, outputDirectory) =>
+                  generateCode(
+                    log,
+                    damlProjectDirectory,
+                    darFile,
+                    packageName,
+                    codegen,
+                    outputDirectory,
+                    damlCompilerVersion.value,
+                  )
+                }
           }.toSet
         }
         cache(settings.map(_._2).toSet).toSeq
@@ -434,13 +449,14 @@ object DamlPlugin extends AutoPlugin {
     }
   }
 
-  /** Calls the Daml Scala Codegen for the provided DAR file (hence, is suitable to use in a sourceGenerator task)
+  /** Calls the Daml Codegen for the provided DAR file (hence, is suitable to use in a sourceGenerator task)
     */
   def generateCode(
       log: Logger,
       damlProjectDirectory: File,
       darFile: File,
-      packageName: String,
+      basePackageName: String,
+      language: Codegen,
       managedSourceDir: File,
       damlVersion: String,
   ): Seq[File] = {
@@ -454,13 +470,30 @@ object DamlPlugin extends AutoPlugin {
         s"Codegen asked to generate code from nonexistent file: $darFile"
       )
 
+    val (url, artifact, packageName, suffix) = language match {
+      case Codegen.Java =>
+        (
+          s"https://repo.maven.apache.org/maven2/com/daml/codegen-java/${damlVersion}/",
+          s"codegen-java-${damlVersion}.jar",
+          basePackageName + ".jva",
+          "java",
+        )
+      case Codegen.Scala =>
+        (
+          s"https://repo.maven.apache.org/maven2/com/daml/codegen-scala-main/${damlVersion}/",
+          s"codegen-scala-main-${damlVersion}.jar",
+          basePackageName,
+          "scala",
+        )
+    }
+
     val codegenJarPath = ensureArtifactAvailable(
-      url = s"https://repo.maven.apache.org/maven2/com/daml/codegen-scala-main/${damlVersion}/",
-      artifactFilename = s"codegen-scala-main-${damlVersion}.jar",
+      url = url,
+      artifactFilename = artifact,
       damlVersion = damlVersion,
     ).getAbsolutePath
 
-    log.debug(s"Running scala-codegen for ${darFile} into ${managedSourceDir}")
+    log.debug(s"Running $language-codegen for ${darFile} into ${managedSourceDir}")
 
     val processLogger = new BufferedLogger
 
@@ -479,7 +512,7 @@ object DamlPlugin extends AutoPlugin {
     }
 
     // return all generated scala files
-    (managedSourceDir ** "*.scala").get
+    (managedSourceDir ** s"*.${suffix}").get
   }
 
 }

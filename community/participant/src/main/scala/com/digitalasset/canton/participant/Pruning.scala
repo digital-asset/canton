@@ -55,6 +55,6 @@ object Pruning {
     override def message = err.toString
   }
 
-  case class LedgerPruningUnknownMaxDeduplicationTime(override val message: String)
+  case class LedgerPruningUnknownMaxDeduplicationDuration(override val message: String)
       extends LedgerPruningError
 }

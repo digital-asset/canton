@@ -287,6 +287,7 @@ trait CantonConfig {
       parameters.timeouts.processing,
       domainConfig.sequencerClient,
       domainConfig.caching,
+      parameters.nonStandardConfig,
     )
   }
 
@@ -304,6 +305,7 @@ trait CantonConfig {
         parameters.enableAdditionalConsistencyChecks,
         features.enablePreviewCommands,
         parameters.timeouts.processing,
+        parameters.nonStandardConfig,
         participantParameters.partyChangeNotification,
         participantParameters.adminWorkflow,
         participantParameters.maxUnzippedDarSize,

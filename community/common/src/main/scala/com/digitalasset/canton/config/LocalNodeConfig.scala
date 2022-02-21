@@ -42,5 +42,6 @@ trait LocalNodeParameters {
   def processingTimeouts: ProcessingTimeout
   def sequencerClient: SequencerClientConfig
   def cachingConfigs: CachingConfigs
+  def nonStandardConfig: Boolean
 
 }

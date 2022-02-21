@@ -38,7 +38,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param participantEventLog  participant-local event log
   * @param multiDomainEventLog  multi domain event log for registering participant event log
   * @param participantClock     clock for the current time to stamp published events with
-  * @param maxDeduplicationTime maximum deduplication time window duration to request ledger api server to enforce
+  * @param maxDeduplicationDuration maximum deduplication time window to request ledger api server to enforce
   * @param loggerFactory        named logger factory
   */
 class ParticipantEventPublisher(
@@ -46,7 +46,7 @@ class ParticipantEventPublisher(
     private val participantEventLog: ParticipantEventLog,
     multiDomainEventLog: MultiDomainEventLog,
     participantClock: Clock,
-    maxDeduplicationTime: Duration,
+    maxDeduplicationDuration: Duration,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -159,7 +159,7 @@ class ParticipantEventPublisher(
               newConfiguration = LedgerConfiguration(
                 generation = 1L,
                 timeModel = CantonLedgerApiServerWrapper.maximumToleranceTimeModel,
-                maxDeduplicationTime = maxDeduplicationTime,
+                maxDeduplicationDuration = maxDeduplicationDuration,
               ),
             )
             publishInternal(event)

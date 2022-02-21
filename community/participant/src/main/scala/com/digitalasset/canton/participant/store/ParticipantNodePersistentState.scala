@@ -55,7 +55,7 @@ object ParticipantNodePersistentState {
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,
       storage: Storage,
       clock: Clock,
-      maxDeduplicationTimeO: Option[NonNegativeFiniteDuration],
+      maxDeduplicationDurationO: Option[NonNegativeFiniteDuration],
       uniqueContractKeysO: Option[Boolean],
       parameters: ParticipantStoreConfig,
       metrics: ParticipantMetrics,
@@ -105,28 +105,30 @@ object ParticipantNodePersistentState {
       }
     }
 
-    def checkOrSetMaxDedupTime(maxDeduplicationTime: NonNegativeFiniteDuration): Future[Unit] = {
+    def checkOrSetMaxDedupDuration(
+        maxDeduplicationDuration: NonNegativeFiniteDuration
+    ): Future[Unit] = {
 
-      def checkStoredMaxDedupTime(
+      def checkStoredMaxDedupDuration(
           storedMaxDeduplication: NonNegativeFiniteDuration
       ): Future[Unit] = {
-        if (maxDeduplicationTime != storedMaxDeduplication) {
+        if (maxDeduplicationDuration != storedMaxDeduplication) {
           logger.warn(
-            show"Using the max deduplication time ${storedMaxDeduplication} instead of the configured $maxDeduplicationTime."
+            show"Using the max deduplication duration ${storedMaxDeduplication} instead of the configured $maxDeduplicationDuration."
           )
         }
         Future.unit
       }
 
       if (storage.isActive) {
-        settingsStore.settings.maxDeduplicationTime match {
-          case None => settingsStore.insertMaxDeduplicationTime(maxDeduplicationTime)
-          case Some(storedMaxDeduplication) => checkStoredMaxDedupTime(storedMaxDeduplication)
+        settingsStore.settings.maxDeduplicationDuration match {
+          case None => settingsStore.insertMaxDeduplicationDuration(maxDeduplicationDuration)
+          case Some(storedMaxDeduplication) => checkStoredMaxDedupDuration(storedMaxDeduplication)
         }
       } else {
-        // On the passive replica wait for the max deduplication time to be written by the active replica
-        waitForSettingsStoreUpdate(_.maxDeduplicationTime, "max deduplication time")
-          .flatMap(checkStoredMaxDedupTime)
+        // On the passive replica wait for the max deduplication duration to be written by the active replica
+        waitForSettingsStoreUpdate(_.maxDeduplicationDuration, "max deduplication duration")
+          .flatMap(checkStoredMaxDedupDuration)
       }
     }
 
@@ -183,7 +185,7 @@ object ParticipantNodePersistentState {
     for {
       _ <- settingsStore.refreshCache()
       _ <- uniqueContractKeysO.traverse_(setUniqueContractKeysSetting)
-      _ <- maxDeduplicationTimeO.traverse_(checkOrSetMaxDedupTime)
+      _ <- maxDeduplicationDurationO.traverse_(checkOrSetMaxDedupDuration)
       multiDomainEventLog <- MultiDomainEventLog(
         syncDomainPersistentStates,
         participantEventLog,

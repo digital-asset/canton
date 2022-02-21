@@ -221,7 +221,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           maxTransactionsInMemoryFanOutBufferSize =
             config.serverConfig.maxTransactionsInMemoryFanOutBufferSize,
           enableInMemoryFanOutForLedgerApi = config.serverConfig.enableInMemoryFanOutForLedgerApi,
-          enableSelfServiceErrorCodes = config.serverConfig.enableSelfServiceErrorCodes,
           userManagementConfig = config.serverConfig.userManagementService.damlConfig,
         )
 

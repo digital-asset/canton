@@ -50,8 +50,8 @@ trait ParticipantSettingsStore extends ParticipantSettingsLookup {
       traceContext: TraceContext
   ): Future[Unit]
 
-  /** Insert the given max deduplication time provided unless a max deduplication time has been set previously. */
-  def insertMaxDeduplicationTime(maxDeduplicationTime: NonNegativeFiniteDuration)(implicit
+  /** Insert the given max deduplication duration provided unless a max deduplication duration has been set previously. */
+  def insertMaxDeduplicationDuration(maxDeduplicationDuration: NonNegativeFiniteDuration)(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
@@ -75,7 +75,7 @@ object ParticipantSettingsStore {
 
   case class Settings(
       resourceLimits: ResourceLimits = ResourceLimits.noLimit,
-      maxDeduplicationTime: Option[NonNegativeFiniteDuration] = None,
+      maxDeduplicationDuration: Option[NonNegativeFiniteDuration] = None,
       uniqueContractKeys: Option[Boolean] = None,
   )
 }

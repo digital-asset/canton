@@ -22,7 +22,7 @@ object ParticipantNodeEphemeralState {
       participantId: ParticipantId,
       persistentState: ParticipantNodePersistentState,
       clock: Clock,
-      maxDeduplicationTime: NonNegativeFiniteDuration,
+      maxDeduplicationDuration: NonNegativeFiniteDuration,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): ParticipantNodeEphemeralState = {
@@ -31,7 +31,7 @@ object ParticipantNodeEphemeralState {
       persistentState.participantEventLog,
       persistentState.multiDomainEventLog,
       clock,
-      maxDeduplicationTime.unwrap,
+      maxDeduplicationDuration.unwrap,
       timeouts,
       loggerFactory,
     )

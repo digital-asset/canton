@@ -291,6 +291,7 @@ class DomainTimeTracker(
       freshnessBound: NonNegativeFiniteDuration,
       latestAndNextRef: AtomicReference[LatestAndNext[A]],
       requiresTimeProof: Boolean,
+      // TODO(i8536): return a `FutureUnlessShutdown`
   )(implicit traceContext: TraceContext): Future[A] = {
     val now = clock.now
     // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.

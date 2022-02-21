@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.crypto.Hash
@@ -61,11 +62,22 @@ trait DamlPackageStore { this: NamedLogging =>
     */
   def getDar(hash: Hash)(implicit traceContext: TraceContext): Future[Option[Dar]]
 
+  /** Remove the DAR with hash `hash` from the store */
+  def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit]
+
   /** @return Future with sequence of DAR descriptors (hash and name)
     */
   def listDars(limit: Option[Int] = None)(implicit
       traceContext: TraceContext
   ): Future[Seq[DarDescriptor]]
+
+  /** Find from `packages` a registered package that does not exist in any dar except perhaps `removeDar`.
+    * This checks whether a DAR containing `packages` can be safely removed -- if there's any package that would be
+    * left without a DAR then we won't remove the DAR.
+    */
+  def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(implicit
+      tc: TraceContext
+  ): OptionT[Future, PackageId]
 }
 
 object DamlPackageStore {

@@ -45,7 +45,8 @@ object RetryEither {
               s"Operation $operationName failed, retrying in ${waitInMs}ms: $err",
             )
             Threading.sleep(waitInMs)
-            Right(Left(retryCount - 1))
+            val nextRetry = if (retryCount == Int.MaxValue) Int.MaxValue else retryCount - 1
+            Right(Left(nextRetry))
           }
         }
     }

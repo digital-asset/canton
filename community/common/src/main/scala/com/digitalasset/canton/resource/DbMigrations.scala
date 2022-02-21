@@ -4,20 +4,25 @@
 package com.digitalasset.canton.resource
 
 import cats.syntax.either._
-import com.digitalasset.canton.config.DbConfig
+import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.resource.DbStorage.{Profile, RetryConfig}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.util.retry.RetryEither
+import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
 import io.functionmeta.functionFullName
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.FlywayException
+import org.slf4j.event.Level
 import slick.jdbc.JdbcBackend.Database
+import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInterpolationCanton
 import slick.jdbc.hikaricp.HikariCPJdbcDataSource
-import slick.jdbc.{DataSourceJdbcDataSource, JdbcDataSource}
+import slick.jdbc.{DataSourceJdbcDataSource, JdbcBackend, JdbcDataSource}
 
 import javax.sql.DataSource
+import scala.concurrent.blocking
+import scala.util.Try
 
 trait DbMigrationsFactory {
 
@@ -132,6 +137,44 @@ trait DbMigrations { this: NamedLogging =>
       }
     }
 
+  def connectionCheck(
+      failFast: Boolean,
+      processingTimeout: ProcessingTimeout,
+  )(implicit tc: TraceContext): Either[DbMigrations.DatabaseError, Unit] = {
+    def attempt: Either[String, Unit] = Try {
+      withDb(
+        { createdDb =>
+          ResourceUtil.withResource(createdDb) { db: JdbcBackend.Database =>
+            //TODO(phoebe): The DataSource could be created from the DbConfig, without first having to create the whole
+            // Database. Swap to this more light-weight approach.
+            val dataSource = db.source
+            val conn = dataSource.createConnection()
+            val valid = blocking {
+              conn.isValid(processingTimeout.network.duration.toSeconds.toInt)
+            }
+            if (valid) Right(())
+            else Left(DbMigrations.DatabaseError(s"A trial database connection was not valid"))
+          }
+        }
+      ).leftMap(err => err.toString)
+    }.toEither.fold(throwable => Left(throwable.toString), identity)
+
+    if (failFast) { attempt.leftMap(DbMigrations.DatabaseError) }
+    else {
+      // Repeatedly attempt to create a valid connection, so that the system waits for the database to come up
+      // We must retry the whole `attempt` operation including the `withDb`, as `withDb` may itself fail if the
+      // database is not up.
+      val retryConfig = RetryConfig.forever
+      val res = RetryEither[String, Unit](
+        retryConfig.maxRetries,
+        retryConfig.retryWaitingTime.toMillis,
+        functionFullName,
+        logger,
+      )(attempt)
+      res.leftMap(DbMigrations.DatabaseError)
+    }
+  }
+
   /** Migrate a database if it is empty, otherwise skip the migration. */
   def migrateIfFresh(): Either[DbMigrations.Error, Unit] =
     TraceContext.withNewTraceContext { implicit traceContext =>
@@ -161,6 +204,126 @@ trait DbMigrations { this: NamedLogging =>
         } yield ()
       }
     }
+
+  def checkDbVersion(
+      timeouts: ProcessingTimeout,
+      standardConfig: Boolean,
+  )(implicit tc: TraceContext): Either[DbMigrations.Error, Unit] = {
+
+    withDb { db =>
+      logger.debug(s"Performing version checks")
+      val profile = DbStorage.profile(dbConfig)
+      val either: Either[String, Unit] = profile match {
+
+        case Profile.Postgres(jdbc) =>
+          val expectedPostgresVersion = 11
+
+          // See https://www.postgresql.org/docs/9.1/sql-show.html
+          val query = sql"show server_version".as[String]
+          // Block on the query result, because `withDb` does not support running functions that return a
+          // future (at the time of writing).
+          val vector = timeouts.network.await(functionFullName)(db.run(query))
+          val stringO = vector.headOption
+          for {
+            versionString <- stringO.toRight(left = s"Could not read Postgres version")
+            // An example `versionString` is 12.9 (Debian 12.9-1.pgdg110+1)
+            majorVersion <- versionString
+              .split('.')
+              .headOption
+              .toRight(left =
+                s"Could not parse Postgres version string $versionString. Are you using the recommended Postgres version 11 ?"
+              )
+              .flatMap(str =>
+                Try(str.toInt).toEither.leftMap(exn =>
+                  s"Exception in parsing Postgres version string $versionString: $exn"
+                )
+              )
+            _unit <- {
+              if (majorVersion == expectedPostgresVersion) Right(())
+              else if (majorVersion > expectedPostgresVersion) {
+                val level = if (standardConfig) Level.WARN else Level.INFO
+                LoggerUtil.logAtLevel(
+                  level,
+                  s"Expected Postgres version $expectedPostgresVersion but got higher version $versionString",
+                )
+                Right(())
+              } else
+                Left(
+                  s"Expected Postgres version $expectedPostgresVersion but got lower version $versionString"
+                )
+            }
+          } yield { () }
+
+        case Profile.Oracle(jdbc) =>
+          def checkOracleVersion(): Either[String, Unit] = {
+
+            val expectedOracleVersion = 19
+            val expectedOracleVersionPrefix =
+              " 19." // Leading whitespace is intentional, see the example bannerString
+
+            // See https://docs.oracle.com/en/database/oracle/oracle-database/18/refrn/V-VERSION.html
+            val oracleVersionQuery = sql"select banner from v$$version".as[String].headOption
+            val stringO = timeouts.network.await(functionFullName)(db.run(oracleVersionQuery))
+            stringO match {
+              case Some(bannerString) =>
+                // An example `bannerString` is "Oracle Database 18c Express Edition Release 18.0.0.0.0 - Production"
+                if (bannerString.contains(expectedOracleVersionPrefix)) {
+                  logger.debug(
+                    s"Check for oracle version $expectedOracleVersion passed: using $bannerString"
+                  )
+                  Right(())
+                } else {
+                  Left(s"Expected Oracle version $expectedOracleVersion but got $bannerString")
+                }
+              case None =>
+                Left(s"Database version check failed: could not read Oracle version")
+            }
+          }
+
+          // Checks that `max_string_size` is set to STANDARD. If it was set to `EXTENDED`,
+          // collations could be used that possibly influence the ordering of strings
+          // where we actually want all identifiers to be ordered by codepoints.
+          //
+          // This is a band-aid check for now until we properly specify the collations to be used
+          // with the DDLs and queries.
+          def checkMaxStringSize(): Either[String, Unit] = {
+            val maxStringSizeQuery =
+              sql"select value from v$$parameter where name='max_string_size'".as[String].headOption
+            val maxStringSizeO =
+              timeouts.network.await(functionFullName)(db.run(maxStringSizeQuery))
+            maxStringSizeO match {
+              case Some(value) =>
+                Either.cond(
+                  value.toUpperCase == "STANDARD",
+                  (),
+                  s"max_string_size should be set to STANDARD, but is $value",
+                )
+              case None =>
+                Left(s"Database config check failed: could not read setting max_string_size")
+            }
+          }
+
+          for {
+            _ <- checkOracleVersion()
+            _ <- checkMaxStringSize()
+          } yield ()
+        case Profile.H2(_) =>
+          // We don't perform version checks for H2
+          Right(())
+      }
+      if (standardConfig)
+        either.leftMap(DbMigrations.DatabaseVersionError)
+      else {
+        either.fold(
+          { str =>
+            logger.info(str)
+            Right(())
+          },
+          Right[DbMigrations.DatabaseVersionError, Unit],
+        )
+      }
+    }
+  }
 
   private def checkPendingMigrationInternal(
       flyway: Flyway
@@ -217,5 +380,10 @@ object DbMigrations {
   }
   case class DatabaseError(error: String) extends Error {
     override def pretty: Pretty[DatabaseError] = prettyOfClass(unnamedParam(_.error.unquoted))
+  }
+  case class DatabaseVersionError(error: String) extends Error {
+    override def pretty: Pretty[DatabaseVersionError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
   }
 }

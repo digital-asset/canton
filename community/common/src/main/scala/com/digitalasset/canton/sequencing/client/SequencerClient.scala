@@ -26,6 +26,7 @@ import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError._
@@ -823,51 +824,61 @@ class SequencerClient(
           failure
         }
 
-        def synchronousFailure(error: Throwable): ApplicationHandlerFailure = {
-          logger.error(
-            s"Synchronous event processing failed for event batch with sequencer counters $firstSc to $lastSc.",
-            error,
-          )
-          putApplicationHandlerFailure(ApplicationHandlerException(error, firstSc, lastSc))
+        def handleException(
+            error: Throwable,
+            syncProcessing: Boolean,
+        ): ApplicationHandlerFailure = {
+          val sync = if (syncProcessing) "Synchronous" else "Asynchronous"
+
+          error match {
+            case PassiveInstanceException(reason) =>
+              logger.warn(
+                s"$sync event processing stopped because instance became passive"
+              )
+              putApplicationHandlerFailure(ApplicationHandlerPassive(reason))
+
+            case _ =>
+              logger.error(
+                s"$sync event processing failed for event batch with sequencer counters $firstSc to $lastSc.",
+                error,
+              )
+              putApplicationHandlerFailure(ApplicationHandlerException(error, firstSc, lastSc))
+          }
         }
 
         def handleAsyncResult(
             asyncResultF: Future[UnlessShutdown[AsyncResult]]
         ): EitherT[Future, ApplicationHandlerFailure, Unit] =
-          EitherTUtil.fromFuture(asyncResultF, synchronousFailure).subflatMap {
-            case UnlessShutdown.Outcome(asyncResult) =>
-              val asyncSignalledF = asyncResult.unwrap.transform { result =>
-                // record errors and shutdown in `applicationHandlerFailure` and move on
-                result match {
-                  case Success(outcome) =>
-                    outcome.onShutdown(putApplicationHandlerFailure(ApplicationHandlerShutdown))
-                  case Failure(error) =>
-                    logger.error(
-                      s"Asynchronous event processing failed for event batch with sequencer counters $firstSc to $lastSc.",
-                      error,
-                    )
-                    putApplicationHandlerFailure(
-                      ApplicationHandlerException(error, firstSc, lastSc)
-                    )
-                }
-                Success(UnlessShutdown.unit)
-              }.unwrap
-              // note, we are adding our async processing to the flush future, so we know once the async processing has finished
-              addToFlush(s"handle async result for counters $firstSc to $lastSc")(asyncSignalledF)
-              FutureUtil.doNotAwait(
-                asyncSignalledF,
-                s"Failed to signal error from asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc.",
-              )
-              // we do not wait for the async results to finish, we are done here once the synchronous part is done
-              Right(())
-            case UnlessShutdown.AbortedDueToShutdown =>
-              putApplicationHandlerFailure(ApplicationHandlerShutdown)
-              Left(ApplicationHandlerShutdown)
-          }
+          EitherTUtil
+            .fromFuture(asyncResultF, handleException(_, syncProcessing = true))
+            .subflatMap {
+              case UnlessShutdown.Outcome(asyncResult) =>
+                val asyncSignalledF = asyncResult.unwrap.transform { result =>
+                  // record errors and shutdown in `applicationHandlerFailure` and move on
+                  result match {
+                    case Success(outcome) =>
+                      outcome.onShutdown(putApplicationHandlerFailure(ApplicationHandlerShutdown))
+                    case Failure(error) =>
+                      handleException(error, syncProcessing = false)
+                  }
+                  Success(UnlessShutdown.unit)
+                }.unwrap
+                // note, we are adding our async processing to the flush future, so we know once the async processing has finished
+                addToFlush(s"handle async result for counters $firstSc to $lastSc")(asyncSignalledF)
+                FutureUtil.doNotAwait(
+                  asyncSignalledF,
+                  s"Failed to signal error from asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc.",
+                )
+                // we do not wait for the async results to finish, we are done here once the synchronous part is done
+                Right(())
+              case UnlessShutdown.AbortedDueToShutdown =>
+                putApplicationHandlerFailure(ApplicationHandlerShutdown)
+                Left(ApplicationHandlerShutdown)
+            }
 
         // note, here, we created the asyncResultF, which means we've completed the synchronous processing part.
         asyncResultFT.fold(
-          error => EitherT.leftT[Future, Unit](synchronousFailure(error)),
+          error => EitherT.leftT[Future, Unit](handleException(error, syncProcessing = true)),
           handleAsyncResult,
         )
       }(EitherT.leftT[Future, Unit](_))
@@ -879,6 +890,8 @@ class SequencerClient(
     val _ = closeReasonPromise.tryComplete(subscriptionCloseReason.map {
       case SubscriptionCloseReason.HandlerException(ex) =>
         SequencerClient.CloseReason.UnrecoverableException(ex)
+      case SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(_reason)) =>
+        SequencerClient.CloseReason.BecamePassive
       case SubscriptionCloseReason.HandlerError(err) =>
         SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err")
       case permissionDenied: SubscriptionCloseReason.PermissionDeniedError =>
@@ -1156,6 +1169,7 @@ object SequencerClient {
 
     case object ClientShutdown extends CloseReason
 
+    case object BecamePassive extends CloseReason
   }
 
   /** Hook for informing tests about replay statistics.

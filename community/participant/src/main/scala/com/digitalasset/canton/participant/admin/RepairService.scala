@@ -1137,7 +1137,7 @@ object RepairService {
         implicit val loggingContext: ErrorLoggingContext =
           ErrorLoggingContext.fromTracedLogger(logger)
 
-        val errorFactories = ErrorFactories.SelfServiceErrorCodeFactories
+        val errorFactories = ErrorFactories()
         val fieldValidations = LedgerApiFieldValidations(errorFactories)
         val apiValueValidation = new LedgerApiValueValidator(errorFactories, fieldValidations)
 

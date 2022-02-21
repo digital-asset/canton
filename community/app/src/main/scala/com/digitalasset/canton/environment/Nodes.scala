@@ -119,12 +119,14 @@ class ManagedNodes[
       instance <- nodes.get(name) match {
         case Some(instance) => Right(instance)
         case None =>
+          val failFast = config.init.startupFailFast
+          val params = parametersFor(name)
           for {
-            _ <- checkMigration(name, config.storage)
+            _ <- checkMigration(name, config.storage, failFast, params)
             instance = create(name, config)
             // we call start which will perform the asynchronous startup
             _ <- Try(
-              parametersFor(name).processingTimeouts.unbounded.await(s"Starting node $name")(
+              params.processingTimeouts.unbounded.await(s"Starting node $name")(
                 instance.start().value
               )
             )
@@ -193,18 +195,35 @@ class ManagedNodes[
   private def checkMigration(
       name: String,
       storageConfig: StorageConfig,
+      failFastIfDbOut: Boolean,
+      params: LocalNodeParameters,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
       val migrations = migrationsFactory.create(dbConfig, name)
       import TraceContext.Implicits.Empty._
       logger.info(s"Setting up database schemas for $name")
       val started = System.nanoTime()
-      for {
-        _ <- migrations.migrateIfFreshAndCheckPending().leftMap {
+      val standardConfig = !params.nonStandardConfig
+
+      def errorMapping(err: DbMigrations.Error): StartupError = {
+        err match {
           case DbMigrations.PendingMigrationError(msg) => PendingDatabaseMigration(name, msg)
           case err: DbMigrations.FlywayError => FailedDatabaseMigration(name, err)
           case err: DbMigrations.DatabaseError => FailedDatabaseMigration(name, err)
+          case err: DbMigrations.DatabaseVersionError => FailedDatabaseVersionChecks(name, err)
         }
+      }
+
+      for {
+        _ <- migrations
+          .connectionCheck(failFastIfDbOut, params.processingTimeouts)
+          .leftMap(
+            FailedDatabaseMigration(name, _)
+          )
+        _ <- migrations
+          .checkDbVersion(params.processingTimeouts, standardConfig)
+          .leftMap(errorMapping)
+        _ <- migrations.migrateIfFreshAndCheckPending().leftMap(errorMapping)
       } yield {
         val elapsed = System.nanoTime() - started
         logger.debug(

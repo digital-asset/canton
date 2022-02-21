@@ -81,6 +81,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     logQueryCost = None,
     processingTimeouts = DefaultProcessingTimeouts.testing,
     enablePreviewFeatures = false,
+    nonStandardConfig = false,
     partyChangeNotification = PartyNotificationConfig.Eager,
     adminWorkflow = AdminWorkflowConfig(
       bongTestMaxLevel = 10,
@@ -136,7 +137,9 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     private val syncDomainStateFactory: SyncDomainEphemeralStateFactory =
       mock[SyncDomainEphemeralStateFactoryImpl]
 
-    participantSettingsStore.insertMaxDeduplicationTime(NonNegativeFiniteDuration.Zero).futureValue
+    participantSettingsStore
+      .insertMaxDeduplicationDuration(NonNegativeFiniteDuration.Zero)
+      .futureValue
 
     when(participantNodePersistentState.participantEventLog).thenReturn(participantEventLog)
     when(participantNodePersistentState.multiDomainEventLog).thenReturn(multiDomainEventLog)
@@ -195,7 +198,6 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       new SimClock(loggerFactory = loggerFactory),
       new ResourceManagementService.CommunityResourceManagementService,
       LocalNodeParameters,
-      false,
       SyncDomain.DefaultFactory,
       indexedStringStore,
       ParticipantTestMetrics,

@@ -25,6 +25,11 @@ final case class FailedDatabaseMigration(name: String, cause: DbMigrations.Error
   def message: String = s"failed to migrate database of $name: $cause"
 }
 
+final case class FailedDatabaseVersionChecks(name: String, cause: DbMigrations.DatabaseVersionError)
+    extends StartupError {
+  def message: String = s"version checks failed for database of $name: $cause"
+}
+
 final case class FailedDatabaseRepairMigration(name: String, cause: DbMigrations.Error)
     extends StartupError {
   def message: String = s"failed to repair the database migration of $name: $cause"

@@ -85,7 +85,7 @@ class AdminWorkflowServices(
       connection,
       adminParty,
       parameters.adminWorkflow.bongTestMaxLevel,
-      syncService.maxDeduplicationTime, // Set the deduplication time for Ping command to the maximum allowed.
+      syncService.maxDeduplicationDuration, // Set the deduplication duration for Ping command to the maximum allowed.
       syncService.isActive(),
       loggerFactory,
       clock,

@@ -286,6 +286,9 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
 
 object DbStorage {
 
+  case class PassiveInstanceException(reason: String)
+      extends RuntimeException(s"DbStorage instance is not active: $reason")
+
   sealed trait Profile extends Product with Serializable with PrettyPrinting {
     def jdbc: JdbcProfile
 
@@ -776,6 +779,11 @@ object DbStorage {
       retryLogLevel = Level.WARN,
       retryWaitingTime = Duration(300, TimeUnit.MILLISECONDS),
       maxRetries = 3,
+    )
+    val forever = RetryConfig(
+      retryLogLevel = Level.INFO,
+      retryWaitingTime = Duration(1, TimeUnit.SECONDS),
+      maxRetries = Int.MaxValue,
     )
   }
 }

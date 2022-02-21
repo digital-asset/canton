@@ -9,12 +9,38 @@ createDamlAppDir.exists || sys.error(s"please setup the create-daml-app example 
 
 createDamlAppDar.exists || sys.error(s"please run daml build in the create-daml-app folder to build the dar file ${createDamlAppDar}")
 
-// setup parties and connect participants to domain
-Seq(("Alice", participant1), ("Bob", participant2)).foreach {
-  case (party, participant) =>
-    participant.parties.enable(party)
-    participant.domains.connect_local(mydomain)
-}
+participant1.domains.connect_local(mydomain)
+participant2.domains.connect_local(mydomain)
+val alice = participant1.parties.enable("Alice")
+val bob = participant2.parties.enable("Bob")
+val public = participant1.parties.enable("Public")
+participant1.topology.party_to_participant_mappings.authorize(
+  TopologyChangeOp.Add,
+  party = public,
+  participant = participant2.id,
+  side = RequestSide.From,
+  permission = ParticipantPermission.Observation,
+)
+participant2.topology.party_to_participant_mappings.authorize(
+  TopologyChangeOp.Add,
+  party = public,
+  participant = participant2.id,
+  side = RequestSide.To,
+  permission = ParticipantPermission.Observation,
+)
+
+participant1.ledger_api.users.create(
+  id = "alice",
+  actAs = Set(alice.toLf),
+  primaryParty = Some(alice.toLf),
+  readAs = Set(public.toLf),
+)
+participant2.ledger_api.users.create(
+  id = "bob",
+  actAs = Set(bob.toLf),
+  primaryParty = Some(bob.toLf),
+  readAs = Set(public.toLf),
+)
 
 // upload dar file to participants
 participants.all.dars.upload(createDamlAppDar.pathAsString)

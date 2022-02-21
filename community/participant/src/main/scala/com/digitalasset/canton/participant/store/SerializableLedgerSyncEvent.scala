@@ -645,11 +645,11 @@ object SerializablePackageId
 case class SerializableConfiguration(configuration: Configuration)
     extends HasProtoV0[v0.Configuration] {
   override def toProtoV0: v0.Configuration = configuration match {
-    case Configuration(generation, timeModel, maxDeduplicationTime) =>
+    case Configuration(generation, timeModel, maxDeduplicationDuration) =>
       v0.Configuration(
         generation,
         Some(SerializableTimeModel(timeModel).toProtoV0),
-        Some(DurationConverter.toProtoPrimitive(maxDeduplicationTime)),
+        Some(DurationConverter.toProtoPrimitive(maxDeduplicationDuration)),
       )
   }
 }
@@ -658,13 +658,14 @@ object SerializableConfiguration {
   def fromProtoV0(
       configuration: v0.Configuration
   ): ParsingResult[Configuration] = {
-    val v0.Configuration(generationP, timeModelP, maxDeduplicationTimeP) = configuration
+    val v0.Configuration(generationP, timeModelP, maxDeduplicationDurationP) = configuration
     for {
       timeModel <- required("timeModel", timeModelP).flatMap(SerializableTimeModel.fromProtoV0)
-      maxDeduplicationTime <- required("maxDeduplicationTime", maxDeduplicationTimeP).flatMap(
-        DurationConverter.fromProtoPrimitive
-      )
-    } yield Configuration(generationP, timeModel, maxDeduplicationTime)
+      maxDeduplicationDuration <- required("maxDeduplicationDuration", maxDeduplicationDurationP)
+        .flatMap(
+          DurationConverter.fromProtoPrimitive
+        )
+    } yield Configuration(generationP, timeModel, maxDeduplicationDuration)
   }
 }
 

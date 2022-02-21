@@ -1,6 +1,8 @@
 -- Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
+-- architecture-handbook-entry-begin: IouDaml
+
 module Iou where
 
 import Daml.Script
@@ -8,16 +10,6 @@ import Daml.Script
 data Amount = Amount {value: Decimal; currency: Text} deriving (Eq, Ord, Show)
 
 amountAsText (amount : Amount) : Text = show amount.value <> amount.currency
-
-template GetCash
-  with
-    payer: Party
-    owner: Party
-    amount: Amount
-  where
-    signatory payer, owner
-    agreement
-      show payer <> " pays " <> amountAsText amount <>" to " <> show owner
 
 template Iou
   with
@@ -30,7 +22,7 @@ template Iou
     ensure (amount.value >= 0.0)
 
     signatory payer
-    observer viewers 
+    observer viewers
 
     controller owner can
       Call : ContractId GetCash do
@@ -42,6 +34,18 @@ template Iou
             with viewer : Party
           do
             create this with viewers = (viewer :: viewers)
+
+-- architecture-handbook-entry-end: IouDaml
+
+template GetCash
+  with
+    payer: Party
+    owner: Party
+    amount: Amount
+  where
+    signatory payer, owner
+    agreement
+      show payer <> " pays " <> amountAsText amount <>" to " <> show owner
 
 template DiscloseIou
   with

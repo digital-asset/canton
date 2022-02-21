@@ -41,7 +41,7 @@ object DefaultDamlValues {
   lazy val ledgerConfiguration: LedgerConfiguration = LedgerConfiguration(
     generation = 1L,
     timeModel = LedgerTimeModel.reasonableDefault,
-    maxDeduplicationTime = java.time.Duration.ofDays(1L),
+    maxDeduplicationDuration = java.time.Duration.ofDays(1L),
   )
 
   def lfTransactionId(index: Int): Ref.TransactionId =

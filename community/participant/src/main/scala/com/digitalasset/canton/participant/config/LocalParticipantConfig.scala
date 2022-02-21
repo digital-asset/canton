@@ -89,6 +89,7 @@ case class ParticipantNodeParameters(
     override val enableAdditionalConsistencyChecks: Boolean,
     override val enablePreviewFeatures: Boolean,
     override val processingTimeouts: ProcessingTimeout,
+    override val nonStandardConfig: Boolean,
     partyChangeNotification: PartyNotificationConfig,
     adminWorkflow: AdminWorkflowConfig,
     maxUnzippedDarSize: Int,
@@ -226,7 +227,7 @@ object AuthServiceConfig {
   * @param internalPort              ledger api server port.
   * @param maxEventCacheWeight       ledger api server event cache maximum weight (caffeine cache size)
   * @param maxContractCacheWeight    ledger api server contract cache maximum weight (caffeine cache size)
-  * @param maxDeduplicationTime      Max deduplication duration of the participant's ledger configuration.
+  * @param maxDeduplicationDuration  Max deduplication duration of the participant's ledger configuration.
   * @param tls                       tls configuration setting from ledger api server.
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
   * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
@@ -245,7 +246,6 @@ object AuthServiceConfig {
   * @param databaseConnectionTimeout database connection timeout
   * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fanout" performance optimization (default false; not tested for production yet)
   * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)
-  * @param enableSelfServiceErrorCodes     whether to emit standard daml error codes (enabled by default; only for use in testing/debugging)
   * @param additionalMigrationPaths Optional extra paths for the database migrations
   */
 case class LedgerApiServerConfig(
@@ -253,7 +253,7 @@ case class LedgerApiServerConfig(
     internalPort: Option[Port] = None,
     maxEventCacheWeight: Long = 0L,
     maxContractCacheWeight: Long = 0L,
-    maxDeduplicationTime: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L),
+    maxDeduplicationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L),
     tls: Option[TlsServerConfig] = None,
     configurationLoadTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
@@ -275,7 +275,6 @@ case class LedgerApiServerConfig(
     maxTransactionsInMemoryFanOutBufferSize: Long =
       LedgerApiServerConfig.DefaultMaxTransactionsInMemoryFanOutBufferSize,
     enableInMemoryFanOutForLedgerApi: Boolean = false, // Not tested for production yet
-    enableSelfServiceErrorCodes: Boolean = true,
     additionalMigrationPaths: Seq[String] = Seq.empty,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
@@ -343,7 +342,6 @@ object LedgerApiServerConfig {
             _maxContractKeyStateCacheSize,
             _maxTransactionsInMemoryFanOutBufferSize,
             _enableInMemoryFanOutForLedgerApi,
-            enableSelfServiceErrorCodes,
             _enableUserManagement,
           ) =>
         def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -393,7 +391,6 @@ object LedgerApiServerConfig {
             acsIdQueueLimit,
           ),
           managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout),
-          enableSelfServiceErrorCodes = enableSelfServiceErrorCodes,
         )
     }
 

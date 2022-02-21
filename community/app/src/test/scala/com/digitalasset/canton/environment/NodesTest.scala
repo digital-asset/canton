@@ -45,6 +45,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def tracing: TracingConfig = ???
     override def sequencerClient: SequencerClientConfig = ???
     override def cachingConfigs: CachingConfigs = ???
+    override def nonStandardConfig: Boolean = ???
   }
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
     override def name: LengthLimitedString = ???
