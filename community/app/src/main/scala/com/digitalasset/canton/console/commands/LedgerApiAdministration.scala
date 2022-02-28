@@ -236,10 +236,14 @@ trait BaseLedgerApiAdministration {
 
       @Help.Summary("Starts measuring throughput at the transaction service", FeatureFlag.Testing)
       @Help.Description(
-        """This function will subscribe on behalf of `parties` to the flat transaction stream and 
-          |notify the metric `name.metricSuffix` whenever a flat transaction is emitted.
+        """This function will subscribe on behalf of `parties` to the transaction tree stream and 
+          |notify various metrics:
+          |The metric `<name>.<metricSuffix>` counts the number of transaction trees emitted.
+          |The metric `<name>.<metricSuffix>-tx-node-count` tracks the number of root events emitted as part of transaction trees.
+          |The metric `<name>.<metricSuffix>-tx-size` tracks the number of bytes emitted as part of transaction trees.
+          |
           |To stop measuring, you need to close the returned `AutoCloseable`.
-          |Use the `onTransaction` parameter to register a callback that is called on every transaction."""
+          |Use the `onTransaction` parameter to register a callback that is called on every transaction tree."""
       )
       def start_measuring(
           parties: Set[PartyId],

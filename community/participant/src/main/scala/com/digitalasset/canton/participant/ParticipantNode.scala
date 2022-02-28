@@ -710,7 +710,10 @@ object ParticipantNodeBootstrap {
             participantNodeParameters,
             testingConfigInternal,
             clock,
-            CantonOnly.newDamlEngine(participantNodeParameters.uniqueContractKeys),
+            CantonOnly.newDamlEngine(
+              participantNodeParameters.uniqueContractKeys,
+              participantNodeParameters.unsafeEnableDamlLfDevVersion,
+            ),
             testingTimeService,
             CantonSyncService.DefaultFactory,
             participantMetrics,

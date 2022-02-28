@@ -105,16 +105,6 @@ class DAMLe(
       traceContext: TraceContext
   ): EitherT[Future, Error, (LfVersionedTransaction, TransactionMetadata)] = {
 
-    def normalizeTransaction(tx: LfVersionedTransaction): Either[Error, LfVersionedTransaction] =
-      CantonOnly.TransactionNormalizer
-        .normalizeTransaction(tx)
-        .leftMap(msg =>
-          Error.Interpretation(
-            Error.Interpretation.Internal("engine.normalization", msg),
-            detailMessage = None,
-          )
-        )
-
     def peelAwayRootLevelRollbackNode(
         tx: LfVersionedTransaction
     ): Either[Error, LfVersionedTransaction] =
@@ -124,7 +114,7 @@ class DAMLe(
         def err(msg: String): Left[Error, LfVersionedTransaction] =
           Left(
             Error.Interpretation(
-              Error.Interpretation.Internal("engine.reinterpret", msg),
+              Error.Interpretation.Internal("engine.reinterpret", msg, None),
               detailMessage = None,
             )
           )
@@ -159,19 +149,21 @@ class DAMLe(
         }
       }
 
-    val result = engine.reinterpret(
-      submitters = submitters,
-      command = command,
-      nodeSeed = rootSeed,
-      submissionTime = submissionTime.toLf,
-      ledgerEffectiveTime = ledgerTime.toLf,
-    )
+    val result = LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
+      engine.reinterpret(
+        submitters = submitters,
+        command = command,
+        nodeSeed = rootSeed,
+        submissionTime = submissionTime.toLf,
+        ledgerEffectiveTime = ledgerTime.toLf,
+      )
+    }
+
     for {
       txWithMetadata <- EitherT(handleResult(contracts, result))
       (tx, metadata) = txWithMetadata
       txNoRootRollback <- EitherT.fromEither[Future](peelAwayRootLevelRollbackNode(tx))
-      normalizedTx <- EitherT.fromEither[Future](normalizeTransaction(txNoRootRollback))
-    } yield normalizedTx -> TransactionMetadata.fromLf(ledgerTime, metadata)
+    } yield txNoRootRollback -> TransactionMetadata.fromLf(ledgerTime, metadata)
   }
 
   def contractWithMetadata(contractInstance: LfContractInst, supersetOfSignatories: Set[LfPartyId])(

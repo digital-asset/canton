@@ -281,8 +281,10 @@ trait BaseTest
 }
 
 object BaseTest {
+
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")
+  lazy val CantonLfDev: String = getResourcePath("CantonLfDev.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
 
   private def getResourcePath(name: String): String =

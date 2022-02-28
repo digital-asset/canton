@@ -4,7 +4,7 @@ val participant = participants.local.head
 // only run once
 if(participant.domains.list_registered().isEmpty) {
 
-    // connect participants to the domain passing a user chosen alias and the domain port as the argument
+    // connect all local participants to the domain passing a user chosen alias and the domain port as the argument
     participants.local.foreach(_.domains.connect("mydomain", "http://localhost:10018"))
 
     // above connect operation is asynchronous. it is generally at the discretion of the domain

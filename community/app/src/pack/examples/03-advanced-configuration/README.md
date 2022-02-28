@@ -1,37 +1,45 @@
-# Running Canton Participants and Domains in Separate Processes
+# Advanced Configuration Example
 
-While most examples are given for a single process setup for simplicity, the purpose of Canton is to run it in
-multi-party workflows across enterprises and trust boundaries. Therefore, the following example features 
-configurations for two [participant](nodes/participant1.conf) nodes and one for the [domain](nodes/domain.conf)
-which can run on different servers. You can find these configurations in the [nodes](nodes) directory and you 
-can use them for your setups.
+This example directory contains a collection of configuration files that can be used to setup domains or 
+participants for various purposes. The directory contains a set of sub-folders:
 
-## Persistence Mixins
+  - storage: contains "storage mixins" such as [memory.conf](storage/memory.conf) or [postgres.conf](storage/postgres.conf)
+  - nodes: contains a set of node defintions for domains and participants
+  - api: contains "api mixins" that modify the API behaviour such as binding to a public address or including jwt authorization
+  - remote: contains a set of remote node definitions for the nodes in the nodes directory.
+  - parameters: contains "parameter mixins" that modify the node behaviour in various ways.
+  
+## Persistence 
 
-In order to run the advanced configuration examples, you need to decide how and if you want to persist the 
-data. You currently have three choices: don't persist and just use in-memory stores, persist using H2-file 
-based stores, or persist to `Postgres` databases.
+For every setup, you need to decide which persistence layer you want to use. Supported are [memory.conf](storage/memory.conf),
+[postgres.conf](storage/postgres.conf) or Oracle (Enterprise). Please [consult the manual](https://www.canton.io/docs/stable/user-manual/usermanual/installation.html#persistence-using-postgres)
+for further instructions. The examples here will illustrate the usage using the in-memory configuration.
 
-For this purpose, there are [storage mixin configurations](storage/) defined. 
-The storage mixins in `memory.conf` and `postgres.conf` can be combined with `participant3.conf`.
-The storage mixins in `h2.conf`, `memory.conf`, `postgres-alternative.conf` can be combined with the other nodes
-(namely, `domain.conf`, `participant1.conf`, `participant2.conf`, `particiant4.conf`, `unique-contract-key-domain.conf`).
-Please consult the documentation within the storage mixin files and 
-the installation section of the Canton manual for further help.
+There is a small helper script in [dbinit.py](storage/dbinit.py) which you can use to create the appropriate SQL commands
+to create users and databases for a series of nodes. This is convenient if you are setting up a test-network. You can 
+run it using:
 
-If you ever see the following error: `Could not resolve substitution to a value: ${_shared.storage}`, then 
-you forgot to add the persistence mixin configuration file.
-
-## Domain
-
-Navigate into the directory where you unpacked Canton. We'll be using the configuration files 
-found in `examples/03-advanced-configuration`. Then start the domain with the following command:
 ```
-    ./bin/canton -c examples/03-advanced-configuration/storage/h2.conf,examples/03-advanced-configuration/nodes/domain.conf
+    python3 examples/03-advanced-configuration/storage/dbinit.py \
+      --type=postgres --user=canton --password=<choose-wisely> --participants=2 --domains=1 --drop
 ```
-The domain can be started without any script, as it self-initialises by default, waiting for incoming connections. In 
-this example, we used the [h2.conf](storage/h2.conf) persistence mixin, but you can also use the 
-[memory.conf](storage/memory.conf) or the [postgres.conf](storage/postgres.conf) (once you've set the database up).
+
+Please run the script with ``--help`` to get an overview of all commands. Generally, you would just pipe the output
+to your SQL console.
+
+## Nodes
+
+The nodes directory contains a set of base configuration files that can be used together with the mix-ins.
+
+### Domain
+
+Start a domain with the following command:
+
+```
+    ./bin/canton -c examples/03-advanced-configuration/storage/memory.conf,examples/03-advanced-configuration/nodes/domain.conf
+```
+
+The domain can be started without any bootstrap script, as it self-initialises by default, waiting for incoming connections.
 
 If you pass in multiple configuration files, they will be combined. It doesn't matter if you separate the 
 configurations using `,` or if you pass them with several `-c` options.
@@ -39,14 +47,14 @@ configurations using `,` or if you pass them with several `-c` options.
 NOTE: If you unpacked the zip directory, then you might have to make the canton startup script executable
  (`chmod u+x bin/canton`).
 
-## Participants
+### Participants
 
 The participant(s) can be started the same way, just by pointing to the participant configuration file. 
 However, before we can use the participant for any Daml processing, we need to connect it to a domain. You can 
 connect to the domain interactively, or use the [initialisation script](participant-init.canton).
 
 ```
-    ./bin/canton -c examples/03-advanced-configuration/storage/h2.conf \
+    ./bin/canton -c examples/03-advanced-configuration/storage/memory.conf \
         -c examples/03-advanced-configuration/nodes/participant1.conf,examples/03-advanced-configuration/nodes/participant2.conf \
         --bootstrap=examples/03-advanced-configuration/participant-init.canton
 ```
@@ -57,6 +65,17 @@ runs on a different server.
 A setup with more participant nodes can be created using the [participant](nodes/participant1.conf) as a template. 
 The same applies to the domain configuration. The instance names should be changed (`participant1` to something else), 
 as otherwise, distinguishing the nodes in a trial run will be difficult. 
+
+## API 
+
+By default, all the APIs only bind to localhost. If you want to expose them on the network, you should secure them using 
+TLS and JWT. You can use the mixins configuration in the ``api`` subdirectory for your convenience.
+
+## Parameters
+
+The parameters directory contains a set of mix-ins to modify the behaviour of your nodes.
+
+- [nonuck.conf](nodes/nonuck.conf) enable non-UCK mode such that you can use multiple domains per participant node (preview). 
 
 ## Test Your Setup
 

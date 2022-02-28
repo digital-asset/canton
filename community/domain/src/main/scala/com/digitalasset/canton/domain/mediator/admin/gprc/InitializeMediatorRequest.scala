@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator.admin.gprc
 
-import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
@@ -13,13 +12,11 @@ import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, ProtoDeserializationError}
+import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{MediatorId, UniqueIdentifier}
 
 case class InitializeMediatorRequest(
-    domainVersion: ProtocolVersion,
     domainId: DomainId,
     mediatorId: MediatorId,
     topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
@@ -28,7 +25,6 @@ case class InitializeMediatorRequest(
 ) extends HasProtoV0[v0.InitializeMediatorRequest] {
   override def toProtoV0: v0.InitializeMediatorRequest =
     v0.InitializeMediatorRequest(
-      domainVersion.fullVersion,
       domainId.toProtoPrimitive,
       mediatorId.uid.toProtoPrimitive,
       topologyState.map(_.toProtoV0),
@@ -42,7 +38,6 @@ object InitializeMediatorRequest {
       requestP: v0.InitializeMediatorRequest
   ): ParsingResult[InitializeMediatorRequest] = {
     val v0.InitializeMediatorRequest(
-      domainVersionP,
       domainIdP,
       mediatorIdP,
       topologyStateP,
@@ -50,9 +45,6 @@ object InitializeMediatorRequest {
       sequencerConnectionP,
     ) = requestP
     for {
-      domainVersion <- ProtocolVersion
-        .create(domainVersionP)
-        .leftMap(err => ProtoDeserializationError.ValueConversionError("domainVersion", err))
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domainId")
       mediatorId <- UniqueIdentifier
         .fromProtoPrimitive(mediatorIdP, "mediatorId")
@@ -67,7 +59,6 @@ object InitializeMediatorRequest {
         sequencerConnectionP,
       )
     } yield InitializeMediatorRequest(
-      domainVersion,
       domainId,
       mediatorId,
       topologyState,

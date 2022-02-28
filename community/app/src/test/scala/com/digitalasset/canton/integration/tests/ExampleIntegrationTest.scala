@@ -56,6 +56,8 @@ object ExampleIntegrationTest {
   lazy val composabilityConfiguration: File = examplesPath / "05-composability"
   lazy val messagingConfiguration: File = examplesPath / "06-messaging"
   lazy val repairConfiguration: File = examplesPath / "07-repair"
+  lazy val advancedConfTestEnv: File =
+    "community" / "app" / "src" / "test" / "resources" / "advancedConfDef.env"
 
   def ensureSystemProperties(kvs: (String, String)*): Unit = synchronized {
     kvs.foreach { case (key, value) =>

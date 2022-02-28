@@ -71,7 +71,11 @@ object LedgerApiJdbcUrl {
 
   private def reuseH2(h2Config: Config): Either[String, LedgerApiJdbcUrl] =
     for {
-      cantonUrl <- h2Config.getDbConfig("url") toRight "h2 configuration must supply a url property"
+      cantonUrl <- DbConfig
+        .writeH2UrlIfNotSet(h2Config)
+        .getDbConfig(
+          "url"
+        ) toRight "h2 configuration url not found or generated."
     } yield {
       val h2CantonUrl = UrlBuilder
         .forH2(cantonUrl)
@@ -89,7 +93,7 @@ object LedgerApiJdbcUrl {
       ReuseCantonDb(ledgerApiUrl, h2CantonUrl)
     }
 
-  private def reusePostgres(pgConfig: Config): Either[String, LedgerApiJdbcUrl] =
+  def reusePostgres(pgConfig: Config): Either[String, LedgerApiJdbcUrl] =
     for {
       cantonUrl <- pgConfig
         .getDbConfig("url")

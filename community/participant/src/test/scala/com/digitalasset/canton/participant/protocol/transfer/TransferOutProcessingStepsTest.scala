@@ -121,7 +121,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory,
     )(executorService)
 
-  val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false)
+  val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
   val mockPackageService =
     new PackageService(
       engine,

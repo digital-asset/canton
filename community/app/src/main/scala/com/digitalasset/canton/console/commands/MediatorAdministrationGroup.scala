@@ -27,7 +27,6 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -75,12 +74,10 @@ class MediatorAdministrationGroup(
       domainParameters: StaticDomainParameters,
       sequencerConnection: SequencerConnection,
       topologySnapshot: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
-      domainVersion: ProtocolVersion = ProtocolVersion.current,
       cryptoType: String = "",
   ): PublicKey = consoleEnvironment.run {
     runner.adminCommand(
       Initialize(
-        domainVersion,
         domainId,
         mediatorId,
         Option(cryptoType).filterNot(_.isEmpty),

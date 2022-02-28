@@ -101,7 +101,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   implicit val executionSequencerFactory: ExecutionSequencerFactory =
     AkkaUtil.createExecutionSequencerFactory(
       loggerFactory.threadName + "-admin-workflow-services",
-      logger,
+      // don't log the number of threads twice, as we log it already when creating the first pool
+      NamedLogging.noopLogger,
     )
 
   // additional closeables

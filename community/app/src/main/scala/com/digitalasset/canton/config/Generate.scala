@@ -30,7 +30,6 @@ object Generate {
         config.participants.map(x => (x._1, x._2.toRemoteConfig)).foreach { case (name, config) =>
           write(name, "participants", config)
         }
-
         config.domains.map(x => (x._1, x._2.toRemoteConfig)).foreach { case (name, config) =>
           write(name, "domains", config)
         }

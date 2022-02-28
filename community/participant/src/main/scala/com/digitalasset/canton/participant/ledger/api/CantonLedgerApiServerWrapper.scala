@@ -18,8 +18,6 @@ import com.daml.ledger.api.v1.experimental_features.{
 import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.engine.Engine
-import com.daml.logging.LoggingContext
-import com.daml.logging.entries.{LoggingEntry, LoggingValue}
 import com.daml.metrics.Metrics
 import com.daml.platform.apiserver.{
   ApiServerConfig,
@@ -56,6 +54,7 @@ import com.digitalasset.canton.participant.config.{
   ParticipantNodeParameters,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.util.LoggingContextUtil
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
@@ -194,8 +193,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           port = DamlPort(config.serverConfig.port.unwrap),
           address = Some(config.serverConfig.address),
           jdbcUrl = ledgerApiStorage.jdbcUrl,
-          databaseConnectionPoolSize =
-            config.storageConfig.maxConnectionsLedgerApiServer(config.logger),
+          databaseConnectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
           databaseConnectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
           tlsConfig = config.serverConfig.tls
             .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
@@ -226,7 +224,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
 
         // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.
         val (indexer, ledgerApiServerResource) =
-          damlLoggingContextWithProperties(config.loggerFactory) { implicit loggingContext =>
+          LoggingContextUtil.createLoggingContext(config.loggerFactory) { implicit loggingContext =>
             val metrics = new Metrics(
               SharedMetricRegistries.getOrCreate(s"${config.participantId}-$uniquifier")
             )
@@ -300,7 +298,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                     config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
                   maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
                   maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
-                )(ec)
+                )(ec, loggingContext)
 
               indexService <- StandaloneIndexService(
                 dbSupport = dbSupport,
@@ -386,24 +384,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       }
   }
 
-  /** Propagates canton logger factory properties to daml LoggingContext
-    */
-  private def damlLoggingContextWithProperties[A](
-      loggerFactory: NamedLoggerFactory
-  )(code: LoggingContext => A) =
-    loggerFactory.properties.toList match {
-      case h :: t =>
-        def damlLogEntryFromCantonKeyValue: ((String, String)) => LoggingEntry = { case (k, v) =>
-          (k, LoggingValue.OfString(v))
-        }
-        LoggingContext
-          .newLoggingContextWith[A](
-            damlLogEntryFromCantonKeyValue(h),
-            t.map(damlLogEntryFromCantonKeyValue): _*
-          )(code)
-      case Nil => LoggingContext.newLoggingContext[A](code)
-    }
-
   private def tryCreateSchema(ledgerApiStorage: LedgerApiStorage, logger: TracedLogger)(implicit
       ec: ExecutionContext
   ): Future[Unit] =
@@ -441,7 +421,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
 
     val logger = loggerFactory.getTracedLogger(getClass)
 
-    damlLoggingContextWithProperties(loggerFactory) { implicit loggingContext =>
+    LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
       for {
         ledgerApiStorage <- LedgerApiStorage
           .fromDbConfig(config.dbConfig)

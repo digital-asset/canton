@@ -211,6 +211,7 @@ class ManagedNodes[
           case err: DbMigrations.FlywayError => FailedDatabaseMigration(name, err)
           case err: DbMigrations.DatabaseError => FailedDatabaseMigration(name, err)
           case err: DbMigrations.DatabaseVersionError => FailedDatabaseVersionChecks(name, err)
+          case err: DbMigrations.DatabaseConfigError => FailedDatabaseConfigChecks(name, err)
         }
       }
 

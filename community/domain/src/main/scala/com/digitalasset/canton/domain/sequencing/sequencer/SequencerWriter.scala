@@ -38,6 +38,7 @@ import scala.util.Failure
 import scala.util.control.NonFatal
 
 /** Configuration for how many sequencers are concurrently operating within the domain.
+  * @param enabled Set to true to enable HA for the sequencer.
   * @param totalNodeCount how many sequencer writers will there ever be in this domain.
   *                       recommend setting to a value larger than the current topology to allow for expansion.
   * @param keepAliveInterval how frequently will we ensure the sequencer watermark is updated to ensure it still appears alive
@@ -45,6 +46,7 @@ import scala.util.control.NonFatal
   * @param offlineDuration how long should a sequencer watermark be lagging for it to be flagged as offline
   */
 case class SequencerHighAvailabilityConfig(
+    enabled: Boolean = false,
     totalNodeCount: Int = 10,
     keepAliveInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100L),
     onlineCheckInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5L),
@@ -352,7 +354,7 @@ object SequencerWriter {
   def apply(
       writerConfig: SequencerWriterConfig,
       writerStorageFactory: SequencerWriterStoreFactory,
-      highAvailabilityConfig: Option[SequencerHighAvailabilityConfig],
+      highAvailabilityConfig: SequencerHighAvailabilityConfig,
       processingTimeout: ProcessingTimeout,
       storage: Storage,
       generalStore: SequencerStore,

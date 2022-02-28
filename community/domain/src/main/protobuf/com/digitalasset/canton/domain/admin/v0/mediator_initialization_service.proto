@@ -21,18 +21,17 @@ service MediatorInitializationService {
 }
 
 message InitializeMediatorRequest {
-  // version the domain node/manager is running (mediator needs to be compatible with this version)
-  string domain_version = 1;
   // the domain identifier
-  string domain_id = 2;
+  string domain_id = 1;
   // the mediator identifier
-  string mediator_id = 3;
+  string mediator_id = 2;
   // topology state required for startup
-  com.digitalasset.canton.protocol.v0.TopologyTransactions current_identity_state = 4;
-  // parameters for the domain
-  com.digitalasset.canton.protocol.v0.StaticDomainParameters domain_parameters = 5;
+  com.digitalasset.canton.protocol.v0.TopologyTransactions current_identity_state = 3;
+  // parameters for the domain (includes the protocol version which needs to match the protocol version the domain
+  // manager is running)
+  com.digitalasset.canton.protocol.v0.StaticDomainParameters domain_parameters = 4;
   // how should the member connect to the domain sequencer
-  com.digitalasset.canton.protocol.v0.SequencerConnection sequencer_connection = 6;
+  com.digitalasset.canton.protocol.v0.SequencerConnection sequencer_connection = 5;
 }
 
 message InitializeMediatorResponse {

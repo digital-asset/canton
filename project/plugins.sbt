@@ -15,7 +15,7 @@ addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
 
-addSbtPlugin("com.thesamet" % "sbt-protoc" % "0.99.33")
+addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.0")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.8"
 
 // Required to for packaging into a tarball and zip archive

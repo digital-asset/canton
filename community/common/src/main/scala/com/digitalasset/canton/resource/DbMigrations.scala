@@ -213,7 +213,7 @@ trait DbMigrations { this: NamedLogging =>
     withDb { db =>
       logger.debug(s"Performing version checks")
       val profile = DbStorage.profile(dbConfig)
-      val either: Either[String, Unit] = profile match {
+      val either: Either[DbMigrations.Error, Unit] = profile match {
 
         case Profile.Postgres(jdbc) =>
           val expectedPostgresVersion = 11
@@ -224,7 +224,7 @@ trait DbMigrations { this: NamedLogging =>
           // future (at the time of writing).
           val vector = timeouts.network.await(functionFullName)(db.run(query))
           val stringO = vector.headOption
-          for {
+          val either = for {
             versionString <- stringO.toRight(left = s"Could not read Postgres version")
             // An example `versionString` is 12.9 (Debian 12.9-1.pgdg110+1)
             majorVersion <- versionString
@@ -252,7 +252,8 @@ trait DbMigrations { this: NamedLogging =>
                   s"Expected Postgres version $expectedPostgresVersion but got lower version $versionString"
                 )
             }
-          } yield { () }
+          } yield ()
+          either.leftMap(DbMigrations.DatabaseVersionError)
 
         case Profile.Oracle(jdbc) =>
           def checkOracleVersion(): Either[String, Unit] = {
@@ -280,48 +281,81 @@ trait DbMigrations { this: NamedLogging =>
             }
           }
 
-          // Checks that `max_string_size` is set to STANDARD. If it was set to `EXTENDED`,
-          // collations could be used that possibly influence the ordering of strings
-          // where we actually want all identifiers to be ordered by codepoints.
-          //
-          // This is a band-aid check for now until we properly specify the collations to be used
-          // with the DDLs and queries.
-          def checkMaxStringSize(): Either[String, Unit] = {
-            val maxStringSizeQuery =
-              sql"select value from v$$parameter where name='max_string_size'".as[String].headOption
-            val maxStringSizeO =
-              timeouts.network.await(functionFullName)(db.run(maxStringSizeQuery))
-            maxStringSizeO match {
-              case Some(value) =>
+          // Checks that the NLS parameter `param` is set to one of the `expected` strings
+          // - The DB setting must be set
+          // - The session setting may be empty
+          def checkNlsParameter(
+              param: String,
+              expected: Seq[String],
+          ): Either[String, Unit] = {
+            def prettyExpected: String =
+              if (expected.size == 1) expected(0)
+              else s"one of ${expected.mkString(", ")}"
+
+            logger.debug(s"Checking NLS parameter $param")
+
+            val queryDbSetting =
+              sql"SELECT value from nls_database_parameters where parameter=$param"
+                .as[String]
+                .headOption
+            val dbSettingO =
+              timeouts.network.await(functionFullName + s"-database-$param")(db.run(queryDbSetting))
+
+            val querySessionSetting =
+              sql"SELECT value from nls_session_parameters where parameter=$param"
+                .as[String]
+                .headOption
+            val sessionSettingO = timeouts.network.await(functionFullName + s"-session-$param")(
+              db.run(querySessionSetting)
+            )
+
+            for {
+              // Require to find the setting for the database, but leave it optional for the session
+              dbSetting <- dbSettingO.toRight(
+                s"Oracle NLS database parameter $param is not set, but should be $prettyExpected"
+              )
+              _ <- Either.cond(
+                expected.contains(dbSetting.toUpperCase),
+                logger.debug(s"NLS database parameter $param is set to $dbSetting"),
+                s"Oracle NLS database parameter $param is $dbSetting, but should be $prettyExpected",
+              )
+
+              _ <- sessionSettingO.fold(
+                Either.right[String, Unit](logger.debug(s"NLS session parameter $param is unset"))
+              ) { sessionSetting =>
                 Either.cond(
-                  value.toUpperCase == "STANDARD",
-                  (),
-                  s"max_string_size should be set to STANDARD, but is $value",
+                  expected.contains(sessionSetting.toUpperCase),
+                  logger.debug(s"NLS session parameter $param is set to $sessionSetting"),
+                  s"Oracle NLS session parameter $param is $sessionSetting, but should be $prettyExpected",
                 )
-              case None =>
-                Left(s"Database config check failed: could not read setting max_string_size")
-            }
+              }
+            } yield ()
           }
 
+          // Check the NLS settings of the database so that Oracle uses the expected encodings and collations for
+          // string fields in tables.
+          def checkOracleNlsSetting(): Either[String, Unit] =
+            for {
+              _ <- checkNlsParameter("NLS_CHARACTERSET", Seq("AL32UTF8"))
+              _ <- checkNlsParameter("NLS_NCHAR_CHARACTERSET", Seq("AL32UTF8", "AL16UTF16"))
+              _ <- checkNlsParameter("NLS_SORT", Seq("BINARY"))
+              _ <- checkNlsParameter("NLS_COMP", Seq("BINARY"))
+            } yield ()
+
           for {
-            _ <- checkOracleVersion()
-            _ <- checkMaxStringSize()
+            _ <- checkOracleVersion().leftMap(DbMigrations.DatabaseVersionError)
+            _ <- checkOracleNlsSetting().leftMap(DbMigrations.DatabaseConfigError)
           } yield ()
         case Profile.H2(_) =>
           // We don't perform version checks for H2
           Right(())
       }
-      if (standardConfig)
-        either.leftMap(DbMigrations.DatabaseVersionError)
-      else {
-        either.fold(
-          { str =>
-            logger.info(str)
-            Right(())
-          },
-          Right[DbMigrations.DatabaseVersionError, Unit],
-        )
-      }
+      if (standardConfig) either
+      else
+        either.leftFlatMap { error =>
+          logger.info(error.toString)
+          Right(())
+        }
     }
   }
 
@@ -383,6 +417,11 @@ object DbMigrations {
   }
   case class DatabaseVersionError(error: String) extends Error {
     override def pretty: Pretty[DatabaseVersionError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
+  }
+  case class DatabaseConfigError(error: String) extends Error {
+    override def pretty: Pretty[DatabaseConfigError] = prettyOfClass(
       unnamedParam(_.error.unquoted)
     )
   }
