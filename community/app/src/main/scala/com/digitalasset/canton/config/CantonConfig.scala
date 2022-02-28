@@ -36,9 +36,9 @@ import com.digitalasset.canton.time._
 import com.digitalasset.canton.tracing.TracingConfig
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{Config, ConfigException, ConfigFactory, ConfigRenderOptions}
+import pureconfig._
 import pureconfig.error.{CannotConvert, FailureReason}
 import pureconfig.generic.{DerivedConfigWriter, FieldCoproductHint, ProductHint}
-import pureconfig._
 import shapeless.Lazy
 
 import java.io.File
@@ -318,6 +318,7 @@ trait CantonConfig {
         participantParameters.minimumProtocolVersion.map(_.unwrap),
         participantParameters.uniqueContractKeys,
         participantParameters.enableCausalityTracking,
+        participantParameters.unsafeEnableDamlLfDevVersion,
       )
     }
 
@@ -1251,7 +1252,9 @@ object CantonConfig {
     */
   def parseAndLoadOrExit[ConfClass <: CantonConfig with ConfigDefaults[
     ConfClass
-  ]: ClassTag: ConfigReader](files: Seq[File])(implicit elc: ErrorLoggingContext): ConfClass = {
+  ]: ClassTag: ConfigReader](files: Seq[File])(implicit
+      elc: ErrorLoggingContext
+  ): ConfClass = {
     val result = parseAndLoad[ConfClass](files)
     configOrExit(result)
   }

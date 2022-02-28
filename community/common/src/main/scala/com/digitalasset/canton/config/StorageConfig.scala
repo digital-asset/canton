@@ -5,7 +5,7 @@ package com.digitalasset.canton.config
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -27,14 +27,12 @@ trait StorageConfig {
     */
   def maxConnections: Option[Int]
 
-  private def maxConnectionsOrDefault(
-      logger: TracedLogger
-  )(implicit traceContext: TraceContext): Int = {
+  private def maxConnectionsOrDefault: Int = {
     // The following is an educated guess of a sane default for the number of DB connections.
     // https://github.com/brettwooldridge/HikariCP/wiki/About-Pool-Sizing
     maxConnections match {
       case Some(value) if value > 0 => value
-      case _ => Threading.detectNumberOfThreads(logger)
+      case _ => Threading.detectNumberOfThreads(NamedLogging.noopLogger)(TraceContext.empty)
     }
   }
 
@@ -48,11 +46,8 @@ trait StorageConfig {
       forParticipant: Boolean,
       withWriteConnectionPool: Boolean,
       withMainConnection: Boolean,
-      logger: TracedLogger,
-  )(implicit
-      traceContext: TraceContext
   ): PositiveInt = {
-    val c = maxConnectionsOrDefault(logger)
+    val c = maxConnectionsOrDefault
 
     // A participant evenly shares the max connections between the ledger API server (not indexer) and canton
     val totalConnectionPoolSize = if (forParticipant) c / 2 else c
@@ -72,11 +67,9 @@ trait StorageConfig {
   }
 
   /** Max connections for the Ledger API server. The Ledger API indexer's max connections are configured separately. */
-  def maxConnectionsLedgerApiServer(logger: TracedLogger)(implicit
-      traceContext: TraceContext
-  ): Int = {
+  def maxConnectionsLedgerApiServer: Int = {
     // The Ledger Api Server always gets half of the max connections allocated to canton
-    maxConnectionsOrDefault(logger) / 2 max 1
+    maxConnectionsOrDefault / 2 max 1
   }
 }
 
@@ -224,7 +217,6 @@ object DbConfig extends NoTracing {
             forParticipant,
             withWriteConnectionPool,
             withMainConnection,
-            logger,
           )
           .unwrap,
         "connectionTimeout" -> dbConfig.connectionTimeout.unwrap.toMillis,
@@ -238,9 +230,7 @@ object DbConfig extends NoTracing {
           val propertiesPath = s"properties.$optionName"
           val valueIsInProperties =
             c.hasPath(propertiesPath) && c.getString(propertiesPath).contains(optionValue)
-          val valueIsInUrl = Seq("url", "jdbcUrl")
-            .map(path => c.hasPath(path) && c.getString(path).contains(s"$optionName=$optionValue"))
-            .exists(identity)
+          val valueIsInUrl = assertOnString(c, "url", _.contains(s"$optionName=$optionValue"))
           valueIsInProperties || valueIsInUrl
         }
         def enforcePgMode(c: Config): Config =
@@ -252,9 +242,7 @@ object DbConfig extends NoTracing {
           } else c
         def enforceDelayClose(c: Config): Config = {
           val isInMemory =
-            Seq("url", "jdbcUrl")
-              .map(path => c.hasPath(path) && c.getString(path).contains(":mem:"))
-              .exists(identity)
+            assertOnString(c, "url", _.contains(":mem:"))
           if (isInMemory && !containsOption(c, "DB_CLOSE_DELAY", "-1")) {
             logger.warn(
               s"Given H2 config is in-memory and does not contain DB_CLOSE_DELAY=-1. Automatically added this to avoid accidentally losing all data. $c"
@@ -268,12 +256,28 @@ object DbConfig extends NoTracing {
           }
           c.withValue("numThreads", ConfigValueFactory.fromAnyRef(1))
         }
-        enforceDelayClose(enforcePgMode(enforceSingleConnection(h2.config)))
-          .withFallback(h2Defaults)
+        enforceDelayClose(
+          enforcePgMode(enforceSingleConnection(writeH2UrlIfNotSet(h2.config)))
+        ).withFallback(h2Defaults)
       case postgres: PostgresDbConfig => postgres.config
       // TODO(soren): this other is a workaround for supporting oracle without referencing the oracle config
       case other => other.config
     }).withFallback(commonDefaults)
+  }
+
+  private def assertOnString(c: Config, path: String, check: String => Boolean): Boolean =
+    c.hasPath(path) && check(c.getString(path))
+
+  /** if the URL is not set, we build one here (assuming that config.properties.databaseName is set and should be used as the file name) */
+  def writeH2UrlIfNotSet(c: Config): Config = {
+    val noUrlConfigured = !assertOnString(c, "url", _.nonEmpty)
+    if (noUrlConfigured && c.hasPath("properties.databaseName")) {
+      val url = "jdbc:h2:file:./" + c.getString(
+        "properties.databaseName"
+      ) + ";MODE=PostgreSQL;LOCK_TIMEOUT=10000;DB_CLOSE_DELAY=-1"
+      c.withValue("url", ConfigValueFactory.fromAnyRef(url))
+    } else
+      c
   }
 
   /** strip the password and the url out of the config object */

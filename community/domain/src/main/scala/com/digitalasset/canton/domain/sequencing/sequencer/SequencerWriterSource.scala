@@ -144,7 +144,7 @@ class SequencerWriterQueues private[sequencer] (
 object SequencerWriterSource {
   def apply(
       writerConfig: SequencerWriterConfig,
-      highAvailabilityConfig: Option[SequencerHighAvailabilityConfig],
+      highAvailabilityConfig: SequencerHighAvailabilityConfig,
       cryptoApi: DomainSyncCryptoClient,
       store: SequencerWriterStore,
       clock: Clock,
@@ -157,9 +157,10 @@ object SequencerWriterSource {
     val logger = TracedLogger(SequencerWriterSource.getClass, loggerFactory)
 
     val totalNodeCount =
-      highAvailabilityConfig
-        .map(_.totalNodeCount)
-        .getOrElse(SequencerHighAvailabilityConfig.SingleSequencerTotalNodeCount)
+      if (highAvailabilityConfig.enabled)
+        highAvailabilityConfig.totalNodeCount
+      else
+        SequencerHighAvailabilityConfig.SingleSequencerTotalNodeCount
     val eventTimestampGenerator =
       new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
     val payloadIdGenerator =
@@ -186,12 +187,13 @@ object SequencerWriterSource {
       .map(Write.Event)
 
     // push keep alive writes at the specified interval, or never if not set
-    val keepAliveSource = highAvailabilityConfig
-      .map(_.keepAliveInterval)
-      .fold(Source.never[Write.KeepAlive.type]) { frequency =>
-        Source.repeat(Write.KeepAlive).throttle(1, frequency.toScala)
+    val keepAliveSource = {
+      if (highAvailabilityConfig.enabled) {
+        Source.repeat(Write.KeepAlive).throttle(1, highAvailabilityConfig.keepAliveInterval.toScala)
+      } else {
+        Source.never[Write.KeepAlive.type]
       }
-      .viaMat(KillSwitches.single)(Keep.right)
+    }.viaMat(KillSwitches.single)(Keep.right)
 
     val mkMaterialized = new SequencerWriterQueues(eventGenerator, loggerFactory)(_, _)
 

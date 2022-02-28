@@ -17,6 +17,7 @@ import sbtprotoc.ProtocPlugin.autoImport.PB
 import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
+
 import scala.language.postfixOps
 
 object BuildCommon {
@@ -329,12 +330,24 @@ object BuildCommon {
     }
   }
 
+  // use explicit protoc executable if it exists. currently, apple M1 can not build canton without this
+  // as in the protoc-jar, there is no protoc compiler that supports aarch64. however, we can just
+  // use an x86_64 compiler which will run on rosetta 2.
+  // i can't use sys.env as i can't easily pass env variables to intellij
+  lazy val protocFile = file("protoc.exe")
+  lazy val pbSettings =
+    if (protocFile.exists())
+      Seq(
+        (Compile / PB.protocExecutable := protocFile)
+      )
+    else Seq()
+
   // applies to all sub-projects
   lazy val sharedSettings = Seq(
     printTestTask,
     unitTestTask,
     oracleUnitTestTask,
-  )
+  ) ++ pbSettings
 
   // applies to all Canton-based sub-projects (descendants of community-common)
   lazy val sharedCantonSettings = sharedSettings ++ Seq(

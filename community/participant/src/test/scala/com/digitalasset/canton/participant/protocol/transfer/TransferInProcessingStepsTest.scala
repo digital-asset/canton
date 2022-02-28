@@ -781,7 +781,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   ): TransferInProcessingSteps = {
 
     val pureCrypto = new SymbolicPureCrypto
-    val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false)
+    val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
     val mockPackageService =
       new PackageService(
         engine,

@@ -203,7 +203,14 @@ object DbStorageSetup {
   object Config {
     trait DbBasicConfig[A <: DbBasicConfig[A]] {
       this: {
-        def copy(username: String, password: String, dbName: String, host: String, port: Int): A
+        def copy(
+            username: String,
+            password: String,
+            dbName: String,
+            host: String,
+            port: Int,
+            options: String,
+        ): A
       } =>
 
       val username: String
@@ -211,6 +218,9 @@ object DbStorageSetup {
       val dbName: String
       val host: String
       val port: Int
+
+      /** Comma separated list of driver specific options. E.g. ApplicationName=myApplication for Postgres. */
+      val options: String
 
       def toConfig: Config
 
@@ -220,7 +230,8 @@ object DbStorageSetup {
           dbName: String = this.dbName,
           host: String = this.host,
           port: Int = this.port,
-      ): A = copy(username, password, dbName, host, port)
+          options: String = this.options,
+      ): A = copy(username, password, dbName, host, port, options)
 
     }
 
@@ -230,16 +241,19 @@ object DbStorageSetup {
         override val dbName: String,
         override val host: String = "localhost",
         override val port: Int = 5432,
+        override val options: String = "",
     ) extends DbBasicConfig[PostgresBasicConfig] {
-      override def toConfig: Config =
+      override def toConfig: Config = {
+        val optionsSuffix = if (options.isEmpty) "" else "?" + options
         ConfigFactory.parseMap(
           Map(
-            "url" -> DbConfig.postgresUrl(host, port, dbName),
+            "url" -> s"${DbConfig.postgresUrl(host, port, dbName)}$optionsSuffix",
             "user" -> username,
             "password" -> password,
             "driver" -> "org.postgresql.Driver",
           ).asJava
         )
+      }
     }
 
     def h2Config[H2C <: H2DbConfig](

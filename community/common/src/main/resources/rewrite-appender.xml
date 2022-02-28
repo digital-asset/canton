@@ -194,6 +194,17 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- Some UserManagementServiceIT conformance tests (CreateUsersRaceCondition, GrantRightsRaceCondition)
+             log some duplicate key violation errors.
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.platform.store.appendonlydao.DbDispatcher</logger>
+            <contains>Processing the request failed due to a non-transient database error: ERROR: duplicate key value violates unique constraint</contains>
+            <exceptionMessage>ERROR: duplicate key value violates unique constraint</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
         <!-- Parallel indexer has been augmented (by us) to log details about RejectedExecutionExceptions to help track
              down the root cause. Until we do so our tests flake too frequently, so for now lower severity to info.
              TODO(#4652)

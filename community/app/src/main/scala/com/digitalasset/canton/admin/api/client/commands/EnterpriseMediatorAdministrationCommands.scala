@@ -22,7 +22,6 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 
@@ -48,7 +47,6 @@ object EnterpriseMediatorAdministrationCommands {
   }
 
   case class Initialize(
-      domainVersion: ProtocolVersion,
       domainId: DomainId,
       mediatorId: MediatorId,
       cryptoType: Option[String],
@@ -63,7 +61,6 @@ object EnterpriseMediatorAdministrationCommands {
     override def createRequest(): Either[String, v0.InitializeMediatorRequest] =
       Right(
         InitializeMediatorRequest(
-          domainVersion,
           domainId,
           mediatorId,
           topologyState,

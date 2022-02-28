@@ -13,7 +13,7 @@ trait SequencerConfig
 trait DatabaseSequencerConfig {
   this: SequencerConfig =>
 
-  val highAvailability: Option[SequencerHighAvailabilityConfig]
+  val highAvailability: SequencerHighAvailabilityConfig
   val writer: SequencerWriterConfig
   val reader: SequencerReaderConfig
   val testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor]
@@ -35,7 +35,7 @@ object CommunitySequencerConfig {
   case class Database(
       writer: SequencerWriterConfig = SequencerWriterConfig.LowLatency(),
       reader: SequencerReaderConfig = SequencerReaderConfig(),
-      highAvailability: Option[SequencerHighAvailabilityConfig] = None,
+      highAvailability: SequencerHighAvailabilityConfig = SequencerHighAvailabilityConfig(),
       testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
   ) extends CommunitySequencerConfig
       with DatabaseSequencerConfig

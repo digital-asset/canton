@@ -189,9 +189,10 @@ private class DomainOutbox(
     with NamedLogging {
 
   private val queue = ListBuffer[StoredTopologyTransaction[TopologyChangeOp]]()
+  private val lock = new Object()
   private val running = new AtomicBoolean(false)
 
-  def queueSize: Int = {
+  def queueSize: Int = lock.synchronized {
     queue.size + (if (running.get()) 1 else 0)
   }
 
@@ -199,7 +200,7 @@ private class DomainOutbox(
       transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = performUnlessClosingF {
     onlyApplicable(transactions).map { filtered =>
-      synchronized {
+      lock.synchronized {
         queue ++= filtered
         kickOffFlush()
       }
@@ -237,7 +238,9 @@ private class DomainOutbox(
   }
 
   def recomputeQueue(implicit traceContext: TraceContext): Future[Unit] = {
-    queue.clear()
+    lock.synchronized {
+      queue.clear()
+    }
     for {
       // find the current target watermark
       watermarkTsO <- target.currentDispatchingWatermark
@@ -247,9 +250,10 @@ private class DomainOutbox(
       // filter candidates for domain
       filtered <- onlyApplicable(dispatchingCandidates.result)
     } yield {
-
-      ErrorUtil.requireState(queue.isEmpty, s"Queue contains ${queue.size} unexpected elements.")
-      queue.appendAll(filtered)
+      lock.synchronized {
+        ErrorUtil.requireState(queue.isEmpty, s"Queue contains ${queue.size} unexpected elements.")
+        queue.appendAll(filtered)
+      }
       logger.debug(
         s"Resuming dispatching with ${filtered.length} transactions after watermark $watermarkTs"
       )
@@ -259,7 +263,7 @@ private class DomainOutbox(
   def flush()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     performUnlessClosingF {
       if (!running.getAndSet(true)) {
-        val ret = synchronized {
+        val ret = lock.synchronized {
           val ret = queue.result()
           queue.clear()
           ret
@@ -270,7 +274,7 @@ private class DomainOutbox(
             case Failure(exception) =>
               logger.warn(s"Pushing ${ret.length} transactions to domain failed.", exception)
               // put stuff back into queue
-              synchronized {
+              lock.synchronized {
                 queue.insertAll(0, ret)
               }
               running.set(false)
@@ -319,7 +323,10 @@ private class DomainOutbox(
         )
         Future.unit
       } { newWatermark =>
-        if (queue.headOption.exists(x => x.validFrom <= newWatermark)) {
+        val warnFutureProgrammers = lock.synchronized {
+          queue.headOption.exists(x => x.validFrom <= newWatermark)
+        }
+        if (warnFutureProgrammers) {
           // once we add batching on transaction addition to the authorized store, we might get multiple tx with the
           // same timestamp. then we need to get a bit smarter. leaving this warning here in case we miss fixing this
           logger.warn(

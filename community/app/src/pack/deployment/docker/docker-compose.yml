@@ -52,10 +52,9 @@ services:
       - "${BASE_PORT:-40}12:10012"
     tty: true
     environment:
-      - CANTON_DB_HOST=postgres.database
-      - CANTON_DB_USER=canton
-      - CANTON_DB_PASSWORD=supersafe
-      - CANTON_DB_NAME=participant1
+      - POSTGRES_HOST=postgres.database
+      - POSTGRES_USER=canton
+      - POSTGRES_PASSWORD=supersafe
       - CANTON_AUTO_APPROVE_AGREEMENTS=yes
       - CANTON_ALLOCATE_PARTIES=${CANTON_ALLOCATE_PARTIES:-alice;bob}
       - CANTON_CONNECT_DOMAINS=${CANTON_CONNECT_DOMAINS:-mydomain#http://localhost:10018}

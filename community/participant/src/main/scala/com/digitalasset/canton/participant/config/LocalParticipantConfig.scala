@@ -102,6 +102,7 @@ case class ParticipantNodeParameters(
     minimumProtocolVersion: Option[ProtocolVersion],
     uniqueContractKeys: Boolean,
     enableCausalityTracking: Boolean,
+    unsafeEnableDamlLfDevVersion: Boolean,
 ) extends LocalNodeParameters
 
 /** Configuration parameters for a single participant
@@ -631,6 +632,7 @@ object TestingTimeServiceConfig {
   *                                             Setting to zero will disable reusing recent time proofs and will instead always fetch a new proof.
   * @param minimumProtocolVersion The minimum protocol version that this participant will speak when connecting to a domain
   * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
+  * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
   */
 case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -643,6 +645,7 @@ case class ParticipantNodeParameterConfig(
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = None,
     uniqueContractKeys: Boolean = true,
     enableCausalityTracking: Boolean = false,
+    unsafeEnableDamlLfDevVersion: Boolean = false,
 )
 
 /** Parameters for the participant node's stores

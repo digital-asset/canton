@@ -103,6 +103,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     minimumProtocolVersion = None,
     uniqueContractKeys = false,
     enableCausalityTracking = true,
+    unsafeEnableDamlLfDevVersion = false,
   )
 
   case class Fixture() {
@@ -193,7 +194,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       syncCrypto,
       pruningProcessor,
       ledgerId,
-      CantonOnly.newDamlEngine(uniqueContractKeys = false),
+      CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),
       new ResourceManagementService.CommunityResourceManagementService,

@@ -50,9 +50,11 @@ class DatabaseSequencer(
   // if high availability is configured we will assume that more than one sequencer is being used
   // and we will switch to using the polling based event signalling as we won't have visibility
   // of all writes locally.
-  private val eventSignaller = config.highAvailability
-    .map(_ => new PollingEventSignaller(config.reader.pollingInterval, timeouts, loggerFactory))
-    .getOrElse(new LocalSequencerStateEventSignaller(timeouts, loggerFactory))
+  private val eventSignaller =
+    if (config.highAvailability.enabled)
+      new PollingEventSignaller(config.reader.pollingInterval, timeouts, loggerFactory)
+    else
+      new LocalSequencerStateEventSignaller(timeouts, loggerFactory)
 
   private val writer = SequencerWriter(
     config.writer,
@@ -103,9 +105,11 @@ class DatabaseSequencer(
     schedule()
   }
 
-  config.highAvailability.foreach { haConfig =>
-    periodicallyMarkLaggingSequencersOffline(haConfig.onlineCheckInterval, haConfig.offlineDuration)
-  }
+  if (config.highAvailability.enabled)
+    periodicallyMarkLaggingSequencersOffline(
+      config.highAvailability.onlineCheckInterval,
+      config.highAvailability.offlineDuration,
+    )
 
   private val reader =
     new SequencerReader(
