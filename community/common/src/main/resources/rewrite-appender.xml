@@ -252,6 +252,16 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- Disable warnings about leaked connections for test containers
+             See: https://github.com/testcontainers/testcontainers-java/issues/2209
+        -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.testcontainers.shaded.okhttp3.OkHttpClient</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>A connection to http://docker.socket/ was leaked. Did you forget to close a response body?</contains>
+            <testing>true</testing>
+        </rewrite>
+
     </appender>
 
     <!-- using an async appender to move rendering and filtering of log messages to background thread -->

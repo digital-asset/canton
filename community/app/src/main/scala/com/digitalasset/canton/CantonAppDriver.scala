@@ -135,12 +135,6 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
     }
   }
 
-  val environment = environmentFactory.create(cantonConfig, loggerFactory)
-  environment.startAndReconnect(cliOptions.autoConnectLocal) match {
-    case Right(()) =>
-    case Left(_) => sys.exit(1)
-  }
-
   private lazy val bootstrapScript: Option[CantonScript] =
     cliOptions.bootstrapScriptPath
       .map(CantonScriptFromFile)
@@ -154,6 +148,13 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
     case _ =>
       new ConsoleInteractiveRunner(cliOptions.noTty, bootstrapScript, loggerFactory)
   }
+
+  val environment = environmentFactory.create(cantonConfig, loggerFactory)
+  environment.startAndReconnect(cliOptions.autoConnectLocal) match {
+    case Right(()) =>
+    case Left(_) => sys.exit(1)
+  }
+
   runner.run(environment)
 
   def loadConfig(config: Config): Either[CantonConfigError, E#Config]

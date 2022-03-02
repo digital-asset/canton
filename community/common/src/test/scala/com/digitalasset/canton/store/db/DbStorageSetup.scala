@@ -192,10 +192,16 @@ object DbStorageSetup {
   def postgresFunctionalTestSetup(
       loggerFactory: NamedLoggerFactory,
       skipDbMigration: Boolean = false,
-  )(implicit ec: ExecutionContext): PostgresDbStorageFunctionalTestSetup =
-    if (sys.env.contains("CI") && !sys.env.contains("MACHINE"))
+  )(implicit ec: ExecutionContext): PostgresDbStorageFunctionalTestSetup = {
+
+    val isCI = sys.env.contains("CI")
+    val isMachine = sys.env.contains("MACHINE")
+    val forceTestContainer = sys.env.contains("DB_FORCE_TEST_CONTAINER")
+
+    if (!forceTestContainer && (isCI && !isMachine))
       new PostgresCISetup(loggerFactory, skipDbMigration)
     else new PostgresTestContainerSetup(loggerFactory, skipDbMigration)
+  }
 
   def h2(loggerFactory: NamedLoggerFactory)(implicit ec: ExecutionContext): H2DbStorageSetup =
     new H2DbStorageSetup(DefaultProcessingTimeouts.testing, loggerFactory)

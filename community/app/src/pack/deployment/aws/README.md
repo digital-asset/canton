@@ -60,7 +60,7 @@ To run using docker execute the following from a directory container the `remote
 ```sh
 docker run --rm -it \
   -e "LB_HOST=your-load-balancer-host.elb.us-east-1.amazonaws.com" \
-  -v $PWD:/conf digitalasset/canton-community:0.22.0 --config /conf/remote.conf
+  -v $PWD:/conf digitalasset/canton-open-source:2.0.0 --config /conf/remote.conf
 ```
 
 ![Canton Remote Adminstration](images/canton-remote-administration.png)

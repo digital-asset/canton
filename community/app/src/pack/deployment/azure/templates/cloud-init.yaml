@@ -70,13 +70,13 @@ write_files:
       ExecStartPre=/opt/canton-azure/update-env.sh
       ExecStartPre=-/usr/bin/docker exec %N stop
       ExecStartPre=-/usr/bin/docker rm %N
-      ExecStartPre=/usr/bin/docker pull digitalasset/canton-community:__CANTON_VERSION__
+      ExecStartPre=/usr/bin/docker pull digitalasset/canton-open-source:__CANTON_VERSION__
       ExecStart=/usr/bin/docker run --rm --name %N \
         -v /etc/canton:/canton/azure \
         -v /var/opt/canton/log:/canton/log \
         --env-file /etc/canton-azure/canton.env \
         -p "127.0.0.1:8080:8080" -p "127.0.0.1:8081:8081" \
-        digitalasset/canton-community:__CANTON_VERSION__ \
+        digitalasset/canton-open-source:__CANTON_VERSION__ \
         daemon \
           --config /canton/azure/canton.conf \
           --bootstrap /canton/azure/canton.bootstrap

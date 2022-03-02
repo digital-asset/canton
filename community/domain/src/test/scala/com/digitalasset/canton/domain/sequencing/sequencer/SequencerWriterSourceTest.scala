@@ -278,36 +278,11 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     }
 
     /*
-      TODO(#8637)
-      For the following two test suites, we want to check that the first event is a success
-      and the second is a failure. However, these two tests were flaky.
-      For now, we check that exactly one event is a success and the other is a failure and
-      we issue a warning if the second is a success. The goal is to be able to distinguish
-      between the following two issues:
-      - ordering (failure, success) instead of (success, failure)
-      - content (failure, failure) instead of (success, failure)
+      Since ordering of the events is not guaranteed, we sort them to ease
+      the test.
      */
-    def checkResult(
-        test: String,
-        events: Seq[StoreEvent[Payload]],
-        valid: PartialFunction[StoreEvent[Payload], Assertion],
-        invalid: PartialFunction[StoreEvent[Payload], Assertion],
-    ): Assertion = {
-      val eventsWithIdx = events.zipWithIndex
-
-      events.size shouldBe 2
-
-      val validIdxO = eventsWithIdx.collectFirst { case (_: DeliverStoreEvent[_], id) => id }
-      val invalidIdxO = eventsWithIdx.collectFirst { case (_: DeliverErrorStoreEvent, id) => id }
-
-      val validIdx = withClue("Exactly one event should be a success")(validIdxO.value)
-      val invalidIdx = withClue("Exactly one event should be an error")(invalidIdxO.value)
-
-      if (validIdx == 1) logger.warn(s"$test: Valid event is expected to be at index 0, found 1")
-
-      inside(events(validIdx))(valid)
-      inside(events(invalidIdx))(invalid)
-    }
+    def sortByMessageId(events: Seq[StoreEvent[Payload]]): Seq[StoreEvent[Payload]] =
+      events.sortBy(_.messageId.unwrap)
 
     "cause errors if way ahead of valid signing window" in withEnv() { implicit env =>
       val nowish = CantonTimestamp.Epoch.plusSeconds(10)
@@ -322,18 +297,16 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           validSigningTimestamp = validSigningTimestamp,
           invalidSigningTimestamp = validSigningTimestamp + margin,
         )
+        sortedEvents = sortByMessageId(events)
       } yield {
-        checkResult(
-          "cause errors if way ahead of valid signing window",
-          events,
-          valid = { case event: DeliverStoreEvent[Payload] =>
-            event.messageId shouldBe messageId1
-          },
-          invalid = { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-            message should (include("Invalid signing timestamp")
-              and include("The signing timestamp must be before or at "))
-          },
-        )
+        inside(sortedEvents(0)) { case event: DeliverStoreEvent[Payload] =>
+          event.messageId shouldBe messageId1
+        }
+
+        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
+          message should (include("Invalid signing timestamp")
+            and include("The signing timestamp must be before or at "))
+        }
       }
     }
 
@@ -351,18 +324,16 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           validSigningTimestamp = invalidSigningTimestamp + margin,
           invalidSigningTimestamp = invalidSigningTimestamp,
         )
+        sortedEvents = sortByMessageId(events)
       } yield {
-        checkResult(
-          "cause errors if way behind the valid signing window",
-          events,
-          { case event: DeliverStoreEvent[Payload] =>
-            event.messageId shouldBe messageId1
-          },
-          { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-            message should (include("Invalid signing timestamp")
-              and include("The signing timestamp must be strictly after "))
-          },
-        )
+        inside(sortedEvents(0)) { case event: DeliverStoreEvent[Payload] =>
+          event.messageId shouldBe messageId1
+        }
+
+        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
+          message should (include("Invalid signing timestamp")
+            and include("The signing timestamp must be strictly after "))
+        }
       }
     }
   }
