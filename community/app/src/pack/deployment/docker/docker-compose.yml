@@ -37,7 +37,7 @@ services:
       - ./data:/data:cached
 
   connect.cleanup:
-    image: digitalasset/canton-${CANTON_TYPE:-community}:${CANTON_VERSION:-latest}
+    image: digitalasset/canton-${CANTON_TYPE:-open-source}:${CANTON_VERSION:-latest}
     entrypoint: []
     command: sh ./utils/cleanup.sh
     volumes:
@@ -46,7 +46,7 @@ services:
       - ./data/logs:/canton/logs
 
   connect.node:
-    image: digitalasset/canton-${CANTON_TYPE:-community}:${CANTON_VERSION:-latest}
+    image: digitalasset/canton-${CANTON_TYPE:-open-source}:${CANTON_VERSION:-latest}
     ports:
       - "${BASE_PORT:-40}11:10011"
       - "${BASE_PORT:-40}12:10012"

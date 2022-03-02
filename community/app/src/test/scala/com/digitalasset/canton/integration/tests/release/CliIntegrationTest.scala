@@ -9,6 +9,7 @@ import com.digitalasset.canton.console.BufferedProcessLogger
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Outcome, SuiteMixin}
 
+import java.io.ByteArrayInputStream
 import scala.sys.process._
 
 /** The `CliIntegrationTest` tests Canton command line options by instantiating a Canton binary in a new process with
@@ -155,6 +156,33 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
         "final logging error",
       )
         .foreach(errorContents.contains)
+    }
+
+    "log number of threads at info level" in { processLogger =>
+      Process("rm -f log/canton.log", Some(new java.io.File(cantonDir))) !
+
+      val basicCommand = {
+        // user-manual-entry-begin: SetNumThreads
+        "bin/canton -Dscala.concurrent.context.numThreads=12 --config examples/01-simple-topology/simple-topology.conf"
+        // user-manual-entry-end: SetNumThreads
+      }
+      val cmd = basicCommand + " --no-tty"
+
+      val inputStream = new ByteArrayInputStream("exit\n".getBytes)
+
+      Process(cmd, Some(new java.io.File(cantonDir))) #< inputStream ! processLogger
+
+      val logLines = (File(cantonDir) / "log" / "canton.log").lines()
+
+      val expectedLine = {
+        // user-manual-entry-begin: LogNumThreads
+        "INFO  c.d.c.e.EnterpriseEnvironment - Deriving 12 as number of threads from '-Dscala.concurrent.context.numThreads'."
+        // user-manual-entry-end: LogNumThreads
+      }
+
+      forAtLeast(1, logLines) { _ should endWith(expectedLine) }
+
+      checkOutput(processLogger)
     }
 
     "turn a local config into a remote" in { processLogger =>

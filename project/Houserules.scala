@@ -74,7 +74,7 @@ object JvmRulesPlugin extends AutoPlugin {
       javacOptions ++= Seq("-encoding", "UTF-8", "-Werror"),
       scalacOptions ++= Seq("-encoding", "UTF-8", "-language:postfixOps"),
       scalacOptions ++= {
-        if (System.getProperty("canton.disable-warts") == "true") Seq()
+        if (System.getProperty("canton-disable-warts") == "true") Seq()
         else
           Seq(
             "-feature",
@@ -96,7 +96,7 @@ object JvmRulesPlugin extends AutoPlugin {
       Test / scalacOptions --= Seq("-Ywarn-value-discard"), // disable value discard check on tests
       addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full),
       wartremoverErrors ++= {
-        if (System.getProperty("canton.disable-warts") == "true") Seq()
+        if (System.getProperty("canton-disable-warts") == "true") Seq()
         else
           Seq(
             Wart.AsInstanceOf,

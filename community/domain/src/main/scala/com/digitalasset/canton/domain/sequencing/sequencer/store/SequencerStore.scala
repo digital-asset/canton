@@ -101,6 +101,8 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
 
   /** Description of the event to be used in logs */
   val description: String
+
+  def messageId: MessageId
 }
 
 /** Structure for storing a deliver events.
