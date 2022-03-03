@@ -22,7 +22,7 @@ Refer to the [Canton Whitepaper](https://www.canton.io/publications/canton-white
 
 ## Availability
 
-This repository hosts the open source version of Canton. The Enterprise version can be purchased from [Digital Asset](https://digital-asset.com/products).
+This repository hosts the open source version of Canton. The Enterprise version can be purchased from [Digital Asset](https://digitalasset.com/products).
 
 ## Running
 
