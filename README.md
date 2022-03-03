@@ -1,6 +1,6 @@
 # Canton
 
-[Canton is a next-generation DAML ledger interoperability protocol](https://www.canton.io) that implements DAML's built-in models of authorization and
+[Canton is a next-generation DAML ledger interoperability protocol](https://docs.daml.com/canton/about.html) that implements DAML's built-in models of authorization and
 privacy faithfully.
 
 * By partitioning the global state it solves both the privacy problems and the scaling bottlenecks of platforms such as
@@ -22,18 +22,12 @@ Refer to the [Canton Whitepaper](https://www.canton.io/publications/canton-white
 
 ## Availability
 
-This repository is hosting an early version of Canton with a centralised
-domain and only provides binary releases. At this point, Canton is not open source. 
-Refer to the [LICENSE](LICENSE.txt) for details and visit [canton.io](https://www.canton.io) for further information.
+This repository hosts the open source version of Canton. The Enterprise version can be purchased from [Digital Asset](https://digital-asset.com/products).
 
 ## Running
 
-Please read [Getting
-Started](https://www.canton.io/docs/stable/user-manual/tutorials/getting_started.html)
+Please read [Getting Started](https://docs.daml.com/canton/tutorials/getting_started.html)
 for instructions on how to get started with Canton.
 
-Consult the [Canton User
-Manual](https://www.canton.io/docs/stable/user-manual/index.html) for further
+Consult the [Canton User Manual](https://docs.daml.com/canton/about.html) for further
 references of Canton's configuration, command-line arguments, or its console.
-
-Templates for deploying the community version of Canton to AWS can be found in [deployment](./deployment).
