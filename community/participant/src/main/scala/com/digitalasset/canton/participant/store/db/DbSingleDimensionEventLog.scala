@@ -7,8 +7,10 @@ import cats.data.OptionT
 import cats.syntax.either._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.protocol.CausalityUpdate
@@ -16,7 +18,7 @@ import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
-import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -29,12 +31,13 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbSingleDimensionEventLog[+Id <: EventLogId](
     override val id: Id,
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     indexedStringStore: IndexedStringStore,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit override protected val executionContext: ExecutionContext)
     extends SingleDimensionEventLog[Id]
-    with NamedLogging {
+    with DbStore {
 
   import ParticipantStorageImplicits._
   import storage.api._
@@ -325,6 +328,7 @@ object DbSingleDimensionEventLog {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
+      closeContext: CloseContext,
   ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] = {
     import DbStorage.Implicits.BuilderChain._
     import ParticipantStorageImplicits._

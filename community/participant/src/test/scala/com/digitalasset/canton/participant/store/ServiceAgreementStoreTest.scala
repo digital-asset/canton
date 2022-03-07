@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.common.domain.ServiceAgreementId
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.{BaseTest, DomainId}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -14,7 +15,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
   val agreement1 = ServiceAgreementId.tryCreate("agreement1")
   val agreement2 = ServiceAgreementId.tryCreate("agreement2")
   val largeAgreementText =
-    """This agreement (the "AGREEMENT"), entered into between DA and You as of
+    String256M.tryCreate("""This agreement (the "AGREEMENT"), entered into between DA and You as of
                          |the date You indicated your acceptance to the terms of this Agreement
                          |(the "EFFECTIVE DATE"), governs Your access to and use of the Canton
                          |Service, described below. "DA" means either Digital Asset Holdings, LLC,
@@ -558,9 +559,12 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
                          |    such other product or service.
                          |
                          |
-                         |""".stripMargin
+                         |""".stripMargin)
 
   def serviceAgreementStore(mk: () => ServiceAgreementStore): Unit = {
+
+    val agreementText1 = String256M.tryCreate("1")
+    val agreementText2 = String256M.tryCreate("2")
 
     "an empty service agreement store" should {
 
@@ -583,7 +587,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
       val sas = mk()
 
       for {
-        _ <- sas.storeAgreement(domain1, agreement1, "1").value
+        _ <- sas.storeAgreement(domain1, agreement1, agreementText1).value
         text <- sas.getAgreement(domain1, agreement1).value
         contains <- sas.containsAgreement(domain1, agreement1)
       } yield assert(text.value == "1" && contains)
@@ -603,10 +607,10 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
       val sas = mk()
 
       for {
-        _ <- sas.storeAgreement(domain1, agreement1, "1").value
-        _ <- sas.storeAgreement(domain1, agreement2, "2").value
-        _ <- sas.storeAgreement(domain2, agreement1, "1").value
-        _ <- sas.storeAgreement(domain2, agreement2, "2").value
+        _ <- sas.storeAgreement(domain1, agreement1, agreementText1).value
+        _ <- sas.storeAgreement(domain1, agreement2, agreementText2).value
+        _ <- sas.storeAgreement(domain2, agreement1, agreementText1).value
+        _ <- sas.storeAgreement(domain2, agreement2, agreementText2).value
         agreements <- sas.listAgreements
       } yield agreements should have size 4
     }
@@ -615,7 +619,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
       val sas = mk()
 
       for {
-        _ <- sas.storeAgreement(domain1, agreement1, "1").value
+        _ <- sas.storeAgreement(domain1, agreement1, agreementText1).value
         _ <- sas.insertAcceptedAgreement(domain1, agreement1).value
         contains <- sas.containsAcceptedAgreement(domain1, agreement1)
         acceptedAgreements <- sas.listAcceptedAgreements(domain1)
@@ -626,11 +630,11 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
       val sas = mk()
 
       for {
-        _ <- sas.storeAgreement(domain1, agreement1, "1").value
+        _ <- sas.storeAgreement(domain1, agreement1, agreementText1).value
         _ <- sas.insertAcceptedAgreement(domain1, agreement1).value
-        _ <- sas.storeAgreement(domain1, agreement2, "2").value
+        _ <- sas.storeAgreement(domain1, agreement2, agreementText2).value
         _ <- sas.insertAcceptedAgreement(domain1, agreement2).value
-        _ <- sas.storeAgreement(domain2, agreement1, "1").value
+        _ <- sas.storeAgreement(domain2, agreement1, agreementText1).value
         _ <- sas.insertAcceptedAgreement(domain2, agreement1).value
         acceptedAgreements <- sas.listAcceptedAgreements(domain1)
       } yield acceptedAgreements should have size (2)
@@ -640,7 +644,7 @@ trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>
       val sas = mk()
 
       for {
-        _ <- sas.storeAgreement(domain1, agreement1, "1").value
+        _ <- sas.storeAgreement(domain1, agreement1, agreementText1).value
         _ <- sas.insertAcceptedAgreement(domain1, agreement1).value
         _ <- sas.insertAcceptedAgreement(domain1, agreement1).value
         acceptedAgreements <- sas.listAcceptedAgreements(domain1)

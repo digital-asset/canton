@@ -7,6 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future._
 import com.digitalasset.canton.DomainId
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{
   Crypto,
   DomainSnapshotSyncCryptoApi,
@@ -17,7 +18,8 @@ import com.digitalasset.canton.domain.config.{DomainBaseConfig, DomainConfig, Do
 import com.digitalasset.canton.domain.topology._
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient, SequencerClientFactory}
@@ -51,6 +53,19 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+
+case class TopologyManagementComponents(
+    client: DomainTopologyClientWithInit,
+    processor: TopologyTransactionProcessor,
+    dispatcher: DomainTopologyDispatcher,
+    timeouts: ProcessingTimeout,
+    loggerFactory: NamedLoggerFactory,
+) extends FlagCloseable
+    with NamedLogging {
+
+  override def onClosed(): Unit = Lifecycle.close(client, processor, dispatcher)(logger)
+
+}
 
 object TopologyManagementInitialization {
 
@@ -105,9 +120,10 @@ object TopologyManagementInitialization {
       materializer: Materializer,
       tracer: Tracer,
       loggingContext: ErrorLoggingContext,
-  ): EitherT[Future, String, DomainTopologyDispatcher] = {
+  ): EitherT[Future, String, TopologyManagementComponents] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val managerId: DomainTopologyManagerId = domainTopologyManager.managerId
+    val timeouts = parameters.processingTimeouts
     val dispatcherLoggerFactory = loggerFactory.appendUnnamedKey("node", "identity")
     // if we're only running a embedded sequencer then there's no need to sequence topology transactions
     val isEmbedded = config match {
@@ -124,7 +140,7 @@ object TopologyManagementInitialization {
           SequencedEventStore(
             storage,
             managerDiscriminator,
-            parameters.processingTimeouts,
+            timeouts,
             dispatcherLoggerFactory,
           )
         val sendTrackerStore = SendTrackerStore(storage)
@@ -138,10 +154,15 @@ object TopologyManagementInitialization {
       eventHandler = {
         val domainTopologyServiceHandler =
           new DomainTopologyManagerEventHandler(
-            RegisterTopologyTransactionResponseStore(storage, crypto.pureCrypto, loggerFactory),
+            RegisterTopologyTransactionResponseStore(
+              storage,
+              crypto.pureCrypto,
+              timeouts,
+              loggerFactory,
+            ),
             domainTopologyService.newRequest,
             (env, callback) => newClient.sendAsync(Batch(List(env)), callback = callback),
-            parameters.processingTimeouts,
+            timeouts,
             loggerFactory,
           )
         val topologyProcessorHandler = topologyProcessor.createHandler(id)
@@ -169,7 +190,7 @@ object TopologyManagementInitialization {
           id,
           topologyClient,
           sequencedTopologyStore,
-          parameters.processingTimeouts,
+          timeouts,
           loggerFactory,
         )
       )
@@ -215,6 +236,12 @@ object TopologyManagementInitialization {
           dispatcherLoggerFactory,
         )
       )
-    } yield dispatcher
+    } yield TopologyManagementComponents(
+      topologyClient,
+      topologyProcessor,
+      dispatcher,
+      parameters.processingTimeouts,
+      loggerFactory,
+    )
   }
 }

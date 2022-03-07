@@ -52,7 +52,7 @@ trait TopologyManagerTest
     object MySetup {
 
       def create(str: String): Future[MySetup] = {
-        val crypto = SymbolicCrypto.create(loggerFactory)
+        val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
 
         def generateSigningKey(name: String): Future[SigningPublicKey] = {
           crypto

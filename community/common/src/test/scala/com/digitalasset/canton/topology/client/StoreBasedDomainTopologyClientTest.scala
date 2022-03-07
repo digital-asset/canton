@@ -389,6 +389,7 @@ trait DbStoreBasedTopologySnapshotTest extends StoreBasedTopologySnapshotTest {
         storage,
         TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
         100,
+        timeouts,
         loggerFactory,
       )
     )

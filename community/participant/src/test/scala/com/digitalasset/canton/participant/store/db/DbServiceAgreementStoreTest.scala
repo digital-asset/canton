@@ -27,7 +27,9 @@ trait DbServiceAgreementStoreTest
   }
 
   "DbServiceAgreementStore" should {
-    behave like serviceAgreementStore(() => new DbServiceAgreementStore(storage, loggerFactory))
+    behave like serviceAgreementStore(() =>
+      new DbServiceAgreementStore(storage, timeouts, loggerFactory)
+    )
   }
 }
 

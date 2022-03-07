@@ -7,14 +7,21 @@ import cats.instances.future._
 import cats.instances.list._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
+import com.digitalasset.canton.config.RequireTypes.{
+  LengthLimitedString,
+  String185,
+  String255,
+  String300,
+}
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
@@ -29,20 +36,21 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbTopologyStoreFactory(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     maxItemsInSqlQuery: Int,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
     extends TopologyStoreFactory
-    with NamedLogging {
+    with DbStore {
 
   private val storeCache = TrieMap.empty[TopologyStoreId, TopologyStore]
-  private val metadata = new DbPartyMetadataStore(storage)
+  private val metadata = new DbPartyMetadataStore(storage, timeouts, loggerFactory)
 
   override def forId(storeId: TopologyStoreId): TopologyStore =
     storeCache.getOrElseUpdate(
       storeId,
-      new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, loggerFactory),
+      new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, timeouts, loggerFactory),
     )
 
   import storage.api._
@@ -82,10 +90,18 @@ class DbTopologyStoreFactory(
 
   override def partyMetadataStore(): PartyMetadataStore = metadata
 
+  override def onClosed(): Unit = Lifecycle.close(metadata)(logger)
+
 }
 
-class DbPartyMetadataStore(storage: DbStorage)(implicit ec: ExecutionContext)
-    extends PartyMetadataStore {
+class DbPartyMetadataStore(
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit
+    ec: ExecutionContext
+) extends PartyMetadataStore
+    with DbStore {
 
   import DbStorage.Implicits.BuilderChain._
   import storage.api._
@@ -114,7 +130,7 @@ class DbPartyMetadataStore(storage: DbStorage)(implicit ec: ExecutionContext)
 
     for {
       data <- query
-        .as[(PartyId, Option[String], Option[String], String, CantonTimestamp, Boolean)]
+        .as[(PartyId, Option[String], Option[String], String255, CantonTimestamp, Boolean)]
     } yield {
       data.map {
         case (partyId, displayNameS, participantIdS, submissionId, effectiveAt, notified) =>
@@ -141,7 +157,7 @@ class DbPartyMetadataStore(storage: DbStorage)(implicit ec: ExecutionContext)
       participantId: Option[ParticipantId],
       displayName: Option[DisplayName],
       effectiveTimestamp: CantonTimestamp,
-      submissionId: String,
+      submissionId: String255,
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.metric.event {
       val participantS = dbValue(participantId)
@@ -176,8 +192,8 @@ class DbPartyMetadataStore(storage: DbStorage)(implicit ec: ExecutionContext)
       storage.update_(query, functionFullName)
     }
 
-  private def dbValue(participantId: Option[ParticipantId]): Option[String] =
-    participantId.map(_.uid.toProtoPrimitive)
+  private def dbValue(participantId: Option[ParticipantId]): Option[String300] =
+    participantId.map(_.uid.toLengthLimitedString.asString300)
 
   /** mark the given metadata has having been successfully forwarded to the domain */
   override def markNotified(
@@ -203,13 +219,14 @@ class DbPartyMetadataStore(storage: DbStorage)(implicit ec: ExecutionContext)
 }
 
 class DbTopologyStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     storeId: TopologyStoreId,
     maxItemsInSqlQuery: Int,
-    val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyStore
-    with NamedLogging {
+    with DbStore {
 
   import DbStorage.Implicits.BuilderChain._
   import storage.api._
@@ -258,8 +275,7 @@ class DbTopologyStore(
         .getOrElse(sql"") ++
       uniquePath.maybeElementId
         .map { elementId =>
-          val tmp = elementId.unwrap
-          sql" AND element_id = $tmp"
+          sql" AND element_id = $elementId"
         }
         .getOrElse(sql"") ++ sql")"
 
@@ -275,6 +291,7 @@ class DbTopologyStore(
 
   }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   private def updateAndInsert(
       store: LengthLimitedString,
       timestamp: CantonTimestamp,
@@ -288,9 +305,11 @@ class DbTopologyStore(
         val operation = transaction.operation
         val transactionType = transaction.uniquePath.dbType
         val namespace = transaction.uniquePath.namespace
-        val identifier = transaction.uniquePath.maybeUid.map(_.id).map(_.unwrap).getOrElse("")
-        val elementId = transaction.uniquePath.maybeElementId.map(_.unwrap).getOrElse("")
-        val reason = reasonT.map(_.asString)
+        val identifier =
+          transaction.uniquePath.maybeUid.map(_.id.toLengthLimitedString).getOrElse(String185.empty)
+        val elementId =
+          transaction.uniquePath.maybeElementId.fold(String255.empty)(_.toLengthLimitedString)
+        val reason = reasonT.map(_.asString1GB)
         val secondary = transaction match {
           case SignedTopologyTransaction(
                 TopologyStateUpdate(_, TopologyStateUpdateElement(_, mapping: PartyToParticipant)),
@@ -489,6 +508,7 @@ class DbTopologyStore(
         query1 ++ sql" AND operation = $value"
       case None => query1
     }
+    @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
     val query3 =
       if (idFilter.isEmpty) query2
       else if (namespaceOnly) {
@@ -616,7 +636,7 @@ class DbTopologyStore(
                     .toList
                     .flatMap(
                       _.map(uid =>
-                        sql"(#$identifier = ${uid.id.unwrap} AND #$namespace = ${uid.namespace})"
+                        sql"(#$identifier = ${uid.id} AND #$namespace = ${uid.namespace})"
                       )
                     )
                 val filterNsQ =
@@ -787,7 +807,7 @@ class DbTopologyStore(
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[CantonTimestamp]] = {
     val ns = participantId.uid.namespace
-    val id = participantId.uid.id.unwrap
+    val id = participantId.uid.id
     val subQuery = sql" AND valid_from < $beforeExclusive " ++
       sql"AND transaction_type = ${DomainTopologyTransactionType.ParticipantState} " ++
       sql"AND namespace = $ns AND identifier = $id "

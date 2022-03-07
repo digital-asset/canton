@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
 import cats.syntax.functor._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.KeyName
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.db.DbCryptoPublicStore
@@ -19,7 +20,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Store for all public cryptographic material such as certificates or public keys. */
-trait CryptoPublicStore {
+trait CryptoPublicStore extends AutoCloseable {
 
   implicit val ec: ExecutionContext
 
@@ -160,12 +161,12 @@ trait CryptoPublicStore {
 }
 
 object CryptoPublicStore {
-  def create(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): CryptoPublicStore = {
     storage match {
       case _: MemoryStorage => new InMemoryCryptoPublicStore
-      case dbStorage: DbStorage => new DbCryptoPublicStore(dbStorage, loggerFactory)
+      case dbStorage: DbStorage => new DbCryptoPublicStore(dbStorage, timeouts, loggerFactory)
     }
   }
 }

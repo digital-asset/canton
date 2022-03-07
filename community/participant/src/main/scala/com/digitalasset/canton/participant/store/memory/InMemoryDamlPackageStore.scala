@@ -9,12 +9,13 @@ import cats.implicits._
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPackageId
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.store.DamlPackageStore
+import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore.defaultPackageDescription
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -30,8 +31,8 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
     with NamedLogging {
   import DamlPackageStore._
 
-  private val pkgData: concurrent.Map[LfPackageId, (DamlLf.Archive, String)] =
-    new ConcurrentHashMap[LfPackageId, (DamlLf.Archive, String)].asScala
+  private val pkgData: concurrent.Map[LfPackageId, (DamlLf.Archive, String256M)] =
+    new ConcurrentHashMap[LfPackageId, (DamlLf.Archive, String256M)].asScala
 
   private val darData: concurrent.Map[Hash, (Array[Byte], String255)] =
     new ConcurrentHashMap[Hash, (Array[Byte], String255)].asScala
@@ -41,7 +42,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
 
   override def append(
       pkgs: List[DamlLf.Archive],
-      sourceDescription: String,
+      sourceDescription: String256M,
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext
@@ -55,7 +56,11 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
       if (sourceDescription.nonEmpty)
         pkgData.put(packageId, (pkgArchive, sourceDescription))
       else
-        pkgData.put(packageId, (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse("default")))
+        // TODO(andreas) This is not thread-safe
+        pkgData.put(
+          packageId,
+          (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse(defaultPackageDescription)),
+        )
     }
 
     dar.foreach { dar =>
@@ -137,4 +142,10 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
     darData.remove(hash)
     Future.unit
   }
+
+  override def close(): Unit = ()
+}
+
+object InMemoryDamlPackageStore {
+  val defaultPackageDescription = String256M.tryCreate("default")
 }

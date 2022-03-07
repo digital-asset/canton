@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, TestHash}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonExamples
@@ -41,12 +41,14 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     val darData = Files.readAllBytes(darFile.toPath)
     val hash = TestHash.digest("hash")
 
+    val testDescription = String256M.tryCreate("test")
+
     "save, retrieve, and remove a dar" in {
       val store = mk()
       for {
         _ <- store.append(
           List(damlPackage),
-          "test",
+          testDescription,
           Some(Dar(DarDescriptor(hash, darName), darData)),
         )
         result <- store.getDar(hash)
@@ -67,7 +69,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
       for {
         _ <- store.append(
           List(damlPackage),
-          "test",
+          testDescription,
           Some(Dar(DarDescriptor(hash, darName), darData)),
         )
         result <- store.listDars()
@@ -78,7 +80,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
       val store = mk()
       val dar = Dar(DarDescriptor(hash, darName), "dar contents".getBytes)
       for {
-        _ <- store.append(List(damlPackage), "test", Some(dar))
+        _ <- store.append(List(damlPackage), testDescription, Some(dar))
         _ = ByteBuffer.wrap(dar.bytes).put("stuff".getBytes)
         result <- store.getDar(hash)
       } yield result shouldBe Some(Dar(DarDescriptor(hash, darName), "dar contents".getBytes))
@@ -89,7 +91,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
       val dar = Dar(DarDescriptor(hash, darName), "dar contents".getBytes)
       for {
         _ <- Future.sequence(
-          (0 until 4).map(_ => store.append(List(damlPackage), "test", Some(dar)))
+          (0 until 4).map(_ => store.append(List(damlPackage), testDescription, Some(dar)))
         )
         result <- store.getDar(hash)
 
@@ -117,14 +119,14 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         val insert1: () => Future[Unit] = () =>
           store.append(
             pkgsDar1,
-            "test",
+            testDescription,
             Some(Dar(DarDescriptor(hash, darName), darData)),
           )
 
         val insert2: () => Future[Unit] = () =>
           store.append(
             pkgsDar2,
-            "test",
+            testDescription,
             Some(Dar(DarDescriptor(hash2, darName2), darData)),
           )
 
@@ -167,7 +169,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     "save and retrieve one Daml Package" in {
       val store = mk()
       for {
-        _ <- store.append(List(damlPackage), "test", None)
+        _ <- store.append(List(damlPackage), testDescription, None)
         result <- store.getPackage(packageId)
       } yield {
         result shouldBe Some(damlPackage)
@@ -177,7 +179,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     "save and retrieve multiple Daml Packages" in {
       val store = mk()
       for {
-        _ <- store.append(List(damlPackage, damlPackage2), "test", None)
+        _ <- store.append(List(damlPackage, damlPackage2), testDescription, None)
         resPkg2 <- store.getPackage(packageId2)
         resPkg1 <- store.getPackage(packageId)
       } yield {
@@ -189,15 +191,17 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     "list package id and state of stored packages" in {
       val store = mk()
       for {
-        _ <- store.append(List(damlPackage), "test", None)
+        _ <- store.append(List(damlPackage), testDescription, None)
         result <- store.listPackages()
-      } yield result should contain only PackageDescription(packageId, "test")
+      } yield result should contain only PackageDescription(packageId, testDescription)
     }
 
     "be able to persist the same package many times at the same time" in {
       val store = mk()
       for {
-        _ <- Future.sequence((0 until 4).map(_ => store.append(List(damlPackage), "test", None)))
+        _ <- Future.sequence(
+          (0 until 4).map(_ => store.append(List(damlPackage), testDescription, None))
+        )
         result <- store.getPackage(packageId)
       } yield {
         result shouldBe Some(damlPackage)
@@ -207,34 +211,38 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     "list package ids by state" in {
       val store = mk()
       for {
-        _ <- store.append(List(damlPackage), "test", None)
+        _ <- store.append(List(damlPackage), testDescription, None)
         result <- store.listPackages()
-      } yield result.loneElement shouldBe PackageDescription(packageId, "test")
+      } yield result.loneElement shouldBe PackageDescription(packageId, testDescription)
     }
 
     "list package id and state of stored packages where sourceDescription is empty" in {
       val store = mk()
       for {
-        _ <- store.append(List(damlPackage), "", None)
+        _ <- store.append(List(damlPackage), String256M.empty, None)
         result <- store.listPackages()
-      } yield result should contain only PackageDescription(packageId, "default")
+      } yield result should contain only PackageDescription(
+        packageId,
+        String256M.tryCreate("default"),
+      )
     }
 
     "list several packages with a limit" in {
       val store = mk()
+      val test2Description = String256M.tryCreate("test2")
       for {
-        _ <- store.append(List(damlPackage), "test", None)
-        _ <- store.append(List(damlPackage2), "test2", None)
+        _ <- store.append(List(damlPackage), testDescription, None)
+        _ <- store.append(List(damlPackage2), test2Description, None)
         result1 <- store.listPackages(Some(1))
         result2 <- store.listPackages(Some(2))
       } yield {
         result1.loneElement should (
-          be(PackageDescription(packageId, "test")) or
-            be(PackageDescription(packageId2, "test2"))
+          be(PackageDescription(packageId, testDescription)) or
+            be(PackageDescription(packageId2, test2Description))
         )
         result2.toSet shouldBe Set(
-          PackageDescription(packageId, "test"),
-          PackageDescription(packageId2, "test2"),
+          PackageDescription(packageId, testDescription),
+          PackageDescription(packageId2, test2Description),
         )
       }
     }
@@ -253,7 +261,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
 
         _ <- store.append(
           fivePkgs,
-          "test",
+          testDescription,
           dar = Some(
             Dar(DamlPackageStoreTest.descriptor, DamlPackageStoreTest.descriptor.name.str.getBytes)
           ),
@@ -261,7 +269,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         _ <-
           store.append(
             missing3,
-            "test",
+            testDescription,
             dar = Some(
               Dar(
                 DamlPackageStoreTest.descriptor2,
@@ -290,7 +298,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         // Check the case where all known packages have a "backup" DAR
         _ <- store.append(
           List(pkg3),
-          "test",
+          testDescription,
           dar = Some(
             Dar(
               DamlPackageStoreTest.descriptor2,
@@ -347,14 +355,14 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
 
         _ <- store.append(
           fivePkgs,
-          "test",
+          testDescription,
           dar = Some(
             Dar(DamlPackageStoreTest.descriptor, DamlPackageStoreTest.descriptor.name.str.getBytes)
           ),
         )
         _ <- store.append(
           fivePkgs,
-          "test",
+          testDescription,
           dar = Some(
             Dar(
               DamlPackageStoreTest.descriptor2,
@@ -395,7 +403,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         )
         _ <- store.append(
           missing2and3,
-          "test",
+          testDescription,
           dar = Some(
             Dar(DamlPackageStoreTest.descriptor, DamlPackageStoreTest.descriptor.name.str.getBytes)
           ),

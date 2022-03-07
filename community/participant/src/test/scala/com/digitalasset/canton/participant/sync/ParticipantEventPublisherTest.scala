@@ -47,6 +47,7 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
     val noDomainResolution = new DomainAliasResolution {
       override def domainIdForAlias(alias: DomainAlias): Option[DomainId] = None
       override def aliasForDomainId(id: DomainId): Option[DomainAlias] = None
+      override def close(): Unit = ()
     }
     val persistentStateManager = new SyncDomainPersistentStateManager(
       noDomainResolution,

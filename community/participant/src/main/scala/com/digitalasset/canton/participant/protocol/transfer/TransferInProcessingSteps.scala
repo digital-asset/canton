@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.transfer
 import cats.data.{EitherT, NonEmptyList, NonEmptySet}
 import cats.syntax.alternative._
 import cats.syntax.either._
+import cats.syntax.functor._
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.daml.ledger.participant.state.v2.TransactionMeta
@@ -16,6 +17,7 @@ import com.daml.lf.interpretation.{Error => LfInterpretationError}
 import com.digitalasset.canton.crypto.{DecryptionError => _, EncryptionError => _, _}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data._
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
@@ -104,7 +106,9 @@ class TransferInProcessingSteps(
       mediatorId: MediatorId,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Submission] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
 
     val SubmissionParam(submitterLf, transferId) = param
     val ipsSnapshot = recentSnapshot.ipsSnapshot
@@ -121,7 +125,7 @@ class TransferInProcessingSteps(
         )
       })
 
-    for {
+    val result = for {
       transferData <- ephemeralState.transferLookup
         .lookup(transferId)
         .leftMap(err => NoTransferData(transferId, err))
@@ -214,6 +218,8 @@ class TransferInProcessingSteps(
       )
       TransferSubmission(Batch.of(messages: _*), rootHash)
     }
+
+    result.mapK(FutureUnlessShutdown.outcomeK).widen[Submission]
   }
 
   override def updatePendingSubmissions(

@@ -5,15 +5,14 @@ package com.digitalasset.canton.crypto.store.db
 
 import cats.data.EitherT
 import cats.syntax.bifunctor._
-import com.digitalasset.canton.config.RequireTypes.String255._
-import com.digitalasset.canton.crypto.KeyName
-import com.digitalasset.canton.crypto.store._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.crypto.store._
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import io.functionmeta.functionFullName
@@ -22,11 +21,12 @@ import slick.jdbc.{GetResult, SetParameter}
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbCryptoPrivateStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)
     extends CryptoPrivateStore
-    with NamedLogging {
+    with DbStore {
 
   import storage.api._
   import storage.converters._

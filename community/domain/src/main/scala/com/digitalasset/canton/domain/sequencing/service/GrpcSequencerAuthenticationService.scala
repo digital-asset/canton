@@ -31,13 +31,13 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcSequencerAuthenticationService(
     authenticationService: MemberAuthenticationService,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends SequencerAuthenticationService
     with NamedLogging {
 
-  private val currentVersion = ProtocolVersion.current
-  private val handshakeValidator = new HandshakeValidator(currentVersion, loggerFactory)
+  private val handshakeValidator = new HandshakeValidator(protocolVersion, loggerFactory)
 
   /** This will complete the participant authentication process using the challenge information and returning a token
     * to be used for further authentication.
@@ -138,7 +138,7 @@ class GrpcSequencerAuthenticationService(
           { case (nonce, fingerprints) =>
             Challenge.Response.Value.Success(
               Challenge.Success(
-                currentVersion.fullVersion,
+                protocolVersion.fullVersion,
                 nonce.toProtoPrimitive,
                 fingerprints.map(_.unwrap).toList,
               )

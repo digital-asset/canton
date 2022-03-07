@@ -22,7 +22,6 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
@@ -128,6 +127,9 @@ class DirectSequencerClientTransport(
   override def handshake(request: HandshakeRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
-    EitherT.rightT(HandshakeResponse.Success(ProtocolVersion.current))
+    // never called - throwing an exception so tests fail if this ever changes
+    throw new UnsupportedOperationException(
+      "handshake is not implemented for DirectSequencerClientTransport"
+    )
 
 }

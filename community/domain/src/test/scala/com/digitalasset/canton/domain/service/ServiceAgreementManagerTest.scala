@@ -26,7 +26,8 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
     try {
       tmpf.write("test")
       val hasher = new SymbolicPureCrypto
-      val sam = ServiceAgreementManager.create(tmpf, new MemoryStorage, hasher, loggerFactory)
+      val sam =
+        ServiceAgreementManager.create(tmpf, new MemoryStorage, hasher, timeouts, loggerFactory)
       sam.fold(fail(_), testCode(_))
     } finally tmpf.delete()
   }
@@ -59,7 +60,13 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
       val hasher = new SymbolicPureCrypto
       val file = "/tmp/canton-invalid-file-for-testing"
       val sam =
-        ServiceAgreementManager.create(File(file), new MemoryStorage, hasher, loggerFactory)
+        ServiceAgreementManager.create(
+          File(file),
+          new MemoryStorage,
+          hasher,
+          timeouts,
+          loggerFactory,
+        )
       sam shouldBe Left(
         s"Unable to load service agreement file: java.nio.file.NoSuchFileException: $file"
       )

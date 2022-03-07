@@ -6,7 +6,8 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import cats.implicits._
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
@@ -15,8 +16,8 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
 }
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import io.functionmeta.functionFullName
@@ -25,11 +26,12 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbDomainConnectionConfigStore private[store] (
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends DomainConnectionConfigStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import storage.converters._
 

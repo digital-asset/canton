@@ -7,6 +7,8 @@ import cats.syntax.either._
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.lf.data.Bytes
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
+import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
@@ -49,6 +51,15 @@ object ContractIdSyntax {
 
   implicit class LfContractIdSyntax(private val contractId: LfContractId) extends AnyVal {
     def toProtoPrimitive: String = contractId.coid
+
+    /** An [[LfContractId]] consists of
+      * - a version (1 byte)
+      * - a discriminator (32 bytes)
+      * - a suffix (at most 94 bytes)
+      * Thoses 1 + 32 + 94 = 127 bytes are base-16 encoded, so this makes 254 chars at most.
+      * See https://github.com/digital-asset/daml/blob/main/daml-lf/spec/contract-id.rst
+      */
+    def toLengthLimitedString: String255 = checked(String255.tryCreate(contractId.coid))
     def encodeDeterministically: ByteString = ByteString.copyFromUtf8(toProtoPrimitive)
   }
 

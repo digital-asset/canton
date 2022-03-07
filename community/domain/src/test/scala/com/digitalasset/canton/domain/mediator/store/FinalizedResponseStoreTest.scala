@@ -139,7 +139,7 @@ trait DbFinalizedResponseStoreTest
   }
   "DbFinalizedResponseStore" should {
     behave like finalizedResponseStore(() =>
-      new DbFinalizedResponseStore(storage, pureCryptoApi, loggerFactory)
+      new DbFinalizedResponseStore(storage, pureCryptoApi, timeouts, loggerFactory)
     )
   }
 }

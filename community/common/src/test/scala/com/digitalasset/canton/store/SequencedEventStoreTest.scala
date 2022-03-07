@@ -26,7 +26,8 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
   this: AsyncWordSpec with BaseTest =>
 
   val sequencerKey: Fingerprint = Fingerprint.tryCreate("sequencer")
-  val crypto: Crypto = SymbolicCrypto.tryCreate(Seq(sequencerKey), Seq(), None, loggerFactory)
+  val crypto: Crypto =
+    SymbolicCrypto.tryCreate(Seq(sequencerKey), Seq(), None, timeouts, loggerFactory)
 
   def sign(str: String): Signature =
     DefaultProcessingTimeouts.default

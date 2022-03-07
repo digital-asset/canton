@@ -36,6 +36,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *                   The events must be serialized versions of `TracedSignedSerializedSequencedEvent`.
   */
 class ReplayingEventsSequencerClientTransport(
+    protocolVersion: ProtocolVersion,
     replayPath: Path,
     metrics: SequencerClientMetrics,
     override protected val timeouts: ProcessingTimeout,
@@ -107,7 +108,7 @@ class ReplayingEventsSequencerClientTransport(
   override def handshake(request: HandshakeRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
-    EitherT.rightT(HandshakeResponse.Success(ProtocolVersion.current))
+    EitherT.rightT(HandshakeResponse.Success(protocolVersion))
 }
 
 object ReplayingEventsSequencerClientTransport {

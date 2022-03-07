@@ -94,4 +94,6 @@ class InMemoryCryptoPublicStore(override implicit val ec: ExecutionContext)
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Set[X509Certificate]] =
     EitherT.rightT(certificateKeyMap.values.toSet)
+
+  override def close(): Unit = ()
 }

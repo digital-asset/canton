@@ -6,7 +6,7 @@ package com.digitalasset.canton.console
 import ammonite.util.Bind
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
 import com.digitalasset.canton.console.CommandErrors.{
   CantonCommandError,
@@ -22,7 +22,6 @@ import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerCon
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Identifier, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
-import com.digitalasset.canton.util.ShowUtil._
 import io.opentelemetry.api.trace.Tracer
 
 import java.time.{Duration, Instant}
@@ -159,40 +158,18 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
   )(implicit tag: ru.TypeTag[T]) {
 
     /** The name is surrounded with back-ticks to enforce valid scala identifier.
-      * @throws java.lang.IllegalStateException if `nameUnsafe` is not a valid name (empty, too long, contains invalid characters).
-      *                                         It is up to the caller to fail more gracefully.
+      * @throws com.digitalasset.canton.config.RequireTypes$.InstanceName$.InvalidInstanceName
+      *   if `nameUnsafe` is not a valid instance name.
+      *   It is up to the caller to fail more gracefully.
       */
     lazy val asBind: Bind[T] = {
-      requireValidInstanceName(nameUnsafe)
+      InstanceName.tryCreate(nameUnsafe)
 
       // Surround with back-ticks to handle the case that name is a reserved keyword in scala.
       Bind("`" + nameUnsafe + "`", value)
     }
     lazy val asHelpItem: Help.Item =
       Help.Item(nameUnsafe, None, Help.Summary(summary), Help.Description(""), Help.Topic(topic))
-  }
-
-  // TODO(i8491): move this code closer to InstanceName
-  private def requireValidInstanceName(nameUnsafe: String): Unit = {
-    val maxLength = 30
-
-    if (!nameUnsafe.matches("^[a-zA-Z0-9_]*$")) {
-      throw new IllegalStateException(
-        show"Node name contains invalid characters (allowed: [a-zA-Z0-9_]): " +
-          show"${nameUnsafe.limit(maxLength).toString.doubleQuoted}"
-      )
-    }
-
-    if (nameUnsafe.isEmpty) {
-      throw new IllegalStateException("Empty node name.")
-    }
-
-    if (nameUnsafe.length > maxLength) {
-      throw new IllegalStateException(
-        show"Node name is too long. Max length: ${maxLength}. Length: ${nameUnsafe.length}. " +
-          show"Name: ${nameUnsafe.limit(maxLength).toString.doubleQuoted}"
-      )
-    }
   }
 
   object TopLevelValue {
@@ -319,15 +296,15 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
     LocalParticipantReference,
   ] =
     NodeReferences(
-      environment.config.participants.keys.map(createParticipantReference).toSeq,
-      environment.config.remoteParticipants.keys
+      environment.config.participantsByString.keys.map(createParticipantReference).toSeq,
+      environment.config.remoteParticipantsByString.keys
         .map(createRemoteParticipantReference)
         .toSeq,
     )
   lazy val domains: NodeReferences[DomainReference, DomainRemoteRef, DomainLocalRef] =
     NodeReferences(
-      environment.config.domains.keys.map(createDomainReference).toSeq,
-      environment.config.remoteDomains.keys.map(createRemoteDomainReference).toSeq,
+      environment.config.domainsByString.keys.map(createDomainReference).toSeq,
+      environment.config.remoteDomainsByString.keys.map(createRemoteDomainReference).toSeq,
     )
 
   // the scala compiler / wartremover gets confused here if I use ++ directly
@@ -408,11 +385,12 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
   }
 
   /** Bindings for ammonite
-    * @throws java.lang.IllegalStateException if `nameUnsafe` is not a valid name (empty, too long, contains invalid characters).
-    *                                         It is up to the caller to fail more gracefully.
+    * @throws com.digitalasset.canton.config.RequireTypes$.InstanceName$.InvalidInstanceName
+    *   if `nameUnsafe` is not a valid instance name.
+    *   It is up to the caller to fail more gracefully.
+    * @throws java.lang.IllegalStateException if names are not unique.
     */
   lazy val bindings: Seq[Bind[_]] = {
-    // TODO(i8491): Add validations to the CantonConfig so that this will never throw.
     val values = topLevelValues
     validateNames(values)
     val binds = topLevelValues.map(_.asBind) :+
@@ -424,7 +402,7 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
 
   private def validateNames(
       values: Seq[TopLevelValue[_]]
-  ): Unit = values.foreach(v => requireValidInstanceName(v.nameUnsafe))
+  ): Unit = values.foreach(v => InstanceName.tryCreate(v.nameUnsafe))
 
   private def validateNameUniqueness(
       binds: Seq[Bind[_]]
@@ -515,6 +493,8 @@ object ConsoleEnvironment {
     implicit def toDomainAlias(alias: String): DomainAlias = DomainAlias.tryCreate(alias)
     implicit def toDomainAliases(aliases: Seq[String]): Seq[DomainAlias] =
       aliases.map(DomainAlias.tryCreate)
+
+    implicit def toInstanceName(name: String): InstanceName = InstanceName.tryCreate(name)
 
     implicit def toGrpcSequencerConnection(connection: String): SequencerConnection =
       GrpcSequencerConnection.tryCreate(connection)

@@ -345,7 +345,7 @@ object HttpSequencerClient {
       keystore <- crypto.javaKeyConverter
         .toJava(crypto.cryptoPrivateStore, crypto.cryptoPublicStore, Password.empty)
         .leftMap(err => s"Failed to create Java keystore: $err")
-      httpClient <- HttpClient
+      httpClient <- HttpClient.Insecure
         .create(connection.certificate, ProtectedKeyStore(keystore, Password.empty), None)(
           processingTimeout,
           loggerFactory,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.{DomainId, checked}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -18,7 +19,9 @@ import com.digitalasset.canton.util.ErrorUtil
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait ParticipantEventLog extends SingleDimensionEventLog[ParticipantEventLogId] {
+trait ParticipantEventLog
+    extends SingleDimensionEventLog[ParticipantEventLogId]
+    with AutoCloseable {
   this: NamedLogging =>
 
   /** Returns the first event (by offset ordering) whose [[com.digitalasset.canton.participant.sync.TimestampedEvent.EventId]]
@@ -56,6 +59,7 @@ object ParticipantEventLog {
   def apply(
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ParticipantEventLog =
     storage match {
@@ -66,6 +70,7 @@ object ParticipantEventLog {
           ProductionParticipantEventLogId,
           dbStorage,
           indexedStringStore,
+          timeouts,
           loggerFactory,
         )
     }

@@ -53,6 +53,7 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
           enableAdditionalConsistencyChecks = true,
           maxContractIdSqlInListSize = PositiveNumeric.tryCreate(10),
           indexStore,
+          timeouts,
           loggerFactory,
         )(ec)
       },

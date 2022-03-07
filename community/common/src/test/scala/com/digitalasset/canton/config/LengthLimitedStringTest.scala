@@ -32,5 +32,12 @@ class LengthLimitedStringTest extends AnyWordSpec with BaseTest {
       ok3.unwrap shouldBe "a" * 255
       a[IllegalArgumentException] should be thrownBy String255.tryCreate("a" * 256)
     }
+
+    "have symmetric equality with strings" in {
+      val s = "foo"
+      val s255 = String255.tryCreate("s")
+      (s255 == s) shouldBe (s == s255)
+      (s255 == "bar") shouldBe ("bar" == s255)
+    }
   }
 }

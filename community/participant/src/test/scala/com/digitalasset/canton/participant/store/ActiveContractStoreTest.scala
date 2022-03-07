@@ -8,6 +8,7 @@ import cats.implicits.toFoldableOps
 import cats.syntax.traverse._
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore._
@@ -33,8 +34,8 @@ import scala.concurrent.{ExecutionContext, Future}
 @nowarn("msg=match may not be exhaustive")
 trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLike with BaseTest =>
 
-  lazy val acsDomainStr: String = "active-contract-store::default"
-  lazy val acsDomainId: DomainId = DomainId.tryFromString(acsDomainStr)
+  lazy val acsDomainStr: String300 = String300.tryCreate("active-contract-store::default")
+  lazy val acsDomainId: DomainId = DomainId.tryFromString(acsDomainStr.unwrap)
 
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
   def activeContractStore(

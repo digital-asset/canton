@@ -4,16 +4,17 @@
 package com.digitalasset.canton.domain.topology.store
 
 import cats.data.OptionT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.crypto.CryptoPureApi
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
 import com.digitalasset.canton.resource.IdempotentInsert.insertIgnoringConflicts
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -24,7 +25,7 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait RegisterTopologyTransactionResponseStore {
+trait RegisterTopologyTransactionResponseStore extends AutoCloseable {
   def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
       traceContext: TraceContext
   ): Future[Unit]
@@ -48,12 +49,17 @@ trait RegisterTopologyTransactionResponseStore {
 object RegisterTopologyTransactionResponseStore {
   case class Response(response: RegisterTopologyTransactionResponse, isCompleted: Boolean)
 
-  def apply(storage: Storage, cryptoApi: CryptoPureApi, loggerFactory: NamedLoggerFactory)(implicit
+  def apply(
+      storage: Storage,
+      cryptoApi: CryptoPureApi,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext
   ): RegisterTopologyTransactionResponseStore = storage match {
     case _: MemoryStorage => new InMemoryRegisterTopologyTransactionResponseStore()
     case jdbc: DbStorage =>
-      new DbRegisterTopologyTransactionResponseStore(jdbc, cryptoApi, loggerFactory)
+      new DbRegisterTopologyTransactionResponseStore(jdbc, cryptoApi, timeouts, loggerFactory)
   }
 }
 
@@ -102,15 +108,18 @@ class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionCon
       traceContext: TraceContext
   ): Future[Boolean] =
     Future.successful(responseMap.contains(requestId))
+
+  override def close(): Unit = ()
 }
 
 class DbRegisterTopologyTransactionResponseStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     cryptoApi: CryptoPureApi,
-    override val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends RegisterTopologyTransactionResponseStore
-    with NamedLogging {
+    with DbStore {
 
   import storage.api._
   import storage.converters._

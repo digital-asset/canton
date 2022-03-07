@@ -6,24 +6,23 @@ package com.digitalasset.canton.store.db
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.functor._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String3
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging._
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.version.VersionedSignedContent
-import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
+import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store._
 import com.digitalasset.canton.store.db.DbSequencedEventStore._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.serialization.ProtoConverter
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -31,14 +30,13 @@ import java.util.concurrent.Semaphore
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class DbSequencedEventStore(
-    override protected[this] val storage: DbStorage,
+    override protected val storage: DbStorage,
     client: SequencerClientDiscriminator,
     override protected val timeouts: ProcessingTimeout,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends SequencedEventStore
-    with FlagCloseable
-    with NamedLogging
+    with DbStore
     with DbPrunableByTime[SequencerClientDiscriminator, Nothing] {
 
   override protected[this] val partitionKey: SequencerClientDiscriminator = client
@@ -372,7 +370,7 @@ object DbSequencedEventStore {
     }
 
     implicit val setParameterSequencedEventType: SetParameter[SequencedEventDbType] = (v, pp) =>
-      pp.setString(v.name.str)
+      pp >> v.name
 
     implicit val getResultSequencedEventType: GetResult[SequencedEventDbType] = GetResult(r =>
       r.nextString() match {

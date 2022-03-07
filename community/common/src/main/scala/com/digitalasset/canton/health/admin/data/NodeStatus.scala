@@ -306,6 +306,7 @@ object ParticipantStatus {
 
 case class SequencerNodeStatus(
     uid: UniqueIdentifier,
+    domainId: DomainId,
     uptime: Duration,
     ports: Map[String, Port],
     connectedParticipants: Seq[ParticipantId],
@@ -316,14 +317,17 @@ case class SequencerNodeStatus(
   override def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
     SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
-      extra = v0.SequencerNodeStatus(participants, sequencer.toProtoV0.some).toByteString
+      extra = v0
+        .SequencerNodeStatus(participants, sequencer.toProtoV0.some, domainId.toProtoPrimitive)
+        .toByteString
     )
   }
 
   override def pretty: Pretty[SequencerNodeStatus] =
     prettyOfString(_ =>
       Seq(
-        s"Domain id: ${uid.toProtoPrimitive}",
+        s"Sequencer id: ${uid.toProtoPrimitive}",
+        s"Domain id: ${domainId.toProtoPrimitive}",
         show"Uptime: $uptime",
         s"Ports: ${portsString(ports)}",
         s"Connected Participants: ${multiline(connectedParticipants.map(_.toString))}",
@@ -351,8 +355,13 @@ object SequencerNodeStatus {
               "sequencer",
               sequencerNodeStatusP.sequencer,
             )
+            domainId <- DomainId.fromProtoPrimitive(
+              sequencerNodeStatusP.domainId,
+              s"SequencerNodeStatus.domainId",
+            )
           } yield SequencerNodeStatus(
             status.uid,
+            domainId,
             status.uptime,
             status.ports,
             participants,
@@ -363,4 +372,56 @@ object SequencerNodeStatus {
       )
     } yield sequencerNodeStatus
 
+}
+
+case class MediatorNodeStatus(
+    uid: UniqueIdentifier,
+    domainId: DomainId,
+    uptime: Duration,
+    ports: Map[String, Port],
+    active: Boolean,
+    topologyQueue: TopologyQueueStatus,
+) extends NodeStatus.Status {
+  override def pretty: Pretty[MediatorNodeStatus] =
+    prettyOfString(_ =>
+      Seq(
+        s"Node uid: ${uid.toProtoPrimitive}",
+        s"Domain id: ${domainId.toProtoPrimitive}",
+        show"Uptime: $uptime",
+        s"Ports: ${portsString(ports)}",
+        s"Active: $active",
+      ).mkString(System.lineSeparator())
+    )
+
+  override def toProtoV0: v0.NodeStatus.Status =
+    SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
+      extra = v0
+        .MediatorNodeStatus(domainId.toProtoPrimitive)
+        .toByteString
+    )
+}
+
+object MediatorNodeStatus {
+  def fromProtoV0(proto: v0.NodeStatus.Status): ParsingResult[MediatorNodeStatus] =
+    for {
+      status <- SimpleStatus.fromProtoV0(proto)
+      mediatorNodeStatus <- ProtoConverter.parse[MediatorNodeStatus, v0.MediatorNodeStatus](
+        v0.MediatorNodeStatus.parseFrom,
+        mediatorNodeStatusP =>
+          for {
+            domainId <- DomainId.fromProtoPrimitive(
+              mediatorNodeStatusP.domainId,
+              s"MediatorNodeStatus.domainId",
+            )
+          } yield MediatorNodeStatus(
+            status.uid,
+            domainId,
+            status.uptime,
+            status.ports,
+            status.active,
+            status.topologyQueue,
+          ),
+        proto.extra,
+      )
+    } yield mediatorNodeStatus
 }

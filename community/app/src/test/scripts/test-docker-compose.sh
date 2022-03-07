@@ -11,7 +11,7 @@ export CANTON_VERSION=${CANTON_VERSION:-"dev"}
 export BASE_PORT="80"
 
 # figure out what our current SDK version is
-EXPECTED_VERSION=$(cat ../../../../../../project/project/DamlVersions.scala | grep "val version =" | awk '{print $4}' | tr -d '"')
+EXPECTED_VERSION=$(cat ../../../../../../project/project/DamlVersions.scala | grep "val version: String =" | awk '{print $5}' | tr -d '"')
 if [ -z $EXPECTED_VERSION ]; then
     echo "unable to determine expected version"
     exit 1

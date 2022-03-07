@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   GrpcAdminCommand,
   ParticipantAdminCommands,
 }
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{CantonCommunityConfig, ClientConfig}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.HeadlessConsole.{
@@ -37,37 +38,28 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
 
   lazy val DefaultConfig: CantonCommunityConfig = CantonCommunityConfig(
     domains = Map(
-      "d1" -> ConfigStubs.domain,
-      "d2" -> ConfigStubs.domain,
-      "d_3" -> ConfigStubs.domain,
+      InstanceName.tryCreate("d1") -> ConfigStubs.domain,
+      InstanceName.tryCreate("d2") -> ConfigStubs.domain,
+      InstanceName.tryCreate("d-3") -> ConfigStubs.domain,
     ),
     participants = Map(
-      "p1" -> ConfigStubs.participant
+      InstanceName.tryCreate("p1") -> ConfigStubs.participant
         .copy(adminApi = ConfigStubs.adminApi), // for testing admin api
-      "p2" -> ConfigStubs.participant,
-      "new" -> ConfigStubs.participant,
-      "p_4" -> ConfigStubs.participant,
+      InstanceName.tryCreate("p2") -> ConfigStubs.participant,
+      InstanceName.tryCreate("new") -> ConfigStubs.participant,
+      InstanceName.tryCreate("p-4") -> ConfigStubs.participant,
     ),
-  )
-
-  lazy val CodeInjectionConfig: CantonCommunityConfig = CantonCommunityConfig(
-    participants = Map(
-      // This one would print a message containing the word ERROR.
-      """aa`=1;println("ERROR: malicious code execution from participant name");var `xxx""" -> ConfigStubs.participant,
-      // This one would fail initialization of ammonite.
-      """aa` invalid-command `xxx""" -> ConfigStubs.participant,
-    )
   )
 
   lazy val NameClashConfig: CantonCommunityConfig = CantonCommunityConfig(
     participants = Map(
       // Reserved keyword
-      "participants" -> ConfigStubs.participant,
+      InstanceName.tryCreate("participants") -> ConfigStubs.participant,
       // Name collision
-      "d1" -> ConfigStubs.participant,
+      InstanceName.tryCreate("d1") -> ConfigStubs.participant,
     ),
     domains = Map(
-      "d1" -> ConfigStubs.domain
+      InstanceName.tryCreate("d1") -> ConfigStubs.domain
     ),
   )
 
@@ -188,8 +180,8 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       verify(participants).start("new")
     }
     "start a participant with underscore in name" in new TestEnvironment {
-      runOrFail("`p_4` start")
-      verify(participants).start("p_4")
+      runOrFail("`p-4` start")
+      verify(participants).start("p-4")
     }
     "stop a participant" in new TestEnvironment {
       runOrFail(
@@ -206,14 +198,14 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       verify(participants).start("p1")
       verify(participants).start("p2")
       verify(participants).start("new")
-      verify(participants).start("p_4")
+      verify(participants).start("p-4")
     }
     "start all domains" in new TestEnvironment {
       runOrFail("domains.local start")
 
       verify(domains).start("d1")
       verify(domains).start("d2")
-      verify(domains).start("d_3")
+      verify(domains).start("d-3")
     }
     "start all" in new TestEnvironment {
       runOrFail("nodes.local start")
@@ -221,10 +213,10 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       verify(participants).start("p1")
       verify(participants).start("p2")
       verify(participants).start("new")
-      verify(participants).start("p_4")
+      verify(participants).start("p-4")
       verify(domains).start("d1")
       verify(domains).start("d2")
-      verify(domains).start("d_3")
+      verify(domains).start("d-3")
     }
 
     "return a compile error if the code fails to compile" in new TestEnvironment {
@@ -249,7 +241,7 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       setupAdminCommandResponse("p1", Right(Seq()))
       setupAdminCommandResponse("p2", Right(Seq()))
       setupAdminCommandResponse("new", Right(Seq()))
-      setupAdminCommandResponse("p_4", Right(Seq()))
+      setupAdminCommandResponse("p-4", Right(Seq()))
 
       runOrFail(s"""participants.all.dars.upload("$CantonExamplesPath", false)""")
 
@@ -264,7 +256,7 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       verifyUploadDar("p1")
       verifyUploadDar("p2")
       verifyUploadDar("new")
-      verifyUploadDar("p_4")
+      verifyUploadDar("p-4")
     }
 
     "participants.local help shows help from both InstanceExtensions and ParticipantExtensions" in new TestEnvironment {
@@ -283,13 +275,6 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
   }
 
   "Console" must {
-    "fail on invalid node names" in new TestEnvironment(CodeInjectionConfig) {
-      val ex: IllegalStateException = the[IllegalStateException] thrownBy run("1+1")
-      ex.getMessage should startWith(
-        """Node name contains invalid characters (allowed: [a-zA-Z0-9_]): """
-      )
-    }
-
     "fail on name clashes in config" in new TestEnvironment(NameClashConfig) {
       val ex: IllegalStateException = the[IllegalStateException] thrownBy run("1+1")
       ex.getMessage should startWith(

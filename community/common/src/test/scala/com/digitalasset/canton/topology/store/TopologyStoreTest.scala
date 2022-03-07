@@ -30,6 +30,8 @@ trait TopologyStoreTest
   protected implicit def traceContext: TraceContext
 
   val pid = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
+  lazy val submissionId = String255.tryCreate("submissionId")
+  lazy val submissionId2 = String255.tryCreate("submissionId2")
 
   def partyMetadataStore(mk: () => PartyMetadataStore): Unit = {
     import DefaultTestIdentities._
@@ -41,12 +43,12 @@ trait TopologyStoreTest
           Some(participant1),
           None,
           CantonTimestamp.Epoch,
-          "submissionId",
+          submissionId,
         )
         fetch <- store.metadataForParty(party1)
       } yield {
         fetch shouldBe Some(
-          PartyMetadata(party1, None, Some(participant1))(CantonTimestamp.Epoch, "submissionId")
+          PartyMetadata(party1, None, Some(participant1))(CantonTimestamp.Epoch, submissionId)
         )
       }
     }
@@ -59,28 +61,28 @@ trait TopologyStoreTest
           None,
           None,
           CantonTimestamp.Epoch,
-          "submissionId",
+          submissionId,
         )
         _ <- store.insertOrUpdatePartyMetadata(
           party2,
           None,
           None,
           CantonTimestamp.Epoch,
-          "submissionId",
+          submissionId,
         )
         _ <- store.insertOrUpdatePartyMetadata(
           party1,
           Some(participant1),
           Some(String255.tryCreate("MoreName")),
           CantonTimestamp.Epoch,
-          "submissionId",
+          submissionId,
         )
         _ <- store.insertOrUpdatePartyMetadata(
           party2,
           Some(participant3),
           Some(String255.tryCreate("Boooh")),
           CantonTimestamp.Epoch,
-          "submissionId",
+          submissionId,
         )
         meta1 <- store.metadataForParty(party1)
         meta2 <- store.metadataForParty(party2)
@@ -88,13 +90,13 @@ trait TopologyStoreTest
         meta1 shouldBe Some(
           PartyMetadata(party1, Some(String255.tryCreate("MoreName")), Some(participant1))(
             CantonTimestamp.Epoch,
-            "",
+            String255.empty,
           )
         )
         meta2 shouldBe Some(
           PartyMetadata(party2, Some(String255.tryCreate("Boooh")), Some(participant3))(
             CantonTimestamp.Epoch,
-            "",
+            String255.empty,
           )
         )
       }
@@ -103,11 +105,11 @@ trait TopologyStoreTest
     "deal with delayed notifications" in {
       val store = mk()
       val rec1 =
-        PartyMetadata(party1, None, Some(participant1))(CantonTimestamp.Epoch, "submissionId")
+        PartyMetadata(party1, None, Some(participant1))(CantonTimestamp.Epoch, submissionId)
       val rec2 =
         PartyMetadata(party2, Some(String255.tryCreate("Boooh")), Some(participant3))(
           CantonTimestamp.Epoch,
-          "submissionId2",
+          submissionId2,
         )
       for {
         _ <- store.insertOrUpdatePartyMetadata(

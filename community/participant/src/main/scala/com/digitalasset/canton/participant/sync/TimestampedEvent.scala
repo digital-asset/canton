@@ -109,11 +109,10 @@ object TimestampedEvent {
     private val TimelyRejectionEventIdRegex =
       s"$timelyRejectionEventIdPrefix([^$timelyRejectionEventSeparator]*)$timelyRejectionEventSeparator(.*)".r
 
-    implicit val eventIdSetParameter: SetParameter[EventId] = (v, pp) =>
-      pp.setString(v.asString300.unwrap)
+    implicit val eventIdSetParameter: SetParameter[EventId] = (v, pp) => pp >> v.asString300
 
     implicit val optionEventIdSetParameter: SetParameter[Option[EventId]] = (v, pp) =>
-      pp.setStringOption(v.map(_.asString300.unwrap))
+      pp >> v.map(_.asString300)
 
     implicit val optionEventIdGetResult: GetResult[Option[EventId]] = GetResult { r =>
       val eventIdO = r.nextStringOption()

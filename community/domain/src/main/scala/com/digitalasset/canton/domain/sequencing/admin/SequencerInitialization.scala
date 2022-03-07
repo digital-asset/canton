@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.admin
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InstanceName
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.store.CryptoPublicStore
 import com.digitalasset.canton.crypto.{KeyName, KeyPurpose, PublicKey}
 import com.digitalasset.canton.domain.topology.DomainTopologyManager

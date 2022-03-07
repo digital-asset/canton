@@ -8,7 +8,6 @@ import akka.stream.scaladsl.Source
 import cats.data.NonEmptyList
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{Sequenced, SequencerMemberId}
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.lifecycle.FlagCloseableAsync
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.SortedSet
@@ -51,7 +50,7 @@ case object ReadSignal extends ReadSignal
 /** Component to signal to a [[SequencerReader]] that more events may be available to read so should attempt
   * fetching events from its store.
   */
-trait EventSignaller extends FlagCloseableAsync {
+trait EventSignaller extends AutoCloseable {
   def notifyOfLocalWrite(notification: WriteNotification)(implicit
       traceContext: TraceContext
   ): Future[Unit]

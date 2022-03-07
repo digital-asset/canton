@@ -116,4 +116,6 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
     storedDecryptionKeyMap.remove(keyId)
     EitherT.rightT(())
   }
+
+  override def close(): Unit = ()
 }

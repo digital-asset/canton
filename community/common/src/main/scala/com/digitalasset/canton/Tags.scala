@@ -62,9 +62,9 @@ object DomainId {
     UniqueIdentifier.getResultO.andThen(_.map(DomainId(_)))
 
   implicit val setParameterDomainId: SetParameter[DomainId] =
-    (d: DomainId, pp: PositionedParameters) => pp.setString(d.toProtoPrimitive)
+    (d: DomainId, pp: PositionedParameters) => pp >> d.toLengthLimitedString
   implicit val setParameterDomainIdO: SetParameter[Option[DomainId]] =
-    (d: Option[DomainId], pp: PositionedParameters) => pp.setStringOption(d.map(_.toProtoPrimitive))
+    (d: Option[DomainId], pp: PositionedParameters) => pp >> d.map(_.toLengthLimitedString)
 
   def fromProtoPrimitive(
       proto: String,
@@ -87,6 +87,8 @@ case class TimedValue[A](timestamp: Instant, value: A)
 case class CommandId(private val id: LfLedgerString) extends PrettyPrinting {
   def unwrap: LfLedgerString = id
   def toProtoPrimitive: String = unwrap
+  def toLengthLimitedString: String255 =
+    checked(String255.tryCreate(id)) // LfLedgerString is limited to 255 chars
   override def pretty: Pretty[CommandId] = prettyOfParam(_.unwrap)
 }
 
@@ -102,7 +104,7 @@ object CommandId {
   }
 
   implicit val setParameterCommandId: SetParameter[CommandId] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
 }
 
 /** Application identifier for identifying customer applications in the ledger api
@@ -111,6 +113,8 @@ object CommandId {
 case class ApplicationId(private val id: LedgerApplicationId) extends PrettyPrinting {
   def unwrap: LedgerApplicationId = id
   def toProtoPrimitive: String = unwrap
+  def toLengthLimitedString: String255 =
+    checked(String255.tryCreate(id)) // LedgerApplicationId is limited to 255 chars
   override def pretty: Pretty[ApplicationId] = prettyOfParam(_.unwrap)
 }
 
@@ -127,7 +131,7 @@ object ApplicationId {
     }
 
   implicit val setParameterApplicationId: SetParameter[ApplicationId] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
 }
 
 /** Workflow identifier for identifying customer workflows, i.e. individual requests, in the ledger api

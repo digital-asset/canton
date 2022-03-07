@@ -66,6 +66,7 @@ message SequencerNodeStatus {
     repeated string connected_participants = 1;
     // required - status of the sequencer component it is running
     SequencerHealthStatus sequencer = 2;
+    string domain_id = 3;
 }
 
 // status of the sequencer component
@@ -74,4 +75,8 @@ message SequencerHealthStatus {
     bool active = 1;
     // optionally set details on how sequencer is healthy/unhealthy
     google.protobuf.StringValue details = 2;
+}
+
+message MediatorNodeStatus {
+    string domain_id = 1;
 }

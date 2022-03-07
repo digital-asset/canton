@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContext
@@ -22,6 +23,7 @@ trait SequencerFactory {
       domainSyncCryptoApi: DomainSyncCryptoClient,
       snapshot: Option[SequencerSnapshot],
       localNodeParameters: LocalNodeParameters,
+      protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext, tracer: Tracer, actorMaterializer: Materializer): Sequencer
 }
 
@@ -39,6 +41,7 @@ object SequencerFactory {
           domainSyncCryptoApi: DomainSyncCryptoClient,
           snapshot: Option[SequencerSnapshot],
           localNodeParameters: LocalNodeParameters,
+          sequencerProtocolVersion: ProtocolVersion,
       )(implicit
           ec: ExecutionContext,
           tracer: Tracer,
@@ -47,6 +50,10 @@ object SequencerFactory {
         val sequencer = new DatabaseSequencer(
           writerStorageFactory,
           config,
+          TotalNodeCountValues.SingleSequencerTotalNodeCount,
+          None,
+          // Dummy config which will be ignored anyway as `config.highAvailabiltyEnabled` is false
+          OnlineSequencerCheckConfig(),
           localNodeParameters.processingTimeouts,
           storage,
           clock,

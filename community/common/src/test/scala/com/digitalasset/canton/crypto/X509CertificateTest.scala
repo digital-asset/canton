@@ -9,8 +9,8 @@ import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.resource.MemoryStorage
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
-import java.security.cert.{CertificateFactory, X509Certificate => JX509Certificate}
 
+import java.security.cert.{CertificateFactory, X509Certificate => JX509Certificate}
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -21,7 +21,12 @@ class X509CertificateTest extends FixtureAsyncWordSpec with BaseTest {
 
   override def withFixture(test: OneArgAsyncTest): FutureOutcome = {
     val fixtureE = for {
-      crypto <- CryptoFactory.create(CryptoConfig(), new MemoryStorage(), loggerFactory)
+      crypto <- CryptoFactory.create(
+        CryptoConfig(),
+        new MemoryStorage(),
+        timeouts,
+        loggerFactory,
+      )
       pubkey <- crypto
         .generateSigningKey(SigningKeyScheme.EcDsaP384, Some(KeyName.tryCreate("test")))
         .leftMap(err => s"Failed to generate keypair: $err")

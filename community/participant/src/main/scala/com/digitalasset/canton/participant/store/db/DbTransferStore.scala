@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
@@ -19,8 +20,8 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.version.VersionedSignedContent
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -37,13 +38,14 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 
 class DbTransferStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     domain: DomainId,
     cryptoApi: CryptoPureApi,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TransferStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import storage.converters._
 
@@ -117,6 +119,7 @@ class DbTransferStore(
       val transferId: TransferId = transferData.transferId
       val newEntry = TransferEntry(transferData, None)
 
+      import DbStorage.Implicits._
       val insert: DBIO[Int] = sqlu"""
         insert into transfers(target_domain, origin_domain, request_timestamp, transfer_out_timestamp, transfer_out_request_counter,
         transfer_out_request, transfer_out_decision_time, contract, creating_transaction_id, transfer_out_result, submitter_lf)
@@ -283,6 +286,7 @@ class DbTransferStore(
       storage.query(
         {
           import DbStorage.Implicits.BuilderChain._
+          import DbStorage.Implicits._
 
           val base = sql"""
      select transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.config._
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.resource.{CommunityDbMigrationsFactory, DbStorage, DbStorageSingle}
@@ -18,12 +19,14 @@ import scala.jdk.CollectionConverters._
 /** Provide a storage backend for tests.
   * Description is used by DbStorageTest to name tests.
   */
-trait DbStorageSetup[C <: DbConfig] extends AutoCloseable {
+trait DbStorageSetup[C <: DbConfig] extends FlagCloseable with HasCloseContext {
   val storage: DbStorage
 
   def config: C
 
-  override def close(): Unit = storage.close()
+  override def onClosed(): Unit = storage.close()
+
+  override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 }
 
 trait DbStorageBasicConfig[BC <: DbBasicConfig[BC]] {
@@ -31,12 +34,12 @@ trait DbStorageBasicConfig[BC <: DbBasicConfig[BC]] {
 }
 
 abstract class PostgresDbStorageSetup(
-    timeout: ProcessingTimeout,
-    loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
     skipDbMigration: Boolean,
 )(implicit ec: ExecutionContext)
     extends DbStorageSetup[PostgresDbConfig]
-    with DbStorageBasicConfig[PostgresBasicConfig] {
+    with DbStorageBasicConfig[PostgresBasicConfig]
+    with NamedLogging {
 
   override lazy val storage: DbStorage = {
     val metrics =
@@ -47,7 +50,7 @@ abstract class PostgresDbStorageSetup(
       connectionPoolForParticipant = false,
       None,
       metrics,
-      timeout,
+      timeouts,
       loggerFactory,
     )
     if (!skipDbMigration) {
@@ -67,7 +70,6 @@ abstract class PostgresDbStorageFunctionalTestSetup(
     skipDbMigration: Boolean,
 )(implicit ec: ExecutionContext)
     extends PostgresDbStorageSetup(
-      DefaultProcessingTimeouts.testing,
       loggerFactory,
       skipDbMigration,
     ) {
@@ -99,12 +101,13 @@ class PostgresCISetup(loggerFactory: NamedLoggerFactory, skipDbMigration: Boolea
   /** Lookup environment variable and return. Throw [[java.lang.RuntimeException]] if missing. */
   private def env(name: String): String =
     sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
+
 }
 
 /** Use [TestContainers]() to create a Postgres docker container instance to run against.
   * Used for running tests locally.
   */
-class PostgresTestContainerSetup(val loggerFactory: NamedLoggerFactory, skipDbMigration: Boolean)(
+class PostgresTestContainerSetup(loggerFactory: NamedLoggerFactory, skipDbMigration: Boolean)(
     implicit ec: ExecutionContext
 ) extends PostgresDbStorageFunctionalTestSetup(loggerFactory, skipDbMigration)
     with NamedLogging {
@@ -126,8 +129,8 @@ class PostgresTestContainerSetup(val loggerFactory: NamedLoggerFactory, skipDbMi
 
   def getContainerID: String = postgresContainer.getContainerId
 
-  override def close(): Unit = {
-    try super.close()
+  override def onClosed(): Unit = {
+    try super.onClosed()
     finally postgresContainer.close()
   }
 }
@@ -138,7 +141,6 @@ class PostgresPerformanceTestingSetup(
     override val basicConfig: PostgresBasicConfig,
 )(implicit executionContext: ExecutionContext)
     extends PostgresDbStorageSetup(
-      DefaultProcessingTimeouts.testing,
       loggerFactory,
       createDatabaseMode,
     ) {
@@ -154,9 +156,10 @@ class PostgresPerformanceTestingSetup(
   }
 }
 
-class H2DbStorageSetup(timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(implicit
+class H2DbStorageSetup(override protected val loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContext
-) extends DbStorageSetup[H2DbConfig] {
+) extends DbStorageSetup[H2DbConfig]
+    with NamedLogging {
   val config: H2DbConfig = DbStorageSetup.Config.h2Config(
     "",
     "",
@@ -204,7 +207,7 @@ object DbStorageSetup {
   }
 
   def h2(loggerFactory: NamedLoggerFactory)(implicit ec: ExecutionContext): H2DbStorageSetup =
-    new H2DbStorageSetup(DefaultProcessingTimeouts.testing, loggerFactory)
+    new H2DbStorageSetup(loggerFactory)
 
   object Config {
     trait DbBasicConfig[A <: DbBasicConfig[A]] {

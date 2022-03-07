@@ -51,6 +51,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   * however currently multiple or even concurrent calls are not prevented (just don't).
   */
 class ReplayingSendsSequencerClientTransport(
+    protocolVersion: ProtocolVersion,
     recordedPath: Path,
     replaySendsConfig: ReplayAction.SequencerSends,
     member: Member,
@@ -369,7 +370,7 @@ class ReplayingSendsSequencerClientTransport(
   override def handshake(request: HandshakeRequest)(implicit
       traceContext: TraceContext
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
-    EitherT.pure(HandshakeResponse.Success(ProtocolVersion.current))
+    EitherT.rightT(HandshakeResponse.Success(protocolVersion))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
     SyncCloseable("underlying-transport", underlyingTransport.close())

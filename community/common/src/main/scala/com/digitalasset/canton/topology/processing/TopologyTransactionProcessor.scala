@@ -10,11 +10,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FlagCloseableAsync,
-  FutureUnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.LoggingAlarmStreamer
 import com.digitalasset.canton.protocol.messages.{
@@ -97,9 +93,7 @@ class TopologyTransactionProcessor(
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
-
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq()
+    with FlagCloseable {
 
   protected val alarmer = new LoggingAlarmStreamer(logger)
   private val authValidator =
@@ -110,7 +104,7 @@ class TopologyTransactionProcessor(
       loggerFactory.append("role", "incoming"),
     )
   private val listeners = ListBuffer[TopologyTransactionProcessingSubscriber]()
-  private val timeAdjuster = new TopologyTimestampPlusEpsilonTracker(loggerFactory)
+  private val timeAdjuster = new TopologyTimestampPlusEpsilonTracker(timeouts, loggerFactory)
   private val serializer = new SimpleExecutionQueue()
   private val initialised = new AtomicBoolean(false)
 
@@ -124,7 +118,7 @@ class TopologyTransactionProcessor(
 
   private def initialise(
       resubscriptionTs: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[EffectiveTime] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[EffectiveTime] = {
     ErrorUtil.requireState(
       !initialised.getAndSet(true),
       "topology processor is already initialised",
@@ -158,7 +152,9 @@ class TopologyTransactionProcessor(
     // anyway).
     for {
       effectiveTsOfSequencedTs <- effectiveTsOfSequencedTsF
-      futureEffectiveTimes <- store.findEffectiveTimestampsSince(resubscriptionTs)
+      futureEffectiveTimes <- performUnlessClosingF(
+        store.findEffectiveTimestampsSince(resubscriptionTs)
+      )
     } yield {
       val tmp =
         mergeEffectiveTimesWithApproximateTimestamps(effectiveTsOfSequencedTs, futureEffectiveTimes)
@@ -493,15 +489,16 @@ class TopologyTransactionProcessor(
       messages: => List[DomainTopologyTransactionMessage],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val sequencedTime = SequencedTime(ts)
-    val updatesF = Future { messages }
-
+    val updatesF = performUnlessClosingF(Future { messages })
     def computeEffectiveTime(
         updates: List[DomainTopologyTransactionMessage]
-    ): Future[EffectiveTime] = {
+    ): FutureUnlessShutdown[EffectiveTime] = {
       if (updates.nonEmpty) {
-        val tmpF = futureSupervisor.supervised(s"adjust ts=$ts for update")(
-          timeAdjuster.adjustTimestampForUpdate(sequencedTime)
-        )
+        val tmpF =
+          futureSupervisor.supervisedUS(s"adjust ts=$ts for update")(
+            timeAdjuster.adjustTimestampForUpdate(sequencedTime)
+          )
+
         // we need to inform the acs commitment processor about the incoming change
         tmpF.map { eft =>
           // this is safe to do here, as the acs commitment processor `publish` method will only be
@@ -510,16 +507,16 @@ class TopologyTransactionProcessor(
           eft
         }
       } else {
-        futureSupervisor.supervised(s"adjust ts=$ts for update")(
+        futureSupervisor.supervisedUS(s"adjust ts=$ts for update")(
           timeAdjuster.adjustTimestampForTick(sequencedTime)
         )
       }
     }
 
-    performUnlessClosingF(for {
+    (for {
       updates <- updatesF
       // initialise on the fly if we need to
-      _ <- if (initialised.get()) Future.unit else initialise(ts.immediatePredecessor)
+      _ <- if (initialised.get()) FutureUnlessShutdown.unit else initialise(ts.immediatePredecessor)
       // compute effective time
       effectiveTime <- computeEffectiveTime(updates)
     } yield {
@@ -549,6 +546,8 @@ class TopologyTransactionProcessor(
       _.withTraceContext { implicit traceContext =>
         {
           case Deliver(sc, ts, _, _, batch) =>
+            // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+            @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
             def extractAndCheckMessages(
                 batch: Batch[DefaultOpenEnvelope]
             ): List[DomainTopologyTransactionMessage] = {
@@ -575,6 +574,8 @@ class TopologyTransactionProcessor(
       }
     }
   }
+
+  override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)
 
 }
 

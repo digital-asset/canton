@@ -56,6 +56,9 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 
 import scala.util.{Failure, Success}
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard futures
 class DomainTopologyDispatcherTest
     extends FixtureAsyncWordSpec
     with BaseTest
@@ -354,7 +357,9 @@ class DomainTopologyDispatcherTest
           _ <- f.sourceStore.append(ts1, Seq(txs.ns1k1, txs.okm1).map(toValidated))
           _ <- f.targetStore.updateDispatchingWatermark(ts0)
           _ <- f.targetStore.append(ts1, Seq(txs.ns1k2, txs.ns1k1).map(toValidated))
-          _ <- f.dispatcher.init(flusher.foo)
+          _ <- f.dispatcher
+            .init(FutureUnlessShutdown.outcomeF(flusher.foo))
+            .failOnShutdown("dispatcher initialization")
           res <- f.expect(1)
         } yield {
           // ensure we've flushed the system
@@ -487,6 +492,9 @@ trait MockClock {
   }
 }
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard futures
 class DomainTopologySenderTest
     extends FixtureAsyncWordSpec
     with BaseTest

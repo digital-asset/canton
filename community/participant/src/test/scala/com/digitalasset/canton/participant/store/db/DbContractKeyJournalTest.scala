@@ -32,6 +32,7 @@ trait DbContractKeyJournalTest extends AsyncWordSpec with BaseTest with Contract
         storage,
         IndexedDomain.tryCreate(DomainId.tryFromString("contract-key-journal::default"), 1),
         PositiveNumeric.tryCreate(10),
+        timeouts,
         loggerFactory,
       )(ec)
     )

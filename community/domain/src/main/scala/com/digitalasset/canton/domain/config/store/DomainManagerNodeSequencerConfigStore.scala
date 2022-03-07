@@ -4,13 +4,14 @@
 package com.digitalasset.canton.domain.config.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait DomainManagerNodeSequencerConfigStore {
+trait DomainManagerNodeSequencerConfigStore extends AutoCloseable {
   def fetchConfiguration(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Option[DomainNodeSequencerConfig]]
@@ -20,11 +21,12 @@ trait DomainManagerNodeSequencerConfigStore {
 }
 
 object DomainManagerNodeSequencerConfigStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      executionContext: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit executionContext: ExecutionContext
   ): DomainManagerNodeSequencerConfigStore =
     storage match {
       case _: MemoryStorage => new InMemoryDomainManagerNodeSequencerConfigStore
-      case storage: DbStorage => new DbDomainManagerNodeSequencerConfigStore(storage, loggerFactory)
+      case storage: DbStorage =>
+        new DbDomainManagerNodeSequencerConfigStore(storage, timeouts, loggerFactory)
     }
 }

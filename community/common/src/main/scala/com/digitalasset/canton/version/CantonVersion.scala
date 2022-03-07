@@ -27,8 +27,8 @@ trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   def major: Int
   def minor: Int
   def patch: Int
-  def isSnapshot: Boolean
   def optSuffix: Option[String]
+  def isSnapshot: Boolean = optSuffix.contains("SNAPSHOT")
   def fullVersion: String = s"$major.$minor.$patch${optSuffix.map("-" + _).getOrElse("")}"
 
   override def pretty: Pretty[CantonVersion] = prettyOfString(_ => fullVersion)
@@ -94,20 +94,21 @@ trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
 
 object CantonVersion {
 
-  private def pv(rawVersion: String): ProtocolVersion = ProtocolVersion.tryCreate(rawVersion)
-  private def rv(rawVersion: String): ReleaseVersion = ReleaseVersion.tryCreate(rawVersion)
+  import ProtocolVersion._
+  // At some point after Daml 3.0, this Map may diverge for domain and participant because we have
+  // different compatibility guarantees for participants and domains and we will need to add separate maps for each
+  private val releaseVersionToProtocolVersions: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
+    ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0_snapshot),
+    ReleaseVersion.v2_0_0 -> List(v2_0_0),
+    ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0, v2_1_0_snapshot),
+    // next (most likely):
+    //     ReleaseVersion.v2_1_0 -> List(v2_0_0, v2_1_0),
+  )
 
   private[version] def getSupportedProtocolsParticipantForRelease(
       release: ReleaseVersion
   ): List[ProtocolVersion] = {
-
-    /* This map, as well as the analogue domain node map, will only become relevant once we have Canton GA and
-     * at least version 1.0.1 of the Canton protocol. Until then, each release will only support one Canton protocol version
-     * that corresponds to the release version. */
-    val supportedProtocolsParticipant: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
-      rv(BuildInfo.version) -> List(pv(BuildInfo.version))
-    )
-    supportedProtocolsParticipant.getOrElse(
+    releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
         s"Please add the supported protocol versions of a participant of release version $release to `supportedProtocolsParticipant` in `CantonVersion.scala`."
@@ -118,10 +119,7 @@ object CantonVersion {
   private[version] def getSupportedProtocolsDomainForRelease(
       release: ReleaseVersion
   ): List[ProtocolVersion] = {
-    val supportedProtocolsDomain: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
-      rv(BuildInfo.version) -> List(pv(BuildInfo.version))
-    )
-    supportedProtocolsDomain.getOrElse(
+    releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
         s"Please add the supported protocol versions of domain nodes of release version $release to `supportedProtocolsDomain` in `CantonVersion.scala`."
@@ -134,7 +132,7 @@ object CantonVersion {
 trait CompanionTrait {
   protected def createInternal(
       rawVersion: String
-  ): Either[String, (Int, Int, Int, Boolean, Option[String])] = {
+  ): Either[String, (Int, Int, Int, Option[String])] = {
     // `?:` removes the capturing group, so we get a cleaner pattern-match statement
     val regex = raw"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,4})(?:-(.*))?".r
     rawVersion match {
@@ -142,11 +140,10 @@ trait CompanionTrait {
         val parsedDigits = List(rawMajor, rawMinor, rawPatch).traverse(raw =>
           Try(raw.toInt).toOption.toRight(s"Couldn't parse number $raw")
         )
-        val isSnapshot = Option(suffix).exists(_.toUpperCase.contains("SNAPSHOT"))
         parsedDigits.flatMap {
           case List(major, minor, patch) =>
             // `suffix` is `null` if no suffix is given
-            Right((major, minor, patch, isSnapshot, Option(suffix)))
+            Right((major, minor, patch, Option(suffix)))
           case _ => Left(s"Unexpected error while parsing version $rawVersion")
         }
       case _ =>
@@ -166,7 +163,6 @@ final case class ReleaseVersion(
     major: Int,
     minor: Int,
     patch: Int,
-    override val isSnapshot: Boolean = false,
     optSuffix: Option[String] = None,
 ) extends CantonVersion
 
@@ -176,17 +172,21 @@ object ReleaseVersion extends CompanionTrait {
   )
 
   def create(rawVersion: String): Either[String, ReleaseVersion] =
-    createInternal(rawVersion).map { case (major, minor, patch, isSnapshot, optSuffix) =>
-      new ReleaseVersion(major, minor, patch, isSnapshot, optSuffix)
+    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
+      new ReleaseVersion(major, minor, patch, optSuffix)
     }
   def tryCreate(rawVersion: String): ReleaseVersion = create(rawVersion).fold(sys.error, identity)
 
   /** The release this process belongs to. */
   val current: ReleaseVersion = ReleaseVersion.tryCreate(BuildInfo.version)
+  lazy val v2_0_0_snapshot: ReleaseVersion = ReleaseVersion(2, 0, 0, Some("SNAPSHOT"))
+  lazy val v2_0_0: ReleaseVersion = ReleaseVersion(2, 0, 0)
+  lazy val v2_1_0_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("SNAPSHOT"))
+  lazy val v2_1_0: ReleaseVersion = ReleaseVersion(2, 1, 0)
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time
-  * (e.g., this ‘snapshot’ contains the information how exactly a `SubmissionRequest` to the sequencer looks like and how exactly a Sequencer handles a call of the `SendAsync` RPC).
+  * (e.g., this ‘snapshot’ contains the information what exactly a `SubmissionRequest` to the sequencer looks like and how exactly a Sequencer handles a call of the `SendAsync` RPC).
   * It is supposed to capture everything that is involved in two different Canton nodes interacting with each other.
   *
   * The protocol version is important for ensuring we meet our compatibility guarantees such that we can
@@ -209,11 +209,11 @@ object ReleaseVersion extends CompanionTrait {
   * in the user manual.
   */
 // Internal only: for the full background, please refer to the following [design doc](https://docs.google.com/document/d/1kDiN-373bZOWploDrtOJ69m_0nKFu_23RNzmEXQOFc8/edit?usp=sharing).
+// or [code walkthrough](https://drive.google.com/file/d/199wHq-P5pVPkitu_AYLR4V3i0fJtYRPg/view?usp=sharing)
 final case class ProtocolVersion(
     major: Int,
     minor: Int,
     patch: Int,
-    override val isSnapshot: Boolean = false,
     optSuffix: Option[String] = None,
 ) extends CantonVersion
 
@@ -221,14 +221,13 @@ object ProtocolVersion extends CompanionTrait {
   private[this] def apply(n: Int): ProtocolVersion = throw new UnsupportedOperationException(
     "Use create method"
   )
-  val current: ProtocolVersion = ProtocolVersion.tryCreate(BuildInfo.protocolVersion)
-  val latest: ProtocolVersion = current
+  val latest: ProtocolVersion = ProtocolVersion.tryCreate(BuildInfo.protocolVersion)
   // Might not be `latest` at some point in the future
   val default: ProtocolVersion = latest
 
   def create(rawVersion: String): Either[String, ProtocolVersion] =
-    createInternal(rawVersion).map { case (major, minor, patch, isSnapshot, optSuffix) =>
-      new ProtocolVersion(major, minor, patch, isSnapshot, optSuffix)
+    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
+      new ProtocolVersion(major, minor, patch, optSuffix)
     }
 
   def tryCreate(rawVersion: String): ProtocolVersion = create(rawVersion).fold(sys.error, identity)
@@ -256,15 +255,19 @@ object ProtocolVersion extends CompanionTrait {
   /** Returns successfully if the client and server should be compatible.
     * Otherwise returns an error message.
     *
-    * We do this by compatibility check by going through a list of all versions instead of, for example, just checking
-    * whether the supported version by the client is larger than the required version by the server,
-    * to ensure that we don't run into issues with patches for old minor versions.
-    * Otherwise, the situation may occur where, for example, the latest protocol version is 1.3.0 but we release patch
-    * release version 1.1.1 after the release of version 1.3.0. If we would just check the major versions, version 1.3.0
-    * would then mistakenly think that it is compatible with a node running version 1.1.1.
+    * The client and server are compatible if the protocol version required by the server is not lower than
+    * the clientMinimumVersion and the protocol version required by the server is among the protocol versions supported
+    * by the client (exact string match).
     *
-    * This sort of error can occur because Canton is operated in a distributed environment where not every node is on the
-    * same version.
+    * Note that this compatibility check cannot be implemented by simply verifying whether the supported
+    * version by the client is larger than the required version by the server as this may lead to issues with
+    * patches for old minor versions.
+    * For example, if the latest release version is 1.3.0 but we release patch release version 1.1.1 after
+    * the release of version 1.3.0, a node on version 1.3.0 which only checks whether
+    * are versions are smaller, would mistakenly indicate that it is compatible with a node running version 1.1.1.
+    * This issue is avoided if the client sends all protocol versions it supports and an exact string match is required.
+    * Generally, this sort of error can occur because Canton is operated in a distributed environment where not every
+    * node is on the same version.
     */
   def canClientConnectToServer(
       clientSupportedVersions: Seq[ProtocolVersion],
@@ -279,6 +282,11 @@ object ProtocolVersion extends CompanionTrait {
       Left(VersionNotSupportedError(server, clientSupportedVersions))
     else Right(())
   }
+
+  lazy val v2_0_0_snapshot: ProtocolVersion = ProtocolVersion(2, 0, 0, Some("SNAPSHOT"))
+  lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
+  lazy val v2_1_0_snapshot: ProtocolVersion = ProtocolVersion(2, 1, 0, Some("SNAPSHOT"))
+  lazy val v2_1_0: ProtocolVersion = ProtocolVersion(2, 1, 0)
 }
 
 sealed trait HandshakeError {

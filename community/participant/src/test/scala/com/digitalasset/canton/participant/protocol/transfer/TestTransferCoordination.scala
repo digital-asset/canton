@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination.{
   DomainData,
@@ -38,7 +39,10 @@ object TestTransferCoordination {
       val timeProof = TimeProofTestUtil.mkTimeProof(timeProofTimestamp)
       val transferStore = new InMemoryTransferStore(domain, loggerFactory)
 
-      DomainData(transferStore, () => EitherT.rightT[Future, TimeProofSourceError](timeProof))
+      DomainData(
+        transferStore,
+        () => EitherT.rightT[FutureUnlessShutdown, TimeProofSourceError](timeProof),
+      )
     }
 
     val domainDataMap = domains.map(domain => domain -> mkDomainData(domain)).toMap

@@ -6,7 +6,8 @@ package com.digitalasset.canton.store
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import com.digitalasset.canton.{DomainId, checked}
-import com.digitalasset.canton.config.CacheConfig
+import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbIndexedStringStore
@@ -39,9 +40,9 @@ object IndexedString {
 abstract class IndexedStringFromDb[A <: IndexedString[B], B] {
 
   protected def buildIndexed(item: B, index: Int): A
-  protected def asString(item: B): String
+  protected def asString(item: B): String300
   protected def dbTyp: IndexedStringType
-  protected def fromString(str: String, index: Int): Either[String, A]
+  protected def fromString(str: String300, index: Int): Either[String, A]
 
   def indexed(
       indexedStringStore: IndexedStringStore
@@ -96,12 +97,13 @@ object IndexedDomain extends IndexedStringFromDb[IndexedDomain, DomainId] {
     checked(tryCreate(item, index))
   }
 
-  override protected def asString(item: DomainId): String = item.toProtoPrimitive
+  override protected def asString(item: DomainId): String300 =
+    item.toLengthLimitedString.asString300
 
-  override protected def fromString(str: String, index: Int): Either[String, IndexedDomain] = {
+  override protected def fromString(str: String300, index: Int): Either[String, IndexedDomain] = {
     // save, because fromString is only called with indices created by IndexedStringStores.
     // These indices are positive by construction.
-    DomainId.fromString(str).map(checked(tryCreate(_, index)))
+    DomainId.fromString(str.unwrap).map(checked(tryCreate(_, index)))
   }
 }
 
@@ -110,10 +112,10 @@ case class IndexedMember private (member: Member, index: Int)
 object IndexedMember extends IndexedStringFromDb[IndexedMember, Member] {
   override protected def buildIndexed(item: Member, index: Int): IndexedMember =
     IndexedMember(item, index)
-  override protected def asString(item: Member): String = item.toProtoPrimitive
+  override protected def asString(item: Member): String300 = item.toLengthLimitedString
   override protected def dbTyp: IndexedStringType = IndexedStringType.memberId
-  override protected def fromString(str: String, index: Int): Either[String, IndexedMember] =
-    Member.fromProtoPrimitive(str, "member").leftMap(_.toString).map(IndexedMember(_, index))
+  override protected def fromString(str: String300, index: Int): Either[String, IndexedMember] =
+    Member.fromProtoPrimitive(str.unwrap, "member").leftMap(_.toString).map(IndexedMember(_, index))
 }
 
 case class IndexedStringType private (source: Int, description: String)
@@ -139,21 +141,30 @@ object IndexedStringType {
 }
 
 /** uid index such that we can store integers instead of long strings in our database */
-trait IndexedStringStore {
+trait IndexedStringStore extends AutoCloseable {
 
-  def getOrCreateIndex(dbTyp: IndexedStringType, str: String): Future[Int]
-  def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String]]
+  def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int]
+  def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String300]]
 
 }
 
 object IndexedStringStore {
-  def create(storage: Storage, config: CacheConfig, loggerFactory: NamedLoggerFactory)(implicit
+  def create(
+      storage: Storage,
+      config: CacheConfig,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext
   ): IndexedStringStore =
     storage match {
       case _: MemoryStorage => InMemoryIndexedStringStore()
       case jdbc: DbStorage =>
-        new IndexedStringCache(new DbIndexedStringStore(jdbc, loggerFactory), config, loggerFactory)
+        new IndexedStringCache(
+          new DbIndexedStringStore(jdbc, timeouts, loggerFactory),
+          config,
+          loggerFactory,
+        )
     }
 }
 
@@ -165,10 +176,10 @@ class IndexedStringCache(
     extends IndexedStringStore
     with NamedLogging {
 
-  private val str2Index: AsyncLoadingCache[(String, IndexedStringType), Int] = Scaffeine()
+  private val str2Index: AsyncLoadingCache[(String300, IndexedStringType), Int] = Scaffeine()
     .maximumSize(config.maximumSize.value)
     .expireAfterAccess(config.expireAfterAccess.toScala)
-    .buildAsyncFuture[(String, IndexedStringType), Int] { case (str, typ) =>
+    .buildAsyncFuture[(String300, IndexedStringType), Int] { case (str, typ) =>
       parent.getOrCreateIndex(typ, str).map { idx =>
         index2str.put((idx, typ), Future.successful(Some(str)))
         idx
@@ -176,22 +187,24 @@ class IndexedStringCache(
     }
 
   // (index,typ)
-  private val index2str: AsyncLoadingCache[(Int, IndexedStringType), Option[String]] = Scaffeine()
-    .maximumSize(config.maximumSize.value)
-    .expireAfterAccess(config.expireAfterAccess.toScala)
-    .buildAsyncFuture[(Int, IndexedStringType), Option[String]] { case (idx, typ) =>
-      parent.getForIndex(typ, idx).map {
-        case Some(str) =>
-          str2Index.put((str, typ), Future.successful(idx))
-          Some(str)
-        case None => None
+  private val index2str: AsyncLoadingCache[(Int, IndexedStringType), Option[String300]] =
+    Scaffeine()
+      .maximumSize(config.maximumSize.value)
+      .expireAfterAccess(config.expireAfterAccess.toScala)
+      .buildAsyncFuture[(Int, IndexedStringType), Option[String300]] { case (idx, typ) =>
+        parent.getForIndex(typ, idx).map {
+          case Some(str) =>
+            str2Index.put((str, typ), Future.successful(idx))
+            Some(str)
+          case None => None
+        }
       }
-    }
 
-  override def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String]] =
+  override def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String300]] =
     index2str.get((idx, dbTyp))
 
-  override def getOrCreateIndex(dbTyp: IndexedStringType, str: String): Future[Int] =
+  override def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int] =
     str2Index.get((str, dbTyp))
 
+  override def close(): Unit = parent.close()
 }

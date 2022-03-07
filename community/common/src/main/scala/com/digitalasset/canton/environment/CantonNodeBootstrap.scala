@@ -7,7 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option._
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{LocalNodeConfig, LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
@@ -47,7 +47,7 @@ import scala.concurrent.duration._
   */
 trait CantonNodeBootstrap[+T <: CantonNode] extends AutoCloseable with NamedLogging {
 
-  def name: LengthLimitedString
+  def name: InstanceName
   def clock: Clock
   def getId: Option[NodeId]
   def isInitialized: Boolean
@@ -71,7 +71,7 @@ abstract class CantonNodeBootstrapBase[
     NodeConfig <: LocalNodeConfig,
     ParameterConfig <: LocalNodeParameters,
 ](
-    val name: LengthLimitedString,
+    override val name: InstanceName,
     config: NodeConfig,
     parameterConfig: ParameterConfig,
     val clock: Clock,
@@ -121,8 +121,10 @@ abstract class CantonNodeBootstrapBase[
   // This absolutely must be a "def", because it is used during class initialization.
   protected def connectionPoolForParticipant: Boolean = false
 
+  protected val timeouts: ProcessingTimeout = parameterConfig.processingTimeouts
+
   // TODO(soren): Move to a error-safe node initialization approach
-  protected val storage = parameterConfig.processingTimeouts.unbounded.await()(
+  protected val storage = timeouts.unbounded.await()(
     storageFactory
       .tryCreate(
         connectionPoolForParticipant,
@@ -132,18 +134,23 @@ abstract class CantonNodeBootstrapBase[
         loggerFactory,
       )
   )
-  protected val initializationStore = InitializationStore(storage, loggerFactory)
+  protected val initializationStore = InitializationStore(storage, timeouts, loggerFactory)
   protected val indexedStringStore =
-    IndexedStringStore.create(storage, parameterConfig.cachingConfigs.indexedStrings, loggerFactory)
+    IndexedStringStore.create(
+      storage,
+      parameterConfig.cachingConfigs.indexedStrings,
+      timeouts,
+      loggerFactory,
+    )
 
-  override val crypto: Crypto = parameterConfig.processingTimeouts.unbounded.await()(
+  override val crypto: Crypto = timeouts.unbounded.await()(
     CryptoFactory
-      .create(cryptoConfig, storage, loggerFactory)
+      .create(cryptoConfig, storage, timeouts, loggerFactory)
       .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
   )
   val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)
 
-  protected val topologyStoreFactory = TopologyStoreFactory(storage, loggerFactory)
+  protected val topologyStoreFactory = TopologyStoreFactory(storage, timeouts, loggerFactory)
 
   protected def isActive: Boolean
 
@@ -286,13 +293,13 @@ abstract class CantonNodeBootstrapBase[
 
   override def close(): Unit = synchronized {
     if (isRunningVar.getAndSet(false)) {
+      val stores = List(initializationStore, indexedStringStore, topologyStoreFactory)
       val instances = List(
         Lifecycle.toCloseableOption(initializationWatcherRef.get()),
         adminServerRegistry,
         adminServer,
-        clock,
         tracerProvider,
-      ) ++ getNode.toList :+ storage
+      ) ++ getNode.toList ++ stores ++ List(crypto, storage, clock)
       Lifecycle.close(instances: _*)(logger)
       logger.debug(s"Successfully completed shutdown of $name")
     } else {

@@ -20,7 +20,7 @@ trait DbParticipantPruningStoreTest extends ParticipantPruningStoreTest { this: 
   }
 
   override def mk(): ParticipantPruningStore =
-    new DbParticipantPruningStore(name, storage, loggerFactory)
+    new DbParticipantPruningStore(name, storage, timeouts, loggerFactory)
 }
 
 class ParticipantPruningStoreTestH2 extends DbParticipantPruningStoreTest with H2Test

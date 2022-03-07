@@ -15,6 +15,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol._
@@ -40,7 +41,7 @@ class CounterCheckpointInconsistentException(message: String) extends RuntimeExc
   * @param readBatchSize max number of events to fetch from the datastore in one page
   * @param checkpointInterval how frequently to checkpoint state
   * @param pollingInterval how frequently to poll for new events from the database.
-  *                        only used if the [[SequencerHighAvailabilityConfig]] has been set,
+  *                        only used if high availability has been configured,
   *                        otherwise will rely on local writes performed by this sequencer to indicate that new events are available.
   */
 case class SequencerReaderConfig(
@@ -69,7 +70,7 @@ class SequencerReader(
       nextReadTimestamp: CantonTimestamp,
       lastBatchWasFull: Boolean = false,
       nextCounterAccumulator: SequencerCounter = 0L,
-  ) {
+  ) extends PrettyPrinting {
 
     /** Update the state after reading a new page of results */
     def update(storedEvents: Seq[Sequenced[_]], batchSize: Int): ReadState =
@@ -90,6 +91,15 @@ class SequencerReader(
         nextReadTimestamp = checkpoint.timestamp,
       )
     }
+
+    override def pretty: Pretty[ReadState] = prettyOfClass(
+      param("member", _.member),
+      param("memberId", _.memberId),
+      param("requestedCounter", _.requestedCounter),
+      param("nextReadTimestamp", _.nextReadTimestamp),
+      param("lastBatchWasFull", _.lastBatchWasFull),
+      param("nextCounterAccumulator", _.nextCounterAccumulator),
+    )
   }
 
   object ReadState {
@@ -210,6 +220,7 @@ class SequencerReader(
   private def fetchEventsBatch(
       readState: ReadState
   )(implicit traceContext: TraceContext): Future[(ReadState, Seq[OrdinarySerializedEvent])] = {
+    logger.debug(s"Reading events from $readState...")
     for {
       storedEvents <- store.readEvents(
         readState.memberId,
@@ -225,7 +236,11 @@ class SequencerReader(
       signedSerializedEvents <- requestedEvents.traverse { case (counter, event) =>
         signAndSerializeEvent(readState.member, readState.memberId, counter, event)
       }
-    } yield (readState.update(storedEvents, config.readBatchSize), signedSerializedEvents)
+    } yield {
+      val newReadState = readState.update(storedEvents, config.readBatchSize)
+      logger.debug(s"New state is $newReadState.")
+      (newReadState, signedSerializedEvents)
+    }
   }
 
   private def signAndSerializeEvent(
@@ -287,7 +302,7 @@ class SequencerReader(
                   timestamp,
                   domainId,
                   messageId,
-                  reason = DeliverErrorReason.BatchRefused(message),
+                  reason = DeliverErrorReason.BatchRefused(message.unwrap),
                 )
             ),
             None,

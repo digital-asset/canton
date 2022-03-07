@@ -18,6 +18,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnkn
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.{DomainAlias, DomainId}
 import io.grpc.StatusRuntimeException
 
@@ -164,7 +165,9 @@ class DomainConnectivityService(
       accepted <- optAgreement.fold(EitherT.rightT[Future, StatusRuntimeException](false))(ag =>
         mapErrNew(EitherT.right(agreementService.hasAcceptedAgreement(domainId, ag.id)))
       )
-      agreement = optAgreement.map(ag => v0.Agreement(ag.id.toProtoPrimitive, ag.text))
+      agreement = optAgreement.map(ag =>
+        v0.Agreement(ag.id.toProtoPrimitive, ag.text.toProtoPrimitive)
+      )
     } yield v0.GetAgreementResponse(domainId = domainId.toProtoPrimitive, agreement, accepted)
     EitherTUtil.toFuture(res)
   }
@@ -180,11 +183,12 @@ class DomainConnectivityService(
           .leftMap(_ => SyncServiceUnknownDomain.Error(alias))
       )
       sequencerConnectClient <- mapErrNew(sequencerConnectClientBuilder(connection))
-      domainId <- mapErrNew(
-        sequencerConnectClient
-          .getDomainId(alias)
-          .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
-      )
+      domainId <-
+        mapErrNew(
+          sequencerConnectClient
+            .getDomainId(alias)
+            .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
+        ).thereafter(_ => sequencerConnectClient.close())
     } yield (connection.sequencerConnection, domainId)
   }
 

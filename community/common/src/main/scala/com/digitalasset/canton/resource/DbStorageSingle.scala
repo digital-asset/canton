@@ -5,7 +5,7 @@ package com.digitalasset.canton.resource
 
 import cats.syntax.either._
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMonitoringConfig}
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationException}
@@ -31,14 +31,15 @@ class DbStorageSingle private (
       action: DbAction.ReadTransactional[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     run(operationName, maxRetries)(db.run(action))
 
   override protected[canton] def runWrite[A](
       action: DbAction.All[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] = run(operationName, maxRetries)(db.run(action))
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
+    run(operationName, maxRetries)(db.run(action))
 
   override def onClosed(): Unit = {
     db.close()

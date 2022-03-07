@@ -238,4 +238,6 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
 
     Future.unit
   }
+
+  override def close(): Unit = ()
 }

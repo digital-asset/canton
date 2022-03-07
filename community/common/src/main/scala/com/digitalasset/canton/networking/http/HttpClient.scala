@@ -32,6 +32,7 @@ import sttp.client3.circe.asJson
 import sttp.client3.okhttp.OkHttpFutureBackend
 import sttp.model.{Header, StatusCode, Uri}
 
+import java.security.cert.X509Certificate
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A generic HTTP client with client certificate authentication and optional request signing.
@@ -225,6 +226,128 @@ object HttpClient {
   import HttpClientError._
 
   case class Response[Res](body: Res, headers: Seq[Header])
+
+  /** Insecure way to create a HTTP client without server cert checks.
+    *
+    * TODO(i8654): Remove again
+    */
+  object Insecure {
+    def create(
+        certificate: X509CertificatePem,
+        protectedKeyStore: ProtectedKeyStore,
+        keyName: Option[String],
+    )(timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(implicit
+        ec: ExecutionContext,
+        tc: TraceContext,
+    ): Either[HttpClientError, HttpClient] = {
+      val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+
+      for {
+        trustStore <- TrustStore.create(certificate).leftMap(FailedToLoadTrustStore)
+        customSslContext <- Insecure
+          .buildCustomSslContext(trustStore, protectedKeyStore, logger)
+          .leftMap[HttpClientError](FailedToBuildSslContext)
+        (sslContext, trustManager) = customSslContext
+        client = new HttpClient(sslContext, trustManager, protectedKeyStore, keyName)(
+          timeouts,
+          loggerFactory,
+        )
+      } yield client
+    }
+
+    def create(
+        certificate: X509CertificatePem,
+        keyStoreConfig: KeyStoreConfig,
+        keyName: Option[String],
+    )(timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(implicit
+        ec: ExecutionContext,
+        tc: TraceContext,
+    ): Either[HttpClientError, HttpClient] = {
+      val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+
+      for {
+        protectedKeyStore <- loadKeyStore(keyStoreConfig, logger)
+        client <- Insecure.create(certificate, protectedKeyStore, keyName)(timeouts, loggerFactory)
+      } yield client
+    }
+
+    @SuppressWarnings(
+      Array("org.wartremover.warts.Null")
+    ) // legacy java APIs are quite fond of nulls
+    def buildCustomSslContext(
+        trustStore: TrustStore,
+        protectedKeyStore: ProtectedKeyStore,
+        logger: TracedLogger,
+    )(implicit tc: TraceContext): Either[String, (SSLContext, X509TrustManager)] =
+      for {
+        sslContext <- Either
+          .catchOnly[NoSuchAlgorithmException](SSLContext.getInstance("TLS"))
+          .leftMap(err => s"Failed to get SSL context instance: $err")
+
+        trustManagerFactory <- Either
+          .catchOnly[NoSuchAlgorithmException](
+            TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm)
+          )
+          .leftMap(err => s"Failed to create trust manager factory: $err")
+
+        _ <- Either
+          .catchOnly[KeyStoreException](trustManagerFactory.init(trustStore.unwrap))
+          .leftMap(err => s"Failed to initialize trust manager factory: $err")
+
+        keyManagerFactory <- Either
+          .catchOnly[NoSuchAlgorithmException](
+            KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
+          )
+          .leftMap(err => s"Failed to create key manager factory: $err")
+
+        _ <- Either
+          .catchNonFatal(
+            keyManagerFactory.init(protectedKeyStore.store, protectedKeyStore.password.toCharArray)
+          )
+          .leftMap(err => s"Failed to initialize key manager factory: $err")
+
+        trustManagers = trustManagerFactory.getTrustManagers
+        keyManagers = keyManagerFactory.getKeyManagers
+        trustManager <- trustManagers match {
+          // OkHttp only accept a single trust manager
+          case Array(tm: X509TrustManager) => Right(tm)
+          case Array(tm: X509TrustManager, _*) =>
+            logger.info(s"More than one trust manager, ignoring the others.")
+            Right(tm)
+          case _ => Left(s"Invalid trust managers: $trustManagers")
+        }
+
+        insecureTrustManager = new X509TrustManager {
+          override def checkClientTrusted(
+              x509Certificates: Array[X509Certificate],
+              s: String,
+          ): Unit =
+            ()
+
+          override def checkServerTrusted(
+              x509Certificates: Array[X509Certificate],
+              s: String,
+          ): Unit =
+            ()
+
+          override def getAcceptedIssuers: Array[X509Certificate] = trustManager.getAcceptedIssuers
+        }
+
+        _ <- Either
+          .catchOnly[KeyManagementException](
+            sslContext.init(
+              keyManagers,
+              Array(insecureTrustManager),
+              null, // we don't need to customize the random provider
+            )
+          )
+          .leftMap(err => s"Failed to initialize SSL context: $err")
+
+        _ = sslContext.createSSLEngine()
+
+      } yield (sslContext, insecureTrustManager)
+
+  }
 
   def create(trustStore: TrustStore, protectedKeyStore: ProtectedKeyStore, keyName: Option[String])(
       timeouts: ProcessingTimeout,

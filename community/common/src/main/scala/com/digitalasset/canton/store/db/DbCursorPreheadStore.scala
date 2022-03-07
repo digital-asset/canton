@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.store.db
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.resource.{DbStorage, TransactionalStoreUpdate}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, TransactionalStoreUpdate}
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
@@ -31,13 +32,14 @@ import scala.concurrent.{ExecutionContext, Future}
 // TODO(#459) Switch to a different superclass or tagging for `Counter`
 class DbCursorPreheadStore[Counter <: Long: GetResult](
     client: SequencerClientDiscriminator,
-    private val storage: DbStorage,
+    override protected val storage: DbStorage,
     cursorTable: String,
     processingTime: GaugeM[TimedLoadGauge, Double],
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
     extends CursorPreheadStore[Counter]
-    with NamedLogging {
+    with DbStore {
   import storage.api._
 
   @nowarn("msg=match may not be exhaustive")
@@ -136,6 +138,7 @@ class DbCursorPreheadStore[Counter <: Long: GetResult](
       query,
       storage,
       Some(processingTime.metric),
+      loggerFactory,
     )
   }
 

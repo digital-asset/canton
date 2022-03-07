@@ -18,7 +18,7 @@ trait DbParticipantSettingsStoreTest extends ParticipantSettingsStoreTest with D
   }
 
   def mk(s: DbStorage): DbParticipantSettingsStore =
-    new DbParticipantSettingsStore(s, loggerFactory)(parallelExecutionContext)
+    new DbParticipantSettingsStore(s, timeouts, loggerFactory)(parallelExecutionContext)
 
   "DbParticipantResourceManagementStore" must {
     behave like participantSettingsStore(() => mk(storage))

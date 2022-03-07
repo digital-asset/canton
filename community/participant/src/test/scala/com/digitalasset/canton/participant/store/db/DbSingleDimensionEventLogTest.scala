@@ -31,7 +31,13 @@ trait DbSingleDimensionEventLogTest
 
   "DbSingleDimensionEventLog" should {
     behave like singleDimensionEventLog(() =>
-      new DbSingleDimensionEventLog(id, storage, InMemoryIndexedStringStore(), loggerFactory)
+      new DbSingleDimensionEventLog(
+        id,
+        storage,
+        InMemoryIndexedStringStore(),
+        timeouts,
+        loggerFactory,
+      )
     )
   }
 }

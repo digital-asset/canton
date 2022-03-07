@@ -72,6 +72,9 @@ message SendAsyncResponse {
             string shutting_down = 5;
             // The sequencer is unavailable and can't currently process requests
             string unavailable = 6;
+            // There are one or more recipients that are not registered so the sequencer cannot guarantee publishing a Deliver event if the request can be sequenced.
+            // This message was added in protocol version 1.1, therefore it must not be used by a sequencer operating on Canton 1.0 protocol version.
+            string unknown_recipients = 7;
         }
     }
 }

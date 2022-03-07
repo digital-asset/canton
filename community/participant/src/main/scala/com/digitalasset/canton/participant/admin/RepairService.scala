@@ -29,7 +29,7 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.crypto.{HashPurpose, SecureRandomness, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
@@ -104,7 +104,8 @@ class RepairService(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with FlagCloseableAsync {
+    with FlagCloseableAsync
+    with HasCloseContext {
   import RepairService._
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts

@@ -24,7 +24,9 @@ trait DbRegisteredDomainsStoreTest
   }
 
   "DbRegisteredDomainsStore" should {
-    behave like registeredDomainsStore(() => new DbRegisteredDomainsStore(storage))
+    behave like registeredDomainsStore(() =>
+      new DbRegisteredDomainsStore(storage, timeouts, loggerFactory)
+    )
   }
 }
 

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.crypto.store
 
 import java.util.concurrent.atomic.AtomicReference
-
 import cats.data.EitherT
 import cats.syntax.functor._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.KeyName
 import com.digitalasset.canton.crypto.store.db.DbCryptoPrivateStore
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
@@ -64,7 +64,7 @@ object EncryptionPrivateKeyWithName {
   * The cache provides a write-through cache such that `get` operations can be served without reading from the async store.
   * Async population of the cache is done at creation time.
   */
-trait CryptoPrivateStore { this: NamedLogging =>
+trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
 
   implicit val ec: ExecutionContext
 
@@ -220,12 +220,12 @@ trait CryptoPrivateStore { this: NamedLogging =>
 }
 
 object CryptoPrivateStore {
-  def create(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): CryptoPrivateStore =
     storage match {
       case _: MemoryStorage => new InMemoryCryptoPrivateStore(loggerFactory)
-      case jdbc: DbStorage => new DbCryptoPrivateStore(jdbc, loggerFactory)
+      case jdbc: DbStorage => new DbCryptoPrivateStore(jdbc, timeouts, loggerFactory)
     }
 }
 

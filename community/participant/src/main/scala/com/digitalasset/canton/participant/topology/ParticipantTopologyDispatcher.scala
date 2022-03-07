@@ -104,6 +104,9 @@ class ParticipantTopologyDispatcher(
     *                     this is used to avoid race conditions between connect / disconnect
     *                     during initial onboarding
     */
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard futures
   def domainConnected(
       domain: DomainAlias,
       domainId: DomainId,

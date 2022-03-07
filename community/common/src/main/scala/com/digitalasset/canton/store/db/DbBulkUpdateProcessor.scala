@@ -6,6 +6,7 @@ package com.digitalasset.canton.store.db
 import cats.data.NonEmptyList
 import cats.syntax.either._
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.resource.DbStorage
@@ -33,7 +34,8 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
     * @return An [[scala.collection.Iterable]] of the same size as `items` that contains the response for `items(i)` is at index `i`.
     */
   protected def bulkUpdateWithCheck(items: NonEmptyList[Traced[A]], queryBaseName: String)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Future[Iterable[Try[B]]] = {
     val bulkUpdate = bulkUpdateAction(items)
     for {
@@ -55,7 +57,8 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
   }
 
   protected def bulkUpdateWithCheck(items: List[Traced[A]], queryBaseName: String)(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Future[Iterable[Try[B]]] =
     NonEmptyList.fromList(items) match {
       case None => Future.successful(Iterable.empty[Try[B]])
@@ -115,7 +118,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
   private def checkReplacements(
       toCheck: Seq[BulkUpdatePendingCheck[A, B]],
       queryBaseName: String,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] = {
     // TODO(#8271) No need for a list conversion here
     NonEmptyList.fromList(toCheck.toList) match {
       case None => Future.unit

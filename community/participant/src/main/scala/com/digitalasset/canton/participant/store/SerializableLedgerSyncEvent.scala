@@ -23,6 +23,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   TimeModelConversionError,
   ValueConversionError,
 }
+import com.digitalasset.canton.config.RequireTypes.String255
 import com.google.rpc.status.{Status => RpcStatus}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.v0
@@ -52,6 +53,7 @@ import com.digitalasset.canton.{
   LedgerTransactionId,
   LfPackageId,
   ProtoDeserializationError,
+  checked,
 }
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
@@ -580,6 +582,8 @@ object SerializableLfTimestamp {
 
 case class SerializableSubmissionId(submissionId: LedgerSubmissionId) {
   def toProtoPrimitive: String = submissionId
+  def toLengthLimitedString: String255 =
+    checked(String255.tryCreate(submissionId)) // LedgerSubmissionId is limited to 255 chars
 }
 
 object SerializableSubmissionId {
@@ -590,7 +594,7 @@ object SerializableSubmissionId {
     LedgerSubmissionId.fromString(submissionIdP).leftMap(SubmissionIdConversionError)
 
   implicit val setParameterSubmissionId: SetParameter[SerializableSubmissionId] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
 
   implicit val getResultSubmissionId: GetResult[SerializableSubmissionId] = GetResult { r =>
     deserializeFromPrimitive(r.nextString())
@@ -602,7 +606,7 @@ object SerializableSubmissionId {
     }
 
   implicit val setParameterOptionSubmissionId: SetParameter[Option[SerializableSubmissionId]] =
-    (v, pp) => pp.setStringOption(v.map(_.toProtoPrimitive))
+    (v, pp) => pp >> v.map(_.toLengthLimitedString)
 
   private def deserializeFromPrimitive(serialized: String): SerializableSubmissionId = {
     val submissionId = SerializableSubmissionId

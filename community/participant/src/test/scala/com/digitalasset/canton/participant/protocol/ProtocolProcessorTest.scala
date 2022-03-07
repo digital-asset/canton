@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, TestHash}
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax.EitherTOnShutdownSyntax
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
@@ -300,7 +301,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     "succeed without errors" in {
       val submissionMap = TrieMap[Int, Unit]()
       val (sut, persistent, ephemeral) = testProcessingSteps(pendingSubmissionMap = submissionMap)
-      sut.submit(0).futureValue.futureValue shouldBe (())
+      sut.submit(0).valueOrFailShutdown("submission").futureValue.futureValue shouldBe (())
       submissionMap.get(0) shouldBe Some(()) // store the pending submission
     }
 
@@ -325,7 +326,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
           sequencerClient = failingSequencerClient,
           pendingSubmissionMap = submissionMap,
         )
-      val submissionResult = sut.submit(0).value.futureValue
+      val submissionResult = sut.submit(0).onShutdown(fail("submission shutdown")).value.futureValue
       submissionResult shouldEqual Left(TestProcessorError(SequencerRequestError(sendError)))
       submissionMap.get(0) shouldBe None // remove the pending submission
     }
@@ -334,7 +335,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val submissionMap = TrieMap[Int, Unit]()
       val (sut, persistent, ephemeral) = testProcessingSteps(pendingSubmissionMap = submissionMap)
 
-      sut.submit(1).futureValue
+      sut.submit(1).valueOrFailShutdown("submission").futureValue.futureValue shouldBe (())
       submissionMap.get(1) shouldBe Some(())
       val afterDecisionTime = parameters.decisionTimeFor(CantonTimestamp.Epoch).plusMillis(1)
       val () =
@@ -354,7 +355,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         parameters,
       ).forOwnerAndDomain(participant, domain)
       val (sut, persistent, ephemeral) = testProcessingSteps(crypto = crypto2)
-      val res = sut.submit(1).value.futureValue
+      val res = sut.submit(1).onShutdown(fail("submission shutdown")).value.futureValue
       res shouldBe Left(TestProcessorError(NoMediatorError(CantonTimestamp.Epoch)))
     }
   }

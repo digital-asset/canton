@@ -40,10 +40,12 @@ trait DbIndexedStringsStoreTest
     val domain2 = DomainId.tryFromString("other::domain")
 
     def d2idx(store: IndexedStringStore, domainId: DomainId): Future[Int] =
-      store.getOrCreateIndex(IndexedStringType.domainId, domainId.toProtoPrimitive)
+      store.getOrCreateIndex(IndexedStringType.domainId, domainId.toLengthLimitedString.asString300)
 
     def idx2d(store: IndexedStringStore, index: Int): Future[Option[DomainId]] =
-      store.getForIndex(IndexedStringType.domainId, index).map(_.map(DomainId.tryFromString))
+      store
+        .getForIndex(IndexedStringType.domainId, index)
+        .map(_.map(str => DomainId.tryFromString(str.unwrap)))
 
     "return the same index for a previously stored uid" in {
       val store = mk()
@@ -102,7 +104,7 @@ trait DbIndexedStringsStoreTest
   }
 
   "DbStaticStringStore" should {
-    behave like staticStringsStore(() => new DbIndexedStringStore(storage, loggerFactory))
+    behave like staticStringsStore(() => new DbIndexedStringStore(storage, timeouts, loggerFactory))
   }
 
 }

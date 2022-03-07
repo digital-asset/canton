@@ -31,7 +31,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
 
   val symbolicVault =
     SymbolicCrypto
-      .tryCreate(Seq(Fingerprint.tryCreate("test")), Seq(), None, loggerFactory)
+      .tryCreate(Seq(Fingerprint.tryCreate("test")), Seq(), None, timeouts, loggerFactory)
       .privateCrypto
 
   val localId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain"))

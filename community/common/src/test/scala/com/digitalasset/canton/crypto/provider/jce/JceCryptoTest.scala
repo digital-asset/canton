@@ -23,7 +23,12 @@ class JceCryptoTest
 
     def jceCrypto(): Future[Crypto] =
       CryptoFactory
-        .create(CryptoConfig(provider = CryptoProvider.Jce), new MemoryStorage, loggerFactory)
+        .create(
+          CryptoConfig(provider = CryptoProvider.Jce),
+          new MemoryStorage,
+          timeouts,
+          loggerFactory,
+        )
         .valueOr(err => throw new RuntimeException(s"failed to create crypto: $err"))
 
     behave like signingProvider(Jce.signing.supported, jceCrypto())

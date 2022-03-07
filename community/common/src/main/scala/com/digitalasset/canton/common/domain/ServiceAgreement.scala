@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.common.domain
 
+import cats.syntax.either._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
+  String256M,
   String255,
 }
 import com.digitalasset.canton.protocol.v0
@@ -26,9 +29,10 @@ object ServiceAgreementId
     ServiceAgreementId(str)
 }
 
-final case class ServiceAgreement(id: ServiceAgreementId, text: String)
+final case class ServiceAgreement(id: ServiceAgreementId, text: String256M)
     extends HasProtoV0[v0.ServiceAgreement] {
-  override def toProtoV0: v0.ServiceAgreement = v0.ServiceAgreement(id.unwrap, text)
+  override def toProtoV0: v0.ServiceAgreement =
+    v0.ServiceAgreement(id.unwrap, text.toProtoPrimitive)
 }
 
 object ServiceAgreement {
@@ -38,7 +42,10 @@ object ServiceAgreement {
   def fromProtoV0(
       agreement: v0.ServiceAgreement
   ): ParsingResult[ServiceAgreement] =
-    ServiceAgreementId
-      .fromProtoPrimitive(agreement.id)
-      .map(ServiceAgreement(_, agreement.legalText))
+    for {
+      id <- ServiceAgreementId.fromProtoPrimitive(agreement.id)
+      legalText <- String256M
+        .create(agreement.legalText)
+        .leftMap(err => ProtoDeserializationError.ValueDeserializationError("legal_text", err))
+    } yield ServiceAgreement(id, legalText)
 }

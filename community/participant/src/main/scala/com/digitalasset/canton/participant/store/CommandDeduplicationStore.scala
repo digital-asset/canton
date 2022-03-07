@@ -7,6 +7,7 @@ import cats.data.OptionT
 import cats.syntax.either._
 import cats.syntax.option._
 import com.daml.ledger.participant.state.v2.ChangeId
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -25,7 +26,7 @@ import slick.jdbc.GetResult
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait CommandDeduplicationStore {
+trait CommandDeduplicationStore extends AutoCloseable {
 
   /** Returns the [[CommandDeduplicationData]] associated with the given
     * [[com.digitalasset.canton.participant.protocol.submission.ChangeIdHash]], if any.
@@ -78,12 +79,12 @@ trait CommandDeduplicationStore {
 
 object CommandDeduplicationStore {
 
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): CommandDeduplicationStore =
     storage match {
       case _: MemoryStorage => new InMemoryCommandDeduplicationStore(loggerFactory)
-      case jdbc: DbStorage => new DbCommandDeduplicationStore(jdbc, loggerFactory)
+      case jdbc: DbStorage => new DbCommandDeduplicationStore(jdbc, timeouts, loggerFactory)
     }
 
   case class OffsetAndPublicationTime(offset: GlobalOffset, publicationTime: CantonTimestamp)

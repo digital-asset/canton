@@ -38,7 +38,7 @@ class GrpcPackageService(
         activePackages <- service.listPackages(OptionUtil.zeroAsNone(request.limit))
       } yield ListPackagesResponse(activePackages.map {
         case protocol.PackageDescription(pid, sourceDescription) =>
-          v0.PackageDescription(pid, sourceDescription)
+          v0.PackageDescription(pid, sourceDescription.unwrap)
       })
     }
 

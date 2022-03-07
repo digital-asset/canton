@@ -38,6 +38,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -462,13 +463,15 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
     "used contract has been created with future ledger time must be rejected" must {
       val creationTime = CantonTimestamp.MaxValue
 
-      createConfirmationRequest().value.map(
-        _ shouldBe Left(
-          ContractConsistencyError(
-            List(ReferenceToFutureContractError(singleFetch.contractId, creationTime, ledgerTime))
+      createConfirmationRequest().value
+        .map(
+          _ shouldBe Left(
+            ContractConsistencyError(
+              List(ReferenceToFutureContractError(singleFetch.contractId, creationTime, ledgerTime))
+            )
           )
         )
-      )
+        .discard[Future[Assertion]] // TODO(#8448) This test doesn't work as intended
 
       def createConfirmationRequest()
           : EitherT[Future, ConfirmationRequestCreationError, ConfirmationRequest] = {
@@ -486,7 +489,6 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           Some(testKeySeed),
         )
       }
-
     }
   }
 }

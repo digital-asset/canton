@@ -80,7 +80,7 @@ import scala.util.{Failure, Success}
 class DomainTopologyDispatcher(
     domainId: DomainId,
     authorizedStore: TopologyStore,
-    val targetClient: DomainTopologyClientWithInit,
+    targetClient: DomainTopologyClientWithInit,
     initialKeys: Map[KeyOwner, Seq[PublicKey]],
     targetStore: TopologyStore,
     crypto: Crypto,
@@ -125,9 +125,11 @@ class DomainTopologyDispatcher(
   private val lastTs = new AtomicReference(CantonTimestamp.MinValue)
   private val inflight = new AtomicInteger(0)
 
-  def init(flushSequencer: => Future[Unit])(implicit traceContext: TraceContext): Future[Unit] = {
+  def init(
+      flushSequencer: => FutureUnlessShutdown[Unit]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     for {
-      initiallyPending <- determinePendingTransactions()
+      initiallyPending <- FutureUnlessShutdown.outcomeF(determinePendingTransactions())
       // synchronise topology processing if necessary to avoid duplicate submissions and ugly warnings
       actuallyPending <-
         if (initiallyPending.nonEmpty) {
@@ -138,9 +140,9 @@ class DomainTopologyDispatcher(
             // flush sequencer (so we are sure that there is nothing pending)
             _ <- flushSequencer
             // now, go back to the db and re-fetch the transactions
-            pending <- determinePendingTransactions()
+            pending <- FutureUnlessShutdown.outcomeF(determinePendingTransactions())
           } yield pending
-        } else Future.successful(initiallyPending)
+        } else FutureUnlessShutdown.pure(initiallyPending)
     } yield {
       queue.appendAll(actuallyPending)
       actuallyPending.lastOption match {
@@ -159,7 +161,7 @@ class DomainTopologyDispatcher(
   override def addedSignedTopologyTransaction(
       timestamp: CantonTimestamp,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): Unit = {
+  )(implicit traceContext: TraceContext): Unit = performUnlessClosing {
     val last = lastTs.getAndSet(timestamp)
     // we assume that we get txs in strict ascending timestamp order
     ErrorUtil.requireArgument(
@@ -189,7 +191,7 @@ class DomainTopologyDispatcher(
         flush()
       }
     }
-  }
+  }.discard
 
   // subscribe to target
   targetClient.subscribe(new DomainTopologyClient.Subscriber {
@@ -423,7 +425,7 @@ class DomainTopologyDispatcher(
   }
 
   override protected def onClosed(): Unit =
-    Lifecycle.close(sender, topologyClient)(logger)
+    Lifecycle.close(sender)(logger)
 
 }
 
@@ -445,6 +447,8 @@ object DomainTopologyDispatcher {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): DomainTopologyDispatcher = {
+
+    val logger = loggerFactory.getTracedLogger(DomainTopologyDispatcher.getClass)
 
     val sender = new DomainTopologySender.Impl(
       domainId,
@@ -476,13 +480,23 @@ object DomainTopologyDispatcher {
     // as starting the domain might be kicked off by the domain manager (in manual init scenarios)
     domainTopologyManager
       .executeSequential(
-        for {
-          _ <- dispatcher.init(flushSequencerWithTimeProof(timeTracker, targetClient))
-        } yield {
-          domainTopologyManager.addObserver(dispatcher)
-        },
+        {
+          for {
+            _ <- dispatcher
+              .init(
+                flushSequencerWithTimeProof(timeTracker, targetClient)
+              )
+          } yield {
+            domainTopologyManager.addObserver(dispatcher)
+          }
+        }.onShutdown(
+          logger.debug("Stopped dispatcher initialization due to shutdown")(
+            TraceContext.empty
+          )
+        ),
         "initializing domain topology dispatcher",
       )
+      .discard[Future[Unit]] // TODO(#8448) Do not discard the future
 
     dispatcher
 
@@ -491,15 +505,18 @@ object DomainTopologyDispatcher {
   private def flushSequencerWithTimeProof(
       timeTracker: DomainTimeTracker,
       targetClient: DomainTopologyClient,
-  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): Future[Unit] = {
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[Unit] = {
     for {
       // flush the sequencer client with a time-proof. this should ensure that we give the
       // topology processor time to catch up with any pending submissions
       timestamp <- timeTracker.fetchTimeProof().map(_.timestamp)
       // wait until the topology client has seen this timestamp
       _ <- targetClient
-        .awaitTimestamp(timestamp, waitForEffectiveTime = false)
-        .getOrElse(Future.unit)
+        .awaitTimestampUS(timestamp, waitForEffectiveTime = false)
+        .getOrElse(FutureUnlessShutdown.unit)
     } yield ()
   }
 

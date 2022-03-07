@@ -90,6 +90,14 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
       ???
     override def close(): Unit = ()
+
+    override def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
+        traceContext: TraceContext
+    ): Future[Boolean] = ???
+
+    override def authorizeLedgerIdentity(identity: LedgerIdentity)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, Unit] = ???
   }
 
   "sendAsync" should {

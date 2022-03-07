@@ -4,8 +4,9 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
+import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String256M, String255}
 import com.digitalasset.canton.crypto.{PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -49,9 +50,13 @@ final case class PartyMetadata(
     partyId: PartyId,
     displayName: Option[DisplayName],
     participantId: Option[ParticipantId],
-)(val effectiveTimestamp: CantonTimestamp, val submissionId: String, val notified: Boolean = false)
+)(
+    val effectiveTimestamp: CantonTimestamp,
+    val submissionId: String255,
+    val notified: Boolean = false,
+)
 
-trait PartyMetadataStore {
+trait PartyMetadataStore extends AutoCloseable {
 
   def metadataForParty(partyId: PartyId)(implicit
       traceContext: TraceContext
@@ -62,7 +67,7 @@ trait PartyMetadataStore {
       participantId: Option[ParticipantId],
       displayName: Option[DisplayName],
       effectiveTimestamp: CantonTimestamp,
-      submissionId: String,
+      submissionId: String255,
   )(implicit traceContext: TraceContext): Future[Unit]
 
   /** mark the given metadata as having been successfully forwarded to the domain */
@@ -105,7 +110,7 @@ object TopologyStoreId {
   }
 }
 
-trait TopologyStoreFactory {
+trait TopologyStoreFactory extends AutoCloseable {
 
   def forId(storeId: TopologyStoreId): TopologyStore
 
@@ -119,19 +124,21 @@ trait TopologyStoreFactory {
 }
 
 object TopologyStoreFactory {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): TopologyStoreFactory =
     storage match {
       case _: MemoryStorage => new InMemoryTopologyStoreFactory(loggerFactory)
       case jdbc: DbStorage =>
         // TODO(rv) propagate this value into config values
-        new DbTopologyStoreFactory(jdbc, maxItemsInSqlQuery = 100, loggerFactory)
+        new DbTopologyStoreFactory(jdbc, maxItemsInSqlQuery = 100, timeouts, loggerFactory)
     }
 }
 
 sealed trait TopologyTransactionRejection extends PrettyPrinting {
   def asString: String
+  def asString1GB: String256M =
+    String256M.tryCreate(asString, Some("topology transaction rejection"))
 }
 object TopologyTransactionRejection {
   object NotAuthorized extends TopologyTransactionRejection {
@@ -210,7 +217,8 @@ object TimeQuery {
 
 }
 
-abstract class TopologyStore(implicit ec: ExecutionContext) { this: NamedLogging =>
+abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseable {
+  this: NamedLogging =>
 
   private val monotonicityCheck = new AtomicReference[Option[CantonTimestamp]](None)
 

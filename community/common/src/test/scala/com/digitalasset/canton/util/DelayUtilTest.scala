@@ -29,11 +29,12 @@ class DelayUtilTest extends AnyWordSpec with BaseTest {
       val executorService =
         Threading.singleThreadScheduledExecutor("delay-util-test-executor", logger)
 
-      DelayUtil.delay(executorService, 1.minute, _.success(()))
+      val delayed = DelayUtil.delay(executorService, 1.minute, _.success(()))
 
       // Executor service terminates immediately despite a pending task.
       executorService.shutdown()
       executorService.awaitTermination(1, TimeUnit.SECONDS) shouldBe true
+      delayed.isCompleted shouldBe false
     }
 
     "not schedule when already closing" in {

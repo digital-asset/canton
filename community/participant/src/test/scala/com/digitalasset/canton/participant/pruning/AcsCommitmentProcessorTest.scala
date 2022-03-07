@@ -338,12 +338,12 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       }
 
       for {
-        res <- safeToPrune(true)
-      } yield res shouldBe Some(CantonTimestamp.MinValue)
-
-      for {
-        res <- safeToPrune(false)
-      } yield res shouldBe Some(AcsCommitmentProcessor.tickBeforeOrAt(now, longInterval).toTs)
+        res1 <- safeToPrune(true)
+        res2 <- safeToPrune(false)
+      } yield {
+        res1 shouldBe Some(CantonTimestamp.MinValue)
+        res2 shouldBe Some(AcsCommitmentProcessor.tickBeforeOrAt(now, longInterval).toTs)
+      }
     }
   }
 

@@ -4,7 +4,9 @@
 package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 
@@ -13,16 +15,22 @@ import scala.concurrent.ExecutionContext
 class DbSequencerCounterTrackerStore(
     client: SequencerClientDiscriminator,
     storage: DbStorage,
-    loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends SequencerCounterTrackerStore {
+    extends SequencerCounterTrackerStore
+    with FlagCloseable
+    with NamedLogging {
   override protected[store] val cursorStore = new DbCursorPreheadStore[SequencerCounter](
     client,
     storage,
     DbSequencerCounterTrackerStore.cursorTable,
     storage.metrics.loadGaugeM("sequencer-counter-tracker-store"),
+    timeouts,
     loggerFactory,
   )
+
+  override def onClosed(): Unit = Lifecycle.close(cursorStore)(logger)
 }
 
 object DbSequencerCounterTrackerStore {

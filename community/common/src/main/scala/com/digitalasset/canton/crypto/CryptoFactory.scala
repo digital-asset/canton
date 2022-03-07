@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{
   CryptoProvider,
   CryptoProviderScheme,
   CryptoSchemeConfig,
+  ProcessingTimeout,
 }
 import com.digitalasset.canton.crypto.provider.jce.{
   JceJavaConverter,
@@ -76,12 +77,17 @@ object CryptoFactory {
   ): Either[String, NonEmptySet[EncryptionKeyScheme]] =
     selectSchemes(config.encryption, config.provider.encryption).map(_.allowed)
 
-  def create(config: CryptoConfig, storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
+  def create(
+      config: CryptoConfig,
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, String, Crypto] = {
-    val cryptoPrivateStore = CryptoPrivateStore.create(storage, loggerFactory)
-    val cryptoPublicStore = CryptoPublicStore.create(storage, loggerFactory)
+    val cryptoPrivateStore = CryptoPrivateStore.create(storage, timeouts, loggerFactory)
+    val cryptoPublicStore = CryptoPublicStore.create(storage, timeouts, loggerFactory)
     for {
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
@@ -110,6 +116,8 @@ object CryptoFactory {
               cryptoPrivateStore,
               cryptoPublicStore,
               javaKeyConverter,
+              timeouts,
+              loggerFactory,
             )
           } yield crypto
         case CryptoProvider.Jce =>
@@ -130,6 +138,8 @@ object CryptoFactory {
               cryptoPrivateStore,
               cryptoPublicStore,
               javaKeyConverter,
+              timeouts,
+              loggerFactory,
             )
           )
       }

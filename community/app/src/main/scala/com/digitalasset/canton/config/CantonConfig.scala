@@ -247,19 +247,42 @@ trait CantonConfig {
     *
     * domains are grouped by their alias, which is used to identify domains locally
     */
-  def domains: Map[String, DomainConfigType]
+  def domains: Map[InstanceName, DomainConfigType]
+
+  /** Use `domains` instead!
+    */
+  def domainsByString: Map[String, DomainConfigType] = domains.map { case (n, c) => n.unwrap -> c }
 
   /** all participants that this Canton process can operate or connect to
     *
     * participants are grouped by their local name
     */
-  def participants: Map[String, ParticipantConfigType]
+  def participants: Map[InstanceName, ParticipantConfigType]
+
+  /** Use `participants` instead!
+    */
+  def participantsByString: Map[String, ParticipantConfigType] = participants.map { case (n, c) =>
+    n.unwrap -> c
+  }
 
   /** all remotely running domains to which the console can connect and operate on */
-  def remoteDomains: Map[String, RemoteDomainConfig]
+  def remoteDomains: Map[InstanceName, RemoteDomainConfig]
+
+  /** Use `remoteDomains` instead!
+    */
+  def remoteDomainsByString: Map[String, RemoteDomainConfig] = remoteDomains.map { case (n, c) =>
+    n.unwrap -> c
+  }
 
   /** all remotely running participants to which the console can connect and operate on */
-  def remoteParticipants: Map[String, RemoteParticipantConfig]
+  def remoteParticipants: Map[InstanceName, RemoteParticipantConfig]
+
+  /** Use `remoteParticipants` instead!
+    */
+  def remoteParticipantsByString: Map[String, RemoteParticipantConfig] = remoteParticipants.map {
+    case (n, c) =>
+      n.unwrap -> c
+  }
 
   /** determines how this Canton process can be monitored */
   def monitoring: MonitoringConfig
@@ -276,25 +299,31 @@ trait CantonConfig {
   /** run a validation on the current config and return possible warning messages */
   def validate: ValidatedNel[String, Unit]
 
-  private lazy val domainNodeParameters_ = domains.fmap { domainConfig =>
-    DomainNodeParameters(
-      monitoring.tracing,
-      monitoring.delayLoggingThreshold,
-      monitoring.logMessagePayloads,
-      monitoring.logQueryCost,
-      parameters.enableAdditionalConsistencyChecks,
-      features.enablePreviewCommands,
-      parameters.timeouts.processing,
-      domainConfig.sequencerClient,
-      domainConfig.caching,
-      parameters.nonStandardConfig,
-    )
+  private lazy val domainNodeParameters_ : Map[InstanceName, DomainNodeParameters] = domains.fmap {
+    domainConfig =>
+      DomainNodeParameters(
+        monitoring.tracing,
+        monitoring.delayLoggingThreshold,
+        monitoring.logMessagePayloads,
+        monitoring.logQueryCost,
+        parameters.enableAdditionalConsistencyChecks,
+        features.enablePreviewCommands,
+        parameters.timeouts.processing,
+        domainConfig.sequencerClient,
+        domainConfig.caching,
+        parameters.nonStandardConfig,
+      )
   }
 
-  private[canton] def domainNodeParameters(name: String): DomainNodeParameters =
+  private[canton] def domainNodeParameters(name: InstanceName): DomainNodeParameters =
     nodeParametersFor(domainNodeParameters_, "domain", name)
 
-  private lazy val participantNodeParameters_ : Map[String, ParticipantNodeParameters] =
+  /** Use `domainNodeParameters` instead!
+    */
+  private[canton] def domainNodeParametersByString(name: String): DomainNodeParameters =
+    domainNodeParameters(InstanceName.tryCreate(name))
+
+  private lazy val participantNodeParameters_ : Map[InstanceName, ParticipantNodeParameters] =
     participants.fmap { participantConfig =>
       val participantParameters = participantConfig.parameters
       ParticipantNodeParameters(
@@ -322,13 +351,21 @@ trait CantonConfig {
       )
     }
 
-  private[canton] def participantNodeParameters(participant: String): ParticipantNodeParameters =
+  private[canton] def participantNodeParameters(
+      participant: InstanceName
+  ): ParticipantNodeParameters =
     nodeParametersFor(participantNodeParameters_, "participant", participant)
 
+  /** Use `participantNodeParameters`` instead!
+    */
+  private[canton] def participantNodeParametersByString(name: String) = participantNodeParameters(
+    InstanceName.tryCreate(name)
+  )
+
   protected def nodeParametersFor[A](
-      cachedNodeParameters: Map[String, A],
+      cachedNodeParameters: Map[InstanceName, A],
       kind: String,
-      name: String,
+      name: InstanceName,
   ): A =
     cachedNodeParameters.getOrElse(
       name,
@@ -357,7 +394,10 @@ trait CantonConfig {
       .mkString(";")
   }
 
-  protected def nodePortsDescription(nodeName: String, portDescriptions: Seq[String]): String =
+  protected def nodePortsDescription(
+      nodeName: InstanceName,
+      portDescriptions: Seq[String],
+  ): String =
     s"$nodeName:${portDescriptions.mkString(",")}"
 
   protected def portDescriptionFromConfig[C](
@@ -712,9 +752,6 @@ object CantonConfig {
     lazy implicit val communityNewDatabaseSequencerWriterConfigLowLatencyReader
         : ConfigReader[SequencerWriterConfig.LowLatency] =
       deriveReader[SequencerWriterConfig.LowLatency]
-    lazy implicit val communityNewDatabaseSequencerTopologyConfigReader
-        : ConfigReader[SequencerHighAvailabilityConfig] =
-      deriveReader[SequencerHighAvailabilityConfig]
     lazy implicit val communitySequencerConfigReader: ConfigReader[CommunitySequencerConfig] =
       deriveReader[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigReader: ConfigReader[DomainParametersConfig] =
@@ -1048,9 +1085,6 @@ object CantonConfig {
     lazy implicit val communityDatabaseSequencerWriterConfigLowLatencyWriter
         : ConfigWriter[SequencerWriterConfig.LowLatency] =
       deriveWriter[SequencerWriterConfig.LowLatency]
-    lazy implicit val communityDatabaseSequencerTopologyConfigWriter
-        : ConfigWriter[SequencerHighAvailabilityConfig] =
-      deriveWriter[SequencerHighAvailabilityConfig]
     lazy implicit val communitySequencerConfigWriter: ConfigWriter[CommunitySequencerConfig] =
       deriveWriter[CommunitySequencerConfig]
     lazy implicit val domainParametersConfigWriter: ConfigWriter[DomainParametersConfig] =

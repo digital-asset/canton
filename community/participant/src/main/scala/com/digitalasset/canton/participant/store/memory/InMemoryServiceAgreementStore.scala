@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.store.memory
 
 import java.util.concurrent.ConcurrentHashMap
-
 import cats.data.EitherT
 import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.tracing.TraceContext
@@ -22,13 +22,13 @@ class InMemoryServiceAgreementStore(protected val loggerFactory: NamedLoggerFact
 
   import ServiceAgreementStore._
 
-  private val agreements = TrieMap.empty[(DomainId, ServiceAgreementId), String]
+  private val agreements = TrieMap.empty[(DomainId, ServiceAgreementId), String256M]
   private val acceptedAgreements = new ConcurrentHashMap[DomainId, Set[ServiceAgreementId]]()
 
   override def storeAgreement(
       domainId: DomainId,
       agreementId: ServiceAgreementId,
-      agreementText: String,
+      agreementText: String256M,
   )(implicit traceContext: TraceContext): EitherT[Future, ServiceAgreementStoreError, Unit] = {
     val _ = agreements.putIfAbsent((domainId, agreementId), agreementText)
     EitherT.rightT(())
@@ -43,7 +43,7 @@ class InMemoryServiceAgreementStore(protected val loggerFactory: NamedLoggerFact
 
   override def getAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
-  ): ServiceAgreementStoreT[String] =
+  ): ServiceAgreementStoreT[String256M] =
     EitherT.fromEither(
       agreements
         .get((domainId, agreementId))
@@ -76,4 +76,6 @@ class InMemoryServiceAgreementStore(protected val loggerFactory: NamedLoggerFact
       implicit traceContext: TraceContext
   ): Future[Boolean] =
     Future.successful(acceptedAgreements.getOrDefault(domainId, Set()).contains(agreementId))
+
+  override def close(): Unit = ()
 }

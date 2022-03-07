@@ -93,8 +93,18 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
       () => {
 
         for {
-          lookup <- DbMultiDomainCausalityStore(storage, indexedStringStore, loggerFactory)
-          single = new DbSingleDomainCausalDependencyStore(writeToDomain, storage, loggerFactory)
+          lookup <- DbMultiDomainCausalityStore(
+            storage,
+            indexedStringStore,
+            timeouts,
+            loggerFactory,
+          )
+          single = new DbSingleDomainCausalDependencyStore(
+            writeToDomain,
+            storage,
+            timeouts,
+            loggerFactory,
+          )
           _unit <- single.initialize(None)
         } yield TestedStores(lookup, single)
       },

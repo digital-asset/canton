@@ -5,16 +5,12 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.syntax.option._
-import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
@@ -25,7 +21,7 @@ import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.store.db.DbRequestJournalStore.ReplaceRequest
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.{
   DbBulkUpdateProcessor,
   DbCursorPreheadStore,
@@ -45,15 +41,16 @@ import scala.util.{Success, Try}
 
 class DbRequestJournalStore(
     domainId: IndexedDomain,
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     maxItemsInSqlInClause: PositiveNumeric[Int],
     insertBatchAggregatorConfig: BatchAggregatorConfig,
     replaceBatchAggregatorConfig: BatchAggregatorConfig,
     enableAdditionalConsistencyChecksInOracle: Boolean,
-    val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
     extends RequestJournalStore
-    with NamedLogging {
+    with DbStore {
 
   import DbStorage.Implicits._
   import storage.api._
@@ -67,6 +64,7 @@ class DbRequestJournalStore(
       storage,
       cursorTable = "head_clean_counters",
       processingTime,
+      timeouts,
       loggerFactory,
     )
 
@@ -368,6 +366,8 @@ class DbRequestJournalStore(
         """.as[RequestData]
     storage.query(statement, functionFullName)
   }
+
+  override def onClosed(): Unit = Lifecycle.close(cleanPreheadStore)(logger)
 }
 
 object DbRequestJournalStore {

@@ -57,6 +57,9 @@ object TestSubscriptionError {
 
 case class TestHandlerError(message: String)
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard the futures
 class ResilientSequencerSubscriptionTest
     extends AsyncWordSpec
     with BaseTest

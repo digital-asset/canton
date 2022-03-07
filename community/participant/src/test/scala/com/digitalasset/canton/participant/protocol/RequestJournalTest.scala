@@ -137,8 +137,9 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
 
     "queries" should {
       s"return $None" in {
-        assertAbsent(rj, List(initRc, initRc + 5, initRc - 1))
-        rj.numberOfDirtyRequests shouldBe 0
+        assertAbsent(rj, List(initRc, initRc + 5, initRc - 1)).map { _ =>
+          rj.numberOfDirtyRequests shouldBe 0
+        }
       }
     }
 

@@ -40,4 +40,6 @@ class InMemorySendTrackerStore(implicit executionContext: ExecutionContext)
     pendingSends -= messageId
     Future.unit
   }
+
+  override def close(): Unit = ()
 }

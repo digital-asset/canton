@@ -4,12 +4,13 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.syntax.traverseFilter._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.MultiDomainCausalityStore
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.VectorClock
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{DomainId, LfPartyId}
@@ -18,12 +19,13 @@ import io.functionmeta.functionFullName
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbMultiDomainCausalityStore private (
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     indexedStringStore: IndexedStringStore,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends MultiDomainCausalityStore
-    with NamedLogging {
+    with DbStore {
 
   override protected def persistCausalityMessageState(
       id: TransferId,
@@ -135,10 +137,12 @@ object DbMultiDomainCausalityStore {
   def apply(
       storage: DbStorage,
       indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, tc: TraceContext): Future[MultiDomainCausalityStore] = {
 
-    val lookup = new DbMultiDomainCausalityStore(storage, indexedStringStore, loggerFactory)
+    val lookup =
+      new DbMultiDomainCausalityStore(storage, indexedStringStore, timeouts, loggerFactory)
     for { _unit <- lookup.initialise } yield lookup
 
   }

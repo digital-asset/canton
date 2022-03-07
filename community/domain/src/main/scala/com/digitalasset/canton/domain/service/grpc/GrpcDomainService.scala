@@ -24,7 +24,10 @@ class GrpcDomainService(
   ): Future[adminProto.GetServiceAgreementResponse] = {
     val agreement =
       agreementManager.map(manager =>
-        v0.ServiceAgreement(manager.agreement.id.toProtoPrimitive, manager.agreement.text)
+        v0.ServiceAgreement(
+          manager.agreement.id.toProtoPrimitive,
+          manager.agreement.text.toProtoPrimitive,
+        )
       )
     Future.successful(adminProto.GetServiceAgreementResponse(agreement))
   }

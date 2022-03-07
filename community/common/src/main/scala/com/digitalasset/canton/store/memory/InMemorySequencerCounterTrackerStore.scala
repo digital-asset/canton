@@ -12,4 +12,6 @@ class InMemorySequencerCounterTrackerStore(override val loggerFactory: NamedLogg
     with NamedLogging {
   override protected[store] val cursorStore =
     new InMemoryCursorPreheadStore[SequencerCounter](loggerFactory)
+
+  override def close(): Unit = ()
 }

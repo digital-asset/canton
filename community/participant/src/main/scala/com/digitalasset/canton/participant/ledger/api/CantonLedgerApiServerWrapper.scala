@@ -475,6 +475,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
             _ <- CantonLedgerApiServerWrapper.stop(this)
             _ <- EitherTUtil
               .fromFuture(indexer.stop(), t => FailedToStopIndexer("Failed to stop indexer", t))
+            _ = indexer.close()
             _ <- EitherT.fromEither[Future](ledgerApiStorage.close()): EitherT[
               Future,
               LedgerApiServerError,

@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.HashSet
 import scala.concurrent.Future
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) do not discard futures
 class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   lazy val participant: ParticipantId = ParticipantId("p1-mydomain")
 

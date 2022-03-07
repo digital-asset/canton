@@ -38,6 +38,7 @@ trait DbRequestJournalStoreTest extends AsyncWordSpec with BaseTest with Request
         BatchAggregatorConfig.defaultsForTesting,
         BatchAggregatorConfig.defaultsForTesting,
         enableAdditionalConsistencyChecksInOracle = true,
+        timeouts,
         loggerFactory,
       )
     )

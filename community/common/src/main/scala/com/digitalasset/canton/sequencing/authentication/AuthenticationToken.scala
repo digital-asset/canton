@@ -4,9 +4,11 @@
 package com.digitalasset.canton.sequencing.authentication
 
 import cats.syntax.either._
+import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.SecureRandomness
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
-import com.digitalasset.canton.store.db.DbSerializationException
+import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.util.{HexString, NoCopy}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
@@ -16,13 +18,19 @@ case class AuthenticationToken private (private val bytes: ByteString)
     with HasCryptographicEvidence {
   def toProtoPrimitive: ByteString = bytes
 
+  def toLengthLimitedHexString: String300 =
+    // Authentication tokens have at most 150 bytes
+    checked(String300.tryCreate(HexString.toHexString(this.toProtoPrimitive)))
+
   override def getCryptographicEvidence: ByteString = bytes
 }
 
 object AuthenticationToken {
-  // The (oracle) database backend can only handle AuthenticationToken's up to a length of 500 bytes
-  // If you try to insert a longer Nonce, the database will throw an error - see documentation at `LengthLimitedString` for more details
-  // If you want to save a AuthenticationToken larger than this, please consult the team
+
+  /** As of now, the database schemas can only handle authentication tokens up to a length of 150 bytes. Thus the length of an [[AuthenticationToken]] should never exceed that.
+    * If we ever want to create an [[AuthenticationToken]] larger than that, we can increase it up to 500 bytes after which we are limited by Oracle length limits.
+    * See the documentation at [[com.digitalasset.canton.config.RequireTypes.LengthLimitedString]] for more details.
+    */
   val length: Int = 20
 
   private[this] def apply(bytes: ByteString): AuthenticationToken =
@@ -45,11 +53,16 @@ object AuthenticationToken {
     )
 
   implicit val setAuthenticationTokenParameter: SetParameter[AuthenticationToken] =
-    (token, pp) => pp.setString(HexString.toHexString(token.toProtoPrimitive))
+    (token, pp) => pp >> token.toLengthLimitedHexString
 
   implicit val getAuthenticationTokenResult: GetResult[AuthenticationToken] = GetResult { r =>
+    val hexString = r.nextString()
+    if (hexString.length > String300.maxLength)
+      throw new DbDeserializationException(
+        s"Base16-encoded authentication token of length ${hexString.length} exceeds allowed limit of ${String300.maxLength}."
+      )
     HexString
-      .parseToByteString(r.nextString())
+      .parseToByteString(hexString)
       .map(new AuthenticationToken(_))
       .getOrElse(
         throw new DbSerializationException(s"Could not deserialize authentication token from db")

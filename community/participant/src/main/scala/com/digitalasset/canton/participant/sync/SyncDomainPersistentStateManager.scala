@@ -55,5 +55,6 @@ class SyncDomainPersistentStateManager(
   def aliasForDomainId(domainId: DomainId): Option[DomainAlias] =
     aliasResolution.aliasForDomainId(domainId)
 
-  override def close(): Unit = Lifecycle.close(domainStates.values.toSeq: _*)(logger)
+  override def close(): Unit =
+    Lifecycle.close(domainStates.values.toSeq :+ aliasResolution: _*)(logger)
 }

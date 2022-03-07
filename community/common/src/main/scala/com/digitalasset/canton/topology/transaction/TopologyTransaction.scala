@@ -136,6 +136,7 @@ object TopologyChangeOp {
 final case class TopologyElementId(override protected val str: String255)
     extends LengthLimitedStringWrapper
     with PrettyPrinting {
+  def toLengthLimitedString: String255 = str
   // TODO(i4933) validate strings when deserializing from proto (must be safesimplestring)
 
   override def pretty: Pretty[TopologyElementId] = prettyOfString(_.unwrap)

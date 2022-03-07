@@ -15,6 +15,7 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.SubmissionErrorGroup
 import com.digitalasset.canton.error._
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
@@ -97,7 +98,7 @@ class TransactionProcessor(
       transaction: WellFormedTransaction[WithoutSuffixes],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransactionProcessor.TransactionSubmissionError, Future[
+  ): EitherT[FutureUnlessShutdown, TransactionProcessor.TransactionSubmissionError, Future[
     TransactionSubmitted
   ]] =
     this.submit(

@@ -45,7 +45,6 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.UnsignedProtocolEventHandler
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
@@ -67,6 +66,7 @@ import com.digitalasset.canton.time.{
 }
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -90,10 +90,6 @@ object SequencerAuthenticationConfig {
   val Disabled: Option[SequencerAuthenticationConfig] = None
 }
 
-trait EventHandlerCreator {
-  def createHandler: UnsignedProtocolEventHandler
-}
-
 /** Run a sequencer and its supporting services.
   * @param authenticationConfig Authentication setup if supported, otherwise none.
   */
@@ -113,7 +109,7 @@ class SequencerRuntime(
     auditLogger: TracedLogger,
     snapshot: Option[SequencerSnapshot],
     authenticationConfig: SequencerAuthenticationConfig,
-    eventHandlerCreator: Option[EventHandlerCreator],
+    topologyProcessorO: Option[TopologyTransactionProcessor],
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -143,6 +139,7 @@ class SequencerRuntime(
       syncCrypto,
       snapshot,
       localNodeParameters,
+      staticDomainParameters.protocolVersion,
     )
 
   private val keyCheckF =
@@ -201,7 +198,7 @@ class SequencerRuntime(
    */
   val sequencerNodeComponentsO
       : Option[(SequencerClient, DomainTimeTracker, Future[DomainInitializationObserver])] =
-    eventHandlerCreator map { identityHandler =>
+    topologyProcessorO map { topologyProcessor =>
       withNewTraceContext { implicit traceContext =>
         logger.debug(s"Creating sequencer client for ${clientDiscriminator}")
         val sequencedEventStore =
@@ -233,9 +230,9 @@ class SequencerRuntime(
         val timeTracker = DomainTimeTracker(timeTrackerConfig, clock, client, loggerFactory)
 
         val topologyManagerSequencerCounterTrackerStore =
-          SequencerCounterTrackerStore(storage, clientDiscriminator, loggerFactory)
+          SequencerCounterTrackerStore(storage, clientDiscriminator, timeouts, loggerFactory)
 
-        val eventHandler = StripSignature(identityHandler.createHandler)
+        val eventHandler = StripSignature(topologyProcessor.createHandler(domainId))
 
         logger.debug("Subscribing topology client within sequencer runtime")
         localNodeParameters.processingTimeouts.unbounded
@@ -296,7 +293,7 @@ class SequencerRuntime(
     val authenticationService = new MemberAuthenticationService(
       domainId,
       syncCrypto,
-      MemberAuthenticationStore(storage, loggerFactory),
+      MemberAuthenticationStore(storage, timeouts, loggerFactory),
       authenticationConfig.agreementManager,
       clock,
       authenticationConfig.nonceExpirationTime.unwrap,
@@ -313,7 +310,11 @@ class SequencerRuntime(
     topologyClient.subscribe(authenticationService)
 
     val sequencerAuthenticationService =
-      new GrpcSequencerAuthenticationService(authenticationService, loggerFactory)
+      new GrpcSequencerAuthenticationService(
+        authenticationService,
+        staticDomainParameters.protocolVersion,
+        loggerFactory,
+      )
 
     val sequencerAuthInterceptor =
       new SequencerAuthenticationServerInterceptor(authenticationService, loggerFactory)
@@ -436,7 +437,15 @@ class SequencerRuntime(
         sequencerNodeComponentsO foreach { case (client, timeTracker, _) =>
           Lifecycle.close(timeTracker, client)(logger)
         },
+      () =>
+        topologyProcessorO.foreach { processor =>
+          // if this component has a topology processor, we need to close it together with
+          // the client
+          topologyClient.close()
+          processor.close()
+        },
       sequencerService,
+      authenticationServices.memberAuthenticationService,
       sequencer,
       ExecutorServiceExtensions(timeoutScheduler)(logger, timeouts),
     )(logger)

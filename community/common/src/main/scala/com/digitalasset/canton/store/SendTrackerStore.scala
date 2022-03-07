@@ -15,7 +15,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Keeps track of [[com.digitalasset.canton.sequencing.protocol.SubmissionRequest]]s
   * that have been sent to the sequencer but not yet witnessed.
   */
-trait SendTrackerStore {
+trait SendTrackerStore extends AutoCloseable {
 
   /** Fetch all pending sends currently stored. */
   def fetchPendingSends(implicit

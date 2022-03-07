@@ -120,4 +120,6 @@ class InMemoryCommandDeduplicationStore(override protected val loggerFactory: Na
       traceContext: TraceContext
   ): OptionT[Future, OffsetAndPublicationTime] =
     OptionT(Future.successful(latestPrunedRef.get()))
+
+  override def close(): Unit = ()
 }

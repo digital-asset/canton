@@ -24,4 +24,6 @@ class InMemoryDomainManagerNodeSequencerConfigStore(implicit executionContext: E
     currentConfiguration.set(Some(configuration))
     EitherT.pure(())
   }
+
+  override def close(): Unit = ()
 }

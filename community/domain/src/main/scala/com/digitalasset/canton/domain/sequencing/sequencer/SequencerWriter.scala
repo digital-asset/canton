@@ -37,28 +37,12 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Failure
 import scala.util.control.NonFatal
 
-/** Configuration for how many sequencers are concurrently operating within the domain.
-  * @param enabled Set to true to enable HA for the sequencer.
-  * @param totalNodeCount how many sequencer writers will there ever be in this domain.
-  *                       recommend setting to a value larger than the current topology to allow for expansion.
-  * @param keepAliveInterval how frequently will we ensure the sequencer watermark is updated to ensure it still appears alive
-  * @param onlineCheckInterval how frequently should this sequencer check that nodes are still online
-  * @param offlineDuration how long should a sequencer watermark be lagging for it to be flagged as offline
-  */
-case class SequencerHighAvailabilityConfig(
-    enabled: Boolean = false,
-    totalNodeCount: Int = 10,
-    keepAliveInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100L),
+case class OnlineSequencerCheckConfig(
     onlineCheckInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5L),
     offlineDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(8L),
 )
 
-object SequencerHighAvailabilityConfig {
-
-  /** Used for when we know there can only be one node (when HA is not available and will never be used such as community edition).
-    * Expect only one node that always has the index 0.
-    */
-  val SingleSequencerNodeIndex: Int = 0
+object TotalNodeCountValues {
   val SingleSequencerTotalNodeCount: Int = 1
 
   /** We need to allocate a range of available DbLockCounters so need to specify a maximum number of sequencer writers
@@ -354,7 +338,8 @@ object SequencerWriter {
   def apply(
       writerConfig: SequencerWriterConfig,
       writerStorageFactory: SequencerWriterStoreFactory,
-      highAvailabilityConfig: SequencerHighAvailabilityConfig,
+      totalNodeCount: Int,
+      keepAliveInterval: Option[NonNegativeFiniteDuration],
       processingTimeout: ProcessingTimeout,
       storage: Storage,
       generalStore: SequencerStore,
@@ -372,7 +357,8 @@ object SequencerWriter {
         logger.error(s"Sequencer writer flow error", _)(TraceContext.empty),
         SequencerWriterSource(
           writerConfig,
-          highAvailabilityConfig,
+          totalNodeCount,
+          keepAliveInterval,
           cryptoApi,
           store,
           clock,

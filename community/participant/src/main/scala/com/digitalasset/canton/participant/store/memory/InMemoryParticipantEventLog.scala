@@ -48,4 +48,6 @@ class InMemoryParticipantEventLog(id: ParticipantEventLogId, loggerFactory: Name
           event
       }
     }
+
+  override def close(): Unit = ()
 }

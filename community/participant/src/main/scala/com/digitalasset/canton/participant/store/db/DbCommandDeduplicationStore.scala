@@ -6,8 +6,10 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import cats.syntax.option._
 import com.daml.ledger.participant.state.v2.ChangeId
+import com.digitalasset.canton.{ApplicationId, CommandId}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.GlobalOffset
@@ -19,7 +21,7 @@ import com.digitalasset.canton.participant.store.{
   DefiniteAnswerEvent,
 }
 import com.digitalasset.canton.protocol.StoredParties
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
@@ -28,11 +30,12 @@ import io.functionmeta.functionFullName
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbCommandDeduplicationStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends CommandDeduplicationStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import storage.converters._
 
@@ -189,8 +192,8 @@ class DbCommandDeduplicationStore(
           val (changeId, definiteAnswerEvent, accepted) = update
           val acceptance = if (accepted) definiteAnswerEvent.some else None
           pp >> ChangeIdHash(changeId)
-          pp >> changeId.applicationId
-          pp >> changeId.commandId
+          pp >> ApplicationId(changeId.applicationId)
+          pp >> CommandId(changeId.commandId)
           pp >> StoredParties.fromIterable(changeId.actAs)
           pp >> definiteAnswerEvent.offset
           pp >> definiteAnswerEvent.publicationTime
@@ -200,11 +203,16 @@ class DbCommandDeduplicationStore(
           pp >> acceptance.map(_.publicationTime)
           pp >> acceptance.flatMap(_.serializableSubmissionId)
           pp >> acceptance.map(_.traceContext)
-          val acceptedFlag = if (accepted) "1" else "0"
-          pp >> acceptedFlag
-          pp >> acceptedFlag
-          pp >> acceptedFlag
-          pp >> acceptedFlag
+
+          @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
+          def setAcceptFlag(): Unit = {
+            val acceptedFlag = if (accepted) "1" else "0"
+            pp >> acceptedFlag
+            pp >> acceptedFlag
+            pp >> acceptedFlag
+            pp >> acceptedFlag
+          }
+          setAcceptFlag()
         }
       storage.queryAndUpdate(bulkUpdate, functionFullName).flatMap { rowCounts =>
         MonadUtil.sequentialTraverse_(rowCounts.iterator.zip(answers.tails)) {

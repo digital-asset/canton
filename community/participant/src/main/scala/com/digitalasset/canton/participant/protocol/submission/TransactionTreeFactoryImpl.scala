@@ -305,7 +305,7 @@ class TransactionTreeFactoryImpl(
               PackageUnknownTo(
                 packageId,
                 description
-                  .map(_.sourceDescription)
+                  .map(_.sourceDescription.unwrap)
                   .getOrElse("package does not exist on local node"),
                 participantId,
               )

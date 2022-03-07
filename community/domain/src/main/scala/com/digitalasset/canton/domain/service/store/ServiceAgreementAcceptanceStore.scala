@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.service.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.domain.service.store.db.DbServiceAgreementAcceptanceStore
 import com.digitalasset.canton.domain.service.store.memory.InMemoryServiceAgreementAcceptanceStore
@@ -29,12 +30,13 @@ trait ServiceAgreementAcceptanceStore {
 
 object ServiceAgreementAcceptanceStore {
 
-  def create(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): ServiceAgreementAcceptanceStore =
     storage match {
       case _: MemoryStorage => new InMemoryServiceAgreementAcceptanceStore(loggerFactory)
-      case dbStorage: DbStorage => new DbServiceAgreementAcceptanceStore(dbStorage, loggerFactory)
+      case dbStorage: DbStorage =>
+        new DbServiceAgreementAcceptanceStore(dbStorage, timeouts, loggerFactory)
     }
 
 }

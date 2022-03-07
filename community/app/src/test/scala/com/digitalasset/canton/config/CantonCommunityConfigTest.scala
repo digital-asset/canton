@@ -39,6 +39,36 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
 
   }
 
+  "the invalid node names configuration" should {
+    "return an error" in {
+      loggerFactory.assertLogs(
+        {
+          val result = loadFile("invalid-configs/invalid-node-names.conf")
+          inside(result.left.value) { case GenericConfigError.Error(cause) =>
+            cause should include(
+              "Node name is too long. Max length: 30. Length: 38. Name: \"mydomain0123456789012345678901...\""
+            )
+            cause should include(
+              "Node name contains invalid characters (allowed: [a-zA-Z0-9_-]): \"my`domain\""
+            )
+            cause should include(
+              "Node name contains invalid characters (allowed: [a-zA-Z0-9_-]): \"my domain\""
+            )
+          }
+        },
+        entry => {
+          entry.shouldBeCantonErrorCode(GenericConfigError.code)
+          val cause = entry.errorMessage
+          cause should include(
+            "Node name is too long. Max length: 30. Length: 38. Name: \"mydomain0123456789012345678901...\""
+          )
+          // The other causes get truncated away, unfortunately.
+          // See https://github.com/digital-asset/daml/issues/12785
+        },
+      )
+    }
+  }
+
   // test that fails because we misspelled 'port' as 'bort'
   "the bort configuration" should {
     "return an error mentioning the bort issue" in {

@@ -9,10 +9,9 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.lifecycle.FlagCloseable
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.admin.PackageService
@@ -22,7 +21,7 @@ import com.digitalasset.canton.participant.store.db.DbDamlPackageStore.{DamlPack
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
-import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -31,17 +30,17 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbDamlPackageStore(
     maxContractIdSqlInListSize: PositiveNumeric[Int],
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends DamlPackageStore
-    with FlagCloseable
-    with NamedLogging {
+    with DbStore {
 
   import DamlPackageStore._
   import storage.api._
   import storage.converters._
+  import DbStorage.Implicits._
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("daml-packages-dars-store")
@@ -57,7 +56,7 @@ class DbDamlPackageStore(
   private def insertOrUpdatePackage(
       pkg: DamlPackage,
       darO: Option[DarDescriptor],
-      sourceDescription: String,
+      sourceDescription: String256M,
   ): DbAction.WriteTransactional[Unit] = {
 
     val insertToPackageStore = (storage.profile match {
@@ -90,7 +89,7 @@ class DbDamlPackageStore(
 
     val insertToDarPackages = darO
       .map { dar =>
-        val hash = dar.hash.toHexString
+        val hash = dar.hash.toLengthLimitedHexString
 
         val sql = IdempotentInsert.insertIgnoringConflicts(
           storage,
@@ -113,7 +112,7 @@ class DbDamlPackageStore(
 
   override def append(
       pkgs: List[DamlLf.Archive],
-      sourceDescription: String,
+      sourceDescription: String256M,
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext
@@ -261,7 +260,9 @@ class DbDamlPackageStore(
     }
 
   private def existing(hash: Hash): DbAction.ReadOnly[Option[Dar]] =
-    sql"select hash, name, data from dars where hash_hex = ${hash.toHexString}".as[Dar].headOption
+    sql"select hash, name, data from dars where hash_hex = ${hash.toLengthLimitedHexString}"
+      .as[Dar]
+      .headOption
 
   private def insertOrUpdateDar(dar: DarRecord): DbAction.WriteOnly[Int] =
     storage.profile match {
@@ -280,7 +281,7 @@ class DbDamlPackageStore(
 
   override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
     storage.update_(
-      sqlu"""delete from dars where hash_hex = ${hash.toHexString}""",
+      sqlu"""delete from dars where hash_hex = ${hash.toLengthLimitedHexString}""",
       functionFullName,
     )
   }
@@ -288,7 +289,7 @@ class DbDamlPackageStore(
 }
 
 object DbDamlPackageStore {
-  private case class DamlPackage(packageId: PackageId, data: Array[Byte])
+  private case class DamlPackage(packageId: LfPackageId, data: Array[Byte])
 
   private case class DarRecord(hash: Hash, data: Array[Byte], name: DarName)
 }

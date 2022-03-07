@@ -16,11 +16,11 @@ import com.daml.lf.language.Ast.Package
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PackageServiceErrorGroup
 import com.digitalasset.canton.error._
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.PackageRemovalError
@@ -180,7 +180,7 @@ class PackageService(
       _ <- validateArchives(dar.all)
       _ <- storeValidatedPackagesAndSyncEvent(
         dar.all,
-        lengthValidatedName.str,
+        lengthValidatedName.asString1GB,
         LedgerSubmissionId.assertFromString(UUID.randomUUID().toString),
         Some(
           PackageService.Dar(DarDescriptor(hash, lengthValidatedName), payload.toByteArray)
@@ -299,7 +299,7 @@ class PackageService(
     */
   def storeValidatedPackagesAndSyncEvent(
       archives: List[DamlLf.Archive],
-      sourceDescription: String,
+      sourceDescription: String256M,
       submissionId: LedgerSubmissionId,
       dar: Option[Dar],
       vetAllPackages: Boolean,
@@ -324,7 +324,7 @@ class PackageService(
               eventPublisher.publish(
                 LedgerSyncEvent.PublicPackageUpload(
                   archives = archives,
-                  sourceDescription = Some(sourceDescription),
+                  sourceDescription = Some(sourceDescription.unwrap),
                   recordTime = ParticipantEventPublisher.now.toLf,
                   submissionId = Some(submissionId),
                 )
@@ -350,6 +350,8 @@ class PackageService(
           EitherT.rightT(())
       }
   }
+
+  override def onClosed(): Unit = Lifecycle.close(packagesDarsStore)(logger)
 
 }
 

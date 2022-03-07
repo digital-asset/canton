@@ -95,7 +95,12 @@ trait DbRegisterTopologyTransactionResponseStoreTest
   }
   "DbRegisterTopologyTransactionResponseStoreTest" should {
     behave like registerTopologyTransactionResponseStore(() =>
-      new DbRegisterTopologyTransactionResponseStore(storage, pureCryptoApi, loggerFactory)
+      new DbRegisterTopologyTransactionResponseStore(
+        storage,
+        pureCryptoApi,
+        timeouts,
+        loggerFactory,
+      )
     )
   }
 }

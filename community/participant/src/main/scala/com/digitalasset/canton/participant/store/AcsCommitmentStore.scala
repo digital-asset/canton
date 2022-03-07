@@ -21,7 +21,10 @@ import scala.concurrent.Future
 import scala.util.control.Breaks._
 
 /** Read and write interface for ACS commitments. Apart from pruning, should only be used by the ACS commitment processor */
-trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime[AcsCommitmentStoreError] {
+trait AcsCommitmentStore
+    extends AcsCommitmentLookup
+    with PrunableByTime[AcsCommitmentStoreError]
+    with AutoCloseable {
 
   /** Store a locally computed ACS commitment. To be called by the ACS commitment processor only.
     *

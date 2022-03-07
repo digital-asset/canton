@@ -56,6 +56,7 @@ object EmbeddedMediatorInitialization {
   ): EitherT[Future, String, MediatorRuntime] = {
 
     val factory = domainNodeMediatorFactory.mediatorRuntimeFactory
+    val timeouts = cantonParameterConfig.processingTimeouts
     val mediatorId = MediatorId(id) // The embedded mediator always has the same ID as the domain
     val sendTrackerStore = SendTrackerStore(storage)
     for {
@@ -66,13 +67,14 @@ object EmbeddedMediatorInitialization {
       sequencedEventStore = SequencedEventStore(
         storage,
         mediatorDiscriminator,
-        cantonParameterConfig.processingTimeouts,
+        timeouts,
         loggerFactory,
       )
       // The mediator has its own sequencer client subscription and therefore needs a separate sequencer counter tracker store
       mediatorSequencerCounterTrackerStore = SequencerCounterTrackerStore(
         storage,
         mediatorDiscriminator,
+        timeouts,
         loggerFactory,
       )
 
@@ -104,8 +106,6 @@ object EmbeddedMediatorInitialization {
         sequencedEventStore,
         sendTrackerStore,
       )
-
-      identityClientHandler = topologyProcessor.createHandler(id)
       mediatorRuntime <- factory
         .create(
           mediatorId,
@@ -116,7 +116,7 @@ object EmbeddedMediatorInitialization {
           sequencerClient,
           syncCrypto,
           topologyClient,
-          identityClientHandler,
+          topologyProcessor,
           timeTrackerConfig,
           cantonParameterConfig,
           clock,

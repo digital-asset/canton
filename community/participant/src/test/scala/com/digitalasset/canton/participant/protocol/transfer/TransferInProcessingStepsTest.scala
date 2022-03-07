@@ -192,14 +192,15 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
-        _preparedSubmission <- valueOrFail(
-          transferInProcessingSteps.prepareSubmission(
-            submissionParam,
-            targetMediator,
-            state,
-            cryptoSnapshot,
-          )
-        )("prepare submission failed")
+        _preparedSubmission <-
+          transferInProcessingSteps
+            .prepareSubmission(
+              submissionParam,
+              targetMediator,
+              state,
+              cryptoSnapshot,
+            )
+            .valueOrFailShutdown("transfer in submission")
       } yield succeed
     }
 
@@ -235,7 +236,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData2, transferOutResult, persistentState)
-        preparedSubmission <- leftOrFail(
+        preparedSubmission <- leftOrFailShutdown(
           transferInProcessingSteps.prepareSubmission(
             submissionParam,
             targetMediator,
@@ -258,7 +259,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         _ <- valueOrFail(persistentState.transferStore.addTransfer(transferData))(
           "add transfer data failed"
         )
-        preparedSubmission <- leftOrFail(
+        preparedSubmission <- leftOrFailShutdown(
           transferInProcessingSteps.prepareSubmission(
             submissionParam,
             targetMediator,
@@ -280,7 +281,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
-        preparedSubmission <- leftOrFail(
+        preparedSubmission <- leftOrFailShutdown(
           transferInProcessingSteps.prepareSubmission(
             submissionParam2,
             targetMediator,
@@ -309,7 +310,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData, transferOutResult, persistentState)
-        preparedSubmission <- leftOrFail(
+        preparedSubmission <- leftOrFailShutdown(
           transferInProcessingSteps.prepareSubmission(
             submissionParam,
             targetMediator,
@@ -337,7 +338,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         deps <- statefulDependencies
         (persistentState, ephemeralState) = deps
         _ <- setUpOrFail(transferData2, transferOutResult, persistentState)
-        preparedSubmission <- leftOrFail(
+        preparedSubmission <- leftOrFailShutdown(
           transferInProcessingSteps.prepareSubmission(
             submissionParam2,
             targetMediator,

@@ -22,7 +22,7 @@ trait DbDomainParameterStoreTest extends AsyncWordSpec with BaseTest with Domain
 
   "DbDomainParameterStore" should {
     behave like domainParameterStore(domainId =>
-      new DbDomainParameterStore(domainId, storage, loggerFactory)
+      new DbDomainParameterStore(domainId, storage, timeouts, loggerFactory)
     )
   }
 }

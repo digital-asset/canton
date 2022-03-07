@@ -171,4 +171,6 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
           inFlight
       }
     }
+
+  override def close(): Unit = ()
 }

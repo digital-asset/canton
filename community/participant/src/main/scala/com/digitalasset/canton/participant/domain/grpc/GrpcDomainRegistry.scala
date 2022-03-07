@@ -30,6 +30,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.AtomicReference
@@ -82,6 +83,7 @@ class GrpcDomainRegistry(
       val domainPersistentState: SyncDomainPersistentState,
       override protected val timeouts: ProcessingTimeout,
   ) extends DomainHandle
+      with FlagCloseableAsync
       with NamedLogging {
 
     override val sequencerClient: SequencerClient = sequencer
@@ -95,6 +97,7 @@ class GrpcDomainRegistry(
           identityPusher.domainDisconnected(domainAlias),
           timeouts.shutdownNetwork.duration,
         ),
+        SyncCloseable("agreementService", agreementService.close()),
         SyncCloseable("sequencerClient", sequencerClient.close()),
       )
     }
@@ -139,7 +142,7 @@ class GrpcDomainRegistry(
         metrics,
         agreementClient,
         sequencerConnectClient,
-      )
+      ).thereafter(_ => sequencerConnectClient.close())
     } yield new GrpcDomainHandle(
       domainHandle.domainId,
       domainHandle.alias,

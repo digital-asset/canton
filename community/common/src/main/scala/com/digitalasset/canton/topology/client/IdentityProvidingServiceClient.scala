@@ -106,6 +106,11 @@ trait TopologyClientApi[T] {
   /** Waits until a snapshot is available */
   def awaitSnapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[T]
 
+  /** Shutdown safe version of await snapshot */
+  def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[T]
+
   /** Returns the topology information at a certain point in time
     *
     * Fails with an exception if the state is not yet known.
@@ -125,6 +130,11 @@ trait TopologyClientApi[T] {
       timestamp: CantonTimestamp,
       waitForEffectiveTime: Boolean,
   )(implicit traceContext: TraceContext): Option[Future[Unit]]
+
+  def awaitTimestampUS(
+      timestamp: CantonTimestamp,
+      waitForEffectiveTime: Boolean,
+  )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]]
 
 }
 
@@ -427,6 +437,13 @@ trait DomainTopologyClientWithInit
   ): Future[TopologySnapshot] =
     awaitTimestamp(timestamp, waitForEffectiveTime = true)
       .getOrElse(Future.unit)
+      .map(_ => trySnapshot(timestamp))
+
+  override def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[TopologySnapshot] =
+    awaitTimestampUS(timestamp, waitForEffectiveTime = true)
+      .getOrElse(FutureUnlessShutdown.unit)
       .map(_ => trySnapshot(timestamp))
 
   /** internal await implementation used to schedule state evaluations after topology updates */

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
@@ -28,7 +29,7 @@ trait ParticipantSettingsLookup {
   * Allows clients to read settings without accessing the database.
   * In turn, a client needs to call `refreshCache` before reading settings.
   */
-trait ParticipantSettingsStore extends ParticipantSettingsLookup {
+trait ParticipantSettingsStore extends ParticipantSettingsLookup with AutoCloseable {
 
   /** A cache for the max number of dirty requests.
     * It is updated in the following situations:
@@ -64,12 +65,12 @@ trait ParticipantSettingsStore extends ParticipantSettingsLookup {
 }
 
 object ParticipantSettingsStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      executionContext: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit executionContext: ExecutionContext
   ): ParticipantSettingsStore = {
     storage match {
       case _: MemoryStorage => new InMemoryParticipantSettingsStore(loggerFactory)
-      case storage: DbStorage => new DbParticipantSettingsStore(storage, loggerFactory)
+      case storage: DbStorage => new DbParticipantSettingsStore(storage, timeouts, loggerFactory)
     }
   }
 

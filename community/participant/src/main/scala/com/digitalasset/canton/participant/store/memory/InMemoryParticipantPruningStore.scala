@@ -45,4 +45,6 @@ class InMemoryParticipantPruningStore(protected val loggerFactory: NamedLoggerFa
       traceContext: TraceContext
   ): Future[ParticipantPruningStatus] =
     Future.successful(status.get())
+
+  override def close(): Unit = ()
 }

@@ -4,11 +4,12 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.DomainId
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.store.ParticipantEventLog
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
+import com.digitalasset.canton.participant.store.ParticipantEventLog
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
@@ -21,12 +22,14 @@ class DbParticipantEventLog(
     id: ParticipantEventLogId,
     storage: DbStorage,
     indexedStringStore: IndexedStringStore,
-    loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends DbSingleDimensionEventLog[ParticipantEventLogId](
       id,
       storage,
       indexedStringStore,
+      timeouts,
       loggerFactory,
     )
     with ParticipantEventLog {

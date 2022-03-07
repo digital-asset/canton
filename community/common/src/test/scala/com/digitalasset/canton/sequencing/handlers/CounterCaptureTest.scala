@@ -15,6 +15,9 @@ import scala.concurrent.Future
 
 case class HandlerError(message: String)
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard the futures
 class CounterCaptureTest extends AnyWordSpec with BaseTest {
   type TestEventHandler = SerializedEventHandler[HandlerError]
 

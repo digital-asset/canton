@@ -99,6 +99,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
           DomainTestMetrics.mediator,
+          timeouts,
           loggerFactory,
         )
       val processor = new ConfirmationResponseProcessor(

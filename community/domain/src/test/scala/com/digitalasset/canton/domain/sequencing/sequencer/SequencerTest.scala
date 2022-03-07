@@ -57,6 +57,9 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       new DatabaseSequencer(
         SequencerWriterStoreFactory.singleInstance,
         CommunitySequencerConfig.Database(),
+        TotalNodeCountValues.SingleSequencerTotalNodeCount,
+        None,
+        OnlineSequencerCheckConfig(),
         DefaultProcessingTimeouts.testing,
         new MemoryStorage(),
         clock,

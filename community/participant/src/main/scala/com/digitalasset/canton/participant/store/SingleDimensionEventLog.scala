@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -194,12 +195,19 @@ object SingleDimensionEventLog {
       id: Id,
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SingleDimensionEventLog[Id] =
     storage match {
       case _: MemoryStorage => new InMemorySingleDimensionEventLog[Id](id, loggerFactory)
       case dbStorage: DbStorage =>
-        new DbSingleDimensionEventLog[Id](id, dbStorage, indexedStringStore, loggerFactory)
+        new DbSingleDimensionEventLog[Id](
+          id,
+          dbStorage,
+          indexedStringStore,
+          timeouts,
+          loggerFactory,
+        )
     }
 
 }

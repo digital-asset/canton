@@ -31,7 +31,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
   }
 
   "DbPartyMetadataStore" should {
-    behave like partyMetadataStore(() => new DbPartyMetadataStore(storage))
+    behave like partyMetadataStore(() => new DbPartyMetadataStore(storage, timeouts, loggerFactory))
   }
 
   private def createTopologyStore(): DbTopologyStore =
@@ -39,6 +39,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       storage,
       TopologyStoreId.AuthorizedStore,
       maxItemsInSqlQuery = 1,
+      timeouts,
       loggerFactory,
     )
 

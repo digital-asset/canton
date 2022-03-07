@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.sequencing.service
 import akka.NotUsed
 import cats.data.{EitherT, NonEmptyList}
 import com.digitalasset.canton._
-import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
@@ -43,7 +42,7 @@ import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemoryS
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import io.grpc.netty.NettyServerBuilder
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.ArgumentMatchersSugar
@@ -112,7 +111,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         v0.Challenge.Response.Value
           .Success(
             v0.Challenge.Success(
-              BuildInfo.version,
+              ReleaseVersion.current.toProtoPrimitive,
               Nonce.generate().toProtoPrimitive,
               fingerprints.map(_.unwrap),
             )
@@ -221,6 +220,9 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   }
 }
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard futures
 class GrpcSequencerIntegrationTest
     extends FixtureAnyWordSpec
     with BaseTest

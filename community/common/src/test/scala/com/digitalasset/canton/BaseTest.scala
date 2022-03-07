@@ -238,6 +238,12 @@ trait BaseTest
   )(implicit position: Position, F: Functor[F]): F[A] =
     valueOrFail(e.swap)(clue)
 
+  /** Converts an EitherT into a Future, failing in a case of a [[scala.Right$]] or shutdown */
+  def leftOrFailShutdown[A, B](e: EitherT[FutureUnlessShutdown, A, B])(
+      clue: String
+  )(implicit ec: ExecutionContext, position: Position): Future[A] =
+    e.swap.valueOrFailShutdown(clue)
+
   /** Converts an Either into an A value, failing in a case of a [[scala.Right$]] */
   def leftOrFail[A, B](e: Either[A, B])(clue: String)(implicit position: Position): A =
     valueOrFail(e.swap)(clue)
@@ -273,6 +279,11 @@ trait BaseTest
 
     def leftOrFailShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[E] =
       self.leftOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
+  }
+
+  implicit class FutureUnlessShutdownSyntax[A](fut: FutureUnlessShutdown[A]) {
+    def failOnShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[A] =
+      fut.onShutdown(fail(s"Shutdown during $clue"))
   }
 
   lazy val CantonExamplesPath: String = BaseTest.CantonExamplesPath

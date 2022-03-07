@@ -6,15 +6,15 @@ package com.digitalasset.canton.environment
 import cats.data.EitherT
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.crypto.Crypto
-import com.digitalasset.canton.topology.NodeId
 import com.digitalasset.canton.lifecycle.ShutdownFailedException
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.CommunityDbMigrationsFactory
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.topology.NodeId
 import com.digitalasset.canton.tracing.TracingConfig
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -48,7 +48,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def nonStandardConfig: Boolean = ???
   }
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
-    override def name: LengthLimitedString = ???
+    override def name: InstanceName = ???
     override def clock: Clock = ???
     override def crypto: Crypto = ???
     override def getId: Option[NodeId] = ???

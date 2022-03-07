@@ -56,7 +56,9 @@ trait DbInitializationStoreTest extends InitializationStoreTest {
   }
 
   "DbInitializationStore" should {
-    behave like initializationStore(() => new DbInitializationStore(storage, loggerFactory))
+    behave like initializationStore(() =>
+      new DbInitializationStore(storage, timeouts, loggerFactory)
+    )
   }
 }
 class DbInitializationStoreTestH2 extends DbInitializationStoreTest with H2Test

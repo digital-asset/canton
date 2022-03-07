@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.domain.sequencing.sequencer.store.DbSequencerStoreTest.MaxInClauseSize
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test}
 import com.digitalasset.canton.tracing.TraceContext
@@ -19,9 +20,11 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
     DbSequencerStoreTest.cleanSequencerTables(storage)
 
   "DbSequencerStore" should {
-    behave like sequencerStore(() => new DbSequencerStore(storage, MaxInClauseSize, loggerFactory))
+    behave like sequencerStore(() =>
+      new DbSequencerStore(storage, MaxInClauseSize, timeouts, loggerFactory)
+    )
     behave like multiTenantedSequencerStore(() =>
-      new DbSequencerStore(storage, MaxInClauseSize, loggerFactory)
+      new DbSequencerStore(storage, MaxInClauseSize, timeouts, loggerFactory)
     )
   }
 }
@@ -32,7 +35,7 @@ object DbSequencerStoreTest {
 
   def cleanSequencerTables(
       storage: DbStorage
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] = {
     import storage.api._
 
     storage.update(

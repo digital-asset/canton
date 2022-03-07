@@ -27,6 +27,8 @@ trait DbSendTrackerTrackerStoreTest extends AsyncWordSpec with BaseTest with Sen
         SequencerClientDiscriminator.fromIndexedDomainId(
           IndexedDomain.tryCreate(DefaultTestIdentities.domainId, 1)
         ),
+        timeouts,
+        loggerFactory,
       )
     )
 

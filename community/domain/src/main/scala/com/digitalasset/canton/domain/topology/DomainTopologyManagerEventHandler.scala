@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
@@ -132,4 +132,6 @@ class DomainTopologyManagerEventHandler(
         )
       }
   }
+
+  override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }

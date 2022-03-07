@@ -5,11 +5,10 @@ package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedString, PrunableByTime}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
@@ -23,8 +22,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * The pruning method of the store must use [[advancePruningTimestamp]] to signal the start end completion
   * of each pruning.
   */
-trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] { this: NamedLogging =>
-  protected[this] val storage: DbStorage
+trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
+  this: DbStore =>
 
   protected[this] implicit def setParameterDiscriminator: SetParameter[PartitionKey]
 
@@ -117,7 +116,8 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] { this: NamedL
 }
 
 /** Specialized [[DbPrunableByTime]] that uses the [[com.digitalasset.canton.DomainId]] as discriminator */
-trait DbPrunableByTimeDomain[E] extends DbPrunableByTime[IndexedDomain, E] { this: NamedLogging =>
+trait DbPrunableByTimeDomain[E] extends DbPrunableByTime[IndexedDomain, E] {
+  this: DbStore =>
 
   protected[this] def domainId: IndexedDomain
 

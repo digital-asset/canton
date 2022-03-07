@@ -11,7 +11,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Storage for a cursor prehead. */
-trait CursorPreheadStore[Counter] {
+trait CursorPreheadStore[Counter] extends AutoCloseable {
   private[store] implicit def ec: ExecutionContext
 
   /** Gets the prehead of the cursor. */

@@ -30,7 +30,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
 
     def newCrypto(): Future[Crypto] =
       CryptoFactory
-        .create(CryptoConfig(), new MemoryStorage, loggerFactory)
+        .create(CryptoConfig(), new MemoryStorage, timeouts, loggerFactory)
         .valueOrFail("create crypto")
 
     def certificateGenerator(crypto: Crypto) =

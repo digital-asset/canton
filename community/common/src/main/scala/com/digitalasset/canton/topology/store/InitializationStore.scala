@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.topology.store
 
-import java.util.concurrent.atomic.AtomicReference
-
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Store where we keep the core identity of the node
@@ -21,7 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * In Canton, everybody is known by his unique identifier which consists of a string and a fingerprint of a signing key.
   * Participant nodes and domains are known by their UID. This store here stores the identity of the node.
   */
-trait InitializationStore {
+trait InitializationStore extends AutoCloseable {
 
   def id(implicit traceContext: TraceContext): Future[Option[NodeId]]
 
@@ -30,12 +30,12 @@ trait InitializationStore {
 }
 
 object InitializationStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): InitializationStore =
     storage match {
       case _: MemoryStorage => new InMemoryInitializationStore(loggerFactory)
-      case jdbc: DbStorage => new DbInitializationStore(jdbc, loggerFactory)
+      case jdbc: DbStorage => new DbInitializationStore(jdbc, timeouts, loggerFactory)
     }
 }
 
@@ -54,14 +54,17 @@ class InMemoryInitializationStore(override protected val loggerFactory: NamedLog
         myId.get().contains(id),
         s"Unique id of node is already defined as ${myId.get().map(_.toString).getOrElse("")} and can't be changed to $id!",
       )
+
+  override def close(): Unit = ()
 }
 
 class DbInitializationStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends InitializationStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
 
   override def id(implicit traceContext: TraceContext): Future[Option[NodeId]] =
@@ -95,7 +98,7 @@ class DbInitializationStore(
               )
               DbStorage.DbAction.unit
             } else
-              sqlu"insert into node_id(identifier, namespace) values(${id.identity.id},${id.identity.namespace.fingerprint.unwrap})"
+              sqlu"insert into node_id(identifier, namespace) values(${id.identity.id},${id.identity.namespace.fingerprint})"
         } yield ()
       }.transactionally.withTransactionIsolation(Serializable),
       functionFullName,

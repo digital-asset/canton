@@ -111,9 +111,6 @@ object UniquePath {
 
   private[topology] val uniqueIdentifierCode = "uid"
 
-  implicit val setParameterUniquePath: SetParameter[UniquePath] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
-
   def queryForNamespace(namespace: Namespace): String = namespace.toProtoPrimitive
 
 }
