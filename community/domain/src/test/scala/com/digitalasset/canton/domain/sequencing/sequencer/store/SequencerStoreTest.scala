@@ -7,6 +7,7 @@ import cats.data.{EitherT, NonEmptyList, NonEmptySet}
 import cats.syntax.option._
 import cats.syntax.traverse._
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.mockDeliverStoreEvent
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SaveLowerBoundError.BoundLowerThanExisting
@@ -287,7 +288,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           error: DeliverErrorStoreEvent = DeliverErrorStoreEvent(
             aliceId,
             messageId1,
-            "Something went wrong",
+            String256M.tryCreate("Something went wrong"),
             traceContext,
           )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)

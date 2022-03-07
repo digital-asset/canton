@@ -4,8 +4,10 @@
 package com.digitalasset.canton.domain.config.store
 
 import cats.data.EitherT
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.String1
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
@@ -16,11 +18,12 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbDomainManagerNodeSequencerConfigStore(
-    storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends DomainManagerNodeSequencerConfigStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import storage.converters._
 
@@ -40,7 +43,7 @@ class DbDomainManagerNodeSequencerConfigStore(
 
   // sentinel value used to ensure the table can only have a single row
   // see create table sql for more details
-  private val singleRowLockValue = "X"
+  private val singleRowLockValue: String1 = String1.fromChar('X')
 
   override def fetchConfiguration(implicit
       traceContext: TraceContext

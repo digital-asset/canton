@@ -57,6 +57,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
           DomainTestMetrics.mediator,
+          timeouts,
           loggerFactory,
         )
       Await.result(sut.add(currentVersion), 1.second)

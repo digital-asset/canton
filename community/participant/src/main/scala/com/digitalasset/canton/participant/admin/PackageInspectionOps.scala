@@ -19,7 +19,6 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
@@ -46,7 +45,6 @@ trait PackageInspectionOps extends NamedLogging {
 
 class PackageInspectionOpsImpl(
     participantId: ParticipantId,
-    clock: Clock,
     storage: Storage,
     aliasManager: DomainAliasManager,
     stateManager: SyncDomainPersistentStateManager,
@@ -63,7 +61,7 @@ class PackageInspectionOpsImpl(
 
     import cats.implicits._
 
-    val store = TopologyStoreFactory.apply(storage, loggerFactory)
+    val store = TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
 
     def snapshotFromStore(id: TopologyStoreId) = {
       val domainStore = store.forId(id)

@@ -3,24 +3,23 @@
 
 package com.digitalasset.canton.health
 
-import java.time.Duration
-
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.config.CantonCommunityConfig
-import com.digitalasset.canton.config.RequireTypes.String185
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.environment.{Environment, ParticipantNodes}
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.metrics.HealthMetrics
 import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PingService}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiDependentCantonServices
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, DomainId}
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.time.Duration
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
@@ -45,7 +44,7 @@ class StubbedCheck(
 class HealthCheckTest extends AsyncWordSpec with BaseTest {
 
   "ping check" should {
-    val participant = "the-participant-alias"
+    val participant = "the_participant_alias"
 
     "return unhealthy if running participants are not yet available" in
       loggerFactory.suppressWarningsAndErrors {
@@ -122,7 +121,7 @@ class HealthCheckTest extends AsyncWordSpec with BaseTest {
 
     def withNotInitializedParticipant(): Environment = mockEnvironment { mocks =>
       val init = mock[ParticipantNodeBootstrap]
-      when(init.name).thenReturn(String185.tryCreate(participant))
+      when(init.name).thenReturn(InstanceName.tryCreate(participant))
       when(init.getNode).thenReturn(None)
       when(mocks.participants.getRunning(participant)).thenReturn(Some(init))
     }

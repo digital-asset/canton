@@ -10,6 +10,7 @@ import cats.data.{EitherT, NonEmptyList}
 import cats.implicits._
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error._
+import com.daml.error.definitions.PackageServiceError
 import com.daml.ledger.api.health.HealthStatus
 import com.daml.ledger.configuration._
 import com.daml.ledger.participant.state
@@ -20,7 +21,7 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
@@ -87,9 +88,9 @@ import java.util.UUID
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.jdk.FutureConverters._
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.FutureConverters._
 import scala.util.{Failure, Success}
 
 /** The Canton-based synchronization service.
@@ -622,9 +623,14 @@ class CantonSyncService(
         // The API Package service has already decoded and validated the archives,
         // so we can simply store them here without revalidating them.
         val ret = for {
+          sourceDescriptionLenLimit <- EitherT.fromEither[Future](
+            String256M
+              .create(sourceDescription.getOrElse(""), Some("package source description"))
+              .leftMap(PackageServiceError.InternalError.Generic.apply)
+          )
           _ <- packageService.storeValidatedPackagesAndSyncEvent(
             archives,
-            sourceDescription.getOrElse(""),
+            sourceDescriptionLenLimit,
             submissionId,
             dar = None,
             vetAllPackages = true,
@@ -1400,7 +1406,11 @@ class CantonSyncService(
       pruningProcessor,
     ) ++ syncCrypto.ips.allDomains.toSeq ++ connectedDomainsMap.values.toSeq ++ Seq(
       packageService,
+      domainRouter,
+      domainRegistry,
       inFlightSubmissionTracker,
+      domainConnectionConfigStore,
+      domainCausalityStore,
       syncDomainPersistentStateManager,
       participantNodePersistentState,
     )

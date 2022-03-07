@@ -16,8 +16,7 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InstanceName
-import com.digitalasset.canton.config.RequireTypes.String185
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, KeyName, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
@@ -134,7 +133,6 @@ class ParticipantNodeBootstrap(
   /** per session created admin token for in-process connections to ledger-api */
   val adminToken: CantonAdminToken = CantonAdminToken.create()
 
-  // This absolutely must be a "def" as the superclass will use it during initialization.
   override protected def connectionPoolForParticipant: Boolean = true
 
   /** If set to `Some(path)`, every sequencer client will record all received events to the directory `path`.
@@ -329,10 +327,10 @@ class ParticipantNodeBootstrap(
     val syncCrypto =
       new SyncCryptoApiProvider(participantId, ips, crypto, config.caching, loggerFactory)
 
-    val registeredDomainsStore = RegisteredDomainsStore(storage, loggerFactory)
+    val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
 
     val acceptedAgreements = storage match {
-      case dbStorage: DbStorage => new DbServiceAgreementStore(dbStorage, loggerFactory)
+      case dbStorage: DbStorage => new DbServiceAgreementStore(dbStorage, timeouts, loggerFactory)
       case _: MemoryStorage => new InMemoryServiceAgreementStore(loggerFactory)
     }
 
@@ -340,11 +338,11 @@ class ParticipantNodeBootstrap(
       new GrpcDomainServiceClient(cantonParameterConfig.tracing.propagation, loggerFactory)
 
     val agreementService =
-      new AgreementService(acceptedAgreements, domainServiceClient, loggerFactory)
+      new AgreementService(acceptedAgreements, domainServiceClient, timeouts, loggerFactory)
 
     for {
       domainConnectionConfigStore <- EitherT.right(
-        DomainConnectionConfigStore(storage, loggerFactory)
+        DomainConnectionConfigStore(storage, timeouts, loggerFactory)
       )
       domainAliasManager <- EitherT.right[String](
         DomainAliasManager(registeredDomainsStore, loggerFactory)
@@ -409,7 +407,6 @@ class ParticipantNodeBootstrap(
           },
           new PackageInspectionOpsImpl(
             participantId,
-            clock,
             storage,
             domainAliasManager,
             syncDomainPersistentStateManager,
@@ -482,7 +479,7 @@ class ParticipantNodeBootstrap(
       )
 
       multiDomainCausalityStore <- EitherT.liftF(
-        MultiDomainCausalityStore(storage, indexedStringStore, loggerFactory)
+        MultiDomainCausalityStore(storage, indexedStringStore, timeouts, loggerFactory)
       )
 
       ledgerId = participantId.uid.id.unwrap
@@ -701,7 +698,7 @@ object ParticipantNodeBootstrap {
         actorSystem: ActorSystem,
         executionSequencerFactory: ExecutionSequencerFactory,
     ): Either[String, ParticipantNodeBootstrap] =
-      String185
+      InstanceName
         .create(name)
         .map(
           new ParticipantNodeBootstrap(
@@ -732,6 +729,7 @@ object ParticipantNodeBootstrap {
             loggerFactory,
           )
         )
+        .leftMap(_.toString)
   }
 }
 

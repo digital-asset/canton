@@ -9,6 +9,7 @@ import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorId, Member, ParticipantId}
 import com.digitalasset.canton.participant.RequestCounter
@@ -114,7 +115,9 @@ class TestProcessingSteps(
       mediatorId: MediatorId,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): EitherT[Future, TestProcessingError, Submission] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TestProcessingError, Submission] = {
     val envelope: ProtocolMessage = mock[ProtocolMessage]
     val recipient: Member = ParticipantId("participant1")
     EitherT.rightT(new UntrackedSubmission {

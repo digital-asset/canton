@@ -570,7 +570,9 @@ class SyncDomain(
       SubmissionDuringShutdown.Rejection()
     ) {
       ErrorUtil.requireState(ready, "Cannot submit transaction before recovery")
-      transactionProcessor.submit(submitterInfo, transactionMeta, transaction)
+      transactionProcessor
+        .submit(submitterInfo, transactionMeta, transaction)
+        .onShutdown(Left(SubmissionDuringShutdown.Rejection()))
     }
 
   def submitTransferOut(
@@ -592,6 +594,7 @@ class SyncDomain(
         .submit(
           TransferOutProcessingSteps.SubmissionParam(submittingParty, contractId, targetDomain)
         )
+        .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
         .semiflatMap(Predef.identity)
     }
 
@@ -608,6 +611,7 @@ class SyncDomain(
         )
       transferInProcessor
         .submit(TransferInProcessingSteps.SubmissionParam(submittingParty, transferId))
+        .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
         .semiflatMap(Predef.identity)
     }
 
@@ -634,10 +638,12 @@ class SyncDomain(
           // their shutdown is initiated.
           () => domainHandle.sequencerClient.closeSubscription(),
           acsCommitmentProcessor,
+          topologyProcessor,
           transactionProcessor,
           transferOutProcessor,
           transferInProcessor,
           badRootHashMessagesRequestProcessor,
+          topologyProcessor,
           ephemeral.timeTracker, // need to close time tracker before domain handle, as it might otherwise send messages
           domainHandle,
           ephemeral,

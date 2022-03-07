@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
@@ -19,11 +20,12 @@ import slick.sql.SqlAction
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbParticipantSettingsStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends ParticipantSettingsStore
-    with NamedLogging {
+    with DbStore {
 
   private val client = 0 // dummy field used to enforce at most one row in the db
 

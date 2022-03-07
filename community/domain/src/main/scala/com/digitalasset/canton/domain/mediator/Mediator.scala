@@ -23,6 +23,7 @@ import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrack
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.google.common.annotations.VisibleForTesting
@@ -38,7 +39,7 @@ class Mediator(
     val sequencerClient: SequencerClient,
     val topologyClient: DomainTopologyClientWithInit,
     syncCrypto: DomainSyncCryptoClient,
-    identityClientEventHandler: UnsignedProtocolEventHandler,
+    topologyTransactionProcessor: TopologyTransactionProcessor,
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
     sequencerCounterTrackerStore: SequencerCounterTrackerStore,
@@ -79,7 +80,7 @@ class Mediator(
   private val eventsProcessor = MediatorEventsProcessor(
     state,
     syncCrypto,
-    identityClientEventHandler,
+    topologyTransactionProcessor.createHandler(domain),
     processor,
     readyCheck,
     loggerFactory,
@@ -160,9 +161,14 @@ class Mediator(
       SyncCloseable(
         "mediator",
         Lifecycle.close(
+          topologyTransactionProcessor,
+          syncCrypto.ips,
           timeTracker,
           sequencerClient,
           syncCrypto.ips,
+          topologyClient,
+          sequencerCounterTrackerStore,
+          state,
         )(logger),
       )
     )

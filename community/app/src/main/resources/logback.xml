@@ -22,6 +22,11 @@
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>${LOG_LEVEL_STDOUT:-WARN}</level>
     </filter>
+    <if condition='isDefined("THROTTLE_STDOUT")'>
+      <then>
+        <filter class="com.digitalasset.canton.logging.ThrottleFilterEvaluator" />
+      </then>
+    </if>
   </appender>
 
   <if condition='isDefined("LOG_FILE_FLAT")'>

@@ -6,11 +6,12 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
 
-trait ServiceAgreementStore {
+trait ServiceAgreementStore extends AutoCloseable {
 
   import ServiceAgreementStore.ServiceAgreementStoreError
 
@@ -20,8 +21,12 @@ trait ServiceAgreementStore {
     *
     * Fails if the agreement has been stored already with a different text.
     */
-  def storeAgreement(domainId: DomainId, agreementId: ServiceAgreementId, agreementText: String)(
-      implicit traceContext: TraceContext
+  def storeAgreement(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+      agreementText: String256M,
+  )(implicit
+      traceContext: TraceContext
   ): ServiceAgreementStoreT[Unit]
 
   /** List all stored agreements. */
@@ -30,7 +35,7 @@ trait ServiceAgreementStore {
   /** Get the agreement text of a stored agreement. */
   def getAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
-  ): ServiceAgreementStoreT[String]
+  ): ServiceAgreementStoreT[String256M]
 
   /** Check if the agreement has been stored already. */
   def containsAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit

@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   String185,
   String255,
+  String68,
 }
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -75,9 +76,9 @@ object Identifier {
   }
 
   implicit val setParameterIdentifier: SetParameter[Identifier] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
   implicit val setParameterIdentifierOption: SetParameter[Option[Identifier]] = (v, pp) =>
-    pp.setStringOption(v.map(_.toProtoPrimitive))
+    pp >> v.map(_.toLengthLimitedString)
 
   implicit val namespaceOrder: Order[Identifier] = Order.by[Identifier, String](_.unwrap)
 
@@ -88,10 +89,10 @@ object Identifier {
 
 object Namespace {
   implicit val setParameterNamespace: SetParameter[Namespace] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
   implicit val namespaceOrder: Order[Namespace] = Order.by[Namespace, String](_.unwrap)
   implicit val setParameterOptionNamespace: SetParameter[Option[Namespace]] = (v, pp) =>
-    pp.setStringOption(v.map(_.toProtoPrimitive))
+    pp >> v.map(_.toLengthLimitedString)
 }
 
 // architecture-handbook-entry-begin: UniqueIdentifier
@@ -102,6 +103,7 @@ object Namespace {
 final case class Namespace(fingerprint: Fingerprint) extends PrettyPrinting {
   def unwrap: String = fingerprint.unwrap
   def toProtoPrimitive: String = fingerprint.toProtoPrimitive
+  def toLengthLimitedString: String68 = fingerprint.toLengthLimitedString
   override def pretty: Pretty[Namespace] = prettyOfParam(_.fingerprint)
 }
 
@@ -164,7 +166,7 @@ object UniqueIdentifier {
   val getResultO: GetResult[Option[UniqueIdentifier]] =
     GetResult(r => r.nextStringOption().map(deserializeFromDb))
   implicit val setParameterUid: SetParameter[UniqueIdentifier] = (v, pp) =>
-    pp.setString(v.toProtoPrimitive)
+    pp >> v.toLengthLimitedString
 
   /** @throws com.digitalasset.canton.store.db.DbDeserializationException if the string is not a valid unqiue identifier */
   def deserializeFromDb(uid: String): UniqueIdentifier =

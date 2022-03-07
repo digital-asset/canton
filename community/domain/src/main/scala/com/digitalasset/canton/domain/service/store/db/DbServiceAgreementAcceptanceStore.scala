@@ -4,11 +4,13 @@
 package com.digitalasset.canton.domain.service.store.db
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.domain.service.store.{
   ServiceAgreementAcceptanceStore,
   ServiceAgreementAcceptanceStoreError,
 }
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
@@ -19,10 +21,13 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbServiceAgreementAcceptanceStore(
     storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ServiceAgreementAcceptanceStore
-    with NamedLogging {
+    with NamedLogging
+    with FlagCloseable
+    with HasCloseContext {
 
   import com.digitalasset.canton.util.ShowUtil._
   import storage.api._

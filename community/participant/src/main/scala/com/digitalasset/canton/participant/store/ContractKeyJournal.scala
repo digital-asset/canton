@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
@@ -84,6 +85,11 @@ object ContractKeyJournal {
 
     /** The name of the status in the database columns */
     def name: String
+
+    // lazy val so that `kind` is initialized first in the subclasses
+    final lazy val toDbPrimitive: String300 =
+      // The Oracle schema allows 300 characters; Postgres and H2 map this to an enum
+      String300.tryCreate(name)
   }
 
   object Status {
@@ -100,7 +106,7 @@ object ContractKeyJournal {
     // Postgresql doesn't like enums serialized as VARCHAR, so the queries must wrap bindings in
     // `CAST($... as key_status)`
     implicit val contractKeyStatusSetParameter: SetParameter[Status] = (v, pp) =>
-      pp.setString(v.name)
+      pp >> v.toDbPrimitive
   }
 
   case object Assigned extends Status {

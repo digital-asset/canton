@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -212,6 +212,10 @@ class TestingIdentityFactory(
         override def awaitTimestamp(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(
             implicit traceContext: TraceContext
         ): Option[Future[Unit]] = None
+
+        override def awaitTimestampUS(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(
+            implicit traceContext: TraceContext
+        ): Option[FutureUnlessShutdown[Unit]] = None
         override def approximateTimestamp: CantonTimestamp =
           currentSnapshotApproximation(TraceContext.empty).timestamp
         override def snapshot(timestamp: CantonTimestamp)(implicit
@@ -220,6 +224,11 @@ class TestingIdentityFactory(
         override def awaitSnapshot(timestamp: CantonTimestamp)(implicit
             traceContext: TraceContext
         ): Future[TopologySnapshot] = Future.successful(trySnapshot(timestamp))
+
+        override def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[TopologySnapshot] =
+          FutureUnlessShutdown.pure(trySnapshot(timestamp))
         override def close(): Unit = ()
         override def topologyKnownUntilTimestamp: CantonTimestamp = approximateTimestamp
 
@@ -231,6 +240,9 @@ class TestingIdentityFactory(
     ips
   }
 
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard the futures
   def topologySnapshot(
       domainId: DomainId = DefaultTestIdentities.domainId,
       packages: Seq[PackageId] = Seq(),
@@ -398,6 +410,7 @@ class TestingIdentityFactory(
       signingFingerprintsOrOwner,
       fingerprintSuffixesOrOwner,
       hkdfOps,
+      DefaultProcessingTimeouts.testing,
       loggerFactory,
     )
   }

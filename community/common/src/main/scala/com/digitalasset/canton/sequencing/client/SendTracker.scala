@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.option._
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.SendTrackerUpdateError
@@ -42,7 +43,8 @@ class SendTracker(
     metrics: SequencerClientMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends NamedLogging {
+    extends NamedLogging
+    with AutoCloseable {
 
   /** Details of sends in flight
     * @param startedAt The time the request was made for calculating the elapsed duration for metrics.
@@ -208,4 +210,5 @@ class SendTracker(
     }
   }
 
+  override def close(): Unit = Lifecycle.close(store)(logger)
 }

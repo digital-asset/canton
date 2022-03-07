@@ -6,21 +6,27 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.EitherT
 import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class DbServiceAgreementStore(storage: DbStorage, val loggerFactory: NamedLoggerFactory)(implicit
+class DbServiceAgreementStore(
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit
     ec: ExecutionContext
 ) extends ServiceAgreementStore
-    with NamedLogging {
+    with DbStore {
 
   import ServiceAgreementStore._
   import storage.api._
@@ -31,15 +37,15 @@ class DbServiceAgreementStore(storage: DbStorage, val loggerFactory: NamedLogger
   private def getAgreementText(
       domainId: DomainId,
       agreementId: ServiceAgreementId,
-  ): DbAction.ReadOnly[Option[String]] =
+  ): DbAction.ReadOnly[Option[String256M]] =
     sql"select agreement_text from service_agreements where domain_id = $domainId and agreement_id = $agreementId"
-      .as[String]
+      .as[String256M]
       .headOption
 
   private def insertAgreement(
       domainId: DomainId,
       agreementId: ServiceAgreementId,
-      agreementText: String,
+      agreementText: String256M,
   ): DbAction.WriteOnly[Unit] = {
     val insert = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
@@ -83,15 +89,19 @@ class DbServiceAgreementStore(storage: DbStorage, val loggerFactory: NamedLogger
 
   def getAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ServiceAgreementStoreError, String] =
+  ): EitherT[Future, ServiceAgreementStoreError, String256M] =
     processingTime.metric.eitherTEvent {
       storage
         .querySingle(getAgreementText(domainId, agreementId), functionFullName)
         .toRight(UnknownServiceAgreement(domainId, agreementId))
     }
 
-  def storeAgreement(domainId: DomainId, agreementId: ServiceAgreementId, agreementText: String)(
-      implicit traceContext: TraceContext
+  def storeAgreement(
+      domainId: DomainId,
+      agreementId: ServiceAgreementId,
+      agreementText: String256M,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[Future, ServiceAgreementStoreError, Unit] =
     processingTime.metric.eitherTEvent {
       EitherT.right(

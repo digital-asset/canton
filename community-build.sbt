@@ -11,6 +11,7 @@ lazy val blake2b = CommunityProjects.blake2b
 lazy val functionmeta = CommunityProjects.functionmeta
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
 lazy val `daml-fork` = CommunityProjects.`daml-fork`
+lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)
@@ -24,4 +25,5 @@ lazy val root = (project in file("."))
     functionmeta,
     `slick-fork`,
     `daml-fork`,
+    `wartremover-extension`,
   )

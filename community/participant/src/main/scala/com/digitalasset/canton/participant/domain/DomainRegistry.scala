@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.error._
-import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.participant.store.{
@@ -22,7 +22,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{DomainAlias, DomainId}
 
 /** A registry of domains. */
-trait DomainRegistry {
+trait DomainRegistry extends AutoCloseable {
 
   /**  Returns a domain handle that is used to setup a connection to a new domain
     */
@@ -304,7 +304,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
 /** A context handle serving all necessary information / connectivity utilities for the node to setup a connection to a
   * new domain
   */
-trait DomainHandle extends FlagCloseableAsync {
+trait DomainHandle extends AutoCloseable {
 
   /** Client to the domain's sequencer. */
   def sequencerClient: SequencerClient

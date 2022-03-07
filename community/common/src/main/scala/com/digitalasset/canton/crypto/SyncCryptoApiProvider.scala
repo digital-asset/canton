@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.SignatureCheckError.{
 }
 import com.digitalasset.canton.crypto.SyncCryptoError.{KeyNotAvailable, SyncCryptoEncryptionError}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology._
@@ -117,6 +118,11 @@ class DomainSyncCryptoClient(
   ): Future[DomainSnapshotSyncCryptoApi] =
     ips.awaitSnapshot(timestamp).map(create)
 
+  override def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[SyncCryptoApi] =
+    ips.awaitSnapshotUS(timestamp).map(create)
+
   private def create(snapshot: TopologySnapshot): DomainSnapshotSyncCryptoApi = {
     new DomainSnapshotSyncCryptoApi(
       owner,
@@ -172,6 +178,11 @@ class DomainSyncCryptoClient(
       waitForEffectiveTime: Boolean,
   )(implicit traceContext: TraceContext): Option[Future[Unit]] =
     ips.awaitTimestamp(timestamp, waitForEffectiveTime)
+
+  override def awaitTimestampUS(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(implicit
+      traceContext: TraceContext
+  ): Option[FutureUnlessShutdown[Unit]] =
+    ips.awaitTimestampUS(timestamp, waitForEffectiveTime)
 
   override def currentSnapshotApproximation(implicit
       traceContext: TraceContext

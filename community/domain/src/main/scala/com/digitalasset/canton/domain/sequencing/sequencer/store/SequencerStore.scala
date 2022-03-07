@@ -9,7 +9,8 @@ import cats.data.{EitherT, NonEmptyList, NonEmptySet}
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.domain.sequencing.sequencer.{
@@ -38,8 +39,10 @@ import scala.concurrent.{ExecutionContext, Future}
 /** In the sequencer database we use integers to represent members.
   * Wrap this in the APIs to not confuse with other numeric types.
   */
-case class SequencerMemberId(private val id: Int) {
+case class SequencerMemberId(private val id: Int) extends PrettyPrinting {
   def unwrap: Int = id
+
+  override def pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
 }
 
 object SequencerMemberId {
@@ -152,7 +155,7 @@ object DeliverStoreEvent {
 case class DeliverErrorStoreEvent(
     sender: SequencerMemberId,
     messageId: MessageId,
-    message: String,
+    message: String256M,
     override val traceContext: TraceContext,
 ) extends StoreEvent[Nothing] {
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
@@ -287,7 +290,7 @@ private[store] case class SequencerStoreRecordCounts(
   * Writers are expected to create a [[SequencerWriterStore]] which may delegate to this underlying store
   * through an appropriately managed storage instance.
   */
-trait SequencerStore extends NamedLogging {
+trait SequencerStore extends NamedLogging with AutoCloseable {
 
   protected implicit val executionContext: ExecutionContext
 
@@ -573,10 +576,12 @@ object SequencerStore {
   def apply(
       storage: Storage,
       maxInClauseSize: PositiveNumeric[Int],
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SequencerStore =
     storage match {
       case _: MemoryStorage => new InMemorySequencerStore(loggerFactory)
-      case dbStorage: DbStorage => new DbSequencerStore(dbStorage, maxInClauseSize, loggerFactory)
+      case dbStorage: DbStorage =>
+        new DbSequencerStore(dbStorage, maxInClauseSize, timeouts, loggerFactory)
     }
 }

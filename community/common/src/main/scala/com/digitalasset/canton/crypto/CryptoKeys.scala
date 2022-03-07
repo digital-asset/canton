@@ -43,7 +43,7 @@ object Fingerprint {
     Order.by[Fingerprint, String](_.unwrap)
 
   implicit val setParameterFingerprint: SetParameter[Fingerprint] = (f, pp) =>
-    pp.setString(f.toProtoPrimitive)
+    pp >> f.toLengthLimitedString
   implicit val getResultFingerprint: GetResult[Fingerprint] = GetResult { r =>
     Fingerprint
       .fromProtoPrimitive(r.nextString())

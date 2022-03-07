@@ -32,6 +32,7 @@ trait DbCommandDeduplicationStoreTest
     behave like commandDeduplicationStore(() =>
       new DbCommandDeduplicationStore(
         storage,
+        timeouts,
         loggerFactory,
       )
     )

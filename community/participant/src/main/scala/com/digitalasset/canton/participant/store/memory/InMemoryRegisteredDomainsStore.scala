@@ -58,4 +58,5 @@ class InMemoryRegisteredDomainsStore(override protected val loggerFactory: Named
       Future.successful(Map(domainAliasMap.asScala.toSeq: _*))
     }
 
+  override def close(): Unit = ()
 }

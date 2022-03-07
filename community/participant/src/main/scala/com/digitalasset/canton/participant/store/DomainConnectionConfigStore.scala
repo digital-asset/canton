@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
@@ -20,7 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** The configured domains and their connection configuration
   */
-trait DomainConnectionConfigStore {
+trait DomainConnectionConfigStore extends AutoCloseable {
 
   /** Stores a domain connection config. Primary identifier is the domain alias.
     * Will return an [[DomainConnectionConfigStore.AlreadyAddedForAlias]] error if a config for that alias already exists.
@@ -58,7 +59,8 @@ object DomainConnectionConfigStore {
     override def toString: String = s"$alias is unknown. Has the domain been registered?"
   }
 
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[DomainConnectionConfigStore] =
@@ -66,6 +68,6 @@ object DomainConnectionConfigStore {
       case _: MemoryStorage =>
         Future.successful(new InMemoryDomainConnectionConfigStore(loggerFactory))
       case dbStorage: DbStorage =>
-        new DbDomainConnectionConfigStore(dbStorage, loggerFactory).initialize()
+        new DbDomainConnectionConfigStore(dbStorage, timeouts, loggerFactory).initialize()
     }
 }

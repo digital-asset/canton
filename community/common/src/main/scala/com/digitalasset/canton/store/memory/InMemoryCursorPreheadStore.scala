@@ -61,4 +61,6 @@ class InMemoryCursorPreheadStore[Counter](protected val loggerFactory: NamedLogg
     }
     Future.unit
   }
+
+  override def close(): Unit = ()
 }

@@ -4,8 +4,11 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
+import cats.syntax.foldable._
 import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
@@ -17,9 +20,11 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 class AgreementService(
     acceptedAgreements: ServiceAgreementStore,
     domainServiceClient: DomainServiceClient,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
-    extends NamedLogging {
+    extends NamedLogging
+    with FlagCloseable {
 
   def isRequiredAgreementAccepted(sequencerConnection: GrpcSequencerConnection, domainId: DomainId)(
       implicit traceContext: TraceContext
@@ -56,7 +61,7 @@ class AgreementService(
       optAgreement <- domainServiceClient
         .getAgreement(domainId, sequencerConnection)
         .leftMap(err => AgreementServiceError(err.message))
-      _ <- optAgreement.fold(EitherT.rightT[Future, AgreementServiceError](()))(ag =>
+      _ <- optAgreement.traverse_(ag =>
         acceptedAgreements
           .storeAgreement(domainId, ag.id, ag.text)
           .leftMap(err => AgreementServiceError(err.description))
@@ -74,6 +79,8 @@ class AgreementService(
       traceContext: TraceContext
   ): Future[Boolean] =
     acceptedAgreements.containsAcceptedAgreement(domainId, agreementId)
+
+  override def onClosed(): Unit = Lifecycle.close(acceptedAgreements)(logger)
 }
 
 object AgreementService {

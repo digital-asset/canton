@@ -4,8 +4,8 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
-
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPrivateStore,
@@ -76,6 +76,7 @@ object SymbolicCrypto extends LazyLogging {
     signature(ByteString.EMPTY, Fingerprint.create(ByteString.EMPTY, HashAlgorithm.Sha256))
 
   def create(
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       hkdfOps: Option[HkdfOps] = None,
       autoInitialize: Boolean = true,
@@ -125,7 +126,15 @@ object SymbolicCrypto extends LazyLogging {
         )
     }
 
-    new Crypto(pureCrypto, privateCrypto, cryptoPrivateStore, cryptoPublicStore, javaKeyConverter)
+    new Crypto(
+      pureCrypto,
+      privateCrypto,
+      cryptoPrivateStore,
+      cryptoPublicStore,
+      javaKeyConverter,
+      timeouts,
+      loggerFactory,
+    )
   }
 
   /** Create symbolic crypto and pre-populate with keys using the given fingerprint suffixes, which will be prepended with the type of key (sigK, encK), and the fingerprints used for signing keys. */
@@ -133,11 +142,12 @@ object SymbolicCrypto extends LazyLogging {
       signingFingerprints: Seq[Fingerprint],
       fingerprintSuffixes: Seq[String],
       hkdfOps: Option[HkdfOps],
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
 
-    val crypto = SymbolicCrypto.create(loggerFactory, hkdfOps)
+    val crypto = SymbolicCrypto.create(timeouts, loggerFactory, hkdfOps)
 
     // Create a keypair for each signing fingerprint
     signingFingerprints.foreach { k =>

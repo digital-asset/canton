@@ -31,6 +31,9 @@ import scala.concurrent.{ExecutionContext, Future}
 class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     config: DatabaseSequencerConfig,
+    totalNodeCount: Int,
+    keepAliveInterval: Option[NonNegativeFiniteDuration],
+    onlineSequencerCheckConfig: OnlineSequencerCheckConfig,
     override protected val timeouts: ProcessingTimeout,
     storage: Storage,
     clock: Clock,
@@ -44,6 +47,7 @@ class DatabaseSequencer(
     SequencerStore(
       storage,
       config.writer.maxSqlInListSize,
+      timeouts,
       loggerFactory,
     )
 
@@ -51,15 +55,16 @@ class DatabaseSequencer(
   // and we will switch to using the polling based event signalling as we won't have visibility
   // of all writes locally.
   private val eventSignaller =
-    if (config.highAvailability.enabled)
-      new PollingEventSignaller(config.reader.pollingInterval, timeouts, loggerFactory)
+    if (config.highAvailabilityEnabled)
+      new PollingEventSignaller(config.reader.pollingInterval, loggerFactory)
     else
       new LocalSequencerStateEventSignaller(timeouts, loggerFactory)
 
   private val writer = SequencerWriter(
     config.writer,
     writerStorageFactory,
-    config.highAvailability,
+    totalNodeCount,
+    keepAliveInterval,
     timeouts,
     storage,
     store,
@@ -105,10 +110,10 @@ class DatabaseSequencer(
     schedule()
   }
 
-  if (config.highAvailability.enabled)
+  if (config.highAvailabilityEnabled)
     periodicallyMarkLaggingSequencersOffline(
-      config.highAvailability.onlineCheckInterval,
-      config.highAvailability.offlineDuration,
+      onlineSequencerCheckConfig.onlineCheckInterval,
+      onlineSequencerCheckConfig.offlineDuration,
     )
 
   private val reader =
@@ -132,7 +137,7 @@ class DatabaseSequencer(
     // otherwise, if the timestamp we use to register the member is equal or higher than the
     // first message to the member, we'd ignore the first message by accident
     val nowMs = clock.monotonicTime().toMicros
-    val uniqueMicros = nowMs - (nowMs % SequencerHighAvailabilityConfig.MaxNodeCount) - 1
+    val uniqueMicros = nowMs - (nowMs % TotalNodeCountValues.MaxNodeCount) - 1
     EitherT.right(store.registerMember(member, CantonTimestamp.assertFromLong(uniqueMicros)).void)
   }
 
@@ -204,5 +209,20 @@ class DatabaseSequencer(
     Lifecycle.close(
       writer,
       reader,
+      eventSignaller,
+      store,
     )(logger)
+
+  override def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] =
+    // unimplemented. We don't plan to implement ledger identity authorization for database sequencers, so this
+    // function will never be implemented.
+    Future.successful(false)
+
+  override def authorizeLedgerIdentity(identity: LedgerIdentity)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] =
+    // see [[isLedgerIdentityRegistered]]
+    EitherT.leftT("authorizeLedgerIdentity is not implemented for database sequencers")
 }

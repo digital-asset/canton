@@ -52,7 +52,7 @@ object SequencerAdminClient {
           keystore <- crypto.javaKeyConverter
             .toJava(crypto.cryptoPrivateStore, crypto.cryptoPublicStore, Password.empty)
             .leftMap(err => s"Failed to convert internal crypto stores into java keystore: $err")
-          httpClient <- HttpClient
+          httpClient <- HttpClient.Insecure
             .create(certificate, ProtectedKeyStore(keystore, Password.empty), None)(
               processingTimeout,
               loggerFactory,

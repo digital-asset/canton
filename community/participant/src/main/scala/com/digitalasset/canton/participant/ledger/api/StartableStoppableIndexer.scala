@@ -13,12 +13,7 @@ import com.daml.metrics.Metrics
 import com.daml.platform.indexer.{IndexerConfig, StandaloneIndexerServer}
 import com.daml.platform.store.LfValueTranslationCache
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{
-  AsyncCloseable,
-  AsyncOrSyncCloseable,
-  FlagCloseable,
-  FlagCloseableAsync,
-}
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
@@ -45,8 +40,7 @@ class StartableStoppableIndexer(
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, actorSystem: ActorSystem, loggingContext: LoggingContext)
-    extends FlagCloseable
-    with FlagCloseableAsync
+    extends FlagCloseableAsync
     with NamedLogging {
 
   // Use a simple execution queue as locking to ensure only one start and stop run at a time.

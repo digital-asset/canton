@@ -8,6 +8,8 @@ import better.files.File
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
@@ -113,16 +115,18 @@ object ServiceAgreementManager {
       agreementFile: File,
       storage: Storage,
       hasher: HashOps,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): Either[String, ServiceAgreementManager] = {
     for {
       agreementText <- Either
         .catchOnly[IOException](agreementFile.contentAsString)
         .leftMap(err => s"Unable to load service agreement file: $err")
+      agreementTextLenLimit <- String256M.create(agreementText)
       hash = hasher.build(HashPurpose.AgreementId).addWithoutLengthPrefix(agreementText).finish()
       agreementId <- ServiceAgreementId.create(hash.toHexString)
-      agreement = ServiceAgreement(agreementId, agreementText)
-      store = ServiceAgreementAcceptanceStore.create(storage, loggerFactory)
+      agreement = ServiceAgreement(agreementId, agreementTextLenLimit)
+      store = ServiceAgreementAcceptanceStore.create(storage, timeouts, loggerFactory)
     } yield new ServiceAgreementManager(agreement, store, loggerFactory)
   }
 }

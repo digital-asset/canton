@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.PackageService
@@ -17,7 +18,7 @@ import scala.concurrent.Future
 
 /** For storing and retrieving Daml packages and DARs.
   */
-trait DamlPackageStore { this: NamedLogging =>
+trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
 
   /** @param pkg Daml package to be stored
     * @param dar The DAR containing the package
@@ -25,7 +26,7 @@ trait DamlPackageStore { this: NamedLogging =>
     */
   def append(
       pkgs: List[DamlLf.Archive],
-      sourceDescription: String,
+      sourceDescription: String256M,
       dar: Option[PackageService.Dar],
   )(implicit
       traceContext: TraceContext

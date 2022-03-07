@@ -13,6 +13,7 @@ import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -62,6 +63,7 @@ class MemberAuthenticationService(
     auditLogger: TracedLogger,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
+    with AutoCloseable
     with DomainTopologyClient.Subscriber {
 
   private val tokenCache = new AuthenticationTokenCache(clock, store, loggerFactory)
@@ -251,4 +253,5 @@ class MemberAuthenticationService(
     }
   }
 
+  override def close(): Unit = Lifecycle.close(store)(logger)
 }

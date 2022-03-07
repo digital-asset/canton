@@ -140,6 +140,12 @@ class CachingDomainTopologyClient(
   )(implicit traceContext: TraceContext): Option[Future[Unit]] =
     parent.awaitTimestamp(timestamp, waitForEffectiveTime)
 
+  override def awaitTimestampUS(
+      timestamp: CantonTimestamp,
+      waitForEffectiveTime: Boolean,
+  )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]] =
+    parent.awaitTimestampUS(timestamp, waitForEffectiveTime)
+
   override def approximateTimestamp: CantonTimestamp = parent.approximateTimestamp
 
   override def currentSnapshotApproximation(implicit
@@ -158,7 +164,9 @@ class CachingDomainTopologyClient(
   override private[topology] def scheduleAwait(condition: => Future[Boolean], timeout: Duration) =
     parent.scheduleAwait(condition, timeout)
 
-  override def close(): Unit = ()
+  override def close(): Unit = {
+    parent.close()
+  }
 
   override def numPendingChanges: Int = parent.numPendingChanges
 

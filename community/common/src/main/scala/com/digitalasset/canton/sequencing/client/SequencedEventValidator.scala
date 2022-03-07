@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{Hash, SignatureCheckError, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.topology.SequencerId
@@ -205,7 +206,10 @@ class SequencedEventValidator(
       previousTsO: Option[CantonTimestamp],
       event: OrdinarySerializedEvent,
       hash: Hash,
-  )(implicit traceContext: TraceContext): EitherT[Future, SequencedEventValidationError, Unit] =
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[Future, SequencedEventValidationError, Unit] =
     (unauthenticated, previousTsO) match {
       // we can not check if we are unauthenticated or if we don't have a previous timestamp (because we haven't received
       // any topology information, so we don't know ... )
@@ -215,14 +219,15 @@ class SequencedEventValidator(
         EitherT.pure(())
       case (_, Some(previousTs)) =>
         val topologyStateKnownUntil = syncCryptoApi.topologyKnownUntilTimestamp
+        import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax.EitherTOnShutdownSyntax
 
         def performValidation(timestamp: CantonTimestamp) = {
           for {
             snapshot <- EitherT.right(
-              timely.supervised(
+              timely.supervisedUS(
                 s"await topology ts $timestamp for event at ${event.timestamp}(tsOfSign=${event.signedEvent.timestampOfSigningKey}) with previous=$previousTsO and known=$topologyStateKnownUntil"
               )(
-                syncCryptoApi.awaitSnapshot(timestamp)
+                syncCryptoApi.awaitSnapshotUS(timestamp)
               )
             )
             _ <- snapshot
@@ -230,7 +235,12 @@ class SequencedEventValidator(
               .leftMap[SequencedEventValidationError](
                 SignatureInvalid(event.timestamp, timestamp, _)
               )
+              .mapK(FutureUnlessShutdown.outcomeK)
           } yield ()
+          // TODO(i4933) on shutdown, we would skip the validation step. rather, we should propagate the shutdown
+        }.onShutdown {
+          logger.debug("Aborting sequenced event validation due to shutdown")
+          Right(())
         }
 
         def determineTimestamp(): Future[CantonTimestamp] = {

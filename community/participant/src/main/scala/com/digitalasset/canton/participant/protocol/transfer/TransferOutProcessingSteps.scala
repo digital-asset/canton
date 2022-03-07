@@ -14,6 +14,8 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewType}
 import com.digitalasset.canton.error.BaseCantonError
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Disabled,
@@ -108,18 +110,22 @@ class TransferOutProcessingSteps(
       mediatorId: MediatorId,
       ephemeralState: SyncDomainEphemeralStateLookup,
       originRecentSnapshot: DomainSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Submission] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
     val SubmissionParam(submittingParty, contractId, targetDomain) = param
     val pureCrypto = originRecentSnapshot.pureCrypto
 
     def withDetails(message: String) = s"Transfer-out $contractId to $targetDomain: $message"
 
     for {
-      _ <- condUnitET[Future](
+      _ <- condUnitET[FutureUnlessShutdown](
         targetDomain != domainId,
         TargetDomainIsOriginDomain(domainId, contractId),
       )
-      stakeholders <- stakeholdersOfContractId(ephemeralState.contractLookup, contractId)
+      stakeholders <- stakeholdersOfContractId(ephemeralState.contractLookup, contractId).mapK(
+        FutureUnlessShutdown.outcomeK
+      )
 
       timeProofAndSnapshot <- getTimeProofAndSnapshot(targetDomain)
       (timeProof, targetCrypto) = timeProofAndSnapshot
@@ -139,12 +145,14 @@ class TransferOutProcessingSteps(
           targetCrypto.ipsSnapshot,
           logger,
         )
+        .mapK(FutureUnlessShutdown.outcomeK)
       (transferOutRequest, recipients) = transferOutRequestAndRecipients
 
       transferOutUuid = seedGenerator.generateUuid()
       seed <- seedGenerator
         .generateSeedForTransferOut(transferOutRequest, transferOutUuid)
         .leftMap(SeedGeneratorError)
+        .mapK(FutureUnlessShutdown.outcomeK)
       fullTree = transferOutRequest.toFullTransferOutTree(
         pureCrypto,
         pureCrypto,
@@ -156,9 +164,10 @@ class TransferOutProcessingSteps(
       viewMessage <- EncryptedViewMessageFactory
         .create(TransferOutViewType)(fullTree, originRecentSnapshot)
         .leftMap[TransferProcessorError](EncryptionError)
+        .mapK(FutureUnlessShutdown.outcomeK)
       maybeRecipients = Recipients.ofSet(recipients)
       recipientsT <- EitherT
-        .fromOption[Future](
+        .fromOption[FutureUnlessShutdown](
           maybeRecipients,
           NoStakeholders.logAndCreate(contractId, logger): TransferProcessorError,
         )
@@ -221,17 +230,23 @@ class TransferOutProcessingSteps(
 
   private[this] def getTimeProofAndSnapshot(targetDomain: DomainId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransferProcessorError, (TimeProof, DomainSnapshotSyncCryptoApi)] =
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransferProcessorError,
+    (TimeProof, DomainSnapshotSyncCryptoApi),
+  ] =
     for {
       timeProof <- transferCoordination.recentTimeProof(targetDomain)
       timestamp = timeProof.timestamp
 
       // Since events are stored before they are processed, we wait just to be sure.
-      waitFuture <- EitherT.fromEither[Future](
+      waitFuture <- EitherT.fromEither[FutureUnlessShutdown](
         transferCoordination.awaitTimestamp(targetDomain, timestamp, waitForEffectiveTime = true)
       )
-      _ <- EitherT.right(waitFuture.getOrElse(Future.unit))
-      targetCrypto <- transferCoordination.cryptoSnapshot(targetDomain, timestamp)
+      _ <- EitherT.right(FutureUnlessShutdown.outcomeF(waitFuture.getOrElse(Future.unit)))
+      targetCrypto <- transferCoordination
+        .cryptoSnapshot(targetDomain, timestamp)
+        .mapK(FutureUnlessShutdown.outcomeK)
     } yield (timeProof, targetCrypto)
 
   override protected def decryptTree(originSnapshot: DomainSnapshotSyncCryptoApi)(
@@ -541,7 +556,9 @@ class TransferOutProcessingSteps(
 
     def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] = {
       for {
-        targetIps <- getTimeProofAndSnapshot(targetDomain).map(_._2)
+        targetIps <- getTimeProofAndSnapshot(targetDomain)
+          .map(_._2)
+          .onShutdown(Left(DomainNotReady(targetDomain, "Shutdown of time tracker")))
         possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.ipsSnapshot))
         inParty <- EitherT.fromOption[Future](
           possibleSubmittingParties.headOption,

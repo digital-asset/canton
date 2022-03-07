@@ -9,7 +9,7 @@ import cats.syntax.functor._
 import cats.{Functor, Monad}
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String255}
 import com.digitalasset.canton.config._
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -45,7 +45,6 @@ import slick.jdbc.{ActionBasedSQLInterpolation => _, SQLActionBuilder => _, _}
 import slick.lifted.Aliases
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 
-import java.net.URI
 import java.sql.{Blob, Driver, SQLException, Statement}
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -120,6 +119,10 @@ class MemoryStorage extends Storage {
   override def isActive: Boolean = true
 }
 
+trait DbStore extends FlagCloseable with NamedLogging with HasCloseContext {
+  protected val storage: DbStorage
+}
+
 trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
 
   val profile: DbStorage.Profile
@@ -188,13 +191,13 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
 
   protected def run[A](operationName: String, maxRetries: Int)(
       body: => Future[A]
-  )(implicit traceContext: TraceContext): Future[A] = {
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] = {
     implicit val success: retry.Success[A] = retry.Success.always
 
     retry
       .Backoff(
         logger,
-        this,
+        closeContext.flagCloseable,
         maxRetries = maxRetries,
         initialDelay = 50.milliseconds,
         maxDelay = timeouts.storageMaxRetryInterval.unwrap,
@@ -207,36 +210,36 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
       action: DbAction.ReadTransactional[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A]
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A]
 
   protected[canton] def runWrite[A](
       action: DbAction.All[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A]
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A]
 
   /** Read-only query, possibly transactional */
   def query[A](
       action: DbAction.ReadTransactional[A],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     runRead(action, operationName, maxRetries)
 
   def sequentialQueryAndCombine[A](
       actions: Iterable[DbAction.ReadOnly[Iterable[A]]],
       operationName: String,
-  )(implicit traceContext: TraceContext): Future[Iterable[A]] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Iterable[A]] =
     if (actions.nonEmpty) {
       MonadUtil.foldLeftM(actions.iterableFactory.empty[A], actions) { case (acc, action) =>
-        query(action, operationName)(traceContext).map(acc ++ _)
+        query(action, operationName)(traceContext, closeContext).map(acc ++ _)
       }
     } else Future.successful(Iterable.empty[A])
 
   def querySingle[A](
       action: DBIOAction[Option[A], NoStream, Effect.Read with Effect.Transactional],
       operationName: String,
-  )(implicit traceContext: TraceContext): OptionT[Future, A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): OptionT[Future, A] =
     OptionT(query(action, operationName))
 
   /** Write-only action, possibly transactional
@@ -251,7 +254,7 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
       action: DBIOAction[A, NoStream, Effect.Write with Effect.Transactional],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     runWrite(action, operationName, maxRetries)
 
   /** Write-only action, possibly transactional
@@ -261,7 +264,7 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
       action: DBIOAction[_, NoStream, Effect.Write with Effect.Transactional],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] =
     runWrite(action, operationName, maxRetries).map(_ => ())
 
   /** Query and update in a single action.
@@ -279,7 +282,7 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
       action: DBIOAction[A, NoStream, Effect.All],
       operationName: String,
       maxRetries: Int = defaultMaxRetries,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     runWrite(action, operationName, maxRetries)
 
 }
@@ -352,8 +355,10 @@ object DbStorage {
     }
 
     implicit val getResultUuid: GetResult[UUID] = GetResult(r => UUID.fromString(r.nextString()))
+    @SuppressWarnings(Array("com.digitalasset.canton.SlickString")) // UUIDs are length-limited
     implicit val setParameterUuid: SetParameter[UUID] = (v, pp) => pp.setString(v.toString)
 
+    @SuppressWarnings(Array("com.digitalasset.canton.SlickString")) // LfPartyIds are length-limited
     implicit val setParameterLfPartyId: SetParameter[LfPartyId] = (v, pp) => pp.setString(v)
     implicit val getResultLfPartyId: GetResult[LfPartyId] = GetResult(r => r.nextString()).andThen {
       LfPartyId
@@ -369,13 +374,13 @@ object DbStorage {
         .fold(err => throw new DbDeserializationException(err.toString), Predef.identity)
     )
     implicit val absCoidSetParameter: SetParameter[LfContractId] =
-      (c: LfContractId, pp: PositionedParameters) => pp.setString(c.toProtoPrimitive)
+      (c, pp) => pp >> c.toLengthLimitedString
 
     // We assume that the HexString of the hash of the global key will fit into 255 characters
     // Please consult the team, if you want to increase this limit
     implicit val lfGlobalKeySetParameter: SetParameter[LfGlobalKey] =
       (key: LfGlobalKey, pp: PositionedParameters) =>
-        pp.setString(String255.tryCreate(key.hash.toHexString).unwrap)
+        pp >> String255.tryCreate(key.hash.toHexString)
     implicit val lfHashGetResult: GetResult[LfHash] = GetResult { r =>
       LfHash
         .fromString(r.nextString())
@@ -384,9 +389,9 @@ object DbStorage {
         )
     }
 
-    implicit val setParameterURI: SetParameter[URI] = (uri, pp) => pp.setString(uri.toString)
-    implicit val getResultURI: GetResult[URI] = GetResult(r => new URI(r.nextString()))
-
+    // LfPackageIds are length-limited
+    @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
+    implicit val setParameterLfPackageId: SetParameter[LfPackageId] = (v, pp) => pp.setString(v)
     implicit val getResultPackageId: GetResult[LfPackageId] =
       GetResult(r => r.nextString()).andThen {
         LfPackageId

@@ -66,6 +66,11 @@ case class Cli(
 
     setLevel(Some(levelStdout), "LOG_LEVEL_STDOUT")
 
+    if (command.isEmpty && !noTty) {
+      // Throttle logging to standard out when the interactive console is running
+      System.setProperty("THROTTLE_STDOUT", true.toString)
+    }
+
     System.setProperty("LOG_FILE_APPEND", (!logTruncate).toString)
 
     Seq(

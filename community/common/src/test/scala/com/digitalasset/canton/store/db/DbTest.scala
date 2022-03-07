@@ -3,12 +3,8 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.config.{
-  DbConfig,
-  DefaultProcessingTimeouts,
-  H2DbConfig,
-  PostgresDbConfig,
-}
+import com.digitalasset.canton.config.{DbConfig, H2DbConfig, PostgresDbConfig}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -22,7 +18,11 @@ import scala.concurrent.{Await, Future}
   * Each database should provide a DbTest implementation that can then be mixed into a storage test to provide the actual backend.
   * See DbCryptoVaultStoreTest for example usage.
   */
-trait DbTest extends BeforeAndAfterAll with BeforeAndAfterEach {
+trait DbTest
+    extends BeforeAndAfterAll
+    with BeforeAndAfterEach
+    with FlagCloseable
+    with HasCloseContext {
   this: Suite with HasExecutionContext with NamedLogging =>
 
   type Config <: DbConfig
@@ -33,7 +33,7 @@ trait DbTest extends BeforeAndAfterAll with BeforeAndAfterEach {
   /** Stores the db storage implementation. Will throw if accessed before the test has started */
   protected lazy val storage: DbStorageIdempotency = {
     val s = Option(setup).map(_.storage).getOrElse(sys.error("Test has not started"))
-    new DbStorageIdempotency(s, DefaultProcessingTimeouts.testing, loggerFactory)
+    new DbStorageIdempotency(s, timeouts, loggerFactory)
   }
 
   override def beforeAll(): Unit = {
@@ -44,6 +44,7 @@ trait DbTest extends BeforeAndAfterAll with BeforeAndAfterEach {
   override def afterAll(): Unit = {
     try {
       cleanup()
+      close()
       super.afterAll()
     } finally setup.close()
   }

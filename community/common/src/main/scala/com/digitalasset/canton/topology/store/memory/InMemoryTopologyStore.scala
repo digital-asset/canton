@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.store.memory
 
 import cats.syntax.functorFilter._
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
+import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -49,6 +50,7 @@ class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLo
 
   override def partyMetadataStore(): PartyMetadataStore = metadata
 
+  override def close(): Unit = ()
 }
 
 class InMemoryPartyMetadataStore extends PartyMetadataStore {
@@ -60,7 +62,7 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
       participantId: Option[ParticipantId],
       displayName: Option[DisplayName],
       effectiveTimestamp: CantonTimestamp,
-      submissionId: String,
+      submissionId: String255,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     store.put(
       partyId,
@@ -99,6 +101,7 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
   override def fetchNotNotified()(implicit traceContext: TraceContext): Future[Seq[PartyMetadata]] =
     Future.successful(store.values.filterNot(_.notified).toSeq)
 
+  override def close(): Unit = ()
 }
 
 class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: ExecutionContext)
@@ -521,4 +524,6 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
         .map(_.toStoredTransaction)
       Future.successful(StoredTopologyTransactions(ret.toSeq))
     }
+
+  override def close(): Unit = ()
 }

@@ -20,6 +20,32 @@ service EnterpriseSequencerAdministrationService {
 
   // Disable members at the sequencer. Will prevent existing and new instances from connecting, and permit removing their data.
   rpc DisableMember(DisableMemberRequest) returns (google.protobuf.Empty);
+
+  rpc AuthorizeLedgerIdentity(LedgerIdentity.AuthorizeRequest) returns (LedgerIdentity.AuthorizeResponse);
+}
+
+message EthereumAccount {
+  string address = 1;
+}
+
+message LedgerIdentity {
+  oneof identifier {
+    EthereumAccount ethereum_account = 1;
+  }
+
+  message AuthorizeRequest {
+    LedgerIdentity identify = 1;
+  }
+  message AuthorizeResponse {
+    oneof value {
+      Success success = 1;
+      Failure failure = 2;
+    }
+  }
+  message Success {}
+  message Failure {
+    string reason = 1;
+  }
 }
 
 message Pruning {

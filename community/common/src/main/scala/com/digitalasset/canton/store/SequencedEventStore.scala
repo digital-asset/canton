@@ -39,7 +39,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * The store may assume that sequencer counters strictly increase with timestamps
   * without checking this precondition.
   */
-trait SequencedEventStore extends PrunableByTime[Nothing] with NamedLogging {
+trait SequencedEventStore extends PrunableByTime[Nothing] with NamedLogging with AutoCloseable {
   import SequencedEventStore.SearchCriterion
 
   implicit val ec: ExecutionContext

@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.IdempotentInsert.insertIgnoringConflicts
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
@@ -43,7 +44,7 @@ case class StoredAuthenticationToken(
     token: AuthenticationToken,
 ) extends HasExpiry
 
-trait MemberAuthenticationStore {
+trait MemberAuthenticationStore extends AutoCloseable {
 
   /** Save the provided nonce */
   def saveNonce(storedNonce: StoredNonce)(implicit traceContext: TraceContext): Future[Unit]
@@ -71,12 +72,13 @@ trait MemberAuthenticationStore {
 }
 
 object MemberAuthenticationStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      executionContext: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit executionContext: ExecutionContext
   ): MemberAuthenticationStore =
     storage match {
       case _: MemoryStorage => new InMemoryMemberAuthenticationStore
-      case dbStorage: DbStorage => new DbMemberAuthenticationStore(dbStorage, loggerFactory)
+      case dbStorage: DbStorage =>
+        new DbMemberAuthenticationStore(dbStorage, timeouts, loggerFactory)
     }
 }
 
@@ -137,14 +139,17 @@ class InMemoryMemberAuthenticationStore extends MemberAuthenticationStore {
       tokens --= tokens.filter(_.member == member)
       Future.unit
     }
+
+  override def close(): Unit = ()
 }
 
 class DbMemberAuthenticationStore(
-    storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends MemberAuthenticationStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import Member.DbStorageImplicits._
 

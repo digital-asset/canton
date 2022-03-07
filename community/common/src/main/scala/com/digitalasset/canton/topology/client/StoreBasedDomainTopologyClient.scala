@@ -230,6 +230,25 @@ abstract class BaseDomainTopologyClient
   override def approximateTimestamp: CantonTimestamp =
     head.get().approximateTimestamp.value.immediateSuccessor
 
+  override def awaitTimestampUS(timestamp: CantonTimestamp, waitForEffectiveTime: Boolean)(implicit
+      traceContext: TraceContext
+  ): Option[FutureUnlessShutdown[Unit]] =
+    if (waitForEffectiveTime)
+      this.awaitKnownTimestampUS(timestamp)
+    else
+      Some(
+        for {
+          snapshotAtTs <- awaitSnapshotUS(timestamp)
+          parametersAtTs <- performUnlessClosingF(
+            snapshotAtTs.findDynamicDomainParametersOrDefault()
+          )
+          epsilonAtTs = parametersAtTs.topologyChangeDelay
+          // then, wait for t+e
+          _ <- awaitKnownTimestampUS(timestamp.plus(epsilonAtTs.unwrap))
+            .getOrElse(FutureUnlessShutdown.unit)
+        } yield ()
+      )
+
   override def awaitTimestamp(
       timestamp: CantonTimestamp,
       waitForEffectiveTime: Boolean,
@@ -247,6 +266,11 @@ abstract class BaseDomainTopologyClient
         _ <- awaitKnownTimestamp(timestamp.plus(epsilonAtTs.unwrap)).getOrElse(Future.unit)
       } yield ()
     )
+  }
+
+  override protected def onClosed(): Unit = {
+    expireTimeAwaiter()
+    super.onClosed()
   }
 
 }

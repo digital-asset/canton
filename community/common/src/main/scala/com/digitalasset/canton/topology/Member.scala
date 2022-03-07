@@ -63,7 +63,7 @@ sealed trait KeyOwner extends Identity {
   def code: KeyOwnerCode
 
   override def toProtoPrimitive: String = toLengthLimitedString.unwrap
-  def toLengthLimitedString: LengthLimitedString =
+  def toLengthLimitedString: String300 =
     String300.tryCreate(
       s"${code.threeLetterId.unwrap}${SafeSimpleString.delimiter}${uid.toProtoPrimitive}"
     )
@@ -152,7 +152,7 @@ object Member {
     */
   object DbStorageImplicits {
     implicit val setParameterMember: SetParameter[Member] = (v: Member, pp) =>
-      pp.setString(v.toProtoPrimitive)
+      pp >> v.toLengthLimitedString
 
     implicit val getResultMember: GetResult[Member] = GetResult(r => {
       KeyOwner
@@ -251,7 +251,7 @@ object ParticipantId {
   implicit val getResultParticipantId: GetResult[ParticipantId] =
     UniqueIdentifier.getResult.andThen(ParticipantId(_))
   implicit val setParameterParticipantId: SetParameter[ParticipantId] =
-    (p: ParticipantId, pp: PositionedParameters) => pp.setString(p.uid.toProtoPrimitive)
+    (p: ParticipantId, pp: PositionedParameters) => pp >> p.uid.toLengthLimitedString
 }
 
 /** A party identifier based on a unique identifier
@@ -269,7 +269,7 @@ object PartyId {
   implicit val getResultPartyId: GetResult[PartyId] =
     UniqueIdentifier.getResult.andThen(PartyId(_))
   implicit val setParameterPartyId: SetParameter[PartyId] =
-    (p: PartyId, pp: PositionedParameters) => pp.setString(p.uid.toProtoPrimitive)
+    (p: PartyId, pp: PositionedParameters) => pp >> p.uid.toLengthLimitedString
 
   def apply(identifier: Identifier, namespace: Namespace): PartyId =
     PartyId(UniqueIdentifier(identifier, namespace))

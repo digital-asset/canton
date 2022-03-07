@@ -25,7 +25,7 @@ class SaltTest extends AnyWordSpec with BaseTest {
     "generate a fresh salt" in {
       implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
-      val crypto = SymbolicCrypto.create(loggerFactory)
+      val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
       val seedData = ByteString.copyFromUtf8("testSeedData")
       val salt = Await.result(Salt.generate(seedData, crypto.privateCrypto).value, 10.seconds)
 

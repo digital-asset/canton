@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.mediator.store
 import cats.data.EitherT
 import cats.instances.future._
 import cats.syntax.either._
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.{
   MediatorRequestNotFound,
@@ -13,14 +14,15 @@ import com.digitalasset.canton.domain.mediator.{
   StaleVersion,
 }
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
 import java.util.concurrent.ConcurrentSkipListMap
-import scala.jdk.CollectionConverters._
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters._
 
 /** Provides state management for messages received by the mediator.
   * Non-finalized response aggregations are kept in memory, such that in case of the node shutting down,
@@ -32,9 +34,11 @@ import scala.concurrent.{ExecutionContext, Future}
 class MediatorState(
     val finalizedResponseStore: FinalizedResponseStore,
     metrics: MediatorMetrics,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging {
+    extends NamedLogging
+    with FlagCloseable {
 
   // outstanding requests are kept in memory while finalized requests will be stored
   // a skip list is used to optimise for when we fetch all keys below a given timestamp
@@ -129,4 +133,6 @@ class MediatorState(
       traceContext: TraceContext
   ): Future[Unit] =
     finalizedResponseStore.prune(pruneRequestsBeforeAndIncludingTs)
+
+  override def onClosed(): Unit = Lifecycle.close(finalizedResponseStore)(logger)
 }

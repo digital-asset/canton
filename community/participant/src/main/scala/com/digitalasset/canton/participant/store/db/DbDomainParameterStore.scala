@@ -4,12 +4,13 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.DomainParameterStore
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 
@@ -17,11 +18,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbDomainParameterStore(
     domainId: DomainId,
-    storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends DomainParameterStore
-    with NamedLogging {
+    with DbStore {
 
   import storage.api._
   import storage.converters._

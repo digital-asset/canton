@@ -43,6 +43,7 @@ trait FlagCloseable extends AutoCloseable {
   protected def closingTimeout: FiniteDuration = timeouts.closing.asFiniteApproximation
 
   private val closingFlag = new AtomicBoolean(false)
+
   // Poor man's read-write lock; stores the number of tasks holding the read lock. If a write lock is held, this
   // goes to -1. Not using Java's ReadWriteLocks since they are about thread synchronization, and since we can't
   // count on acquires and releases happening on the same thread, since we support the synchronization of futures.
@@ -87,7 +88,7 @@ trait FlagCloseable extends AutoCloseable {
     * @return [[scala.None$]] if a shutdown has been initiated. Otherwise the result of the task.
     */
   def performUnlessClosing[A](f: => A)(implicit traceContext: TraceContext): UnlessShutdown[A] = {
-    if (closingFlag.get() || !addReader()) {
+    if (isClosing || !addReader()) {
       logger.debug("Won't schedule the task as this object is closing")
       UnlessShutdown.AbortedDueToShutdown
     } else
@@ -116,7 +117,7 @@ trait FlagCloseable extends AutoCloseable {
   protected def internalPerformUnlessClosingF[A](
       f: => Future[A]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): UnlessShutdown[Future[A]] = {
-    if (closingFlag.get() || !addReader()) {
+    if (isClosing || !addReader()) {
       logger.debug("Won't schedule the future as this object is closing")
       UnlessShutdown.AbortedDueToShutdown
     } else {
@@ -145,7 +146,7 @@ trait FlagCloseable extends AutoCloseable {
   def performUnlessClosingEitherTF[E, R](onClosing: => E)(
       etf: => EitherT[Future, E, Future[R]]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, E, Future[R]] = {
-    if (closingFlag.get() || !addReader()) {
+    if (isClosing || !addReader()) {
       logger.debug("Won't schedule the future as this object is closing")
       EitherT.leftT(onClosing)
     } else {
@@ -222,13 +223,14 @@ trait FlagCloseable extends AutoCloseable {
       val tasks = runOnShutdownTasks.getAndSet(List())
       tasks.foreach { task =>
         if (!task.done) {
-          logger.debug(s"Completing task ${task.name}")
           Try { task.run() }.recover { exp =>
             logger.warn(s"Task ${task.name} failed on shutdown!", exp)
           }
         }
       }
       onClosed()
+    } else {
+      // TODO(i8594): Ensure we call close only once
     }
   }
 
@@ -259,4 +261,16 @@ object FlagCloseable {
 
   /** Logged upon forced shutdown. Pulled out a string here so that test log checking can refer to it. */
   val forceShutdownStr = "Shutting down forcibly"
+}
+
+/** Context to capture and pass through a caller's closing state.
+  *
+  * This allows us for example to stop operations down the call graph if either the caller or the current component
+  * executing an operation is closed.
+  */
+final case class CloseContext(flagCloseable: FlagCloseable)
+
+/** Mix-in to obtain a [[CloseContext]] implicit based on the class's [[FlagCloseable]] */
+trait HasCloseContext { self: FlagCloseable =>
+  implicit val closeContext: CloseContext = CloseContext(self)
 }

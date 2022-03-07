@@ -11,6 +11,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.Success
@@ -95,14 +96,20 @@ object SequencerHandshake {
       config: SequencerClientConfig,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): EitherT[Future, String, Unit] =
-    new SequencerHandshake(
-      supportedProtocols,
-      minimumProtocolVersion,
-      Traced.lift(client.handshake(_)(_)),
-      config.handshakeRetryAttempts.unwrap,
-      config.handshakeRetryDelay.toScala,
-      timeouts,
-      loggerFactory,
-    ).handshake
+  )(implicit executionContext: ExecutionContext): EitherT[Future, String, Unit] = {
+    val sequencerHandshake =
+      new SequencerHandshake(
+        supportedProtocols,
+        minimumProtocolVersion,
+        Traced.lift(client.handshake(_)(_)),
+        config.handshakeRetryAttempts.unwrap,
+        config.handshakeRetryDelay.toScala,
+        timeouts,
+        loggerFactory,
+      )
+
+    sequencerHandshake.handshake.thereafter { _ =>
+      sequencerHandshake.close()
+    }
+  }
 }

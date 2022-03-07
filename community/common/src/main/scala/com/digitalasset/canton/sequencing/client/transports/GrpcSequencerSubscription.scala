@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol.SubscriptionResponse
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureUtil
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Context.CancellableContext
 import io.grpc.Status.Code.CANCELLED
@@ -31,7 +32,7 @@ import io.grpc.{Status, StatusRuntimeException}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent._
-import scala.util.{Failure, Success, Try}
+import scala.util.Try
 
 /** Supply the grpc error that caused the subscription to fail */
 case class GrpcSubscriptionError(grpcError: GrpcError)
@@ -67,14 +68,14 @@ class GrpcSequencerSubscription[E] private[transports] (
   private def cancel(): Unit =
     if (!cancelledByClient.getAndSet(true)) context.close()
 
-  private def appendToCurrentProcessing(next: Try[Unit] => Future[Unit]): Future[Unit] = {
-    currentProcessing.updateAndGet(_.transformWith {
-      case Success(()) =>
-        next(Success(()))
-      case Failure(t) =>
-        // Very fatal error, as currentProcessing should not be failed.
-        logger.error(s"An unexpected exception has occurred in currentProcessing.", t)
-        next(Failure(t))
+  private def appendToCurrentProcessing(next: Try[Unit] => Future[Unit]): Unit = {
+    val newPromise = Promise[Unit]()
+    val oldFuture = currentProcessing.getAndSet(newPromise.future)
+    newPromise.completeWith(oldFuture.transformWith { outcome =>
+      FutureUtil.logOnFailure(
+        Future.fromTry(Try(next(outcome))).flatten,
+        "An unexpected exception has occurred in currentProcessing.",
+      )
     })
   }
 

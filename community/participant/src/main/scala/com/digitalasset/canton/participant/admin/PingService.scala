@@ -24,6 +24,7 @@ import com.digitalasset.canton.protocol.messages.LocalReject.ConsistencyRejectio
 }
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.google.common.annotations.VisibleForTesting
 
 import java.time.Duration
@@ -257,6 +258,9 @@ class PingService(
     }
   }
 
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard futures
   override private[admin] def processTransaction(
       tx: Transaction
   )(implicit traceContext: TraceContext): Unit = {
@@ -376,6 +380,9 @@ class PingService(
   }
 
   @VisibleForTesting
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard futures
   private[admin] def processPings(pings: Seq[Contract[M.Ping]], workflowId: WorkflowId)(implicit
       traceContext: TraceContext
   ): Unit =
@@ -419,7 +426,7 @@ class PingService(
   private[admin] def processPongs(pongs: Seq[Contract[M.Pong]], workflowId: WorkflowId)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    runSequentially(pongs.filter(_.value.initiator == adminParty)) { p =>
+    MonadUtil.sequentialTraverse_(pongs.filter(_.value.initiator == adminParty)) { p =>
       // purge duplicate checker
       duplicate.clear()
       // first, ack the pong
@@ -463,12 +470,6 @@ class PingService(
         }
       } yield ()
     }
-
-  /** Will sequentially run each supplied item in provided order over the future generating function waiting for the result to complete before continuing.
-    * If a failed future is returned this will prevent execution of further items and the failed future will be returned.
-    */
-  private def runSequentially[T](items: Seq[T])(run: T => Future[Unit]): Future[Unit] =
-    items.foldLeft(Future.unit)((previous, item) => previous.flatMap(_ => run(item)))
 
   /** Races the supplied future against a timeout.
     * If the supplied promise completes first the returned future will be completed with this value.

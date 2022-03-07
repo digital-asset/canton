@@ -41,6 +41,7 @@ class DbSyncDomainPersistentState(
     DomainEventLogId(domainId),
     storage,
     indexedStringStore,
+    processingTimeouts,
     loggerFactory,
   )
 
@@ -54,7 +55,8 @@ class DbSyncDomainPersistentState(
       processingTimeouts,
       loggerFactory,
     )
-  val transferStore = new DbTransferStore(storage, domainId.item, pureCryptoApi, loggerFactory)
+  val transferStore =
+    new DbTransferStore(storage, domainId.item, pureCryptoApi, processingTimeouts, loggerFactory)
   val activeContractStore =
     new DbActiveContractStore(
       storage,
@@ -62,12 +64,14 @@ class DbSyncDomainPersistentState(
       enableAdditionalConsistencyChecks,
       parameters.maxItemsInSqlClause,
       indexedStringStore,
+      processingTimeouts,
       loggerFactory,
     )
   val contractKeyJournal = new DbContractKeyJournal(
     storage,
     domainId,
     parameters.maxItemsInSqlClause,
+    processingTimeouts,
     loggerFactory,
   )
   private val client = SequencerClientDiscriminator.fromIndexedDomainId(domainId)
@@ -84,17 +88,38 @@ class DbSyncDomainPersistentState(
     insertBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
     replaceBatchAggregatorConfig = parameters.dbBatchAggregationConfig,
     enableAdditionalConsistencyChecks,
+    processingTimeouts,
     loggerFactory,
   )
-  val acsCommitmentStore = new DbAcsCommitmentStore(storage, domainId, pureCryptoApi, loggerFactory)
+  val acsCommitmentStore =
+    new DbAcsCommitmentStore(storage, domainId, pureCryptoApi, processingTimeouts, loggerFactory)
 
-  val parameterStore = new DbDomainParameterStore(domainId.item, storage, loggerFactory)
+  val parameterStore =
+    new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)
   val sequencerCounterTrackerStore =
-    new DbSequencerCounterTrackerStore(client, storage, loggerFactory)
+    new DbSequencerCounterTrackerStore(client, storage, processingTimeouts, loggerFactory)
   //TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
   val causalDependencyStore =
-    new DbSingleDomainCausalDependencyStore(domainId.item, storage, loggerFactory)
+    new DbSingleDomainCausalDependencyStore(
+      domainId.item,
+      storage,
+      processingTimeouts,
+      loggerFactory,
+    )
 
-  override def close() = Lifecycle.close(contractStore)(logger)
+  override def close() = Lifecycle.close(
+    eventLog,
+    contractStore,
+    transferStore,
+    activeContractStore,
+    contractKeyJournal,
+    sequencedEventStore,
+    requestJournalStore,
+    acsCommitmentStore,
+    parameterStore,
+    sequencerCounterTrackerStore,
+    sendTrackerStore,
+    causalDependencyStore,
+  )(logger)
 }

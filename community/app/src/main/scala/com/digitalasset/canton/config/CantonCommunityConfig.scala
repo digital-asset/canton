@@ -8,6 +8,7 @@ import cats.data.ValidatedNel
 import java.io.File
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.{CommunityDomainConfig, RemoteDomainConfig}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.config.{
@@ -23,10 +24,10 @@ import monocle.macros.syntax.lens._
 import scala.annotation.nowarn
 
 case class CantonCommunityConfig(
-    domains: Map[String, CommunityDomainConfig] = Map.empty,
-    participants: Map[String, CommunityParticipantConfig] = Map.empty,
-    remoteDomains: Map[String, RemoteDomainConfig] = Map.empty,
-    remoteParticipants: Map[String, RemoteParticipantConfig] = Map.empty,
+    domains: Map[InstanceName, CommunityDomainConfig] = Map.empty,
+    participants: Map[InstanceName, CommunityParticipantConfig] = Map.empty,
+    remoteDomains: Map[InstanceName, RemoteDomainConfig] = Map.empty,
+    remoteParticipants: Map[InstanceName, RemoteParticipantConfig] = Map.empty,
     monitoring: MonitoringConfig = MonitoringConfig(),
     parameters: CantonParameters = CantonParameters(),
     features: CantonFeatures = CantonFeatures(),

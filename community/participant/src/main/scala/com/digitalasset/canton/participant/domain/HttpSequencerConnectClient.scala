@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.{DomainAlias, DomainId}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -81,4 +82,6 @@ class HttpSequencerConnectClient(
     case transactionCheckFailed: HttpSequencerClientError.TransactionCheckFailed =>
       SequencerConnectClient.Error.Transport(transactionCheckFailed.toString)
   }
+
+  override def close(): Unit = Lifecycle.close(httpSequencerClient)(logger)
 }

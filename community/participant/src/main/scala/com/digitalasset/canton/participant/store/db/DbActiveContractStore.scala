@@ -10,9 +10,10 @@ import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String100}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
@@ -22,7 +23,7 @@ import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractS
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
@@ -37,15 +38,16 @@ import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbActiveContractStore(
-    protected[this] override val storage: DbStorage,
+    override protected val storage: DbStorage,
     protected[this] override val domainId: IndexedDomain,
     enableAdditionalConsistencyChecks: Boolean,
     maxContractIdSqlInListSize: PositiveNumeric[Int],
     indexedStringStore: IndexedStringStore,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ActiveContractStore
-    with NamedLogging
+    with DbStore
     with DbPrunableByTimeDomain[AcsError] {
 
   import ActiveContractStore._
@@ -255,6 +257,7 @@ class DbActiveContractStore(
     // As we can directly query daml_contracts from the database
 
     import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits._
 
     // TODO(i7860): Integrate with performance tests to check that we can remove packages when there are many contracts.
 
@@ -776,18 +779,23 @@ class DbActiveContractStore(
 }
 
 sealed trait ChangeType {
-  val name: String
+  def name: String
+
+  // lazy val so that `kind` is initialized first in the subclasses
+  final lazy val toDbPrimitive: String100 =
+    // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
+    String100.tryCreate(name)
 }
 
 object ChangeType {
   case object Activation extends ChangeType {
-    val name = "activation"
+    override val name = "activation"
   }
   case object Deactivation extends ChangeType {
-    val name = "deactivation"
+    override val name = "deactivation"
   }
 
-  implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp.setString(v.name)
+  implicit val setParameterChangeType: SetParameter[ChangeType] = (v, pp) => pp >> v.toDbPrimitive
   implicit val getResultChangeType: GetResult[ChangeType] = GetResult(r =>
     r.nextString() match {
       case ChangeType.Activation.name => ChangeType.Activation
@@ -799,24 +807,29 @@ object ChangeType {
 
 sealed trait OperationType extends Product with Serializable {
   val name: String
+
+  // lazy val so that `kind` is initialized first in the subclasses
+  final lazy val toDbPrimitive: String100 =
+    // The Oracle DB schema allows up to 100 chars; Postgres, H2 map this to an enum
+    String100.tryCreate(name)
 }
 
 object OperationType {
   case object Create extends OperationType {
-    val name = "create"
+    override val name = "create"
   }
   case object Archive extends OperationType {
-    val name = "archive"
+    override val name = "archive"
   }
   case object TransferIn extends OperationType {
-    val name = "transfer-in"
+    override val name = "transfer-in"
   }
   case object TransferOut extends OperationType {
-    val name = "transfer-out"
+    override val name = "transfer-out"
   }
 
   implicit val setParameterOperationType: SetParameter[OperationType] = (v, pp) =>
-    pp.setString(v.name)
+    pp >> v.toDbPrimitive
   implicit val getResultChangeType: GetResult[OperationType] = GetResult(r =>
     r.nextString() match {
       case OperationType.Create.name => OperationType.Create

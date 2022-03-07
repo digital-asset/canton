@@ -25,7 +25,7 @@ trait DbDomainConnectionConfigStoreTest
 
   "DbDomainConnectionConfigStoreTest" should {
     behave like domainConnectionConfigStore(
-      new DbDomainConnectionConfigStore(storage, loggerFactory).initialize()
+      new DbDomainConnectionConfigStore(storage, timeouts, loggerFactory).initialize()
     )
   }
 }

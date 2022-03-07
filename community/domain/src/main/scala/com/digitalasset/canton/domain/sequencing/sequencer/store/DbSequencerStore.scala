@@ -8,13 +8,15 @@ import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.list._
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommitMode,
   SequencerMemberStatus,
   SequencerPruningStatus,
 }
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
@@ -51,10 +53,13 @@ import scala.util.{Failure, Success}
 class DbSequencerStore(
     storage: DbStorage,
     maxInClauseSize: PositiveNumeric[Int],
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(protected implicit val executionContext: ExecutionContext)
     extends SequencerStore
-    with NamedLogging {
+    with NamedLogging
+    with FlagCloseable
+    with HasCloseContext {
 
   import DbStorage.Implicits._
   import Member.DbStorageImplicits._
@@ -157,8 +162,9 @@ class DbSequencerStore(
       all.find(_.value == value).toRight(s"Event type discriminator for value [$value] not found")
   }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   private implicit val setEventTypeDiscriminatorParameter: SetParameter[EventTypeDiscriminator] =
-    (etd, pp) => pp.setString(etd.value.toString)
+    (etd, pp) => pp >> etd.value.toString
 
   private implicit val getEventTypeDiscriminatorResult: GetResult[EventTypeDiscriminator] =
     GetResult(r => {
@@ -182,7 +188,7 @@ class DbSequencerStore(
       recipientsO: Option[NonEmptySet[SequencerMemberId]] = None,
       payloadO: Option[P] = None,
       signingTimestampO: Option[CantonTimestamp] = None,
-      errorMessageO: Option[String] = None,
+      errorMessageO: Option[String256M] = None,
       traceContext: TraceContext,
   ) {
     lazy val asStoreEvent: Either[String, Sequenced[P]] =
@@ -256,47 +262,6 @@ class DbSequencerStore(
       }
   }
 
-  private def mkSetDeliverStoreEventRowParameter(
-      instanceIndex: Int
-  ): SetParameter[Sequenced[PayloadId]] = {
-    val timestampSetter = implicitly[SetParameter[CantonTimestamp]]
-    val timestampOSetter = implicitly[SetParameter[Option[CantonTimestamp]]]
-    val discriminatorSetter = implicitly[SetParameter[EventTypeDiscriminator]]
-    val messageIdSetter = implicitly[SetParameter[Option[MessageId]]]
-    val memberIdSetter = implicitly[SetParameter[Option[SequencerMemberId]]]
-    val memberIdNesSetter = implicitly[SetParameter[Option[NonEmptySet[SequencerMemberId]]]]
-    val payloadIdSetter = implicitly[SetParameter[Option[PayloadId]]]
-    val errorMessageSetter = implicitly[SetParameter[Option[String]]]
-    val traceContextSetter = implicitly[SetParameter[TraceContext]]
-
-    (event, pp) => {
-      val DeliverStoreEventRow(
-        timestamp,
-        sequencerInstanceIndex,
-        eventType,
-        messageId,
-        sender,
-        recipients,
-        payloadId,
-        signingTimestampO,
-        errorMessage,
-        traceContext,
-      ) =
-        DeliverStoreEventRow(instanceIndex, event)
-
-      timestampSetter(timestamp, pp)
-      pp.setInt(sequencerInstanceIndex)
-      discriminatorSetter(eventType, pp)
-      messageIdSetter(messageId, pp)
-      memberIdSetter(sender, pp)
-      memberIdNesSetter(recipients, pp)
-      payloadIdSetter(payloadId, pp)
-      timestampOSetter(signingTimestampO, pp)
-      errorMessageSetter(errorMessage, pp)
-      traceContextSetter(traceContext, pp)
-    }
-  }
-
   private implicit val getPayloadOResult: GetResult[Option[Payload]] =
     GetResult
       .createGetTuple2[Option[PayloadId], Option[ByteString]]
@@ -319,7 +284,7 @@ class DbSequencerStore(
     val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
     val memberIdNesGetter = implicitly[GetResult[Option[NonEmptySet[SequencerMemberId]]]]
     val payloadGetter = implicitly[GetResult[Option[Payload]]]
-    val errorMessageGetter = implicitly[GetResult[Option[String]]]
+    val errorMessageGetter = implicitly[GetResult[Option[String256M]]]
     val traceContextGetter = implicitly[GetResult[TraceContext]]
 
     GetResult(r => {
@@ -549,9 +514,6 @@ class DbSequencerStore(
       case _: H2 | _: Postgres => ("", "on conflict do nothing")
       case _: Oracle => ("/*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_events ( ts ) ) */", "")
     }
-    implicit val setDeliverStoreEventRowParameter = mkSetDeliverStoreEventRowParameter(
-      instanceIndex
-    )
     val saveSql = s"""|insert $prefix into sequencer_events (
                      |    ts, node_index, event_type, message_id, sender, recipients,
                      |    payload_id, signing_timestamp, error_message, trace_context
@@ -562,7 +524,29 @@ class DbSequencerStore(
 
     storage.queryAndUpdate(
       DbStorage.bulkOperation_(saveSql, events.toList, storage.profile) { pp => event =>
-        setDeliverStoreEventRowParameter(event, pp)
+        val DeliverStoreEventRow(
+          timestamp,
+          sequencerInstanceIndex,
+          eventType,
+          messageId,
+          sender,
+          recipients,
+          payloadId,
+          signingTimestampO,
+          errorMessage,
+          traceContext,
+        ) = DeliverStoreEventRow(instanceIndex, event)
+
+        pp >> timestamp
+        pp >> sequencerInstanceIndex
+        pp >> eventType
+        pp >> messageId
+        pp >> sender
+        pp >> recipients
+        pp >> payloadId
+        pp >> signingTimestampO
+        pp >> errorMessage
+        pp >> traceContext
       },
       functionFullName,
     )

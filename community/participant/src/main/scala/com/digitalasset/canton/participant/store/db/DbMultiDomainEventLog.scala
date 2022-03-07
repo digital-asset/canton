@@ -19,7 +19,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
+  CloseContext,
   FlagCloseableAsync,
+  HasCloseContext,
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -104,6 +106,7 @@ class DbMultiDomainEventLog private[db] (
     implicit val mat: Materializer,
 ) extends MultiDomainEventLog
     with FlagCloseableAsync
+    with HasCloseContext
     with NamedLogging
     with HasFlushFuture {
 
@@ -709,6 +712,7 @@ object DbMultiDomainEventLog {
       ec: ExecutionContext,
       mat: Materializer,
       traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Future[DbMultiDomainEventLog] =
     for {
       headAndPublicationTime <- lastOffsetAndPublicationTime(storage)
@@ -734,7 +738,10 @@ object DbMultiDomainEventLog {
   private[db] def lastOffsetAndPublicationTime(
       storage: DbStorage,
       upToInclusive: GlobalOffset = Long.MaxValue,
-  )(implicit traceContext: TraceContext): Future[Option[(GlobalOffset, CantonTimestamp)]] = {
+  )(implicit
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): Future[Option[(GlobalOffset, CantonTimestamp)]] = {
     import storage.api._
 
     val query =
@@ -748,6 +755,7 @@ object DbMultiDomainEventLog {
   private[db] def lastLocalOffsets(storage: DbStorage)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
+      closeContext: CloseContext,
   ): Future[TrieMap[Int, LocalOffset]] = {
     import storage.api._
 

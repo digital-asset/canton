@@ -26,6 +26,9 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) do not discard futures
 class SingleDomainCausalTrackerTest
     extends AnyWordSpec
     with BaseTest

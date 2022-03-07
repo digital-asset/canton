@@ -14,6 +14,9 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{Future, Promise, blocking}
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard the futures
 class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   private class Fixture(startTimeout: Duration = 1.minute) extends StartAndCloseable[Unit] {

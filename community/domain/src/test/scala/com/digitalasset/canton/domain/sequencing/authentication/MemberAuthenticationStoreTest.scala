@@ -158,7 +158,7 @@ trait DbMemberAuthenticationStoreTest extends MemberAuthenticationStoreTest {
 
   "DbMemberAuthenticationStore" should {
     behave like memberAuthenticationStore(() =>
-      new DbMemberAuthenticationStore(storage, loggerFactory)
+      new DbMemberAuthenticationStore(storage, timeouts, loggerFactory)
     )
   }
 }

@@ -28,9 +28,9 @@ class AuthenticationTokenCache(
   def lookupMatchingToken(member: Member, providedToken: AuthenticationToken)(implicit
       traceContext: TraceContext
   ): Future[Option[StoredAuthenticationToken]] = {
-    def lookupFromStore(): Future[Option[StoredAuthenticationToken]] = {
-      val now = clock.now
+    val now = clock.now
 
+    def lookupFromStore(): Future[Option[StoredAuthenticationToken]] =
       for {
         matchedTokenO <- store
           .fetchTokens(member)
@@ -38,10 +38,13 @@ class AuthenticationTokenCache(
         // cache it
         _ = matchedTokenO.foreach(cacheToken)
       } yield matchedTokenO
-    }
 
     // lookup from cache, otherwise fetch from store (and then cache that)
-    tokenCache.get(providedToken).fold(lookupFromStore())(token => Future.successful(Some(token)))
+    tokenCache.get(providedToken) match {
+      case Some(token) if token.member == member && token.expireAt > now =>
+        Future.successful(Some(token))
+      case _ => lookupFromStore()
+    }
   }
 
   /** Will persist and locally cache a new token */

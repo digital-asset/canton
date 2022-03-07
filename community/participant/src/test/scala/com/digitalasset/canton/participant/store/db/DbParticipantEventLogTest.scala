@@ -20,7 +20,7 @@ trait DbParticipantEventLogTest extends ParticipantEventLogTest { this: DbTest =
     )
   }
   override def newStore: DbParticipantEventLog =
-    new DbParticipantEventLog(id, storage, InMemoryIndexedStringStore(), loggerFactory)
+    new DbParticipantEventLog(id, storage, InMemoryIndexedStringStore(), timeouts, loggerFactory)
 }
 
 class ParticipantEventLogTestH2 extends DbParticipantEventLogTest with H2Test

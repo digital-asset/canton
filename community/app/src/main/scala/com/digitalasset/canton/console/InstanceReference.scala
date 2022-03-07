@@ -129,8 +129,9 @@ trait LocalInstanceReference extends InstanceReference {
 
   @Help.Summary("Manage public and secret keys")
   @Help.Group("Keys")
-  override val keys: LocalKeyAdministrationGroup =
-    new LocalKeyAdministrationGroup(this, consoleEnvironment, crypto)
+  override def keys = _keys
+
+  private val _keys = new LocalKeyAdministrationGroup(this, consoleEnvironment, crypto)
 
   private[console] def migrateDbCommand(): ConsoleCommandResult[Unit] =
     migrateInstanceDb().toResult(_.message, _ => ())
@@ -272,7 +273,7 @@ trait RemoteDomainReference extends DomainReference with GrpcRemoteInstanceRefer
 
   @Help.Summary("Returns the remote domain configuration")
   def config: RemoteDomainConfig =
-    consoleEnvironment.environment.config.remoteDomains(name)
+    consoleEnvironment.environment.config.remoteDomainsByString(name)
 
   override def sequencerConnection: SequencerConnection =
     config.publicApi.toConnection
@@ -305,7 +306,7 @@ trait LocalDomainReference
 
   @Help.Summary("Returns the domain configuration")
   def config: consoleEnvironment.environment.config.DomainConfigType =
-    consoleEnvironment.environment.config.domains(name)
+    consoleEnvironment.environment.config.domainsByString(name)
 
   override def sequencerConnection: SequencerConnection =
     config.sequencerConnectionConfig.toConnection
@@ -484,7 +485,7 @@ class RemoteParticipantReference(environment: ConsoleEnvironment, override val n
 
   @Help.Summary("Return remote participant config")
   def config: RemoteParticipantConfig =
-    consoleEnvironment.environment.config.remoteParticipants(name)
+    consoleEnvironment.environment.config.remoteParticipantsByString(name)
 
   override def equals(obj: Any): Boolean = {
     obj match {
@@ -533,7 +534,7 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
 
   @Help.Summary("Return participant config")
   def config: LocalParticipantConfig =
-    consoleEnvironment.environment.config.participants(name)
+    consoleEnvironment.environment.config.participantsByString(name)
 
   private lazy val testing_ =
     new LocalParticipantTestingGroup(this, consoleEnvironment, loggerFactory)

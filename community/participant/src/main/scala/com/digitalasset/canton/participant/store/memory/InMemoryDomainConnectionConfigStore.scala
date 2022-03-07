@@ -59,4 +59,6 @@ class InMemoryDomainConnectionConfigStore(protected override val loggerFactory: 
 
   /** We have no cache so is effectively a noop. */
   override def refreshCache()(implicit traceContext: TraceContext): Future[Unit] = Future.unit
+
+  override def close(): Unit = ()
 }

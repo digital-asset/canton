@@ -142,7 +142,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
         recipients.contains(
           member
         ) // only if they're a recipient (sender should already be a recipient)
-      case DeliverErrorStoreEvent(sender, messageId, message, _trace) =>
+      case DeliverErrorStoreEvent(sender, _messageId, _message, _trace) =>
         sender == member // only if we're the sender
     }
 
@@ -405,4 +405,6 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
         checkpoints.values.map(_.size()).sum.toLong,
       )
     )
+
+  override def close(): Unit = ()
 }

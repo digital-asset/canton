@@ -5,12 +5,10 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.NotUsed
 import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.Source
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
-import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -20,7 +18,6 @@ import scala.concurrent.Future
   */
 class PollingEventSignaller(
     pollingInterval: NonNegativeFiniteDuration,
-    override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 ) extends EventSignaller
     with NamedLogging {
@@ -37,5 +34,5 @@ class PollingEventSignaller(
       .repeat(ReadSignal)
       .delay(pollingInterval.toScala, strategy = DelayOverflowStrategy.backpressure)
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq()
+  override def close(): Unit = ()
 }

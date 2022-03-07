@@ -17,7 +17,13 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
-@SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
+@SuppressWarnings(
+  Array(
+    "org.wartremover.warts.Null",
+    "org.wartremover.warts.Var",
+    "com.digitalasset.canton.DiscardedFuture", // TODO(#8448) Do not discard futures
+  )
+)
 class PingServiceTest
     extends AnyWordSpec
     with BaseTest

@@ -7,25 +7,24 @@ import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.syntax.foldable._
 import cats.syntax.list._
 import cats.syntax.traverse._
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.{LfPartyId, checked}
+import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEitherIterable
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{BatchAggregator, MonadUtil}
-import com.digitalasset.canton.util.Thereafter.syntax._
 import com.github.blemale.scaffeine.AsyncCache
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
@@ -34,17 +33,16 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 class DbContractStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     domainIdIndexed: IndexedDomain,
     maxContractIdSqlInListSize: PositiveNumeric[Int],
     cacheConfig: CacheConfig,
     dbQueryBatcherConfig: BatchAggregatorConfig,
     override protected val timeouts: ProcessingTimeout,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(protected implicit val ec: ExecutionContext)
     extends ContractStore
-    with FlagCloseable
-    with NamedLogging {
+    with DbStore {
 
   import DbStorage.Implicits._
   import storage.api._
@@ -84,7 +82,8 @@ class DbContractStore(
         ): Future[Iterable[Option[StoredContract]]] = {
           processingTime.metric.event {
             storage.sequentialQueryAndCombine(lookupQueries(ids.map(_.value)), functionFullName)(
-              traceContext
+              traceContext,
+              closeContext,
             )
           }
         }
@@ -149,6 +148,7 @@ class DbContractStore(
 
       // If filter is set returns a conjunctive (`and` prepended) constraint on attribute `name`.
       // Otherwise empty sql action.
+      @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
       def createConjunctiveFilter(name: String, filter: Option[String]): SQLActionBuilderChain =
         filter
           .map { f =>
@@ -202,6 +202,7 @@ class DbContractStore(
 
   // Not to be called directly: use contractsCache
   private def contractInsert(storedContract: StoredContract): DbAction.WriteOnly[Int] = {
+    import DbStorage.Implicits._
     val contractId = storedContract.contractId
     val contract = storedContract.contract.rawContractInstance
     val metadata = storedContract.contract.metadata
@@ -210,7 +211,7 @@ class DbContractStore(
     val creatingTransactionId = storedContract.creatingTransactionIdO
     val template = storedContract.contract.contractInstance.unversioned.template
     val packageId = template.packageId
-    val templateId = template.qualifiedName.toString
+    val templateId = checked(String2066.tryCreate(template.qualifiedName.toString))
 
     // TODO(M40): Figure out if we should check that the contract instance remains the same and whether we should update the instance if not.
     // The instance payload is not being updated as uploading this payload on a previously set field is problematic for Oracle when it exceeds 32KB

@@ -52,7 +52,7 @@ message CompressedBatch {
     }
 
     CompressionAlgorithm algorithm = 1;
-    bytes compressedBatch = 2;
+    bytes compressed_batch = 2;
 }
 
 message Batch {

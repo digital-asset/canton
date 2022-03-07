@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.db.DbMultiDomainCausalityStore
@@ -19,7 +20,7 @@ import com.google.common.annotations.VisibleForTesting
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-trait MultiDomainCausalityStore extends NamedLogging {
+trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
 
   implicit val ec: ExecutionContext
 
@@ -38,6 +39,9 @@ trait MultiDomainCausalityStore extends NamedLogging {
   protected val transferOutPromises: TrieMap[TransferId, Promise[Unit]] =
     new TrieMap()
 
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard futures
   def awaitTransferOutRegistered(id: TransferId, parties: Set[LfPartyId])(implicit
       tc: TraceContext
   ): Future[Map[LfPartyId, VectorClock]] = {
@@ -177,13 +181,14 @@ object MultiDomainCausalityStore {
   def apply(
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, tc: TraceContext): Future[MultiDomainCausalityStore] = {
     storage match {
       case _: MemoryStorage =>
         Future.successful(new InMemoryMultiDomainCausalityStore(loggerFactory))
       case storage: DbStorage =>
-        DbMultiDomainCausalityStore(storage, indexedStringStore, loggerFactory)
+        DbMultiDomainCausalityStore(storage, indexedStringStore, timeouts, loggerFactory)
     }
   }
 }

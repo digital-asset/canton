@@ -23,7 +23,7 @@ class TinkCryptoTest
 
     def tinkCrypto(): Future[Crypto] =
       CryptoFactory
-        .create(CryptoConfig(provider = Tink), new MemoryStorage, loggerFactory)
+        .create(CryptoConfig(provider = Tink), new MemoryStorage, timeouts, loggerFactory)
         .valueOrFail("create crypto")
 
     behave like signingProvider(Tink.signing.supported, tinkCrypto())

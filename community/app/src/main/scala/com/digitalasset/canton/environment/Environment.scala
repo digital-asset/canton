@@ -164,16 +164,16 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     new DomainNodes(
       createDomain,
       migrationsFactory,
-      config.domains,
-      config.domainNodeParameters,
+      config.domainsByString,
+      config.domainNodeParametersByString,
       loggerFactory,
     )
   lazy val participants =
     new ParticipantNodes(
       createParticipant,
       migrationsFactory,
-      config.participants,
-      config.participantNodeParameters,
+      config.participantsByString,
+      config.participantNodeParametersByString,
       loggerFactory,
     )
 
@@ -190,9 +190,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     def toDomainConfig(domain: DomainNodeBootstrap): Either[StartupError, DomainConnectionConfig] =
       (for {
         connection <- domain.config.sequencerConnectionConfig.toConnection
-        name <- DomainAlias.create(domain.name.str)
+        name <- DomainAlias.create(domain.name.unwrap)
       } yield DomainConnectionConfig(name, connection)).leftMap(err =>
-        StartFailed(domain.name.str, s"Can not parse config for auto-connect: ${err}")
+        StartFailed(domain.name.unwrap, s"Can not parse config for auto-connect: ${err}")
       )
     val connectParticipants =
       participants.running.filter(_.isActive).flatMap(x => x.getNode.map((x.name, _)).toList)
@@ -207,11 +207,11 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         this.config.parameters.timeouts.processing.unbounded.await()(connectET.value)
       }
     logger.info(s"Auto-connecting local participants ${connectParticipants
-      .map(_._1.str)} to local domains ${activeDomains.map(_.name.str)}")
+      .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
     activeDomains
       .traverse(toDomainConfig)
       .traverse_(config =>
-        connectParticipants.traverse_ { case (name, node) => connect(name.str, node, config) }
+        connectParticipants.traverse_ { case (name, node) => connect(name.unwrap, node, config) }
       )
   }
 
@@ -250,7 +250,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     config.parameters.portsFile.foreach { portsFile =>
       val items = participants.running.map { node =>
         (
-          node.name.str,
+          node.name.unwrap,
           ParticipantApis(node.config.ledgerApi.port.unwrap, node.config.adminApi.port.unwrap),
         )
       }.toMap
@@ -320,7 +320,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       .create(
         name,
         participantConfig,
-        config.participantNodeParameters(name),
+        config.participantNodeParametersByString(name),
         createClock(Some(ParticipantNodeBootstrap.LoggerFactoryKeyName -> name)),
         testingTimeService,
         metricsFactory.forParticipant(name),
@@ -340,7 +340,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         name,
         domainConfig,
         testingConfig,
-        config.domainNodeParameters(name),
+        config.domainNodeParametersByString(name),
         createClock(Some(DomainNodeBootstrap.LoggerFactoryKeyName -> name)),
         metricsFactory.forDomain(name),
         futureSupervisor,

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferCoordination.DomainData
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
@@ -103,9 +104,11 @@ class TransferCoordination(
 
   /** Returns a recent time proof received from the given domain. */
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def recentTimeProof(domain: DomainId): EitherT[Future, TransferProcessorError, TimeProof] =
+  def recentTimeProof(
+      domain: DomainId
+  ): EitherT[FutureUnlessShutdown, TransferProcessorError, TimeProof] =
     for {
-      domainData <- EitherT.fromEither[Future](lookupDomain(domain))
+      domainData <- EitherT.fromEither[FutureUnlessShutdown](lookupDomain(domain))
       timeProof <- domainData
         .recentTimeProofSource()
         .leftMap[TransferProcessorError](_ => NoTimeProofFromDomain(domain))
@@ -159,7 +162,7 @@ object TransferCoordination {
 
   case class DomainData(
       transferStore: TransferStore,
-      recentTimeProofSource: () => EitherT[Future, TimeProofSourceError, TimeProof],
+      recentTimeProofSource: () => EitherT[FutureUnlessShutdown, TimeProofSourceError, TimeProof],
   )
 
   def apply(
@@ -184,17 +187,20 @@ object TransferCoordination {
     def domainDataFor(domain: DomainId): Option[DomainData] = {
       OptionUtil.zipWith(syncDomainPersistentStateManager.get(domain), submissionHandles(domain)) {
         (state, handle) =>
-          def recentTimeProofSource(): EitherT[Future, TimeProofSourceError, TimeProof] = for {
-            crypto <- EitherT.fromEither[Future](
+          def recentTimeProofSource()
+              : EitherT[FutureUnlessShutdown, TimeProofSourceError, TimeProof] = for {
+            crypto <- EitherT.fromEither[FutureUnlessShutdown](
               syncCryptoApi.forDomain(domain).toRight(DomainParametersNotAvailable)
             )
-            parameters <- EitherT.right(
-              crypto.ips.currentSnapshotApproximation.findDynamicDomainParametersOrDefault()
+            parameters <- EitherT.right[TimeProofSourceError](
+              FutureUnlessShutdown.outcomeF(
+                crypto.ips.currentSnapshotApproximation.findDynamicDomainParametersOrDefault()
+              )
             )
 
             exclusivityTimeout = parameters.transferExclusivityTimeout
             desiredTimeProofFreshness = calculateFreshness(exclusivityTimeout)
-            timeProof <- EitherT.right(
+            timeProof <- EitherT.right[TimeProofSourceError](
               handle.timeTracker.fetchTimeProof(desiredTimeProofFreshness)
             )
           } yield timeProof

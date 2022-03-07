@@ -68,7 +68,7 @@ class ConsoleHttpAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
           case Some(client) =>
             Right(client)
           case None =>
-            HttpClient
+            HttpClient.Insecure
               .create(
                 sequencerConnection.certificate,
                 ccfConfig.memberKeyStore,

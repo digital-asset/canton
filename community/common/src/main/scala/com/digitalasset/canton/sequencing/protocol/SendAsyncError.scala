@@ -60,6 +60,11 @@ object SendAsyncError {
     override def category: ErrorCategory = ErrorCategory.InvalidGivenCurrentSystemStateOther
   }
 
+  case class UnknownRecipients(message: String) extends SendAsyncError {
+    override def toProtoReason = v0.SendAsyncResponse.Error.Reason.SenderUnknown(message)
+    override def category: ErrorCategory = ErrorCategory.InvalidGivenCurrentSystemStateOther
+  }
+
   /** The Sequencer declined to process new requests as it is shutting down */
   case class ShuttingDown(message: String = "Sequencer shutting down") extends SendAsyncError {
     override def toProtoReason = v0.SendAsyncResponse.Error.Reason.ShuttingDown(message)
@@ -80,6 +85,8 @@ object SendAsyncError {
       case v0.SendAsyncResponse.Error.Reason.Unavailable(message) => Unavailable(message).asRight
       case v0.SendAsyncResponse.Error.Reason.SenderUnknown(message) =>
         SenderUnknown(message).asRight
+      case v0.SendAsyncResponse.Error.Reason.UnknownRecipients(message) =>
+        UnknownRecipients(message).asRight
       case v0.SendAsyncResponse.Error.Reason.ShuttingDown(message) => ShuttingDown(message).asRight
     }
 }

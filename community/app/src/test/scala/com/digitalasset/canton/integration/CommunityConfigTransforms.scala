@@ -72,7 +72,7 @@ object CommunityConfigTransforms {
     cantonConfig =>
       cantonConfig
         .focus(_.domains)
-        .modify(_.map { case (dName, dConfig) => (dName, update(dName, dConfig)) })
+        .modify(_.map { case (dName, dConfig) => (dName, update(dName.unwrap, dConfig)) })
 
   def updateAllParticipantConfigs(
       update: (String, CommunityParticipantConfig) => CommunityParticipantConfig
@@ -80,7 +80,7 @@ object CommunityConfigTransforms {
     cantonConfig =>
       cantonConfig
         .focus(_.participants)
-        .modify(_.map { case (pName, pConfig) => (pName, update(pName, pConfig)) })
+        .modify(_.map { case (pName, pConfig) => (pName, update(pName.unwrap, pConfig)) })
 
   def uniqueH2DatabaseNames: CommunityConfigTransform = {
     updateAllDomainConfigs { case (nodeName, cfg) =>

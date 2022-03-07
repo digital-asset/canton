@@ -27,11 +27,14 @@ object Generate {
       case Command.Generate.RemoteConfig =>
         val writers = new CantonConfig.ConfigWriters(confidential = false)
         import writers._
-        config.participants.map(x => (x._1, x._2.toRemoteConfig)).foreach { case (name, config) =>
-          write(name, "participants", config)
+        config.participantsByString.map(x => (x._1, x._2.toRemoteConfig)).foreach {
+          case (name, config) =>
+            write(name, "participants", config)
         }
-        config.domains.map(x => (x._1, x._2.toRemoteConfig)).foreach { case (name, config) =>
-          write(name, "domains", config)
+
+        config.domainsByString.map(x => (x._1, x._2.toRemoteConfig)).foreach {
+          case (name, config) =>
+            write(name, "domains", config)
         }
 
     }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
@@ -13,21 +14,20 @@ import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{MediatorRequest, ProtocolMessage, Verdict}
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
+import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import java.util.concurrent.ConcurrentHashMap
-import com.digitalasset.canton.version.ProtocolVersion
-import io.functionmeta.functionFullName
-
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Stores and retrieves finalized mediator response aggregations
   */
-trait FinalizedResponseStore {
+trait FinalizedResponseStore extends AutoCloseable {
 
   /** Stores finalized mediator response aggregations (whose state is a Left(verdict)).
     * In the event of a crash we may attempt to store an existing finalized request so the store
@@ -52,12 +52,17 @@ trait FinalizedResponseStore {
 }
 
 object FinalizedResponseStore {
-  def apply(storage: Storage, cryptoApi: CryptoPureApi, loggerFactory: NamedLoggerFactory)(implicit
+  def apply(
+      storage: Storage,
+      cryptoApi: CryptoPureApi,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext
   ): FinalizedResponseStore = storage match {
     case _: MemoryStorage => new InMemoryFinalizedResponseStore(loggerFactory)
     case jdbc: DbStorage =>
-      new DbFinalizedResponseStore(jdbc, cryptoApi, loggerFactory)
+      new DbFinalizedResponseStore(jdbc, cryptoApi, timeouts, loggerFactory)
   }
 }
 
@@ -93,15 +98,18 @@ class InMemoryFinalizedResponseStore(override protected val loggerFactory: Named
 
   override def count()(implicit traceContext: TraceContext): Future[Long] =
     Future.successful(finalizedRequests.size.toLong)
+
+  override def close(): Unit = ()
 }
 
 class DbFinalizedResponseStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     cryptoApi: CryptoPureApi,
-    override val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends FinalizedResponseStore
-    with NamedLogging {
+    with DbStore {
   import storage.api._
   import storage.converters._
 

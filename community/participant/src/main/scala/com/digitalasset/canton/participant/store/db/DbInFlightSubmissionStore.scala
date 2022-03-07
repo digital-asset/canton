@@ -7,18 +7,13 @@ import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.syntax.alternative._
 import cats.syntax.option._
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  TracedLogger,
-}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.protocol.submission._
@@ -28,7 +23,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
   InFlightReference,
 }
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -45,13 +40,14 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 class DbInFlightSubmissionStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     maxItemsInSqlInClause: PositiveNumeric[Int],
     registerBatchAggregatorConfig: BatchAggregatorConfig,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends InFlightSubmissionStore
-    with NamedLogging {
+    with DbStore {
 
   import storage.api._
   import storage.converters._
@@ -138,7 +134,11 @@ class DbInFlightSubmissionStore(
 
   private val batchAggregatorRegister = {
     val processor =
-      new DbInFlightSubmissionStore.RegisterProcessor(storage, maxItemsInSqlInClause, logger)
+      new DbInFlightSubmissionStore.RegisterProcessor(
+        storage,
+        maxItemsInSqlInClause,
+        logger,
+      )
     BatchAggregator(processor, registerBatchAggregatorConfig, processingTime.some)
   }
 
@@ -272,8 +272,10 @@ object DbInFlightSubmissionStore {
       override protected val storage: DbStorage,
       maxItemsInSqlInClause: PositiveNumeric[Int],
       override val logger: TracedLogger,
-  )(override protected implicit val executionContext: ExecutionContext)
-      extends DbBulkUpdateProcessor[InFlightSubmission[
+  )(
+      override protected implicit val executionContext: ExecutionContext,
+      implicit val closeContext: CloseContext,
+  ) extends DbBulkUpdateProcessor[InFlightSubmission[
         UnsequencedSubmission
       ], RegisterProcessor.Result] {
     import RegisterProcessor.Result

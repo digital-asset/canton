@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import java.util.concurrent.atomic.AtomicReference
 import cats.data.EitherT
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.DomainAliasAndIdStore
 import com.digitalasset.canton.participant.sync.SyncServiceError
@@ -16,7 +17,7 @@ import com.google.common.collect.{BiMap, HashBiMap}
 import scala.jdk.CollectionConverters._
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
-trait DomainAliasResolution {
+trait DomainAliasResolution extends AutoCloseable {
   def domainIdForAlias(alias: DomainAlias): Option[DomainId]
   def aliasForDomainId(id: DomainId): Option[DomainAlias]
 }
@@ -79,6 +80,7 @@ class DomainAliasManager private (
       )
     } yield ()
 
+  override def close(): Unit = Lifecycle.close(domainAliasAndIdStore)(logger)
 }
 
 object DomainAliasManager {

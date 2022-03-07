@@ -258,6 +258,7 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
     }
   }
 
+  override def close(): Unit = ()
 }
 
 /* An in-memory, mutable running ACS snapshot */

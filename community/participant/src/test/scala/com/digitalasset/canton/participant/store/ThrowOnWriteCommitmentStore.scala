@@ -158,4 +158,6 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
         traceContext: TraceContext
     ): Future[Unit] = incrementCounterAndErrF()
   }
+
+  override def close(): Unit = ()
 }

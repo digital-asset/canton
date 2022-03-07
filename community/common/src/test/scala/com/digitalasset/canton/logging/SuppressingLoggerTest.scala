@@ -13,6 +13,9 @@ import scala.collection.immutable.ListMap
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
+@SuppressWarnings(
+  Array("com.digitalasset.canton.DiscardedFuture")
+) // TODO(#8448) Do not discard the futures
 class SuppressingLoggerTest extends AnyWordSpec with BaseTest {
 
   "suppress" should {

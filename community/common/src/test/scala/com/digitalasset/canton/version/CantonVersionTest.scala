@@ -11,55 +11,48 @@ class CantonVersionTest extends AnyWordSpec with BaseTest {
   private def v(rawVersion: String): ProtocolVersion = ProtocolVersion.create(rawVersion).value
   "CantonVersion" should {
     "parse version string if valid" in {
-      ProtocolVersion.create("5.1.3").value shouldBe new ProtocolVersion(5, 1, 3, false)
+      ProtocolVersion.create("5.1.3").value shouldBe new ProtocolVersion(5, 1, 3)
       ProtocolVersion.create("1.43.3-SNAPSHOT").value shouldBe new ProtocolVersion(
         1,
         43,
         3,
-        true,
         Some("SNAPSHOT"),
       )
       ProtocolVersion.create("1.43.3-rc").value shouldBe new ProtocolVersion(
         1,
         43,
         3,
-        false,
         Some("rc"),
       )
       ProtocolVersion.create("1.43.3-rc9").value shouldBe new ProtocolVersion(
         1,
         43,
         3,
-        false,
         Some("rc9"),
       )
       ProtocolVersion.create("1.1.1-SNAPSHT").value shouldBe new ProtocolVersion(
         1,
         1,
         1,
-        false,
         Some("SNAPSHT"),
       )
       ProtocolVersion.create("1.1.1-rc10").value shouldBe new ProtocolVersion(
         1,
         1,
         1,
-        false,
         Some("rc10"),
       )
       ProtocolVersion.create("1.1.1-rc0").value shouldBe new ProtocolVersion(
         1,
         1,
         1,
-        false,
         Some("rc0"),
       )
-      ProtocolVersion.create("1.1.1-").value shouldBe new ProtocolVersion(1, 1, 1, false, Some(""))
+      ProtocolVersion.create("1.1.1-").value shouldBe new ProtocolVersion(1, 1, 1, Some(""))
       ProtocolVersion.create("1.1.1-SNAPSHOT-rc").value shouldBe new ProtocolVersion(
         1,
         1,
         1,
-        true,
         Some("SNAPSHOT-rc"),
       )
 

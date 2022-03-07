@@ -3,25 +3,28 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.DbStorage
+import cats.data.OptionT
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 import io.functionmeta.functionFullName
-import cats.data.OptionT
+import com.digitalasset.canton.config.RequireTypes.String300
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbIndexedStringStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
     extends IndexedStringStore
-    with NamedLogging {
+    with DbStore {
 
   import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
   import storage.api._
 
-  override def getOrCreateIndex(dbTyp: IndexedStringType, str: String): Future[Int] =
+  override def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int] =
     getIndexForStr(dbTyp.source, str).getOrElseF {
       insertIgnore(dbTyp.source, str).flatMap { _ =>
         getIndexForStr(dbTyp.source, str).getOrElse {
@@ -33,7 +36,7 @@ class DbIndexedStringStore(
       }
     }
 
-  private def getIndexForStr(dbType: Int, str: String): OptionT[Future, Int] =
+  private def getIndexForStr(dbType: Int, str: String300): OptionT[Future, Int] =
     OptionT(
       storage
         .query(
@@ -44,7 +47,7 @@ class DbIndexedStringStore(
         )
     )
 
-  private def insertIgnore(dbType: Int, str: String): Future[Unit] = {
+  private def insertIgnore(dbType: Int, str: String300): Future[Unit] = {
     // not sure how to get "last insert id" here in case the row was inserted
     // therefore, we're just querying the db again. this is a bit dorky,
     // but we'll hardly ever do this, so should be good
@@ -60,11 +63,11 @@ class DbIndexedStringStore(
     storage.update_(query, functionFullName)
   }
 
-  override def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String]] = {
+  override def getForIndex(dbTyp: IndexedStringType, idx: Int): Future[Option[String300]] = {
     storage
       .query(
         sql"select string from static_strings where id = $idx and source = ${dbTyp.source}"
-          .as[String],
+          .as[String300],
         functionFullName,
       )
       .map(_.headOption)

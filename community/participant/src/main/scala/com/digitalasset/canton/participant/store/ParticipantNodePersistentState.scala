@@ -7,7 +7,7 @@ import akka.stream.Materializer
 import cats.syntax.foldable._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -16,9 +16,9 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.retry.RetryEither
+import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import io.functionmeta.functionFullName
 
 import scala.concurrent.duration._
@@ -39,7 +39,14 @@ class ParticipantNodePersistentState private (
 ) extends AutoCloseable
     with NamedLogging {
   override def close(): Unit =
-    Lifecycle.close(multiDomainEventLog)(logger)
+    Lifecycle.close(
+      settingsStore,
+      participantEventLog,
+      multiDomainEventLog,
+      inFlightSubmissionStore,
+      commandDeduplicationStore,
+      pruningStore,
+    )(logger)
 }
 
 object ParticipantNodePersistentState {
@@ -67,43 +74,50 @@ object ParticipantNodePersistentState {
       mat: Materializer,
       traceContext: TraceContext,
   ): Future[ParticipantNodePersistentState] = {
-    val settingsStore = ParticipantSettingsStore(storage, loggerFactory)
-    val participantEventLog = ParticipantEventLog(storage, indexedStringStore, loggerFactory)
+    val settingsStore = ParticipantSettingsStore(storage, timeouts, loggerFactory)
+    val participantEventLog =
+      ParticipantEventLog(storage, indexedStringStore, timeouts, loggerFactory)
     val inFlightSubmissionStore = InFlightSubmissionStore(
       storage,
       parameters.maxItemsInSqlClause,
       parameters.dbBatchAggregationConfig,
+      timeouts,
       loggerFactory,
     )
-    val commandDeduplicationStore = CommandDeduplicationStore(storage, loggerFactory)
-    val pruningStore = ParticipantPruningStore(storage, loggerFactory)
+    val commandDeduplicationStore = CommandDeduplicationStore(storage, timeouts, loggerFactory)
+    val pruningStore = ParticipantPruningStore(storage, timeouts, loggerFactory)
 
     val logger = loggerFactory.getTracedLogger(ParticipantNodePersistentState.getClass)
+
     implicit lazy val loggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
+
+    val flagCloseable = FlagCloseable(logger, timeouts)
+    implicit val closeContext: CloseContext = CloseContext(flagCloseable)
 
     def waitForSettingsStoreUpdate[A](
         lens: ParticipantSettingsStore.Settings => Option[A],
         settingName: String,
-    ): Future[A] = {
-      RetryEither(
-        timeouts.activeInit.retries(50.millis),
-        50.millis.toMillis,
-        functionFullName,
-        logger,
-      ) {
-        settingsStore.refreshCache()
-        lens(settingsStore.settings).toRight(())
-      } match {
-        case Left(_) =>
-          ErrorUtil.internalErrorAsync(
+    ): Future[A] =
+      retry
+        .Pause(
+          logger,
+          flagCloseable,
+          timeouts.activeInit.retries(50.millis),
+          50.millis,
+          functionFullName,
+        )
+        .apply(
+          settingsStore.refreshCache().map(_ => lens(settingsStore.settings).toRight(())),
+          NoExnRetryable,
+        )
+        .map(_.getOrElse {
+          ErrorUtil.internalError(
             new IllegalStateException(
               s"Passive replica failed to read $settingName, needs to be written by active replica"
             )
           )
-        case Right(a) => Future.successful(a)
-      }
-    }
+        })
 
     def checkOrSetMaxDedupDuration(
         maxDeduplicationDuration: NonNegativeFiniteDuration
@@ -196,6 +210,7 @@ object ParticipantNodePersistentState {
         timeouts,
         loggerFactory,
       )
+      _ = flagCloseable.close()
     } yield {
       new ParticipantNodePersistentState(
         settingsStore,

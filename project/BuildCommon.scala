@@ -5,7 +5,7 @@ import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.headerSources
 import org.scalafmt.sbt.ScalafmtPlugin
 import sbt.Keys._
 import sbt.internal.util.ManagedLogger
-import sbt._
+import sbt.{Def, _}
 import sbt.nio.Keys._
 import sbtassembly.AssemblyKeys._
 import sbtassembly.AssemblyPlugin.autoImport.assembly
@@ -349,8 +349,14 @@ object BuildCommon {
     oracleUnitTestTask,
   ) ++ pbSettings
 
+  lazy val cantonWarts = Seq(
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
+    wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
+  ).flatMap(_.settings)
+
   // applies to all Canton-based sub-projects (descendants of community-common)
-  lazy val sharedCantonSettings = sharedSettings ++ Seq(
+  lazy val sharedCantonSettings = sharedSettings ++ cantonWarts ++ Seq(
     //
     // Enable logging of begin and end of test cases, test suites, and test runs.
     Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
@@ -392,6 +398,7 @@ object BuildCommon {
     conf / headerSources ++= (((conf / sourceDirectory).value / relativeDir) ** filePattern).get
 
   object CommunityProjects {
+
     lazy val `community-app` = project
       .in(file("community/app"))
       .dependsOn(
@@ -448,7 +455,7 @@ object BuildCommon {
     lazy val `community-common` = project
       .in(file("community/common"))
       .enablePlugins(BuildInfoPlugin, DamlPlugin)
-      .dependsOn(blake2b, functionmeta, `slick-fork`)
+      .dependsOn(blake2b, functionmeta, `slick-fork`, `wartremover-extension`)
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
@@ -686,6 +693,20 @@ object BuildCommon {
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
         coverageEnabled := false,
+      )
+
+    lazy val `wartremover-extension` = project
+      .in(file("community/lib/wartremover"))
+      .dependsOn(`slick-fork`)
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          scalatest % Test,
+          slick,
+          wartremover_dep,
+        ),
       )
 
     lazy val `daml-fork` = project

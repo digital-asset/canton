@@ -85,7 +85,8 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
 
   /** Validate the config that the storage configuration is not shared between nodes. */
   private def noDuplicateStorage(config: CantonCommunityConfig): ValidatedNel[String, Unit] = {
-    val dbAccessToNodes = extractNormalizedDbAccess(config.participants, config.domains)
+    val dbAccessToNodes =
+      extractNormalizedDbAccess(config.participantsByString, config.domainsByString)
 
     dbAccessToNodes.toList
       .traverse_ {

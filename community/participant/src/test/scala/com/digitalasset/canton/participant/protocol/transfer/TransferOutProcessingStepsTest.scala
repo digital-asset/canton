@@ -426,14 +426,15 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           1L,
           Seq(WithTransactionId(contract, transactionId)),
         )
-        _submissionResult <- valueOrFail(
-          outProcessingSteps.prepareSubmission(
-            submissionParam,
-            originMediator,
-            state,
-            cryptoSnapshot,
-          )
-        )("prepare submission failed")
+        _submissionResult <-
+          outProcessingSteps
+            .prepareSubmission(
+              submissionParam,
+              originMediator,
+              state,
+              cryptoSnapshot,
+            )
+            .valueOrFailShutdown("prepare submission failed")
       } yield succeed
     }
 
@@ -453,7 +454,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           1L,
           Seq(WithTransactionId(contract, transactionId)),
         )
-        submissionResult <- leftOrFail(
+        submissionResult <- leftOrFailShutdown(
           outProcessingSteps.prepareSubmission(
             submissionParam,
             originMediator,

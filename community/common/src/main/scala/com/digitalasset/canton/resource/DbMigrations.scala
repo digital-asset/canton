@@ -216,7 +216,10 @@ trait DbMigrations { this: NamedLogging =>
       val either: Either[DbMigrations.Error, Unit] = profile match {
 
         case Profile.Postgres(jdbc) =>
-          val expectedPostgresVersion = 11
+          val expectedPostgresVersions = Seq(10, 11)
+          val expectedPostgresVersionsStr = Seq(10, 11).mkString(" or ")
+          @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
+          val maxPostgresVersion = expectedPostgresVersions.max
 
           // See https://www.postgresql.org/docs/9.1/sql-show.html
           val query = sql"show server_version".as[String]
@@ -239,17 +242,17 @@ trait DbMigrations { this: NamedLogging =>
                 )
               )
             _unit <- {
-              if (majorVersion == expectedPostgresVersion) Right(())
-              else if (majorVersion > expectedPostgresVersion) {
+              if (expectedPostgresVersions.contains(majorVersion)) Right(())
+              else if (majorVersion > maxPostgresVersion) {
                 val level = if (standardConfig) Level.WARN else Level.INFO
                 LoggerUtil.logAtLevel(
                   level,
-                  s"Expected Postgres version $expectedPostgresVersion but got higher version $versionString",
+                  s"Expected Postgres version $expectedPostgresVersionsStr but got higher version $versionString",
                 )
                 Right(())
               } else
                 Left(
-                  s"Expected Postgres version $expectedPostgresVersion but got lower version $versionString"
+                  s"Expected Postgres version $expectedPostgresVersionsStr but got lower version $versionString"
                 )
             }
           } yield ()
@@ -294,6 +297,7 @@ trait DbMigrations { this: NamedLogging =>
 
             logger.debug(s"Checking NLS parameter $param")
 
+            @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
             val queryDbSetting =
               sql"SELECT value from nls_database_parameters where parameter=$param"
                 .as[String]
@@ -301,6 +305,7 @@ trait DbMigrations { this: NamedLogging =>
             val dbSettingO =
               timeouts.network.await(functionFullName + s"-database-$param")(db.run(queryDbSetting))
 
+            @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
             val querySessionSetting =
               sql"SELECT value from nls_session_parameters where parameter=$param"
                 .as[String]

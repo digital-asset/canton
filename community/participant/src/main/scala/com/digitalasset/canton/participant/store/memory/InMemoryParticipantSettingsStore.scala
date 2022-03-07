@@ -57,4 +57,6 @@ class InMemoryParticipantSettingsStore(override protected val loggerFactory: Nam
     cache.updateAndGet(_.orElse(Some(Settings())))
     Future.unit
   }
+
+  override def close(): Unit = ()
 }

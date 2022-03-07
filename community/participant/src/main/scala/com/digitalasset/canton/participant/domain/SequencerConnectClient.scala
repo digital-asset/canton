@@ -20,7 +20,7 @@ import com.digitalasset.canton.{DomainAlias, DomainId}
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
-trait SequencerConnectClient extends NamedLogging {
+trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 
   def getDomainId(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext

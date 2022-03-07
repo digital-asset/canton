@@ -15,8 +15,7 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InstanceName
-import com.digitalasset.canton.config.RequireTypes.String185
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
@@ -392,6 +391,7 @@ class DomainNodeBootstrap(
           topologyManagerSequencerCounterTrackerStore = SequencerCounterTrackerStore(
             storage,
             managerDiscriminator,
+            timeouts,
             loggerFactory,
           )
           initialKeys <- EitherT.right(manager.getKeysForBootstrapping())
@@ -456,7 +456,7 @@ class DomainNodeBootstrap(
           agreementManager <- config.serviceAgreement
             .traverse { agreementFile =>
               ServiceAgreementManager
-                .create(agreementFile.toScala, storage, crypto.pureCrypto, loggerFactory)
+                .create(agreementFile.toScala, storage, crypto.pureCrypto, timeouts, loggerFactory)
             }
             .toEitherT[Future]
 
@@ -505,7 +505,7 @@ class DomainNodeBootstrap(
             syncCrypto,
           )
 
-          dispatcher <- TopologyManagementInitialization(
+          topologyManagementArtefacts <- TopologyManagementInitialization(
             config,
             domainId,
             nodeId,
@@ -553,7 +553,7 @@ class DomainNodeBootstrap(
               adminServerRegistry,
               manager,
               agreementManager,
-              dispatcher,
+              topologyManagementArtefacts,
               storage,
               sequencerRuntime,
               mediatorRuntime,
@@ -607,7 +607,7 @@ object DomainNodeBootstrap {
         traceContext: TraceContext,
     ): Either[String, DomainNodeBootstrap] = {
       for {
-        domainName <- String185.create(name)
+        domainName <- InstanceName.create(name).leftMap(_.toString)
       } yield new DomainNodeBootstrap(
         domainName,
         config,
@@ -644,7 +644,7 @@ class Domain(
     adminApiRegistry: CantonMutableHandlerRegistry,
     val domainTopologyManager: DomainTopologyManager,
     val agreementManager: Option[ServiceAgreementManager],
-    private[canton] val identityDispatcher: DomainTopologyDispatcher,
+    topologyManagementArtefacts: TopologyManagementComponents,
     storage: Storage,
     sequencerRuntime: SequencerRuntime,
     @VisibleForTesting
@@ -672,8 +672,8 @@ class Domain(
       }
       val topologyQueues = TopologyQueueStatus(
         manager = domainTopologyManager.queueSize,
-        dispatcher = identityDispatcher.queueSize,
-        clients = identityDispatcher.targetClient.numPendingChanges,
+        dispatcher = topologyManagementArtefacts.dispatcher.queueSize,
+        clients = topologyManagementArtefacts.client.numPendingChanges,
       )
       DomainStatus(
         domainTopologyManager.id,
@@ -688,7 +688,7 @@ class Domain(
   override def close(): Unit = {
     logger.debug("Stopping domain runner")
     Lifecycle.close(
-      identityDispatcher,
+      topologyManagementArtefacts,
       domainTopologyManager,
       mediatorRuntime,
       sequencerRuntime,

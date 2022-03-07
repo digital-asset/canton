@@ -10,14 +10,13 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.functor._
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.SequencerHighAvailabilityConfig.SingleSequencerTotalNodeCount
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
@@ -38,7 +37,6 @@ import scala.util.{Failure, Success}
 class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExecutorService {
 
   class MockEventSignaller extends EventSignaller {
-    override val timeouts = SequencerWriterSourceTest.this.timeouts
     private val listenerRef =
       new AtomicReference[Option[WriteNotification => Unit]](None)
 
@@ -64,12 +62,10 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     ): Source[ReadSignal, NotUsed] =
       ???
 
-    override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq()
-    override protected def logger: TracedLogger =
-      SequencerWriterSourceTest.this.logger
+    override def close(): Unit = ()
   }
 
-  class Env(highAvailabilityConfig: SequencerHighAvailabilityConfig) extends FlagCloseableAsync {
+  class Env(keepAliveInterval: Option[NonNegativeFiniteDuration]) extends FlagCloseableAsync {
     override val timeouts = SequencerWriterSourceTest.this.timeouts
     protected val logger = SequencerWriterSourceTest.this.logger
     implicit val actorSystem = ActorSystem()
@@ -109,7 +105,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       logger.error("Writer flow failed", _), {
         SequencerWriterSource(
           testWriterConfig,
-          highAvailabilityConfig,
+          totalNodeCount = 1,
+          keepAliveInterval,
           TestDomainParameters.domainSyncCryptoApi(
             DefaultTestIdentities.domainId,
             loggerFactory,
@@ -124,6 +121,9 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       },
     )
 
+    @SuppressWarnings(
+      Array("com.digitalasset.canton.DiscardedFuture")
+    ) // TODO(#8448) Do not discard futures
     def completeFlow(): Future[Unit] = {
       writer.complete()
       doneF.void
@@ -141,9 +141,9 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   def withEnv(
-      highAvailabilityConfig: SequencerHighAvailabilityConfig = SequencerHighAvailabilityConfig()
+      keepAliveInterval: Option[NonNegativeFiniteDuration] = None
   )(testCode: Env => Future[Assertion]): Future[Assertion] = {
-    val env = new Env(highAvailabilityConfig)
+    val env = new Env(keepAliveInterval)
     val result = testCode(env)
     result.onComplete(_ => env.close())
     result
@@ -304,7 +304,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         }
 
         inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-          message should (include("Invalid signing timestamp")
+          message.unwrap should (include("Invalid signing timestamp")
             and include("The signing timestamp must be before or at "))
         }
       }
@@ -331,7 +331,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         }
 
         inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-          message should (include("Invalid signing timestamp")
+          message.unwrap should (include("Invalid signing timestamp")
             and include("The signing timestamp must be strictly after "))
         }
       }
@@ -453,11 +453,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   "an idle writer still updates its watermark to demonstrate that its online" in withEnv(
-    SequencerHighAvailabilityConfig(
-      enabled = true,
-      totalNodeCount = SingleSequencerTotalNodeCount,
-      keepAliveInterval = NonNegativeFiniteDuration.ofSeconds(1L),
-    )
+    Some(NonNegativeFiniteDuration.ofSeconds(1L))
   ) { implicit env =>
     import env._
     // the specified keepAliveInterval of 1s ensures the watermark gets updated

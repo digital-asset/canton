@@ -14,6 +14,7 @@ import com.daml.ledger.participant.state.v2.ChangeId
 import com.daml.ledger.participant.state.v2.Update.{CommandRejected, TransactionAccepted}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
@@ -266,6 +267,7 @@ object MultiDomainEventLog {
       executionContext: ExecutionContext,
       mat: Materializer,
       traceContext: TraceContext,
+      closeContext: CloseContext,
   ): Future[MultiDomainEventLog] =
     storage match {
       case _: MemoryStorage =>

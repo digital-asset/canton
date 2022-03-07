@@ -9,6 +9,7 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor._
@@ -142,7 +143,7 @@ trait ProcessingSteps[
       mediatorId: MediatorId,
       ephemeralState: SyncDomainEphemeralStateLookup,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): EitherT[Future, SubmissionError, Submission]
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SubmissionError, Submission]
 
   /** Convert [[com.digitalasset.canton.participant.protocol.ProtocolProcessor.NoMediatorError]] into a submission error */
   def embedNoMediatorError(error: NoMediatorError): SubmissionError

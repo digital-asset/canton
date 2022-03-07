@@ -12,7 +12,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.archive.DarParser
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
@@ -76,13 +76,15 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
     test(env)
   }
 
+  lazy val cantonExamplesDescription = String256M.tryCreate("CantonExamples")
+
   "PackageService" should {
     "append DAR and packages from file" in withEnv { env =>
       import env._
 
       val expectedPackageIdsAndState = examplePackages
         .map(DamlPackageStore.readPackageId)
-        .map(PackageDescription(_, "CantonExamples"))
+        .map(PackageDescription(_, cantonExamplesDescription))
       val payload = BinaryFileUtil
         .readByteStringFromFile(CantonExamplesPath)
         .valueOrFail("could not load examples")
@@ -109,7 +111,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
 
       val expectedPackageIdsAndState = examplePackages
         .map(DamlPackageStore.readPackageId)
-        .map(PackageDescription(_, "CantonExamples"))
+        .map(PackageDescription(_, cantonExamplesDescription))
 
       for {
         hash <- sut

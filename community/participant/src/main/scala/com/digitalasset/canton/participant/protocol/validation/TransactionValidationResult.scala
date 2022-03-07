@@ -34,6 +34,8 @@ case class TransactionValidationResult(
     hostedInformeeStakeholders: Set[LfPartyId],
 ) {
 
+  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   def commitSet(requestId: RequestId, alarm: String => Future[Unit]): CommitSet = {
     if (successfulActivenessCheck) {
       val archivals = consumedInputsOfHostedParties ++ transient

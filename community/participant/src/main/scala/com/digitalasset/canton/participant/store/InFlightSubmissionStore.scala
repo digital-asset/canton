@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -32,7 +32,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * Bulk operations may interleave arbitrarily the atomic changes of the affected individual submissions
   * and therefore need not be atomic as a whole.
   */
-trait InFlightSubmissionStore {
+trait InFlightSubmissionStore extends AutoCloseable {
 
   /** Retrieves the in-flight submission for the given
     * [[com.daml.ledger.participant.state.v2.ChangeId]] if one exists.
@@ -135,6 +135,7 @@ object InFlightSubmissionStore {
       storage: Storage,
       maxItemsInSqlInClause: PositiveNumeric[Int],
       registerBatchAggregatorConfig: BatchAggregatorConfig,
+      timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext
@@ -145,6 +146,7 @@ object InFlightSubmissionStore {
         jdbc,
         maxItemsInSqlInClause,
         registerBatchAggregatorConfig,
+        timeouts,
         loggerFactory,
       )
   }

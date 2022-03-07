@@ -940,6 +940,8 @@ class SequencerClient(
       SyncCloseable("sequencer-client-subscription", closeSubscription()),
       SyncCloseable("sequencer-client-transport", transport.close()),
       SyncCloseable("sequencer-client-recorder", recorderO.foreach(_.close())),
+      SyncCloseable("sequencer-send-tracker", sendTracker.close()),
+      SyncCloseable("sequenced-event-store", sequencedEventStore.close()),
       SyncCloseable(
         "sequencer-client-close-reason", {
           val _ =
@@ -1089,6 +1091,7 @@ object SequencerClient {
           case Some(ReplayConfig(recording, SequencerEvents)) =>
             EitherT.rightT(
               new ReplayingEventsSequencerClientTransport(
+                domainParameters.protocolVersion,
                 recording.fullFilePath,
                 metrics,
                 processingTimeout,
@@ -1099,6 +1102,7 @@ object SequencerClient {
             for {
               underlyingTransport <- mkRealTransport
             } yield new ReplayingSendsSequencerClientTransport(
+              domainParameters.protocolVersion,
               recording.fullFilePath,
               replaySendsConfig,
               member,

@@ -7,6 +7,7 @@ import cats.syntax.option._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, SignedContent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -229,8 +230,8 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
       for {
         // provide an event with a timestamp (not our response to requesting a time)
         _ <- observeTimeProof(42)
-        fetch1 <- fetchP1
-        fetch2 <- fetchP2
+        fetch1 <- fetchP1.failOnShutdown("fetch first time proof")
+        fetch2 <- fetchP2.failOnShutdown("fetch second time proof")
       } yield {
         fetch1 shouldBe ts(42)
         fetch2 shouldBe ts(42)
@@ -246,12 +247,16 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         _ <- observeTimeProof(42)
         _ = clock.advanceTo(ts(5))
         // should return the existing observation as it's within the freshness bounds
-        fetch1 <- timeTracker.fetchTime(NonNegativeFiniteDuration.ofSeconds(5))
+        fetch1 <- timeTracker
+          .fetchTime(NonNegativeFiniteDuration.ofSeconds(5))
+          .failOnShutdown("fetch time")
         _ = fetch1 shouldBe ts(42)
         // we've returned a sufficiently fresh time without causing a request
         _ = requestSubmitter.hasRequestedTime shouldBe false
         // however if we now request a timestamp that was received within the last 2 seconds, we'll have to go fetch one
-        fetch2F = timeTracker.fetchTime(NonNegativeFiniteDuration.ofSeconds(2))
+        fetch2F = timeTracker
+          .fetchTime(NonNegativeFiniteDuration.ofSeconds(2))
+          .failOnShutdown("fetch time")
         _ = requestSubmitter.hasRequestedTime shouldBe true
         _ <- observeTimeProof(43)
         fetch2 <- fetch2F
@@ -268,13 +273,28 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
         for {
           // observe a recent event which isn't a time proof
           _ <- observeTimestamp(1)
-          timeProofF = timeTracker.fetchTimeProof()
+          timeProofF = timeTracker.fetchTimeProof().failOnShutdown("fetch time")
           // also we've seen a recent event we know this won't suffice for a time proof
           _ = requestSubmitter.hasRequestedTime shouldBe true
           // then observe one
           _ <- observeTimeProof(42)
           timeProof <- timeProofF
         } yield timeProof.timestamp shouldBe ts(42)
+    }
+
+    "stop waiting on shutdown" in { env =>
+      import env._
+
+      clock.advanceTo(ts(1))
+
+      for {
+        // observe a recent event which isn't a time proof
+        _ <- observeTimestamp(1)
+        timeProofF = timeTracker.fetchTimeProof()
+        // Shutdown the time tracker
+        _ = timeTracker.close()
+        timeProof <- timeProofF.unwrap
+      } yield timeProof shouldBe AbortedDueToShutdown
     }
   }
 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.db.DbRegisteredDomainsStore
 import com.digitalasset.canton.participant.store.memory.InMemoryRegisteredDomainsStore
@@ -17,7 +18,7 @@ trait RegisteredDomainsStore extends DomainAliasAndIdStore
 
 /** Keeps track of domainIds of all domains the participant has previously connected to.
   */
-trait DomainAliasAndIdStore {
+trait DomainAliasAndIdStore extends AutoCloseable {
 
   /** Adds a mapping from a domain alias to a domain id
     */
@@ -37,10 +38,10 @@ object DomainAliasAndIdStore {
 }
 
 object RegisteredDomainsStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
+  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
+      implicit ec: ExecutionContext
   ): RegisteredDomainsStore = storage match {
     case _: MemoryStorage => new InMemoryRegisteredDomainsStore(loggerFactory)
-    case jdbc: DbStorage => new DbRegisteredDomainsStore(jdbc)
+    case jdbc: DbStorage => new DbRegisteredDomainsStore(jdbc, timeouts, loggerFactory)
   }
 }

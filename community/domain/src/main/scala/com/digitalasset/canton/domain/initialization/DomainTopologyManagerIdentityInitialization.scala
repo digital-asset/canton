@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.initialization
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{KeyName, PublicKey, X509Certificate}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
@@ -17,15 +17,7 @@ import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   OwnerToKeyMapping,
 }
-import com.digitalasset.canton.topology.{
-  DomainTopologyManagerId,
-  Identifier,
-  LegalIdentityInit,
-  MediatorId,
-  Namespace,
-  NodeId,
-  UniqueIdentifier,
-}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -34,7 +26,7 @@ trait DomainTopologyManagerIdentityInitialization {
   self: CantonNodeBootstrapBase[_, _, DomainNodeParameters] =>
 
   def initializeTopologyManagerIdentity(
-      name: LengthLimitedString,
+      name: InstanceName,
       legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
       initialDynamicDomainParameters: DynamicDomainParameters,
   )(implicit

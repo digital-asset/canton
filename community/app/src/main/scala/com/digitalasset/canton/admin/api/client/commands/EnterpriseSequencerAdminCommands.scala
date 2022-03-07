@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.sequencing.admin.client.HttpSequencerAdminClient
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
-import com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot
+import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -170,6 +170,23 @@ object EnterpriseSequencerAdminCommands {
         request: v0.DisableMemberRequest,
     ): Future[Empty] = service.disableMember(request)
     override def handleResponse(response: Empty): Either[String, Unit] = Right(())
+  }
+
+  final case class AuthorizeLedgerIdentity(ledgerIdentity: LedgerIdentity)
+      extends BaseSequencerAdministrationCommand[
+        v0.LedgerIdentity.AuthorizeRequest,
+        v0.LedgerIdentity.AuthorizeResponse,
+        Unit,
+      ] {
+    override def createRequest(): Either[String, v0.LedgerIdentity.AuthorizeRequest] =
+      Right(v0.LedgerIdentity.AuthorizeRequest(Some(ledgerIdentity.toProtoV0)))
+    override def submitRequest(
+        service: v0.EnterpriseSequencerAdministrationServiceGrpc.EnterpriseSequencerAdministrationServiceStub,
+        request: v0.LedgerIdentity.AuthorizeRequest,
+    ): Future[v0.LedgerIdentity.AuthorizeResponse] = service.authorizeLedgerIdentity(request)
+    override def handleResponse(
+        response: v0.LedgerIdentity.AuthorizeResponse
+    ): Either[String, Unit] = Right(())
   }
 
   final case class BootstrapTopology(

@@ -4,15 +4,18 @@
 package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
   CryptoPublicStore,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.KeyOwner
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HasVersionedToByteString
 import com.google.protobuf.ByteString
@@ -26,7 +29,11 @@ class Crypto(
     val cryptoPrivateStore: CryptoPrivateStore,
     val cryptoPublicStore: CryptoPublicStore,
     val javaKeyConverter: JavaKeyConverter,
-)(implicit ec: ExecutionContext) {
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends NamedLogging
+    with FlagCloseable {
 
   /** Helper method to generate a new signing key pair and store the public key in the public store as well. */
   def generateSigningKey(
@@ -57,6 +64,8 @@ class Crypto(
           EncryptionKeyGenerationError.EncryptionPublicStoreError
         )
     } yield publicKey
+
+  override def onClosed(): Unit = Lifecycle.close(cryptoPrivateStore, cryptoPublicStore)(logger)
 }
 
 trait CryptoPureApi extends EncryptionOps with SigningOps with HmacOps with HkdfOps with HashOps

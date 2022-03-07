@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.processing
 
 import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time._
@@ -17,6 +18,8 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
+import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.ProcessingTimeout
 
 /** Compute and synchronise the effective timestamps
   *
@@ -33,9 +36,16 @@ import scala.util.{Failure, Success}
   * This class (hopefully) takes care of this logic
   */
 class TopologyTimestampPlusEpsilonTracker(
-    val loggerFactory: NamedLoggerFactory
+    val timeouts: ProcessingTimeout,
+    val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging
-    with TimeAwaiter {
+    with TimeAwaiter
+    with FlagCloseable {
+
+  override protected def onClosed(): Unit = {
+    expireTimeAwaiter()
+    super.onClosed()
+  }
 
   /** track changes to epsilon carefully.
     *
@@ -57,8 +67,8 @@ class TopologyTimestampPlusEpsilonTracker(
   private val lastEffectiveTimeProcessed =
     new AtomicReference[EffectiveTime](EffectiveTime.MinValue)
   private val sequentialWait =
-    new AtomicReference[Future[EffectiveTime]](
-      Future.successful(EffectiveTime.MinValue)
+    new AtomicReference[FutureUnlessShutdown[EffectiveTime]](
+      FutureUnlessShutdown.pure(EffectiveTime.MinValue)
     )
 
   override protected def currentKnownTime: CantonTimestamp = lastEffectiveTimeProcessed.get().value
@@ -91,7 +101,7 @@ class TopologyTimestampPlusEpsilonTracker(
   def adjustTimestampForUpdate(sequencingTime: SequencedTime)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[EffectiveTime] =
+  ): FutureUnlessShutdown[EffectiveTime] =
     synchronize(
       sequencingTime, {
         val adjusted = adjustByEpsilon(sequencingTime)
@@ -121,37 +131,43 @@ class TopologyTimestampPlusEpsilonTracker(
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[EffectiveTime] = {
+  ): FutureUnlessShutdown[EffectiveTime] = {
     // note, this is a side effect free chain await
-    def chainUpdates(previousEffectiveTime: EffectiveTime): Future[EffectiveTime] = {
-      FutureUtil.logOnFailure(
-        {
-          val synchronizeAt = CantonTimestamp.min(previousEffectiveTime.value, sequencingTime.value)
-          awaitKnownTimestamp(synchronizeAt) match {
-            case None => Future.successful(computeEffective)
-            case Some(value) =>
-              logger.debug(
-                s"Need to wait until topology processing has caught up at $sequencingTime"
-              )
-              value.map { _ =>
-                logger.debug(s"Topology processing caught up at $sequencingTime")
-                computeEffective
-              }
-          }
-        },
-        "chaining of sequential waits failed",
+    def chainUpdates(previousEffectiveTime: EffectiveTime): FutureUnlessShutdown[EffectiveTime] = {
+      FutureUnlessShutdown(
+        FutureUtil.logOnFailure(
+          {
+            val synchronizeAt =
+              CantonTimestamp.min(previousEffectiveTime.value, sequencingTime.value)
+            awaitKnownTimestampUS(synchronizeAt) match {
+              case None => FutureUnlessShutdown.pure(computeEffective)
+              case Some(value) =>
+                logger.debug(
+                  s"Need to wait until topology processing has caught up at $sequencingTime"
+                )
+                value.map { _ =>
+                  logger.debug(s"Topology processing caught up at $sequencingTime")
+                  computeEffective
+                }
+            }
+          }.unwrap,
+          "chaining of sequential waits failed",
+        )
       )
     }
-    val nextChainP = Promise[EffectiveTime]()
-    val ret = sequentialWait.getAndUpdate(cur => cur.flatMap(_ => nextChainP.future))
+    val nextChainP = Promise[UnlessShutdown[EffectiveTime]]()
+    val ret =
+      sequentialWait.getAndUpdate(cur => cur.flatMap(_ => FutureUnlessShutdown(nextChainP.future)))
     ret.onComplete {
-      case Success(previousEffectiveTime) =>
+      case Success(UnlessShutdown.AbortedDueToShutdown) =>
+        nextChainP.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard
+      case Success(UnlessShutdown.Outcome(previousEffectiveTime)) =>
         chainUpdates(previousEffectiveTime).map { effectiveTime =>
-          nextChainP.success(effectiveTime)
-        } // this is supervised
+          nextChainP.trySuccess(UnlessShutdown.Outcome(effectiveTime)).discard
+        }.discard // this is supervised
       case Failure(exception) => nextChainP.failure(exception)
     }
-    nextChainP.future
+    FutureUnlessShutdown(nextChainP.future)
   }
 
   def effectiveTimeProcessed(effectiveTime: EffectiveTime): Unit = {
@@ -164,7 +180,7 @@ class TopologyTimestampPlusEpsilonTracker(
   def adjustTimestampForTick(sequencingTime: SequencedTime)(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[EffectiveTime] = synchronize(
+  ): FutureUnlessShutdown[EffectiveTime] = synchronize(
     sequencingTime, {
       val adjusted = adjustByEpsilon(sequencingTime)
       val monotonic = uniqueUpdateTime.updateAndGet(EffectiveTime.max(_, adjusted))
@@ -218,12 +234,14 @@ object TopologyTimestampPlusEpsilonTracker {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): Future[EffectiveTime] = {
+  ): FutureUnlessShutdown[EffectiveTime] = {
     for {
-      topologyChangeDelay <- TopologyTimestampPlusEpsilonTracker.determineEpsilonFromStore(
-        sequencedTs,
-        store,
-        loggerFactory,
+      topologyChangeDelay <- FutureUnlessShutdown.outcomeF(
+        TopologyTimestampPlusEpsilonTracker.determineEpsilonFromStore(
+          sequencedTs,
+          store,
+          loggerFactory,
+        )
       )
       // we initialise our tracker with the current topology change delay, using the sequenced timestamp
       // as the effective time. this is fine as we know that if epsilon(sequencedTs) = e, then this e was activated by

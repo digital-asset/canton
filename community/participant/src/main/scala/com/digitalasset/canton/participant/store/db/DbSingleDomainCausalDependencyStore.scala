@@ -3,16 +3,18 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.DomainPerPartyCausalState
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore
 import com.digitalasset.canton.protocol.TransferId
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Profile
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{DomainId, LfPartyId}
 import io.functionmeta.functionFullName
@@ -23,11 +25,12 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 
 class DbSingleDomainCausalDependencyStore(
     val domainId: DomainId,
-    storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends SingleDomainCausalDependencyStore
-    with NamedLogging {
+    with DbStore {
 
   override val state: DomainPerPartyCausalState = new TrieMap()
 
@@ -96,7 +99,7 @@ object DbSingleDomainCausalDependencyStore {
       transferOutId: Option[TransferId],
       domainId: DomainId,
       profile: Profile,
-  )(implicit elc: ErrorLoggingContext): Future[Unit] = {
+  )(implicit elc: ErrorLoggingContext, closeContext: CloseContext): Future[Unit] = {
     val insertStatement =
       """
         |insert into per_party_causal_dependencies (owning_domain_id, constraint_ts, request_counter, party_id, transfer_origin_domain_if_present, domain_id, domain_ts)
@@ -106,6 +109,7 @@ object DbSingleDomainCausalDependencyStore {
       map.toSeq.map(domainTs => party -> domainTs)
     }
     val bulkInsert = DbStorage.bulkOperation_(insertStatement, toInsert, profile) { pp => pair =>
+      import DbStorage.Implicits._
       val (party, (otherDomain, ts)) = pair
       pp >> domainId
       pp >> ts
@@ -116,6 +120,6 @@ object DbSingleDomainCausalDependencyStore {
       pp >> ts
     }
 
-    storage.queryAndUpdate(bulkInsert, functionFullName)(elc.traceContext)
+    storage.queryAndUpdate(bulkInsert, functionFullName)(elc.traceContext, closeContext)
   }
 }

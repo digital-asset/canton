@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DbStorage
@@ -28,14 +29,14 @@ class DbStorageIdempotency(
       action: ReadTransactional[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     underlying.runRead(action, operationName, maxRetries)
 
   override protected[canton] def runWrite[A](
       action: All[A],
       operationName: String,
       maxRetries: Int,
-  )(implicit traceContext: TraceContext): Future[A] =
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[A] =
     underlying.runWrite(action, operationName + "-1", maxRetries).flatMap { _ =>
       underlying.runWrite(action, operationName + "-2", maxRetries)
     }

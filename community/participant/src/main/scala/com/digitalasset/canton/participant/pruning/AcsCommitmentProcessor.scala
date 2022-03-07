@@ -210,11 +210,11 @@ class AcsCommitmentProcessor(
       ,
       "ACS commitment processor initialization",
     )
-    FutureUtil.logOnFailure(
+    val loggedFut = FutureUtil.logOnFailure(
       executed,
       "Failed to initialize the ACS commitment processor.",
     )
-    FutureUnlessShutdown(executed)
+    FutureUnlessShutdown(loggedFut)
   }
 
   @volatile private[this] var lastPublished: Option[RecordTime] = None
@@ -435,12 +435,11 @@ class AcsCommitmentProcessor(
       }
     }
 
-    FutureUtil.logOnFailure(
-      future.unwrap,
+    FutureUtil.logOnFailureUnlessShutdown(
+      future,
       failureMessage = s"Failed to process incoming commitment. Halting SyncDomain $domainId",
       onFailure = _ => killSwitch,
     )
-    future
   }
 
   private def persistRunningCommitments(

@@ -6,6 +6,8 @@ package com.digitalasset.canton.resource
 import cats.syntax.alternative._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
+import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
@@ -36,7 +38,11 @@ object TransactionalStoreUpdate {
     */
   def execute(
       updates: Seq[TransactionalStoreUpdate]
-  )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[Unit] = updates match {
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+      closeContext: CloseContext,
+  ): Future[Unit] = updates match {
     case Seq() => Future.unit
     case Seq(singleUpdate) => singleUpdate.runStandalone()
     case _ =>
@@ -103,9 +109,13 @@ object TransactionalStoreUpdate {
       val sql: DBIOAction[_, NoStream, Effect.Write with Effect.Transactional],
       val storage: DbStorage,
       val metric: Option[TimedLoadGauge],
-  )(implicit val ec: ExecutionContext)
-      extends TransactionalStoreUpdate {
-    override def runStandalone()(implicit traceContext: TraceContext): Future[Unit] = {
+      override protected val loggerFactory: NamedLoggerFactory,
+  )(implicit val ec: ExecutionContext, closeContext: CloseContext)
+      extends TransactionalStoreUpdate
+      with NamedLogging {
+    override def runStandalone()(implicit
+        traceContext: TraceContext
+    ): Future[Unit] = {
       lazy val runDbF = storage.update_(sql, functionFullName)
       metric.fold(runDbF)(_.event(runDbF))
     }

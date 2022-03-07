@@ -4,10 +4,12 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.SavePendingSendError.MessageIdAlreadyTracked
 import com.digitalasset.canton.store.{SavePendingSendError, SendTrackerStore}
@@ -16,9 +18,15 @@ import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class DbSendTrackerStore_Unused(storage: DbStorage, client: SequencerClientDiscriminator)(implicit
+class DbSendTrackerStore_Unused(
+    override protected val storage: DbStorage,
+    client: SequencerClientDiscriminator,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit
     ec: ExecutionContext
-) extends SendTrackerStore {
+) extends SendTrackerStore
+    with DbStore {
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("send-tracker-store")

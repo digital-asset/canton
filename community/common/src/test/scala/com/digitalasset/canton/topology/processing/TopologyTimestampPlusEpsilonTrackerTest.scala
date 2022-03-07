@@ -4,13 +4,17 @@
 package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.DomainParametersChange
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingOwnerWithKeys}
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
+
+import scala.concurrent.Future
 
 class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasExecutionContext {
 
@@ -22,7 +26,8 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       )
   ) = {
     val store = new InMemoryTopologyStore(loggerFactory)
-    val tracker = new TopologyTimestampPlusEpsilonTracker(loggerFactory)
+    val tracker =
+      new TopologyTimestampPlusEpsilonTracker(DefaultProcessingTimeouts.testing, loggerFactory)
     prepareO.foreach { case (ts, topologyChangeDelay) =>
       val crypto = new TestingOwnerWithKeys(
         DefaultTestIdentities.domainManager,
@@ -37,12 +42,16 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
         crypto.SigningKeys.key1,
       )
       store.updateState(CantonTimestamp.MinValue, Seq(), positive = Seq(tx)).futureValue
-      TopologyTimestampPlusEpsilonTracker
-        .initialiseFromStore(tracker, store, ts, loggerFactory)
-        .futureValue
+      unwrap(
+        TopologyTimestampPlusEpsilonTracker
+          .initialiseFromStore(tracker, store, ts, loggerFactory)
+      ).futureValue
     }
     (tracker, store)
   }
+
+  private def unwrap[T](fut: FutureUnlessShutdown[T]): Future[T] =
+    fut.onShutdown(fail("should not receive a shutdown"))
 
   private lazy val ts = CantonTimestamp.Epoch
   private lazy val epsilonFD = NonNegativeFiniteDuration.ofMillis(250)
@@ -53,7 +62,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       ts: CantonTimestamp,
       expected: CantonTimestamp,
   ) = {
-    val eff = tracker.adjustTimestampForUpdate(ts).futureValue
+    val eff = unwrap(tracker.adjustTimestampForUpdate(ts)).futureValue
     eff.value shouldBe expected
     tracker.effectiveTimeProcessed(eff)
   }
@@ -63,7 +72,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       newEpsilon: NonNegativeFiniteDuration,
   ) = {
 
-    val adjustedTs = tracker.adjustTimestampForUpdate(ts).futureValue
+    val adjustedTs = unwrap(tracker.adjustTimestampForUpdate(ts)).futureValue
     tracker.adjustEpsilon(adjustedTs, ts, newEpsilon)
 
     // until adjustedTs, we should still get the old epsilon
@@ -81,10 +90,10 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
 
       assertEffectiveTimeForUpdate(tracker, ts, ts.plus(epsilon))
       assertEffectiveTimeForUpdate(tracker, ts.plusSeconds(5), ts.plusSeconds(5).plus(epsilon))
-      tracker
-        .adjustTimestampForTick(ts.plusSeconds(5))
-        .futureValue
-        .value shouldBe ts.plusSeconds(5).plus(epsilon)
+      unwrap(
+        tracker
+          .adjustTimestampForTick(ts.plusSeconds(5))
+      ).futureValue.value shouldBe ts.plusSeconds(5).plus(epsilon)
 
     }
 
@@ -127,10 +136,12 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       forAll(prepared) { case (expected, delta) =>
         val ts1 = ts.plus(epsilon).immediateSuccessor.plusMillis(delta)
         // tick should not advance the clock
-        tracker.adjustTimestampForTick(ts1).futureValue.value shouldBe expected.immediatePredecessor
+        unwrap(
+          tracker.adjustTimestampForTick(ts1)
+        ).futureValue.value shouldBe expected.immediatePredecessor
         // update should advance the clock
         val res = loggerFactory.assertLogs(
-          tracker.adjustTimestampForUpdate(ts1).futureValue,
+          unwrap(tracker.adjustTimestampForUpdate(ts1)).futureValue,
           _.errorMessage should include("Broken or malicious domain"),
         )
         res.value shouldBe expected
@@ -144,15 +155,15 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       val eps2 = epsilon.dividedBy(2)
       epsilon.toMillis shouldBe 250 // this test assumes this
       // first, we'll kick off the computation
-      val fut1 = tracker.adjustTimestampForUpdate(ts).futureValue
+      val fut1 = unwrap(tracker.adjustTimestampForUpdate(ts)).futureValue
       // then, we tick another update with a third and with half epsilon
-      val fut2 = tracker.adjustTimestampForUpdate(ts.plus(eps3)).futureValue
-      val fut3 = tracker.adjustTimestampForUpdate(ts.plus(eps2)).futureValue
+      val fut2 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(eps3))).futureValue
+      val fut3 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(eps2))).futureValue
       // if we didn't get stuck by now, we didn't get blocked. now, let's get futures that gets blocked
-      val futB = tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusSeconds(1))
-      val futB1 = tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusMillis(1001))
-      val futB2 = tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusMillis(1200))
-      val futC = tracker.adjustTimestampForTick(ts.plus(epsilon).plusSeconds(2))
+      val futB = unwrap(tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusSeconds(1)))
+      val futB1 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusMillis(1001)))
+      val futB2 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(epsilon).plusMillis(1200)))
+      val futC = unwrap(tracker.adjustTimestampForTick(ts.plus(epsilon).plusSeconds(2)))
       Threading.sleep(500) // just to be sure that the future truly is blocked
       futB.isCompleted shouldBe false
       futB1.isCompleted shouldBe false

@@ -25,6 +25,7 @@ import com.digitalasset.canton.data._
 import com.digitalasset.canton.error.TransactionError
 import com.daml.error.ErrorCode
 import com.digitalasset.canton.data.ViewType.TransactionViewType
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -79,7 +80,6 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, IterableUtil, LfTransactionUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   DiscardOps,
   DomainId,
@@ -168,7 +168,7 @@ class TransactionProcessingSteps(
       recentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, TransactionSubmissionError, Submission] = {
+  ): EitherT[FutureUnlessShutdown, TransactionSubmissionError, Submission] = {
     val SubmissionParam(submitterInfo, transactionMeta, wfTransaction) = param
     val tracked = new TrackedTransactionSubmission(
       submitterInfo,
@@ -179,7 +179,7 @@ class TransactionProcessingSteps(
       ephemeralState.contractLookup,
       ephemeralState.observedTimestampLookup,
     )
-    EitherT.rightT[Future, TransactionSubmissionError](tracked)
+    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError](tracked)
   }
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
@@ -336,7 +336,8 @@ class TransactionProcessingSteps(
         )
       } yield {
         val batch = request.asBatch
-        val batchSize = batch.toProtoVersioned(ProtocolVersion.default).serializedSize
+        val batchSize =
+          batch.toProtoVersioned(staticDomainParameters.protocolVersion).serializedSize
         metrics.protocolMessages.confirmationRequestSize.metric.update(batchSize)
 
         new PreparedTransactionBatch(

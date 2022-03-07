@@ -73,6 +73,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     val state = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
       mediatorMetrics,
+      timeouts,
       loggerFactory,
     )
 

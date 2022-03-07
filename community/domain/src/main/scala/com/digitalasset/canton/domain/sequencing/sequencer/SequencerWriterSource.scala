@@ -11,12 +11,13 @@ import cats.syntax.either._
 import cats.syntax.list._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withNelTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
@@ -144,7 +145,8 @@ class SequencerWriterQueues private[sequencer] (
 object SequencerWriterSource {
   def apply(
       writerConfig: SequencerWriterConfig,
-      highAvailabilityConfig: SequencerHighAvailabilityConfig,
+      totalNodeCount: Int,
+      keepAliveInterval: Option[NonNegativeFiniteDuration],
       cryptoApi: DomainSyncCryptoClient,
       store: SequencerWriterStore,
       clock: Clock,
@@ -156,11 +158,6 @@ object SequencerWriterSource {
   ): Source[Traced[BatchWritten], SequencerWriterQueues] = {
     val logger = TracedLogger(SequencerWriterSource.getClass, loggerFactory)
 
-    val totalNodeCount =
-      if (highAvailabilityConfig.enabled)
-        highAvailabilityConfig.totalNodeCount
-      else
-        SequencerHighAvailabilityConfig.SingleSequencerTotalNodeCount
     val eventTimestampGenerator =
       new PartitionedTimestampGenerator(clock, store.instanceIndex, totalNodeCount)
     val payloadIdGenerator =
@@ -187,13 +184,11 @@ object SequencerWriterSource {
       .map(Write.Event)
 
     // push keep alive writes at the specified interval, or never if not set
-    val keepAliveSource = {
-      if (highAvailabilityConfig.enabled) {
-        Source.repeat(Write.KeepAlive).throttle(1, highAvailabilityConfig.keepAliveInterval.toScala)
-      } else {
-        Source.never[Write.KeepAlive.type]
+    val keepAliveSource = keepAliveInterval
+      .fold(Source.never[Write.KeepAlive.type]) { frequency =>
+        Source.repeat(Write.KeepAlive).throttle(1, frequency.toScala)
       }
-    }.viaMat(KillSwitches.single)(Keep.right)
+      .viaMat(KillSwitches.single)(Keep.right)
 
     val mkMaterialized = new SequencerWriterQueues(eventGenerator, loggerFactory)(_, _)
 
@@ -261,7 +256,9 @@ class SendEventGenerator(store: SequencerWriterStore, payloadIdGenerator: () => 
 
     def validateAndGenerateEvent(senderId: SequencerMemberId): Future[StoreEvent[Payload]] = {
       def deliverError(unknownRecipients: NonEmptyList[Member]): DeliverErrorStoreEvent = {
-        val message = s"Unknown recipients: ${unknownRecipients.toList.mkString(", ")}"
+        val message = String256M.tryCreate(
+          s"Unknown recipients: ${unknownRecipients.toList.take(1000).mkString(", ")}"
+        )
         DeliverErrorStoreEvent(senderId, submission.messageId, message, traceContext)
       }
 

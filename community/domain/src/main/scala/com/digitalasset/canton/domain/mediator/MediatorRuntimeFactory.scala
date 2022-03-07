@@ -16,12 +16,12 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.UnsignedProtocolEventHandler
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig, GrpcDomainTimeService}
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
@@ -71,7 +71,7 @@ trait MediatorRuntimeFactory {
       sequencerClient: SequencerClient,
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
-      identityClientEventHandler: UnsignedProtocolEventHandler,
+      topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: LocalNodeParameters,
       clock: Clock,
@@ -95,7 +95,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       sequencerClient: SequencerClient,
       syncCrypto: DomainSyncCryptoClient,
       topologyClient: DomainTopologyClientWithInit,
-      identityClientEventHandler: UnsignedProtocolEventHandler,
+      topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: LocalNodeParameters,
       clock: Clock,
@@ -109,8 +109,14 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
   ): EitherT[Future, String, MediatorRuntime] = {
     val state =
       new MediatorState(
-        FinalizedResponseStore(storage, syncCrypto.pureCrypto, loggerFactory),
+        FinalizedResponseStore(
+          storage,
+          syncCrypto.pureCrypto,
+          nodeParameters.processingTimeouts,
+          loggerFactory,
+        ),
         metrics,
+        nodeParameters.processingTimeouts,
         loggerFactory,
       )
     EitherT.pure[Future, String](
@@ -121,7 +127,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
           sequencerClient,
           topologyClient,
           syncCrypto,
-          identityClientEventHandler,
+          topologyTransactionProcessor,
           timeTrackerConfig,
           state,
           sequencerCounterTrackerStore,

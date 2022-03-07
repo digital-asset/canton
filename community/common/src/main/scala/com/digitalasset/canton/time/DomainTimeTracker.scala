@@ -6,7 +6,7 @@ package com.digitalasset.canton.time
 import cats.syntax.option._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.OrdinaryApplicationHandler
@@ -166,13 +166,13 @@ class DomainTimeTracker(
     */
   def fetchTime(freshnessBound: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero)(implicit
       traceContext: TraceContext
-  ): Future[CantonTimestamp] =
+  ): FutureUnlessShutdown[CantonTimestamp] =
     fetch(freshnessBound, timestampRef, requiresTimeProof = false)
 
   /** Similar to `fetchTime` but will only return time proof. */
   def fetchTimeProof(freshnessBound: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero)(
       implicit traceContext: TraceContext
-  ): Future[TimeProof] =
+  ): FutureUnlessShutdown[TimeProof] =
     fetch(freshnessBound, timeProofRef, requiresTimeProof = true)
 
   /** Register that we want to observe a domain time.
@@ -258,11 +258,11 @@ class DomainTimeTracker(
       def updateOne(event: OrdinarySequencedEvent[_]): Unit = {
         val oldTimestamp =
           timestampRef.getAndSet(LatestAndNext(received(event.timestamp).some, None))
-        oldTimestamp.next.foreach(_.trySuccess(event.timestamp))
+        oldTimestamp.next.foreach(_.trySuccess(UnlessShutdown.Outcome(event.timestamp)))
 
         TimeProof.fromEventO(event).foreach { proof =>
           val oldTimeProof = timeProofRef.getAndSet(LatestAndNext(received(proof).some, None))
-          oldTimeProof.next.foreach(_.trySuccess(proof))
+          oldTimeProof.next.foreach(_.trySuccess(UnlessShutdown.Outcome(proof)))
           timeRequestSubmitter.handleTimeProof(proof)
         }
       }
@@ -291,44 +291,44 @@ class DomainTimeTracker(
       freshnessBound: NonNegativeFiniteDuration,
       latestAndNextRef: AtomicReference[LatestAndNext[A]],
       requiresTimeProof: Boolean,
-      // TODO(i8536): return a `FutureUnlessShutdown`
-  )(implicit traceContext: TraceContext): Future[A] = {
-    val now = clock.now
-    // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.
-    val receivedWithin = now.minus(freshnessBound.unwrap)
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[A] =
+    performUnlessClosing {
+      val now = clock.now
+      // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.
+      val receivedWithin = now.minus(freshnessBound.unwrap)
 
-    val (future, needUpdate) = withLock {
-      val newState = latestAndNextRef.updateAndGet { latestAndNext =>
-        latestAndNext.latest match {
-          case Some(Received(_value, receivedAt)) if receivedAt >= receivedWithin =>
-            latestAndNext
-          case _latest => latestAndNext.withNextSet
+      val (future, needUpdate) = withLock {
+        val newState = latestAndNextRef.updateAndGet { latestAndNext =>
+          latestAndNext.latest match {
+            case Some(Received(_value, receivedAt)) if receivedAt >= receivedWithin =>
+              latestAndNext
+            case _latest => latestAndNext.withNextSet
+          }
+        }
+        newState.latest match {
+          case Some(Received(value, receivedAt)) if receivedAt >= receivedWithin =>
+            FutureUnlessShutdown.pure(value) -> false
+          case _ =>
+            val promise = newState.next.getOrElse(
+              ErrorUtil.internalError(
+                new IllegalStateException("Should have set to a promise in prior block")
+              )
+            )
+
+            // if we're looking for a time proof then just request one; no need to call `maybeScheduleUpdate()`
+            // as the TimeProofRequestSubmitter itself retries if it doesn't get one soon enough.
+            // otherwise if looking for a timestamp we don't care what domain time we're looking for (just the next),
+            // so just register a pending tick for the earliest point.
+            // we use MinValue rather than Epoch so it will still be considered far before "now" when initially started
+            // using the simclock.
+            if (requiresTimeProof) timeRequestSubmitter.fetchTimeProof()
+            else pendingTicks.put(new AwaitingTick(CantonTimestamp.MinValue))
+            FutureUnlessShutdown(promise.future) -> !requiresTimeProof
         }
       }
-      newState.latest match {
-        case Some(Received(value, receivedAt)) if receivedAt >= receivedWithin =>
-          Future.successful(value) -> false
-        case _ =>
-          val promise = newState.next.getOrElse(
-            ErrorUtil.internalError(
-              new IllegalStateException("Should have set to a promise in prior block")
-            )
-          )
-
-          // if we're looking for a time proof then just request one; no need to call `maybeScheduleUpdate()`
-          // as the TimeProofRequestSubmitter itself retries if it doesn't get one soon enough.
-          // otherwise if looking for a timestamp we don't care what domain time we're looking for (just the next),
-          // so just register a pending tick for the earliest point.
-          // we use MinValue rather than Epoch so it will still be considered far before "now" when initially started
-          // using the simclock.
-          if (requiresTimeProof) timeRequestSubmitter.fetchTimeProof()
-          else pendingTicks.put(new AwaitingTick(CantonTimestamp.MinValue))
-          promise.future -> !requiresTimeProof
-      }
-    }
-    if (needUpdate) maybeScheduleUpdate()
-    future
-  }
+      if (needUpdate) maybeScheduleUpdate()
+      future
+    }.onShutdown(FutureUnlessShutdown.abortedDueToShutdown)
 
   /** When we expect to observe the earliest timestamp in local time. */
   @VisibleForTesting
@@ -400,7 +400,12 @@ class DomainTimeTracker(
   @VisibleForTesting
   protected[time] def flush(): Future[Unit] = doFlush()
 
-  override def onClosed(): Unit = timeRequestSubmitter.close()
+  override def onClosed(): Unit = {
+    Seq(timeProofRef, timestampRef).foreach { ref =>
+      ref.get().next.foreach(_.trySuccess(UnlessShutdown.AbortedDueToShutdown))
+    }
+    timeRequestSubmitter.close()
+  }
 
   /** In the absence of any real activity on the domain we will infrequently request a time.
     * Short of being aware of a relatively recent domain time, it will allow features like sequencer pruning
@@ -424,7 +429,9 @@ class DomainTimeTracker(
           FutureUtil.doNotAwait(
             // fetchTime shouldn't fail (if anything it will never complete due to infinite retries or closing)
             // but ensure schedule is called regardless
-            fetchTime().thereafter(_ => scheduleNextUpdate()),
+            fetchTime()
+              .thereafter(_ => scheduleNextUpdate())
+              .onShutdown(logger.debug("Stopped fetch time due to shutdown")),
             "Failed to fetch a time to ensure the minimum observation duration",
           )
         }
@@ -461,12 +468,18 @@ object DomainTimeTracker {
   /** Keep track of the latest value received and a promise to complete when the next one arrives
     * It is not a case class so that equality is object identity (equality on promises is anyway object identity).
     */
-  class LatestAndNext[A](val latest: Option[Received[A]], val next: Option[Promise[A]]) {
+  class LatestAndNext[A](
+      val latest: Option[Received[A]],
+      val next: Option[Promise[UnlessShutdown[A]]],
+  ) {
     def withNextSet: LatestAndNext[A] =
-      next.fold(LatestAndNext(latest, Promise[A]().some))(_ => this)
+      next.fold(LatestAndNext(latest, Promise[UnlessShutdown[A]]().some))(_ => this)
   }
   object LatestAndNext {
-    def apply[A](latest: Option[Received[A]], next: Option[Promise[A]]): LatestAndNext[A] =
+    def apply[A](
+        latest: Option[Received[A]],
+        next: Option[Promise[UnlessShutdown[A]]],
+    ): LatestAndNext[A] =
       new LatestAndNext(latest, next)
     def empty[A]: LatestAndNext[A] = LatestAndNext(None, None)
   }

@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.topology
 import cats.syntax.foldable._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
+import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
@@ -36,7 +37,6 @@ import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Listens to changes of the identity stores and notifies the ledger-api server
@@ -127,7 +127,7 @@ class LedgerServerPartyNotifier(
       targetParticipantId: Option[ParticipantId],
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
-      submissionIdRaw: String = UUID.randomUUID().toString,
+      submissionIdRaw: String255 = LengthLimitedString.getUuid.asString255,
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
     def desiredDisplayName(
@@ -220,7 +220,7 @@ class LedgerServerPartyNotifier(
           metadata.displayName.map(_.unwrap).getOrElse(""),
           targetParticipantId.toLf,
           ParticipantEventPublisher.now.toLf,
-          LedgerSubmissionId.fromString(metadata.submissionId).toOption,
+          LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
         )
         for {
           _ <- eventPublisher.publish(event)
@@ -238,7 +238,11 @@ class LedgerServerPartyNotifier(
       effectiveTimestamp: EffectiveTime,
       transaction: SignedTopologyTransaction[TopologyChangeOp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    def dispatch(party: PartyId, participant: ParticipantId, submissionId: String) = {
+    def dispatch(
+        party: PartyId,
+        participant: ParticipantId,
+        submissionId: String255,
+    ): FutureUnlessShutdown[Unit] = {
       // start the notification in the background
       // note, that if this fails, we have an issue as ledger server will not have
       // received the event. this is generally an issue with everything we send to the
@@ -265,10 +269,10 @@ class LedgerServerPartyNotifier(
       transaction.transaction.element.mapping match {
         // TODO(rv): this will also pick mappings which are only one-sided. we should fix this by looking at the aggregated topology state once the metadata in the server is consolidated and allows us to match it to our metadata
         case PartyToParticipant(_, party, participant, permission) if permission.isActive =>
-          dispatch(party, participant, transaction.transaction.element.id.unwrap)
+          dispatch(party, participant, transaction.transaction.element.id.toLengthLimitedString)
         // propagate admin parties
         case ParticipantState(_, _, participant, permission, _) if permission.isActive =>
-          dispatch(participant.adminParty, participant, UUID.randomUUID().toString)
+          dispatch(participant.adminParty, participant, LengthLimitedString.getUuid.asString255)
         case _ => FutureUnlessShutdown.unit
       }
     } else {

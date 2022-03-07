@@ -135,18 +135,22 @@ abstract class ProtocolProcessor[
     */
   def submit(submissionParam: SubmissionParam)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SubmissionError, Future[SubmissionResult]] = {
+  ): EitherT[FutureUnlessShutdown, SubmissionError, Future[SubmissionResult]] = {
     logger.debug(withKind(s"Preparing request ${steps.submissionDescription(submissionParam)}"))
 
     val recentSnapshot = crypto.currentSnapshotApproximation
     for {
-      mediatorId <- chooseMediator(recentSnapshot.ipsSnapshot).leftMap(steps.embedNoMediatorError)
+      mediatorId <- chooseMediator(recentSnapshot.ipsSnapshot)
+        .leftMap(steps.embedNoMediatorError)
+        .mapK(FutureUnlessShutdown.outcomeK)
       submission <- steps.prepareSubmission(submissionParam, mediatorId, ephemeral, recentSnapshot)
-      result <- submission match {
-        case untracked: steps.UntrackedSubmission =>
-          submitWithoutTracking(submissionParam, untracked)
-        case tracked: steps.TrackedSubmission => submitWithTracking(submissionParam, tracked)
-      }
+      result <- {
+        submission match {
+          case untracked: steps.UntrackedSubmission =>
+            submitWithoutTracking(submissionParam, untracked)
+          case tracked: steps.TrackedSubmission => submitWithTracking(submissionParam, tracked)
+        }
+      }.mapK(FutureUnlessShutdown.outcomeK)
     } yield result
   }
 
@@ -741,6 +745,9 @@ abstract class ProtocolProcessor[
   }
 
   @VisibleForTesting
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture")
+  ) // TODO(#8448) Do not discard futures
   private[protocol] def performResultProcessing(
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, Result],
@@ -1006,6 +1013,8 @@ abstract class ProtocolProcessor[
     )
   }
 
+  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private def handleCommitSetError(requestId: RequestId)(
       e: RequestTracker.CommitSetError
   )(implicit traceContext: TraceContext): RequestTracker.RequestTrackerError = {
@@ -1018,6 +1027,8 @@ abstract class ProtocolProcessor[
     e
   }
 
+  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private def handleRequestTrackerResultError(requestId: RequestId)(
       error: RequestTracker.ResultError
   )(implicit traceContext: TraceContext): RequestTracker.RequestTrackerError = {

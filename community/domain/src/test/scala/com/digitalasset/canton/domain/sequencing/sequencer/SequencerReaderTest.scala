@@ -52,7 +52,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     valueOrFail(crypto.forDomain(domainId).toRight("no crypto api"))("domain crypto")
   private val instanceDiscriminator = new UUID(1L, 2L)
 
-  class ManualEventSignaller(implicit materializer: Materializer) extends EventSignaller {
+  class ManualEventSignaller(implicit materializer: Materializer)
+      extends EventSignaller
+      with FlagCloseableAsync {
     private val (queue, source) = Source
       .queue[ReadSignal](1)
       .buffer(1, OverflowStrategy.dropHead)

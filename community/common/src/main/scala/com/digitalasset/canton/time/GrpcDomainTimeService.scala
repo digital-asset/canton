@@ -38,7 +38,12 @@ class GrpcDomainTimeService(
           timeTracker <- EitherT
             .fromEither[Future](lookupTimeTracker(request.domainIdO))
             .leftMap(Status.INVALID_ARGUMENT.withDescription)
-          timestamp <- EitherT.right[Status](timeTracker.fetchTime(request.freshnessBound))
+          timestamp <- EitherT(
+            timeTracker
+              .fetchTime(request.freshnessBound)
+              .map(Right(_))
+              .onShutdown(Left(Status.ABORTED.withDescription("shutdown")))
+          )
         } yield FetchTimeResponse(timestamp).toProtoV0
       }
     }

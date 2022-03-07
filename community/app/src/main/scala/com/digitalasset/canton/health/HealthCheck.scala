@@ -200,7 +200,7 @@ object HealthCheck {
         )
 
       case CheckConfig.IsActive(participantO) =>
-        val configuredParticipants = environment.config.participants
+        val configuredParticipants = environment.config.participantsByString
 
         val participantName = participantO match {
           case Some(configName) =>

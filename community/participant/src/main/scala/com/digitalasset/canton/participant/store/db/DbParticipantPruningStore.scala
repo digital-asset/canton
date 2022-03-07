@@ -3,16 +3,17 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String36
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.store.ParticipantPruningStore
 import com.digitalasset.canton.participant.store.ParticipantPruningStore.ParticipantPruningStatus
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
@@ -20,12 +21,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbParticipantPruningStore(
     name: String36,
-    storage: DbStorage,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ParticipantPruningStore
-    with NamedLogging
-    with NoTracing {
+    with DbStore {
 
   import storage.api._
 

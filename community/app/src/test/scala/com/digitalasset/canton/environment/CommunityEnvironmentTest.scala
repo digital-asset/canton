@@ -4,7 +4,7 @@
 package com.digitalasset.canton.environment
 
 import cats.data.EitherT
-import com.digitalasset.canton.config.RequireTypes.{Port, String185}
+import com.digitalasset.canton.config.RequireTypes.{InstanceName, Port}
 import com.digitalasset.canton.config.{CantonCommunityConfig, TestingConfigInternal}
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.domain.config.{
@@ -36,12 +36,12 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
   lazy val sampleConfig: CantonCommunityConfig = CantonCommunityConfig(
     domains = Map(
-      "d1" -> domain1Config,
-      "d2" -> domain2Config,
+      InstanceName.tryCreate("d1") -> domain1Config,
+      InstanceName.tryCreate("d2") -> domain2Config,
     ),
     participants = Map(
-      "p1" -> participant1Config,
-      "p2" -> participant2Config,
+      InstanceName.tryCreate("p1") -> participant1Config,
+      InstanceName.tryCreate("p2") -> participant2Config,
     ),
   )
 
@@ -59,14 +59,14 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
     def mockDomain: DomainNodeBootstrap = {
       val domain = mock[DomainNodeBootstrap]
       when(domain.start()).thenReturn(EitherT.pure[Future, String](()))
-      when(domain.name).thenReturn(String185.tryCreate("mockD"))
+      when(domain.name).thenReturn(InstanceName.tryCreate("mockD"))
       domain
     }
 
     def mockParticipantAndNode: (ParticipantNodeBootstrap, ParticipantNode) = {
       val bootstrap = mock[ParticipantNodeBootstrap]
       val node = mock[ParticipantNode]
-      when(bootstrap.name).thenReturn(String185.tryCreate("mockP"))
+      when(bootstrap.name).thenReturn(InstanceName.tryCreate("mockP"))
       when(bootstrap.start()).thenReturn(EitherT.pure[Future, String](()))
       when(bootstrap.getNode).thenReturn(Some(node))
       when(node.reconnectDomainsIgnoreFailures()(any[TraceContext], any[ExecutionContext]))
@@ -140,7 +140,9 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
         when(d1.isActive).thenReturn(true)
         when(d2.isActive).thenReturn(false)
 
-        when(d1.config).thenReturn(config.domains.get("d1").valueOrFail("where is my config?"))
+        when(d1.config).thenReturn(
+          config.domainsByString.get("d1").valueOrFail("where is my config?")
+        )
         when(
           pn.autoConnectLocalDomain(any[DomainConnectionConfig])(
             any[TraceContext],
@@ -179,7 +181,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
         val pp = mockParticipant
         when(pp.config).thenReturn(
-          config.participants.get("p1").valueOrFail("config should be there")
+          config.participantsByString.get("p1").valueOrFail("config should be there")
         )
         Seq("p1", "p2").foreach(setupParticipantFactory(_, pp))
         Seq("d1", "d2").foreach(setupDomainFactory(_, mockDomain))

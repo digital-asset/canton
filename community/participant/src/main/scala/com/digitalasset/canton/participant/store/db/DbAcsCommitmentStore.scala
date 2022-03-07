@@ -5,53 +5,56 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.traverse._
-import com.digitalasset.canton.config.RequireTypes.String68
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.String68
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashAlgorithm, HashPurpose}
-import slick.jdbc.{GetResult, PositionedParameters, TransactionIsolation}
-import com.google.protobuf.ByteString
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStore,
   CommitmentQueue,
   IncrementalCommitmentStore,
 }
-import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.protocol.StoredParties
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
+import slick.jdbc.{GetResult, PositionedParameters, TransactionIsolation}
 
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits._
 
 class DbAcsCommitmentStore(
-    override val storage: DbStorage,
+    override protected val storage: DbStorage,
     override val domainId: IndexedDomain,
     cryptoApi: CryptoPureApi,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends AcsCommitmentStore
     with DbPrunableByTimeDomain[AcsCommitmentStoreError]
-    with NamedLogging {
+    with DbStore {
 
   import DbStorage.Implicits._
   import storage.api._
@@ -506,18 +509,21 @@ class DbAcsCommitmentStore(
     }
 
   override val runningCommitments =
-    new DbIncrementalCommitmentStore(storage, domainId, loggerFactory)
+    new DbIncrementalCommitmentStore(storage, domainId, timeouts, loggerFactory)
 
-  override val queue = new DbCommitmentQueue(storage, domainId, loggerFactory)
+  override val queue = new DbCommitmentQueue(storage, domainId, timeouts, loggerFactory)
+
+  override def onClosed(): Unit = Lifecycle.close(runningCommitments, queue)(logger)
 }
 
 class DbIncrementalCommitmentStore(
-    storage: DbStorage,
+    override protected val storage: DbStorage,
     domainId: IndexedDomain,
+    override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends IncrementalCommitmentStore
-    with NamedLogging {
+    with DbStore {
 
   import DbStorage.Implicits._
   import storage.api._
@@ -669,15 +675,16 @@ class DbIncrementalCommitmentStore(
 }
 
 class DbCommitmentQueue(
-    val storage: DbStorage,
+    override protected val storage: DbStorage,
     domainId: IndexedDomain,
-    protected val loggerFactory: NamedLoggerFactory,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends CommitmentQueue
-    with NamedLogging {
+    with DbStore {
 
-  import storage.api._
   import DbStorage.Implicits._
+  import storage.api._
 
   private implicit val acsCommitmentReader =
     AcsCommitment.getAcsCommitmentResultReader(domainId.item)

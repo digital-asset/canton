@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.{
+  LedgerIdentity,
   SequencerClients,
   SequencerPruningStatus,
   SequencerSnapshot,
@@ -205,4 +206,9 @@ class SequencerAdministrationGroup(
     consoleEnvironment.run {
       runner.adminCommand(EnterpriseSequencerAdminCommands.Snapshot(timestamp))
     }
+
+  def authorize_ledger_identity(ledgerIdentity: LedgerIdentity): Unit = consoleEnvironment.run {
+    runner.adminCommand(EnterpriseSequencerAdminCommands.AuthorizeLedgerIdentity(ledgerIdentity))
+  }
+
 }

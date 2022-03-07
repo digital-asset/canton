@@ -5,6 +5,7 @@ package com.digitalasset.canton.concurrent
 
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.util.Thereafter.syntax._
@@ -24,18 +25,24 @@ import scala.util.{Failure, Success}
   * As this is costly, we'll turn this off in production.
   */
 trait FutureSupervisor {
-  def supervised[T](description: => String, warnAfter: Duration = 10.seconds)(fut: => Future[T])(
+  def supervised[T](description: => String, warnAfter: Duration = 10.seconds)(fut: Future[T])(
       implicit
       errorLoggingContext: ErrorLoggingContext,
       executionContext: ExecutionContext,
   ): Future[T]
+  def supervisedUS[T](description: => String, warnAfter: Duration = 10.seconds)(
+      fut: FutureUnlessShutdown[T]
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[T] = FutureUnlessShutdown(supervised(description, warnAfter)(fut.unwrap))
 }
 
 object FutureSupervisor {
 
   object Noop extends FutureSupervisor {
     override def supervised[T](description: => String, warnAfter: Duration)(
-        fut: => Future[T]
+        fut: Future[T]
     )(implicit
         errorLoggingContext: ErrorLoggingContext,
         executionContext: ExecutionContext,
@@ -93,21 +100,20 @@ object FutureSupervisor {
     def supervised[T](
         description: => String,
         warnAfter: Duration = defaultWarningInterval.duration,
-    )(fut: => Future[T])(implicit
+    )(fut: Future[T])(implicit
         errorLoggingContext: ErrorLoggingContext,
         executionContext: ExecutionContext,
     ): Future[T] = {
-      val started = fut
       val itm =
         ScheduledFuture(
-          started,
+          fut,
           () => description,
           startNanos = System.nanoTime(),
           warnAfter.toNanos,
           errorLoggingContext,
         )
       scheduled.updateAndGet(x => x.filterNot(_.fut.isCompleted) :+ itm)
-      started.thereafter {
+      fut.thereafter {
         case Failure(exception) =>
           errorLoggingContext.logger.warn(
             s"${description} failed with exception after ${elapsed(itm)}",

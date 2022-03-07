@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
 import com.digitalasset.canton.DomainId
-import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InstanceName
+import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{Crypto, KeyName, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.topology.MediatorId

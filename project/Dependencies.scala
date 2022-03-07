@@ -211,4 +211,7 @@ object Dependencies {
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"
+
+  lazy val wartremover_dep =
+    "org.wartremover" % "wartremover" % wartremover.Wart.PluginVersion cross CrossVersion.full
 }

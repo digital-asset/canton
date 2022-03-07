@@ -6,11 +6,15 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl.{BroadcastHub, Keep, Source, SourceQueueWithComplete}
-import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.lifecycle.AsyncCloseable
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
@@ -32,13 +36,15 @@ class LocalSequencerStateEventSignaller(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit materializer: Materializer, executionContext: ExecutionContext)
     extends EventSignaller
+    with FlagCloseableAsync
     with NamedLogging {
 
-  private val (queue, notificationsHubSource) = AkkaUtil.runSupervised(
+  private val ((queue, killSwitch), notificationsHubSource) = AkkaUtil.runSupervised(
     logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty), {
       Source
         .queue[WriteNotification](1, OverflowStrategy.backpressure)
         .conflate(_ union _)
+        .viaMat(KillSwitches.single)(Keep.both)
         .toMat(BroadcastHub.sink(1))(Keep.both)
     },
   )
@@ -74,16 +80,12 @@ class LocalSequencerStateEventSignaller(
     }
   }
 
-  protected override def closeAsync() = {
+  protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty._
     Seq(
-      AsyncCloseable(
-        "queue", {
-          queue.complete()
-          queue.watchCompletion().void
-        },
-        timeouts.shutdownShort.unwrap,
-      )
+      SyncCloseable("queue.complete", queue.complete()),
+      SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
+      AsyncCloseable("queue.completion", queue.watchCompletion(), timeouts.shutdownShort.unwrap),
     )
   }
 }

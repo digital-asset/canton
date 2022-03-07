@@ -6,26 +6,33 @@ package com.digitalasset.canton.participant.store.db
 import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either._
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.{DomainAlias, DomainId}
-import com.digitalasset.canton.participant.store.RegisteredDomainsStore
 import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
   DomainAliasAlreadyAdded,
   DomainIdAlreadyAdded,
   Error,
 }
-import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.participant.store.RegisteredDomainsStore
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{DomainAlias, DomainId}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class DbRegisteredDomainsStore(storage: DbStorage)(implicit ec: ExecutionContext)
-    extends RegisteredDomainsStore {
-  import storage.api._
+class DbRegisteredDomainsStore(
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends RegisteredDomainsStore
+    with DbStore {
   import DomainAlias._
   import DomainId._
+  import storage.api._
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("registered-domains-store")
