@@ -16,10 +16,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.daml.platform.participant.util.LfEngineToApi
-import com.daml.platform.server.api.validation.{
-  ErrorFactories,
-  FieldValidations => LedgerApiFieldValidations,
-}
+import com.daml.platform.server.api.validation.{FieldValidations => LedgerApiFieldValidations}
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{
@@ -581,7 +578,8 @@ class RepairService(
         repair.domainPersistence.contractStore.lookupContract(cid).value,
         t => log(s"Failed to look up contract ${cid} in domain ${repair.domainAlias}", t),
       )
-      // TODO(#5949): Check that the participant hosts a stakeholder
+      // Not checking that the participant hosts a stakeholder as we might be cleaning up contracts
+      // on behalf of stakeholders no longer around.
 
       contractToArchiveInEvent <- acsStatus match {
         case None =>
@@ -655,7 +653,22 @@ class RepairService(
           case None | Some(ActiveContractStore.TransferredAway(_)) =>
             for {
               contract <- readContract(repairSource, cid)
-              // TODO(#5949): Check that the participant hosts a stakeholder
+              // Check that the participant hosts a stakeholder
+              stakeholders <- readStakeholders(repairSource, cid)
+
+              // At least one stakeholder is hosted locally in the target domain
+              _localStakeholder <- EitherT(
+                stakeholders.toSeq
+                  .findM(hostsParty(repairTarget.topologySnapshot))
+                  .map { oneLocalStakeholderO =>
+                    oneLocalStakeholderO.toRight(
+                      log(
+                        show"Not allowed to move contract ${contract.contractId} without local target domain stakeholders ${stakeholders}"
+                      )
+                    )
+                  }
+              )
+
               _ <- persistContract(repairTarget, contract)
               _ <- persistTransferOut(repairSource, repairTarget.domainId, cid)
               _ <- persistTransferIn(repairTarget, repairSource.domainId, cid)
@@ -772,6 +785,19 @@ class RepairService(
     repair.domainPersistence.contractStore
       .lookupContractE(cid)
       .leftMap(e => log(s"Failed to look up contract ${cid} in domain ${repair.domainAlias}: ${e}"))
+
+  private def readStakeholders(repair: RepairRequest, cid: LfContractId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Set[LfPartyId]] =
+    repair.domainPersistence.contractStore
+      .lookupStakeholders(Set(cid))
+      .bimap(
+        e =>
+          log(
+            s"Failed to look up stakeholder of contract ${cid} in domain ${repair.domainAlias}: ${e}"
+          ),
+        _.getOrElse(cid, Set.empty),
+      )
 
   private def scheduleUpstreamEventPublishUponDomainStart[C](
       contracts: Seq[C],
@@ -1138,14 +1164,10 @@ object RepairService {
         implicit val loggingContext: ErrorLoggingContext =
           ErrorLoggingContext.fromTracedLogger(logger)
 
-        val errorFactories = ErrorFactories()
-        val fieldValidations = LedgerApiFieldValidations(errorFactories)
-        val apiValueValidation = new LedgerApiValueValidator(errorFactories, fieldValidations)
-
         for {
-          template <- fieldValidations.validateIdentifier(templateId).leftMap(_.getMessage)
+          template <- LedgerApiFieldValidations.validateIdentifier(templateId).leftMap(_.getMessage)
 
-          argsValue <- apiValueValidation
+          argsValue <- LedgerApiValueValidator
             .validateRecord(createArguments)
             .leftMap(e => s"Failed to validate arguments: ${e}")
 

@@ -14,9 +14,6 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{Future, Promise, blocking}
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard the futures
 class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   private class Fixture(startTimeout: Duration = 1.minute) extends StartAndCloseable[Unit] {
@@ -116,7 +113,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
       // Only finish the starting future if closing starts to wait for it, to test for mutual
       // exclusion of start and close. This hangs the test if we got the synchronization wrong!
-      f.waitingInvokedP.future.map { _ =>
+      val waitingF = f.waitingInvokedP.future.map { _ =>
         f.started.trySuccess(())
         f.closed.trySuccess(())
       }
@@ -126,6 +123,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       } yield {
         f.evaluate(true, true, 1, 1)
       }).futureValue
+      waitingF.futureValue
     }
 
     "close begin, close done, start begin, start done" in {
@@ -149,7 +147,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       val fs = f.closingInvokedP.future.flatMap { _ =>
         f.start()
       }
-      f.startInvokedP.future.map { _ =>
+      val startF = f.startInvokedP.future.map { _ =>
         f.closed.success(())
         f.started.success(())
       }
@@ -160,6 +158,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
         f.evaluate(true, true, 0, 1)
         failure shouldBe a[StartAfterClose]
       }).futureValue
+      startF.futureValue
     }
 
     "multiple starts" in {
@@ -167,7 +166,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       f.closed.success(())
       val fs = f.start()
       val fs2 = f.start()
-      f.startInvokedP.future.map(_ => f.started.success(()))
+      val startF = f.startInvokedP.future.map(_ => f.started.success(()))
       (for {
         _ <- fs
         _ <- fs2
@@ -176,6 +175,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
         f.close()
         f.evaluate(true, true, 1, 1)
       }).futureValue
+      startF.futureValue
     }
 
     "multiple closes" in {
@@ -184,14 +184,14 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
       f.started.success(())
       val fc = f.closeF()
       val fc2 = f.closeF()
-      f.closingInvokedP.future.map(_ => f.closed.success(()))
+      val closeF = f.closingInvokedP.future.map(_ => f.closed.success(()))
       (for {
         _ <- fc
         _ <- fc2
       } yield {
         f.evaluate(true, true, 1, 1)
-        succeed
       }).futureValue
+      closeF.futureValue
     }
   }
 }

@@ -63,7 +63,7 @@ class DbTransferStore(
   )
   implicit val setParameterFullTransferOutTree: SetParameter[FullTransferOutTree] =
     (r: FullTransferOutTree, pp: PositionedParameters) =>
-      pp >> r.toByteString(ProtocolVersion.default).toByteArray
+      pp >> r.toByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
 
   // format: off
   implicit val getResultOptionDeliveredTransferOutResult: GetResult[Option[DeliveredTransferOutResult]] = GetResult(
@@ -81,12 +81,12 @@ class DbTransferStore(
 
   implicit val setParameterDeliveredTransferOutResult: SetParameter[DeliveredTransferOutResult] =
     (r: DeliveredTransferOutResult, pp: PositionedParameters) =>
-      pp >> r.result.toByteArray(ProtocolVersion.default)
+      pp >> r.result.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
 
   implicit val setParameterOptionDeliveredTransferOutResult
       : SetParameter[Option[DeliveredTransferOutResult]] =
     (r: Option[DeliveredTransferOutResult], pp: PositionedParameters) =>
-      pp >> r.map(_.result.toByteArray(ProtocolVersion.default))
+      pp >> r.map(_.result.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
 
   private implicit val getResultTransferData: GetResult[TransferData] = GetResult(r =>
     TransferData(

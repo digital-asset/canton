@@ -36,7 +36,7 @@ object ParticipantStorageImplicits {
   }
 
   private def eventToBytes(event: LedgerSyncEvent): Array[Byte] =
-    SerializableLedgerSyncEvent(event).toByteArray(ProtocolVersion.default)
+    SerializableLedgerSyncEvent(event).toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
 
   private[db] implicit def setLedgerSyncEvent(implicit
       setParameterByteArray: SetParameter[Array[Byte]]

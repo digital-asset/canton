@@ -160,7 +160,11 @@ class ReplayingSendsSequencerClientTransport(
     }
 
     underlyingTransport
-      .sendAsync(extendMaxSequencingTime(submission), replaySendsConfig.sendTimeout.toScala)
+      .sendAsync(
+        extendMaxSequencingTime(submission),
+        replaySendsConfig.sendTimeout.toScala,
+        protocolVersion,
+      )
       .value
       .map(handleSendResult)
       .map(updateTimestamps)
@@ -337,11 +341,19 @@ class ReplayingSendsSequencerClientTransport(
   }
 
   /** We're replaying sends so shouldn't allow the app to send any new ones */
-  override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
 
-  override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
 

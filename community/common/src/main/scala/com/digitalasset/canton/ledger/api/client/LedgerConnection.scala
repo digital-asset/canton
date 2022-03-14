@@ -79,27 +79,36 @@ trait LedgerConnection extends LedgerSubmit {
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender)
   ): Future[(Seq[CreatedEvent], LedgerOffset)]
   def subscribe(
+      subscriptionName: String,
       offset: LedgerOffset,
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender),
   )(f: Transaction => Unit): LedgerSubscription
   def subscribeAsync(
+      subscriptionName: String,
       offset: LedgerOffset,
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender),
   )(f: Transaction => Future[Unit]): LedgerSubscription
   def subscription[T](
+      subscriptionName: String,
       offset: LedgerOffset,
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender),
-  )(mapOperator: Flow[Transaction, T, _]): LedgerSubscription
+  )(mapOperator: Flow[Transaction, Any, _]): LedgerSubscription
 
-  def subscribeTree(offset: LedgerOffset, filter: Seq[P.Party] = Seq(sender))(
-      f: TransactionTree => Unit
-  ): LedgerSubscription
-  def subscribeAsyncTree(offset: LedgerOffset, filter: Seq[P.Party] = Seq(sender))(
-      f: TransactionTree => Future[Unit]
-  ): LedgerSubscription
-  def subscriptionTree[T](offset: LedgerOffset, filter: Seq[P.Party] = Seq(sender))(
-      mapOperator: Flow[TransactionTree, T, _]
-  ): LedgerSubscription
+  def subscribeTree(
+      subscriptionName: String,
+      offset: LedgerOffset,
+      filter: Seq[Any] = Seq(sender),
+  )(f: TransactionTree => Unit): LedgerSubscription
+  def subscribeAsyncTree(
+      subscriptionName: String,
+      offset: LedgerOffset,
+      filter: Seq[Any] = Seq(sender),
+  )(f: TransactionTree => Future[Unit]): LedgerSubscription
+  def subscriptionTree[T](
+      subscriptionName: String,
+      offset: LedgerOffset,
+      filter: Seq[Any] = Seq(sender),
+  )(mapOperator: Flow[TransactionTree, Any, _]): LedgerSubscription
 
   def transactionById(id: String): Future[Option[Transaction]]
 
@@ -315,19 +324,22 @@ object LedgerConnection {
         )
 
       override def subscribe(
+          subscriptionName: String,
           offset: LedgerOffset,
           filter: TransactionFilter = transactionFilter(sender),
-      )(f: Transaction => Unit): LedgerSubscription = subscription(offset, filter) {
-        Flow[Transaction].map(f)
-      }
+      )(f: Transaction => Unit): LedgerSubscription =
+        subscription(subscriptionName, offset, filter)({
+          Flow[Transaction].map(f)
+        })
 
       override def subscribeAsync(
+          subscriptionName: String,
           offset: LedgerOffset,
           filter: TransactionFilter = transactionFilter(sender),
       )(f: Transaction => Future[Unit]): LedgerSubscription =
-        subscription(offset, filter) {
+        subscription(subscriptionName, offset, filter)({
           Flow[Transaction].mapAsync(1)(f)
-        }
+        })
 
       override def transactionById(id: String): Future[Option[Transaction]] =
         client.transactionClient.getFlatTransactionById(id, Seq(sender.unwrap), token).map { resp =>
@@ -340,41 +352,49 @@ object LedgerConnection {
       )
 
       override def subscription[T](
+          subscriptionName: String,
           offset: LedgerOffset,
           filter: TransactionFilter = transactionFilter(sender),
-      )(mapOperator: Flow[Transaction, T, _]): LedgerSubscription =
+      )(mapOperator: Flow[Transaction, Any, _]): LedgerSubscription =
         makeSubscription(
           transactionClient.getTransactions(offset, None, transactionFilter(sender)),
           mapOperator,
+          subscriptionName,
         )
 
-      override def subscribeTree(offset: LedgerOffset, filterParty: Seq[P.Party] = Seq(sender))(
-          f: TransactionTree => Unit
-      ): LedgerSubscription =
-        subscriptionTree(offset, filterParty) {
+      override def subscribeTree(
+          subscriptionName: String,
+          offset: LedgerOffset,
+          filterParty: Seq[Any] = Seq(sender),
+      )(f: TransactionTree => Unit): LedgerSubscription =
+        subscriptionTree(subscriptionName, offset, filterParty)({
           Flow[TransactionTree].map(f)
-        }
+        })
 
       override def subscribeAsyncTree(
+          subscriptionName: String,
           offset: LedgerOffset,
-          filterParty: Seq[P.Party] = Seq(sender),
+          filterParty: Seq[Any] = Seq(sender),
       )(f: TransactionTree => Future[Unit]): LedgerSubscription =
-        subscriptionTree(offset, filterParty) {
+        subscriptionTree(subscriptionName, offset, filterParty)({
           Flow[TransactionTree].mapAsync(1)(f)
-        }
+        })
 
       override def subscriptionTree[T](
+          subscriptionName: String,
           offset: LedgerOffset,
-          filterParty: Seq[P.Party] = Seq(sender),
-      )(mapOperator: Flow[TransactionTree, T, _]): LedgerSubscription =
+          filterParty: Seq[Any] = Seq(sender),
+      )(mapOperator: Flow[TransactionTree, Any, _]): LedgerSubscription =
         makeSubscription(
           transactionClient.getTransactionTrees(offset, None, transactionFilter(sender)),
           mapOperator,
+          subscriptionName,
         )
 
       private def makeSubscription[S, T](
           source: Source[S, NotUsed],
           mapOperator: Flow[S, T, _],
+          subscriptionName: String,
       ): LedgerSubscription =
         new LedgerSubscription {
           override protected def timeouts: ProcessingTimeout = processingTimeouts
@@ -390,14 +410,21 @@ object LedgerConnection {
               // was processed
               .toMat(Sink.ignore)(Keep.both),
           )
-          override val loggerFactory = loggerFactoryForLedgerConnectionOverride
+          override val loggerFactory =
+            if (subscriptionName.isEmpty)
+              loggerFactoryForLedgerConnectionOverride
+            else
+              loggerFactoryForLedgerConnectionOverride.appendUnnamedKey(
+                "subscription",
+                subscriptionName,
+              )
 
           override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
             import TraceContext.Implicits.Empty._
             List[AsyncOrSyncCloseable](
-              SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
+              SyncCloseable(s"killSwitch.shutdown $subscriptionName", killSwitch.shutdown()),
               AsyncCloseable(
-                "graph.completed",
+                s"graph.completed $subscriptionName",
                 completed.transform {
                   case Success(v) => Success(v)
                   case Failure(ex: StatusRuntimeException) =>

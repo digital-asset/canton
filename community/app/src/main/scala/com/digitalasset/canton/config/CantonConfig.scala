@@ -70,7 +70,7 @@ object CheckConfig {
     * Intended for a HA participant where only one of potentially many replicas will be active concurrently.
     * @param participant If unset will default to picking the only configured participant as this is the likely usage of this check,
     *                    however if many participants are available within the process it will throw an error on startup.
-    *                    If using many participaints in process then set to the conifgured name of the participant to return
+    *                    If using many participants in process then set to the configured name of the participant to return
     *                    the active status of.
     */
   case class IsActive(participant: Option[String] = None) extends CheckConfig

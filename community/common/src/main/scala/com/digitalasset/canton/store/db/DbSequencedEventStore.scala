@@ -138,7 +138,7 @@ class DbSequencedEventStore(
     DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
       pp >> partitionKey
       pp >> event.timestamp
-      pp >> event.underlyingEventBytes(ProtocolVersion.default)
+      pp >> event.underlyingEventBytes(ProtocolVersion.v2_0_0_Todo_i8793)
       pp >> event.dbType
       pp >> event.counter
       pp >> event.traceContext

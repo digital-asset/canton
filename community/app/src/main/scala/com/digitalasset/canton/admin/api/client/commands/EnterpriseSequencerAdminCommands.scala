@@ -186,7 +186,13 @@ object EnterpriseSequencerAdminCommands {
     ): Future[v0.LedgerIdentity.AuthorizeResponse] = service.authorizeLedgerIdentity(request)
     override def handleResponse(
         response: v0.LedgerIdentity.AuthorizeResponse
-    ): Either[String, Unit] = Right(())
+    ): Either[String, Unit] = response.value match {
+      case v0.LedgerIdentity.AuthorizeResponse.Value.Failure(v0.LedgerIdentity.Failure(reason)) =>
+        Left(reason)
+      case v0.LedgerIdentity.AuthorizeResponse.Value.Success(v0.LedgerIdentity.Success()) =>
+        Right(())
+      case other => Left(s"Empty response: $other")
+    }
   }
 
   final case class BootstrapTopology(

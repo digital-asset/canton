@@ -320,6 +320,7 @@ class JcePureCrypto(
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] = publicKey.scheme match {
     case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
       for {
@@ -355,7 +356,10 @@ class JcePureCrypto(
         ciphertext <- Either
           .catchOnly[GeneralSecurityException](
             encrypter
-              .encrypt(message.toByteString(ProtocolVersion.default).toByteArray, Array[Byte]())
+              .encrypt(
+                message.toByteString(version).toByteArray,
+                Array[Byte](),
+              )
           )
           .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
         encrypted = new Encrypted[M](ByteString.copyFrom(ciphertext))
@@ -413,6 +417,7 @@ class JcePureCrypto(
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SymmetricKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] =
     symmetricKey.scheme match {
       case SymmetricKeyScheme.Aes128Gcm =>
@@ -423,7 +428,7 @@ class JcePureCrypto(
             EncryptionError.InvalidSymmetricKey,
           )
           encryptedBytes <- encryptAes128Gcm(
-            message.toByteString(ProtocolVersion.default),
+            message.toByteString(version),
             symmetricKey.key,
           )
           encrypted = new Encrypted[M](encryptedBytes)
@@ -449,9 +454,14 @@ class JcePureCrypto(
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SecureRandomness,
+      version: ProtocolVersion,
       scheme: SymmetricKeyScheme,
   ): Either[EncryptionError, Encrypted[M]] = {
-    encryptWith(message, SymmetricKey(CryptoKeyFormat.Raw, symmetricKey.unwrap, scheme)(None))
+    encryptWith(
+      message,
+      SymmetricKey(CryptoKeyFormat.Raw, symmetricKey.unwrap, scheme)(None),
+      version,
+    )
   }
 
   override def decryptWith[M](

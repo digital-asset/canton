@@ -18,6 +18,12 @@ message VersionedTopologyTransaction {
   }
 }
 
+message VersionedTopologyTransactions {
+  oneof version {
+    com.digitalasset.canton.protocol.v0.TopologyTransactions v0 = 1;
+  }
+}
+
 message VersionedSignedTopologyTransaction {
   oneof version {
     com.digitalasset.canton.protocol.v0.SignedTopologyTransaction v0 = 1;

@@ -183,6 +183,6 @@ object SignedTopologyTransaction {
       setParameterByteArray: SetParameter[Array[Byte]]
   ): SetParameter[SignedTopologyTransaction[TopologyChangeOp]] = {
     (d: SignedTopologyTransaction[TopologyChangeOp], pp: PositionedParameters) =>
-      pp >> d.toByteArray(ProtocolVersion.default)
+      pp >> d.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
   }
 }

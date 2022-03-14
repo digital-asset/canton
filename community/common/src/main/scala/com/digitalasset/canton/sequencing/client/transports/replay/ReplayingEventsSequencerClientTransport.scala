@@ -46,12 +46,20 @@ class ReplayingEventsSequencerClientTransport(
     with NamedLogging {
 
   /** Does nothing. */
-  override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
 
   /** Does nothing. */
-  override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
 
@@ -72,7 +80,9 @@ class ReplayingEventsSequencerClientTransport(
     val startTime = CantonTimestamp.now()
     val replayF = MonadUtil
       .sequentialTraverse_(messages) { e =>
-        logger.debug("Replaying event")(e.traceContext)
+        logger.debug(
+          s"Replaying event with sequencer counter ${e.counter} and timestamp ${e.timestamp}"
+        )(e.traceContext)
         for {
           unitOrErr <- metrics.load.metric.event(handler(e))
         } yield unitOrErr match {

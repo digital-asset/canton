@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HasVersionedToByteString
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, DomainId}
 import com.google.protobuf.ByteString
 
@@ -313,6 +314,7 @@ class DomainSnapshotSyncCryptoApi(
   override def encryptFor[M <: HasVersionedToByteString](
       message: M,
       owner: KeyOwner,
+      version: ProtocolVersion,
   ): EitherT[Future, SyncCryptoError, Encrypted[M]] =
     EitherT(
       ipsSnapshot
@@ -322,7 +324,7 @@ class DomainSnapshotSyncCryptoApi(
             .toRight(KeyNotAvailable(owner, KeyPurpose.Encryption, ipsSnapshot.timestamp))
             .flatMap(k =>
               crypto.pureCrypto
-                .encryptWith(message, k)
+                .encryptWith(message, k, version)
                 .leftMap(SyncCryptoEncryptionError)
             )
         }

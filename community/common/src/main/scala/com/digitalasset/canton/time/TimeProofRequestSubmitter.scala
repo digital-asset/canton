@@ -130,7 +130,7 @@ private[time] class TimeProofRequestSubmitterImpl(
         } else Future.successful(Right(()))
       }.onShutdown(Right(()))
 
-    def eventuallySendRequest(): Unit = addToFlush(
+    def eventuallySendRequest(): Unit = addToFlushAndLogError(
       s"sendRequestIfPending scheduled ${config.maxSequencingDelay} after ${clock.now}"
     ) {
       {

@@ -72,7 +72,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         List(
           ClosedEnvelope(
             serializedOverride.getOrElse(
-              message.toEnvelopeContentByteString(ProtocolVersion.default)
+              message.toEnvelopeContentByteString(ProtocolVersion.latestForTest)
             ),
             Recipients.cc(subscriberId),
           )

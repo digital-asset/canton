@@ -59,10 +59,6 @@ case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])
 
   def map[Env2 <: Envelope[_]](f: Env => Env2): Batch[Env2] = Batch(envelopes.map(f))
 
-  def closeEnvelopes: Batch[ClosedEnvelope] = {
-    this.map(x => x.closeEnvelope)
-  }
-
   def envelopesCount: Int = envelopes.size
 
   private[sequencing] def traverse[F[_], Env2 <: Envelope[_]](f: Env => F[Env2])(implicit
@@ -145,5 +141,13 @@ object Batch {
   ): Batch[OpenEnvelope[T]] = {
     val newEnvs = batch.envelopes.mapFilter(e => e.forRecipient(member))
     Batch(newEnvs)
+  }
+
+  def closeEnvelopes[T <: ProtocolMessage](
+      batch: Batch[OpenEnvelope[T]],
+      version: ProtocolVersion,
+  ): Batch[ClosedEnvelope] = {
+    val closedEnvs = batch.envelopes.map(env => env.closeEnvelope(version))
+    Batch(closedEnvs)
   }
 }

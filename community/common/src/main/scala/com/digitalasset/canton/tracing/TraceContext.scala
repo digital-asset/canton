@@ -110,7 +110,7 @@ object TraceContext {
 
   implicit def writeTraceContextToDb(implicit
       setParameterByteArray: SetParameter[Array[Byte]]
-  ): SetParameter[TraceContext] = (v, pp) => pp >> v.toByteArray(ProtocolVersion.default)
+  ): SetParameter[TraceContext] = (v, pp) => pp >> v.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
 
   implicit def getResultTraceContextOption(implicit
       getResultByteArrayO: GetResult[Option[Array[Byte]]]
@@ -122,7 +122,7 @@ object TraceContext {
   implicit def setParameterTraceContextOption(implicit
       setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
   ): SetParameter[Option[TraceContext]] = (v, pp) =>
-    pp >> v.map(_.toByteArray(ProtocolVersion.default))
+    pp >> v.map(_.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
 
   val empty: TraceContext = new TraceContext(OpenTelemetryContext.root())
 

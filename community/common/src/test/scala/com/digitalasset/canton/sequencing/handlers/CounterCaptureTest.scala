@@ -15,9 +15,6 @@ import scala.concurrent.Future
 
 case class HandlerError(message: String)
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard the futures
 class CounterCaptureTest extends AnyWordSpec with BaseTest {
   type TestEventHandler = SerializedEventHandler[HandlerError]
 
@@ -33,23 +30,26 @@ class CounterCaptureTest extends AnyWordSpec with BaseTest {
       val handler: TestEventHandler = _ => Future.successful(Right(()))
       val capturingHandler = counterCapture(handler)
 
-      capturingHandler(
+      val fut = capturingHandler(
         OrdinarySequencedEvent(sign(SequencerTestUtils.mockDeliver(counter = 42L)))(traceContext)
       )
 
       counterCapture.counter shouldBe 42L
+      fut.futureValue shouldBe Right(())
     }
 
     "not update the counter when the handler fails" in {
       val counterCapture = new CounterCapture(1L, loggerFactory)
-      val handler: TestEventHandler = _ => Future.failed(new RuntimeException)
+      val ex = new RuntimeException
+      val handler: TestEventHandler = _ => Future.failed(ex)
       val capturingHandler = counterCapture(handler)
 
-      capturingHandler(
+      val fut = capturingHandler(
         OrdinarySequencedEvent(sign(SequencerTestUtils.mockDeliver(counter = 42L)))(traceContext)
       )
 
       counterCapture.counter shouldBe 1L
+      fut.failed.futureValue shouldBe ex
     }
   }
 

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.EitherT
+import cats.data.{EitherT, NonEmptySeq}
 import cats.instances.future._
 import cats.syntax.bifunctor._
 import com.digitalasset.canton.DomainId
@@ -119,32 +119,56 @@ class Mediator(
         PruningError.CannotPruneAtTimestamp(timestamp, cleanTimestamp),
       )
 
-      allDomainParametersChanges <- EitherT.right(
-        topologyClient.listDynamicDomainParametersChanges()
+      domainParametersChanges <- EitherT.right(
+        topologyClient.awaitSnapshot(timestamp).flatMap(_.listDynamicDomainParametersChanges())
       )
 
-      latestSafePruningTsO = Mediator.latestSafePruningTsBefore(
-        allDomainParametersChanges,
-        cleanTimestamp,
-      )
+      _ <- NonEmptySeq.fromSeq(domainParametersChanges) match {
+        case Some(domainParametersChangesNes) =>
+          prune(
+            pruneAt = timestamp,
+            cleanTimestamp = cleanTimestamp,
+            domainParametersChanges = domainParametersChangesNes,
+          )
 
+        case None =>
+          logger.info(
+            s"No domain parameters found for pruning at $timestamp. This is likely due to $timestamp being before domain bootstrapping. Will not prune."
+          )
+          EitherT.pure[Future, PruningError](())
+      }
+
+    } yield ()
+
+  private def prune(
+      pruneAt: CantonTimestamp,
+      cleanTimestamp: CantonTimestamp,
+      domainParametersChanges: NonEmptySeq[DynamicDomainParameters.WithValidity],
+  ): EitherT[Future, PruningError, Unit] = {
+    val latestSafePruningTsO = Mediator.latestSafePruningTsBefore(
+      domainParametersChanges,
+      cleanTimestamp,
+    )
+
+    for {
       _ <- EitherT.fromEither {
         latestSafePruningTsO
-          .toRight(PruningError.MissingDataForValidPruningTsComputation(timestamp))
+          .toRight(PruningError.MissingDataForValidPruningTsComputation(pruneAt))
           .flatMap { latestSafePruningTs =>
             Either.cond[PruningError, Unit](
-              timestamp <= latestSafePruningTs,
+              pruneAt <= latestSafePruningTs,
               (),
-              PruningError.CannotPruneAtTimestamp(timestamp, latestSafePruningTs),
+              PruningError.CannotPruneAtTimestamp(pruneAt, latestSafePruningTs),
             )
           }
       }
 
-      _ = logger.debug(show"Pruning finalized responses up to [$timestamp]")
-      _ <- EitherT.right(state.prune(timestamp))
-      _ = logger.debug(show"Pruning sequenced event up to [$timestamp]")
-      _ <- EitherT.right(sequencedEventStore.prune(timestamp).merge)
+      _ = logger.debug(show"Pruning finalized responses up to [$pruneAt]")
+      _ <- EitherT.right(state.prune(pruneAt))
+      _ = logger.debug(show"Pruning sequenced event up to [$pruneAt]")
+      _ <- EitherT.right(sequencedEventStore.prune(pruneAt).merge)
     } yield ()
+  }
 
   private def handle(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
     tracedEvents.withTraceContext { implicit traceContext => events =>
@@ -217,7 +241,7 @@ object Mediator {
 
   /** Returns the latest safe pruning ts which is <= cleanTs */
   private[mediator] def latestSafePruningTsBefore(
-      allDomainParametersChanges: Seq[DynamicDomainParameters.WithValidity],
+      allDomainParametersChanges: NonEmptySeq[DynamicDomainParameters.WithValidity],
       cleanTs: CantonTimestamp,
   ): Option[CantonTimestamp] = allDomainParametersChanges
     .map(checkPruningStatus(_, cleanTs))

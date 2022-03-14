@@ -42,10 +42,10 @@ class SequencedEventTest extends BaseTestWordSpec {
           Some(MessageId.tryCreate("some-message-id")),
           batch,
         )
-      val deliverEventPV0 = deliver.toProtoV0(ProtocolVersion.default)
-      val deliverEventP = deliver.toProtoVersioned(ProtocolVersion.default)
+      val deliverEventPV0 = deliver.toProtoV0(ProtocolVersion.latestForTest)
+      val deliverEventP = deliver.toProtoVersioned(ProtocolVersion.latestForTest)
       val deserializedEventV0 = deserializeV0(deliverEventPV0)
-      val deserializedEvent = fromByteString(deliverEventP)
+      val deserializedEvent = deserializeVersioned(deliverEventP)
 
       deserializedEventV0.value shouldBe deliver
       deserializedEvent.value shouldBe deliver
@@ -61,8 +61,8 @@ class SequencedEventTest extends BaseTestWordSpec {
       )
       val deliverErrorPV0 = deliverError.toProtoV0
       val deserializedEventV0 = deserializeV0(deliverErrorPV0)
-      val deliverErrorP = deliverError.toProtoVersioned(ProtocolVersion.default)
-      val deserializedEvent = fromByteString(deliverErrorP)
+      val deliverErrorP = deliverError.toProtoVersioned(ProtocolVersion.latestForTest)
+      val deserializedEvent = deserializeVersioned(deliverErrorP)
 
       deserializedEvent.value shouldBe deliverError
       deserializedEventV0.value shouldBe deliverError
@@ -72,18 +72,20 @@ class SequencedEventTest extends BaseTestWordSpec {
         eventP: v0.SequencedEvent
     ): ParsingResult[SequencedEvent[DefaultOpenEnvelope]] = {
       val cryptoPureApi = mock[CryptoPureApi]
+      val bytes = eventP.toByteString
       SequencedEvent.fromProtoWithV0(
         OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoPureApi))
-      )(eventP, None)
+      )(eventP, bytes)
     }
 
-    def fromByteString(
+    def deserializeVersioned(
         eventP: VersionedSequencedEvent
     ): ParsingResult[SequencedEvent[DefaultOpenEnvelope]] = {
       val cryptoPureApi = mock[CryptoPureApi]
+      val bytes = eventP.toByteString
       SequencedEvent.fromProtoWith(
         OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoPureApi))
-      )(eventP, None)
+      )(eventP, bytes)
     }
   }
 }

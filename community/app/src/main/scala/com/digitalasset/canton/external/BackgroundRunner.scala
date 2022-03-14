@@ -152,6 +152,8 @@ class BackgroundRunner(
 ) extends NamedLogging
     with FlagCloseable {
 
+  import BackgroundRunner._
+
   private def dumpOutputToLogger(parent: InputStream, level: Level): Unit = {
     @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.While"))
     class CopyOutput() extends NoTracing with Runnable {
@@ -160,8 +162,8 @@ class BackgroundRunner(
       override def run(): Unit = {
         try {
           var b = parent.read()
-          while (b != 0) {
-            if (b == '\n') {
+          while (b != -1) {
+            if (b == '\n' || buf.getBuffer.length() >= MaxLineLength) {
               // strip the ansi color commands from the string
               val msg = s"Output of ${name}: ${buf.toString}"
               level match {
@@ -235,6 +237,10 @@ class BackgroundRunner(
 
 }
 
+object BackgroundRunner {
+  private val MaxLineLength = 8192
+}
+
 object BackgroundRunnerHelpers {
 
   /** Yields the jvm params specifying the current classpath, e.g., `Seq("-cp", myClassPath)`.
@@ -252,7 +258,7 @@ object BackgroundRunnerHelpers {
   }
 
   private def loadIntelliJClasspath(): Option[String] =
-    Some(System.getProperty("java.class.path")).filter(!_.contains("sbt-launch.jar"))
+    Some(System.getProperty("java.class.path")).filter(!_.matches(".*sbt-launch.*\\.jar"))
 
   private def tryGetClasspathFile(): File = {
     val cpFile = File(s"classpath.txt")

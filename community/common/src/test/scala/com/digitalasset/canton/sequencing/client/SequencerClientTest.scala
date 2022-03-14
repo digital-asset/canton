@@ -60,6 +60,7 @@ import com.digitalasset.canton.time.{
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -619,11 +620,19 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         traceContext: TraceContext
     ): Future[Unit] =
       Future.unit
-    override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+    override def sendAsync(
+        request: SubmissionRequest,
+        timeout: Duration,
+        protocolVersion: ProtocolVersion,
+    )(implicit
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncClientError, Unit] = ???
 
-    override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+    override def sendAsyncUnauthenticated(
+        request: SubmissionRequest,
+        timeout: Duration,
+        protocolVersion: ProtocolVersion,
+    )(implicit
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncClientError, Unit] = ???
 

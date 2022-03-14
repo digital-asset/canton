@@ -155,11 +155,6 @@ trait DomainTopologyClient extends TopologyClientApi[TopologySnapshot] with Auto
   def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
-
-  /** List all the dynamic domain parameters (past and current) */
-  def listDynamicDomainParametersChanges()(implicit
-      traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]]
 }
 
 object DomainTopologyClient {
@@ -363,6 +358,10 @@ trait DomainGovernanceSnapshotClient {
       traceContext: TraceContext
   ): Future[DynamicDomainParameters]
 
+  /** List all the dynamic domain parameters (past and current) */
+  def listDynamicDomainParametersChanges()(implicit
+      traceContext: TraceContext
+  ): Future[Seq[DynamicDomainParameters.WithValidity]]
 }
 
 trait TopologySnapshot

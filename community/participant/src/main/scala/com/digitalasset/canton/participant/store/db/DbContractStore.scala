@@ -319,24 +319,24 @@ class DbContractStore(
 
   override def deleteDivulged(
       upTo: RequestCounter
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val query = profile match {
-      case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
-        (sql"""select contract_id from contracts
-                 where domain_id = $domainId and request_counter <= $upTo and creating_transaction_id is null""")
-      case _: DbStorage.Profile.Oracle =>
-        // Here we use exactly the same expression as in idx_contracts_request_counter
-        // to make sure the index is used.
-        sql"""select contract_id from contracts
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    processingTime.metric
+      .event {
+        val query = profile match {
+          case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
+            sqlu"""delete from contracts
+                 where domain_id = $domainId and request_counter <= $upTo and creating_transaction_id is null"""
+          case _: DbStorage.Profile.Oracle =>
+            // Here we use exactly the same expression as in idx_contracts_request_counter
+            // to make sure the index is used.
+            sqlu"""delete from contracts
                  where (case when creating_transaction_id is null then domain_id end) = $domainId and 
                        (case when creating_transaction_id is null then request_counter end) <= $upTo"""
-    }
+        }
 
-    processingTime.metric.event(storage.query(query.as[LfContractId], functionFullName)).flatMap {
-      contractIds =>
-        deleteIgnoringUnknown(contractIds)
-    }
-  }
+        storage.update_(query, functionFullName)
+      }
+      .thereafter(_ => cache.synchronous().invalidateAll())
 
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext

@@ -13,7 +13,7 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture}
+import com.digitalasset.canton.util.HasFlushFuture
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -63,8 +63,7 @@ class PeriodicAcknowledgements(
         }.onShutdown(
           logger.debug("Acknowledging sequencer timestamp skipped due to shutdown")
         )
-        val future = FutureUtil.logOnFailure(updateF, "Failed to acknowledge sequencer timestamp")
-        addToFlush("periodic acknowledgement")(future)
+        addToFlushAndLogError("periodic acknowledgement")(updateF)
       }
     }
 

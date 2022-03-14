@@ -61,6 +61,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter, checked}
 
 import scala.collection.{concurrent, mutable}
@@ -73,6 +74,7 @@ class TransferOutProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
+    version: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -162,7 +164,7 @@ class TransferOutProcessingSteps(
       mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferOutViewType)(fullTree, originRecentSnapshot)
+        .create(TransferOutViewType)(fullTree, originRecentSnapshot, version)
         .leftMap[TransferProcessorError](EncryptionError)
         .mapK(FutureUnlessShutdown.outcomeK)
       maybeRecipients = Recipients.ofSet(recipients)

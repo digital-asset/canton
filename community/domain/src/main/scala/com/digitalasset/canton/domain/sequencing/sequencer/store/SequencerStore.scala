@@ -130,7 +130,7 @@ object DeliverStoreEvent {
   /** Typically in deliver events the recipients are just the recipients of the batch.
     * However in our store we want all members that will read the event to be queryable in a single collection
     * to efficiently implement as a filter at the database. So ensure that the sender is also included in this collection
-    * as they will receive a deliver event as a receipt even if they are receving anything from the batch.
+    * as they will receive a deliver event as a receipt even if they aren't receiving anything from the batch.
     */
   def ensureSenderReceivesEvent(
       sender: SequencerMemberId,

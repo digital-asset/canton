@@ -12,6 +12,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{EncryptedView, EncryptedViewMessage}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainId, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -21,6 +22,7 @@ object EncryptedViewMessageFactory {
   def create[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+      version: ProtocolVersion,
       optRandomness: Option[SecureRandomness] = None,
   )(implicit
       traceContext: TraceContext,
@@ -47,12 +49,12 @@ object EncryptedViewMessageFactory {
       informeeParticipants <- cryptoSnapshot.ipsSnapshot
         .activeParticipantsOfAll(informeeParties)
         .leftMap(UnableToDetermineParticipant(_, cryptoSnapshot.domainId))
-      keyMap <- createKeyMap(informeeParticipants.to(LazyList), randomness, cryptoSnapshot)
+      keyMap <- createKeyMap(informeeParticipants.to(LazyList), randomness, cryptoSnapshot, version)
       signature <- viewTree.toBeSigned
         .traverse(rootHash => cryptoSnapshot.sign(rootHash.unwrap).leftMap(FailedToSignViewMessage))
       encryptedView <- eitherT(
         EncryptedView
-          .compressed[VT](cryptoPureApi, symmetricViewKey, viewType)(viewTree)
+          .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, version)(viewTree)
           .leftMap(FailedToEncryptViewMessage)
       )
     } yield EncryptedViewMessage[VT](
@@ -68,13 +70,14 @@ object EncryptedViewMessageFactory {
       participants: LazyList[ParticipantId],
       randomness: SecureRandomness,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
+      version: ProtocolVersion,
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, UnableToDetermineKey, Map[ParticipantId, Encrypted[SecureRandomness]]] =
     participants
       .traverse { participant =>
         cryptoSnapshot
-          .encryptFor(randomness, participant)
+          .encryptFor(randomness, participant, version)
           .bimap(UnableToDetermineKey(participant, _, cryptoSnapshot.domainId), participant -> _)
       }
       .map(_.toMap)

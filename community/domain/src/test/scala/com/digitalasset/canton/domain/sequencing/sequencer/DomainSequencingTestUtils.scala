@@ -40,7 +40,9 @@ object DomainSequencingTestUtils {
         case DeliverErrorStoreEvent(_sender, _messageId, _message, _traceContext) => None
       }
     }
-    payloadIds.map(pid => Payload(pid, Batch.empty.toByteString(ProtocolVersion.default))).toList
+    payloadIds
+      .map(pid => Payload(pid, Batch.empty.toByteString(ProtocolVersion.latestForTest)))
+      .toList
   }
 
 }

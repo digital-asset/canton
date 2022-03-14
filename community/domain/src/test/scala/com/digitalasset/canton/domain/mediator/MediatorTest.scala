@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import cats.data.NonEmptySeq
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.{Safe, SafeUntil}
@@ -37,8 +38,6 @@ class MediatorTest extends AnyWordSpec with BaseTest {
       Mediator.checkPruningStatus(parameters, cleanTimestamp) shouldBe SafeUntil(
         earliestPruningTimestamp
       )
-
-      Mediator.latestSafePruningTsBefore(Nil, cleanTimestamp) shouldBe None
     }
 
     "cap the time using DynamicDomainParameters.WithValidity.validFrom" in {
@@ -117,7 +116,7 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     val dpChangeTs1 = relTime(20)
     val dpChangeTs2 = relTime(40)
 
-    val parameters = List(
+    val parameters = NonEmptySeq.of(
       DynamicDomainParameters.WithValidity(origin, Some(dpChangeTs1), defaultParameters),
       // This one prevents pruning for some time
       DynamicDomainParameters

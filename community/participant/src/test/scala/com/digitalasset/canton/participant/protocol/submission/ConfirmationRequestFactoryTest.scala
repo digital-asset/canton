@@ -22,7 +22,6 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   SerializableContractOfId,
   TransactionTreeConversionError,
 }
-import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.protocol.ExampleTransactionFactory._
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol._
@@ -38,7 +37,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import org.scalatest.Assertion
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -231,7 +230,12 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           .flatMap(_.keySet)
 
         val encryptedView = EncryptedView
-          .compressed(cryptoPureApi, symmetricKey, TransactionViewType)(
+          .compressed(
+            cryptoPureApi,
+            symmetricKey,
+            TransactionViewType,
+            ProtocolVersion.latestForTest,
+          )(
             LightTransactionViewTree.fromTransactionViewTree(tree)
           )
           .valueOr(err => fail(s"Failed to encrypt view tree: $err"))
@@ -276,7 +280,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
         .futureValue
         .getOrElse(fail("The defaultIdentitySnapshot really should have at least one key."))
     } yield participant -> cryptoPureApi
-      .encryptWith(randomness, publicKey)
+      .encryptWith(randomness, publicKey, ProtocolVersion.latestForTest)
       .valueOr(err => fail(err.toString))
 
     randomnessPairs.toMap
@@ -301,6 +305,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               newCryptoSnapshot,
               contractInstanceOfId,
               Some(testKeySeed),
+              ProtocolVersion.latestForTest,
             )
             .value
             .map(res =>
@@ -330,6 +335,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             emptyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            ProtocolVersion.latestForTest,
           )
           .value
           .map(
@@ -363,6 +369,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             confirmationOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            ProtocolVersion.latestForTest,
           )
           .value
           .map(
@@ -393,6 +400,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             newCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            ProtocolVersion.latestForTest,
           )
           .value
           .map(_ should equal(Left(TransactionTreeFactoryError(error))))
@@ -420,6 +428,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             submitterOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            ProtocolVersion.latestForTest,
           )
           .value
           .map(
@@ -452,42 +461,12 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             noKeyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
+            ProtocolVersion.latestForTest,
           )
           .value
           .map(_ should matchPattern {
             case Left(EncryptedViewMessageCreationError(UnableToDetermineKey(_, _, _))) =>
           })
-      }
-    }
-
-    "used contract has been created with future ledger time must be rejected" must {
-      val creationTime = CantonTimestamp.MaxValue
-
-      createConfirmationRequest().value
-        .map(
-          _ shouldBe Left(
-            ContractConsistencyError(
-              List(ReferenceToFutureContractError(singleFetch.contractId, creationTime, ledgerTime))
-            )
-          )
-        )
-        .discard[Future[Assertion]] // TODO(#8448) This test doesn't work as intended
-
-      def createConfirmationRequest()
-          : EitherT[Future, ConfirmationRequestCreationError, ConfirmationRequest] = {
-        val factory = confirmationRequestFactory(Right(singleFetch.transactionTree))
-
-        factory.createConfirmationRequest(
-          singleFetch.wellFormedUnsuffixedTransaction,
-          ConfirmationPolicy.Vip,
-          submitterInfo,
-          ledgerTime,
-          workflowId,
-          mediator,
-          newCryptoSnapshot,
-          contractInstanceOfId,
-          Some(testKeySeed),
-        )
       }
     }
   }

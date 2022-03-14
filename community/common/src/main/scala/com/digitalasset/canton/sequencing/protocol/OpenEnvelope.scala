@@ -23,7 +23,9 @@ case class OpenEnvelope[+M <: ProtocolMessage](
 ) extends Envelope[M] {
 
   override protected def content: M = protocolMessage
-  override protected def contentAsByteString(version: ProtocolVersion): ByteString =
+
+  /** Returns the serialized contents of the envelope */
+  protected def contentAsByteString(version: ProtocolVersion): ByteString =
     protocolMessage.toEnvelopeContentByteString(version)
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -42,6 +44,10 @@ case class OpenEnvelope[+M <: ProtocolMessage](
     val subtrees = recipients.forMember(member)
     subtrees.map(s => OpenEnvelope(protocolMessage, s))
   }
+
+  /** Closes the envelope by serializing the contents */
+  def closeEnvelope(version: ProtocolVersion): ClosedEnvelope =
+    ClosedEnvelope(contentAsByteString(version), recipients)
 }
 
 object OpenEnvelope {

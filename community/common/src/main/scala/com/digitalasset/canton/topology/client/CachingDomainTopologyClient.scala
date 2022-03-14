@@ -29,7 +29,7 @@ import com.digitalasset.canton.{DomainId, SequencerCounter}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 class CachingDomainTopologyClient(
     protected val clock: Clock,
@@ -169,10 +169,6 @@ class CachingDomainTopologyClient(
   }
 
   override def numPendingChanges: Int = parent.numPendingChanges
-
-  override def listDynamicDomainParametersChanges()(implicit
-      traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]] = parent.listDynamicDomainParametersChanges()
 }
 
 object CachingDomainTopologyClient {
@@ -294,6 +290,11 @@ private class ForwardingTopologySnapshotClient(
       traceContext: TraceContext
   ): Future[Option[DynamicDomainParameters]] = parent.findDynamicDomainParameters
 
+  /** List all the dynamic domain parameters (past and current) */
+  override def listDynamicDomainParametersChanges()(implicit
+      traceContext: TraceContext
+  ): Future[Seq[DynamicDomainParameters.WithValidity]] = parent.listDynamicDomainParametersChanges()
+
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
       loadParticipantStates: Seq[ParticipantId] => Future[Map[ParticipantId, ParticipantAttributes]],
@@ -338,6 +339,9 @@ class CachingTopologySnapshot(
 
   private val domainParametersCache =
     new AtomicReference[Option[Future[Option[DynamicDomainParameters]]]](None)
+
+  private val domainParametersChangesCache =
+    new AtomicReference[Option[Future[Seq[DynamicDomainParameters.WithValidity]]]](None)
 
   override def participants(): Future[Seq[(ParticipantId, ParticipantPermission)]] =
     parent.participants()
@@ -405,20 +409,30 @@ class CachingTopologySnapshot(
     parent.inspectKnownParties(filterParty, filterParticipant, limit)
 
   /** returns the list of currently known mediators */
-  override def mediators(): Future[Seq[MediatorId]] = mediatorsCache.get().getOrElse {
-    // simple cache implementation using a reference
-    val responseF = parent.mediators()
-    mediatorsCache.set(Some(responseF))
-    responseF
+  override def mediators(): Future[Seq[MediatorId]] =
+    getAndCache(mediatorsCache, parent.mediators())
+
+  /** Returns the value if it is present in the cache. Otherwise, use the
+    * `getter` to fetch it and cache the result.
+    */
+  private def getAndCache[T](
+      cache: AtomicReference[Option[Future[T]]],
+      getter: => Future[T],
+  ): Future[T] = {
+    val promise = Promise[T]()
+    val previousO = cache.getAndSet(Some(promise.future))
+    promise.completeWith(previousO.getOrElse(getter))
+    promise.future
   }
 
   override def findDynamicDomainParameters(implicit
       traceContext: TraceContext
   ): Future[Option[DynamicDomainParameters]] =
-    domainParametersCache.get().getOrElse {
-      val responseF = parent.findDynamicDomainParameters
-      domainParametersCache.set(Some(responseF))
-      responseF
-    }
+    getAndCache(domainParametersCache, parent.findDynamicDomainParameters)
 
+  /** List all the dynamic domain parameters (past and current) */
+  override def listDynamicDomainParametersChanges()(implicit
+      traceContext: TraceContext
+  ): Future[Seq[DynamicDomainParameters.WithValidity]] =
+    getAndCache(domainParametersChangesCache, parent.listDynamicDomainParametersChanges())
 }

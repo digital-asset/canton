@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -61,6 +62,7 @@ class ConfirmationRequestFactory(
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       contractInstanceOfId: SerializableContractOfId,
       optKeySeed: Option[SecureRandomness],
+      version: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ConfirmationRequestCreationError, ConfirmationRequest] = {
@@ -104,6 +106,7 @@ class ConfirmationRequestFactory(
         transactionTree,
         cryptoSnapshot,
         keySeed,
+        version,
       )
     } yield ConfirmationRequest(
       InformeeMessage(transactionTree.fullInformeeTree),
@@ -145,6 +148,7 @@ class ConfirmationRequestFactory(
       transactionTree: GenTransactionTree,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       keySeed: SecureRandomness,
+      version: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, ConfirmationRequestCreationError, List[
     OpenEnvelope[TransactionViewMessage]
   ]] = {
@@ -159,7 +163,7 @@ class ConfirmationRequestFactory(
         .traverse { case (vt, witnesses, seed) =>
           for {
             viewMessage <- EncryptedViewMessageFactory
-              .create(TransactionViewType)(vt, cryptoSnapshot, Some(seed))
+              .create(TransactionViewType)(vt, cryptoSnapshot, version, Some(seed))
               .leftMap(EncryptedViewMessageCreationError)
             recipients <- witnesses
               .toRecipients(cryptoSnapshot.ipsSnapshot)

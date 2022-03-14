@@ -54,6 +54,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, DomainId, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -189,6 +190,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       damle,
       coordination,
       seedGenerator,
+      ProtocolVersion.latestForTest,
       loggerFactory,
     )(executorService)
 
@@ -662,7 +664,10 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       tree: FullTransferOutTree
   ): Future[EncryptedViewMessage[TransferOutViewType]] =
     EncryptedViewMessageFactory
-      .create(TransferOutViewType)(tree, cryptoSnapshot)(implicitly[TraceContext], executorService)
+      .create(TransferOutViewType)(tree, cryptoSnapshot, ProtocolVersion.latestForTest)(
+        implicitly[TraceContext],
+        executorService,
+      )
       .fold(error => fail(s"Failed to encrypt transfer-out request: $error"), Predef.identity)
 
   def makeRootHashMessage(

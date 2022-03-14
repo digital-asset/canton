@@ -53,6 +53,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
@@ -69,6 +70,7 @@ class TransferInProcessingSteps(
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
     causalityTracking: Boolean,
+    version: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -192,7 +194,7 @@ class TransferInProcessingSteps(
       )
 
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferInViewType)(fullTree, recentSnapshot)
+        .create(TransferInViewType)(fullTree, recentSnapshot, version)
         .leftMap[TransferProcessorError](EncryptionError)
     } yield {
       val rootHashMessage =

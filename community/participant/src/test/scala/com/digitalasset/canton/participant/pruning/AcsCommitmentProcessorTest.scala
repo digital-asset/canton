@@ -164,7 +164,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     val sequencerClient = mock[SequencerClient]
     when(
       sequencerClient.sendAsync(
-        any[Batch[Envelope[ProtocolMessage]]],
+        any[Batch[OpenEnvelope[ProtocolMessage]]],
         any[SendType],
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],
@@ -545,7 +545,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         received <- store.searchReceivedBetween(CantonTimestamp.Epoch, timeProofs.last)
       } yield {
         verify(processor.sequencerClient, times(2)).sendAsync(
-          any[Batch[Envelope[ProtocolMessage]]],
+          any[Batch[OpenEnvelope[ProtocolMessage]]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],

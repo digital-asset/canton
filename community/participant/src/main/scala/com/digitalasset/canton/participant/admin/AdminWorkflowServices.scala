@@ -103,7 +103,6 @@ class AdminWorkflowServices(
         packageService,
         hashOps,
         isActive = syncService.isActive(),
-        timeouts = timeouts,
         loggerFactory = loggerFactory,
       )
   }
@@ -196,21 +195,11 @@ class AdminWorkflowServices(
     val (offset, connection) = createConnection(applicationId, applicationId)
     val service = createService(connection)
 
-    // subscribe preferring async transaction processing if supported
-    val subscription = service match {
-      case asyncService: AsyncAdminWorkflowService =>
-        connection.subscribeAsync(offset)(tx =>
-          withSpan(s"$applicationId.processTransaction") { implicit traceContext => _ =>
-            asyncService.processTransactionAsync(tx)
-          }
-        )
-      case syncService =>
-        connection.subscribe(offset)(tx =>
-          withSpan(s"$applicationId.processTransaction") { implicit traceContext => _ =>
-            syncService.processTransaction(tx)
-          }
-        )
-    }
+    val subscription = connection.subscribeAsync(subscriptionName = applicationId, offset)(tx =>
+      withSpan(s"$applicationId.processTransaction") { implicit traceContext => _ =>
+        service.processTransaction(tx)
+      }
+    )
 
     subscription.completed onComplete {
       case Success(_) =>

@@ -211,7 +211,6 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
       shareOfferStore,
       whitelistStore,
       isActive = true,
-      timeouts,
       logger,
     )
   }
@@ -233,7 +232,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
     // we're heavily relying on the ScalaTest default serial execution context to
     // execute all futures during one test step before starting the next
     def processTransaction(tx: Transaction): Unit = executionContext.execute { () =>
-      List(alices, bobs).map(_.service.processTransactionAsync(tx))
+      List(alices, bobs).map(_.service.processTransaction(tx))
     }
 
     def processTransaction(events: Event.Event*): Unit =

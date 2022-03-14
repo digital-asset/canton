@@ -11,7 +11,12 @@ import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.functor._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
 import com.digitalasset.canton.sequencing.protocol._
@@ -121,9 +126,6 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       },
     )
 
-    @SuppressWarnings(
-      Array("com.digitalasset.canton.DiscardedFuture")
-    ) // TODO(#8448) Do not discard futures
     def completeFlow(): Future[Unit] = {
       writer.complete()
       doneF.void
@@ -134,7 +136,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
       Seq(
-        AsyncCloseable("sequencer", writer.complete(), 10.seconds),
+        SyncCloseable("sequencer", writer.complete()),
         AsyncCloseable("done", doneF, 10.seconds),
         AsyncCloseable("actorSystem", actorSystem.terminate(), 10.seconds),
       )

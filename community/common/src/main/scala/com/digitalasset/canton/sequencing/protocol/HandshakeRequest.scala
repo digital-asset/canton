@@ -14,6 +14,8 @@ final case class HandshakeRequest(
     minimumProtocolVersion: Option[ProtocolVersion],
 ) extends HasProtoV0[v0.Handshake.Request] {
 
+  // IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
+  // when changing the handshake message format
   override def toProtoV0: v0.Handshake.Request =
     v0.Handshake.Request(
       clientProtocolVersions.map(_.fullVersion),
@@ -23,6 +25,8 @@ final case class HandshakeRequest(
   /* We allow serializing this message to a ByteArray despite it not implementing HasVersionedWrapper because the serialization
    is (and should only be used) in the HttpSequencerClient.
   If you need to save this message in a database, please add a Versioned... message as documented in CONTRIBUTING.md  */
+  // IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
+  // when changing the handshake message format
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteArray
 
 }

@@ -388,8 +388,7 @@ class DomainTimeTracker(
         if (updateCondition(current)) {
           // schedule next update
           val nextF = clock.scheduleAt(_ => maybeScheduleUpdate(), updateBy).unwrap
-          addToFlush(s"scheduled update at $updateBy")(nextF)
-          FutureUtil.doNotAwait(nextF, s"scheduled update at $updateBy failed")
+          addToFlushAndLogError(s"scheduled update at $updateBy")(nextF)
         }
       }
     }

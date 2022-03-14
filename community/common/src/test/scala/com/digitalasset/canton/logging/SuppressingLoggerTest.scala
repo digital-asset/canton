@@ -13,9 +13,6 @@ import scala.collection.immutable.ListMap
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard the futures
 class SuppressingLoggerTest extends AnyWordSpec with BaseTest {
 
   "suppress" should {
@@ -112,11 +109,12 @@ class SuppressingLoggerTest extends AnyWordSpec with BaseTest {
     "suppress intended log messages during asynchronous operation" in new LoggingTester {
       val promise: Promise[Unit] = Promise[Unit]()
 
-      loggerFactory.assertLogs(promise.future, _.errorMessage shouldBe "Test")
+      val fut = loggerFactory.assertLogs(promise.future, _.errorMessage shouldBe "Test")
 
       logger.error("Test")
 
       promise.success(())
+      fut.futureValue
 
       verify(underlyingLogger, never).error(any[String])
       verify(underlyingLogger).info("Suppressed ERROR: Test")

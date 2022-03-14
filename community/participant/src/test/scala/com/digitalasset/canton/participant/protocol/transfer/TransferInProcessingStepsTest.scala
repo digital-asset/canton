@@ -60,6 +60,7 @@ import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -822,6 +823,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       ),
       seedGenerator,
       causalityTracking = true,
+      ProtocolVersion.latestForTest,
       loggerFactory = loggerFactory,
     )
   }
@@ -857,7 +859,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       tree: FullTransferInTree
   ): Future[EncryptedViewMessage[TransferInViewType]] =
     EncryptedViewMessageFactory
-      .create(TransferInViewType)(tree, cryptoSnapshot)
+      .create(TransferInViewType)(tree, cryptoSnapshot, ProtocolVersion.latestForTest)
       .fold(
         error => throw new IllegalArgumentException(s"Cannot encrypt transfer-in request: $error"),
         Predef.identity,

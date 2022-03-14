@@ -133,7 +133,7 @@ class DbFinalizedResponseStore(
   )
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =
     (r: MediatorRequest, pp: PositionedParameters) =>
-      pp >> r.toEnvelopeContentByteString(ProtocolVersion.default).toByteArray
+      pp >> r.toEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("finalized-response-store")

@@ -92,7 +92,7 @@ class PeriodicAcknowledgementsTest extends AsyncWordSpec with BaseTest with HasE
           env.clock.advance(env.interval.plus(1.millis).toJava)
           env.sut.flush()
         },
-        _.errorMessage shouldBe "Failed to acknowledge sequencer timestamp",
+        _.errorMessage shouldBe "periodic acknowledgement failed",
       )
     } yield succeed
   }

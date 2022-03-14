@@ -26,9 +26,6 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) do not discard futures
 class SingleDomainCausalTrackerTest
     extends AnyWordSpec
     with BaseTest
@@ -107,7 +104,7 @@ class SingleDomainCausalTrackerTest
           id,
           VectorClock(domain1, localTs = outTime, alice, Map(domain1 -> outTime)),
         )
-      sut.registerCausalityMessages(List(cm))
+      sut.registerCausalityMessages(List(cm)).futureValue
 
       val events = runUpdates(sut, updates)
 
@@ -243,8 +240,8 @@ class SingleDomainCausalTrackerTest
           ),
         )
 
-      sut.registerCausalityMessages(List(cmBob))
-      sut.registerCausalityMessages(List(cmAlice))
+      sut.registerCausalityMessages(List(cmBob)).futureValue
+      sut.registerCausalityMessages(List(cmAlice)).futureValue
 
       val events = runUpdates(sut, updates)
 

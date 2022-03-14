@@ -18,6 +18,7 @@ import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HasVersionedToByteString
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -110,6 +111,8 @@ object SyncCryptoError {
   }
 }
 
+// TODO(i8808): consider changing `encryptFor` API to
+//  `def encryptFor(message: ByteString, owner: KeyOwner): EitherT[Future, SyncCryptoError, ByteString]`
 // architecture-handbook-entry-begin: SyncCryptoApi
 /** impure part of the crypto api with access to private key store and knowledge about the current entity to key assoc */
 trait SyncCryptoApi {
@@ -144,6 +147,7 @@ trait SyncCryptoApi {
   def encryptFor[M <: HasVersionedToByteString](
       message: M,
       owner: KeyOwner,
+      version: ProtocolVersion,
   ): EitherT[Future, SyncCryptoError, Encrypted[M]]
 }
 // architecture-handbook-entry-end: SyncCryptoApi

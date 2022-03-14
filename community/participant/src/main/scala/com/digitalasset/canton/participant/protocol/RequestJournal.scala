@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, HasFlushFuture, NoCopy}
+import com.digitalasset.canton.util.{ErrorUtil, HasFlushFuture, NoCopy}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.ConcurrentModificationException
@@ -142,9 +142,7 @@ class RequestJournal(
       _ = pendingCursor.insert(rc, info)
 
       // Asynchronously drain the cursors and update the clean head
-      _ = addToFlush(s"Update Pending cursor for request $rc")(
-        FutureUtil.logOnFailure(drainPending, "Failed to update Pending cursor")
-      )
+      _ = addToFlushAndLogError(s"Update Pending cursor for request $rc")(drainPending)
     } yield info.signal.future
 
   /** Tells the request journal that the given request is ready to transition to the given state.
@@ -285,8 +283,8 @@ class RequestJournal(
         }
 
         // Asynchronously drain the cursors and update the clean head
-        addToFlush(s"Update cursors for request $rc")(
-          FutureUtil.logOnFailure(drainCursorsAndStoreNewCleanPrehead(), "Failed to update cursors")
+        addToFlushAndLogError(s"Update cursors for request $rc")(
+          drainCursorsAndStoreNewCleanPrehead()
         )
 
         Some(info.signal.future)

@@ -207,6 +207,14 @@ class SequencerAdministrationGroup(
       runner.adminCommand(EnterpriseSequencerAdminCommands.Snapshot(timestamp))
     }
 
+  @Help.Summary(
+    "Authorize a ledger identity (e.g. an EthereumAccount) on the underlying ledger. "
+  )
+  @Help.Description("""Authorize a ledger identity (e.g. an EthereumAccount) on the underlying ledger. 
+                      |Currently only implemented for the Ethereum sequencer and has no effect for other sequencer
+                      |integrations.
+                      | See the authorization documentation of the Ethereum sequencer integrations for more detail. 
+                    """")
   def authorize_ledger_identity(ledgerIdentity: LedgerIdentity): Unit = consoleEnvironment.run {
     runner.adminCommand(EnterpriseSequencerAdminCommands.AuthorizeLedgerIdentity(ledgerIdentity))
   }

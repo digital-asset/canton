@@ -331,42 +331,6 @@ class StoreBasedDomainTopologyClient(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
     scheduleAwait(condition(currentSnapshotApproximation), timeout)
-
-  override def listDynamicDomainParametersChanges()(implicit
-      traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]] = store
-    .inspect(
-      stateStore = false,
-      timeQuery = TimeQuery.Range(None, None),
-      recentTimestampO = None,
-      ops = Some(TopologyChangeOp.Replace),
-      typ = Some(DomainTopologyTransactionType.DomainParameters),
-      idFilter = "",
-      namespaceOnly = false,
-    )
-    .map { storedTxs =>
-      val domainParametersChanges = storedTxs.result
-        .map(storedTx =>
-          (storedTx.validFrom, storedTx.validUntil, storedTx.transaction.transaction.element)
-        )
-        .collect {
-          case (
-                validFrom,
-                validUntil,
-                DomainGovernanceElement(DomainParametersChange(_, domainParameters)),
-              ) =>
-            DynamicDomainParameters.WithValidity(
-              validFrom,
-              validUntil,
-              domainParameters,
-            )
-        }
-
-      if (domainParametersChanges.isEmpty)
-        logger.warn("List of all domain parameters changes should not be empty.")
-
-      domainParametersChanges
-    }
 }
 
 object StoreBasedDomainTopologyClient {
@@ -847,4 +811,34 @@ class StoreBasedTopologySnapshot(
       }
     }
 
+  override def listDynamicDomainParametersChanges()(implicit
+      traceContext: TraceContext
+  ): Future[Seq[DynamicDomainParameters.WithValidity]] = store
+    .inspect(
+      stateStore = false,
+      timeQuery = TimeQuery.Range(None, Some(timestamp)),
+      recentTimestampO = None,
+      ops = Some(TopologyChangeOp.Replace),
+      typ = Some(DomainTopologyTransactionType.DomainParameters),
+      idFilter = "",
+      namespaceOnly = false,
+    )
+    .map {
+      _.result
+        .map(storedTx =>
+          (storedTx.validFrom, storedTx.validUntil, storedTx.transaction.transaction.element)
+        )
+        .collect {
+          case (
+                validFrom,
+                validUntil,
+                DomainGovernanceElement(DomainParametersChange(_, domainParameters)),
+              ) =>
+            DynamicDomainParameters.WithValidity(
+              validFrom,
+              validUntil,
+              domainParameters,
+            )
+        }
+    }
 }

@@ -478,25 +478,27 @@ object DomainTopologyDispatcher {
     // schedule init on domain topology manager to avoid race conditions between
     // queue filling and store scanning. however, we can't do that synchronously here
     // as starting the domain might be kicked off by the domain manager (in manual init scenarios)
-    domainTopologyManager
-      .executeSequential(
-        {
-          for {
-            _ <- dispatcher
-              .init(
-                flushSequencerWithTimeProof(timeTracker, targetClient)
-              )
-          } yield {
-            domainTopologyManager.addObserver(dispatcher)
-          }
-        }.onShutdown(
-          logger.debug("Stopped dispatcher initialization due to shutdown")(
-            TraceContext.empty
-          )
+    FutureUtil.doNotAwait(
+      domainTopologyManager
+        .executeSequential(
+          {
+            for {
+              _ <- dispatcher
+                .init(
+                  flushSequencerWithTimeProof(timeTracker, targetClient)
+                )
+            } yield {
+              domainTopologyManager.addObserver(dispatcher)
+            }
+          }.onShutdown(
+            logger.debug("Stopped dispatcher initialization due to shutdown")(
+              TraceContext.empty
+            )
+          ),
+          "initializing domain topology dispatcher",
         ),
-        "initializing domain topology dispatcher",
-      )
-      .discard[Future[Unit]] // TODO(#8448) Do not discard the future
+      "domain topology manager sequential init failed",
+    )(ErrorLoggingContext.fromTracedLogger(logger))
 
     dispatcher
 

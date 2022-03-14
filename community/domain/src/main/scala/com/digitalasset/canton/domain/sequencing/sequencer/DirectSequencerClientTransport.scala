@@ -22,6 +22,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
@@ -42,14 +43,22 @@ class DirectSequencerClientTransport(
   private val subscriptionFactory =
     new DirectSequencerSubscriptionFactory(sequencer, timeouts, loggerFactory)
 
-  override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
     sequencer
       .sendAsync(request)
       .leftMap(SendAsyncClientError.RequestRefused)
 
-  override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
     EitherT.leftT(

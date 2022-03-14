@@ -32,7 +32,6 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
     val doneP = Promise[Unit]()
     val writerFlow = {
       val queues = mock[SequencerWriterQueues]
-      when(queues.complete()).thenReturn(Future.unit)
       new RunningSequencerWriterFlow(queues, doneP.future)
     }
   }

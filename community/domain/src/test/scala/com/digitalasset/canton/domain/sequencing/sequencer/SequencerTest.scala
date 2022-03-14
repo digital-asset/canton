@@ -127,12 +127,14 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         alice,
         messageId,
         true,
-        Batch
-          .of(
-            (message1, Recipients.cc(bob)),
-            (message2, Recipients.cc(carole)),
-          )
-          .closeEnvelopes,
+        Batch.closeEnvelopes(
+          Batch
+            .of(
+              (message1, Recipients.cc(bob)),
+              (message2, Recipients.cc(carole)),
+            ),
+          ProtocolVersion.latestForTest,
+        ),
         clock.now.plusSeconds(10),
         None,
       )
@@ -157,11 +159,11 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
         bobDeliverEvent.messageId shouldBe None
         bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only message1
-          .toEnvelopeContentByteString(ProtocolVersion.default)
+          .toEnvelopeContentByteString(ProtocolVersion.latestForTest)
 
         caroleDeliverEvent.messageId shouldBe None
         caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only message2
-          .toEnvelopeContentByteString(ProtocolVersion.default)
+          .toEnvelopeContentByteString(ProtocolVersion.latestForTest)
       }
     }
   }
