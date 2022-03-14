@@ -9,7 +9,6 @@ import java.util.Base64
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive => P}
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry.{
@@ -144,10 +143,9 @@ class DarDistributionService(
     shareOfferStore: ShareOfferStore = new InMemoryShareOfferStore,
     whitelistStore: WhitelistStore = new InMemoryWhitelistStore,
     isActive: => Boolean,
-    override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends AsyncAdminWorkflowService
+    extends AdminWorkflowService
     with DarDistribution
     with NamedLogging {
   import cats.data._
@@ -156,7 +154,7 @@ class DarDistributionService(
   /** Async processing of the transaction.
     * TODO(danilo): promote async processing to [[AdminWorkflowService]] and our LedgerConnection
     */
-  override private[admin] def processTransactionAsync(
+  override private[admin] def processTransaction(
       tx: Transaction
   )(implicit traceContext: TraceContext): Future[Unit] = {
     if (isActive) {

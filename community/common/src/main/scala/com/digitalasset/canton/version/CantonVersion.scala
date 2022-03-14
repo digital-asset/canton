@@ -15,6 +15,7 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   supportedProtocolsDomain,
   supportedProtocolsParticipant,
 }
+import com.google.common.annotations.VisibleForTesting
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -222,8 +223,12 @@ object ProtocolVersion extends CompanionTrait {
     "Use create method"
   )
   val latest: ProtocolVersion = ProtocolVersion.tryCreate(BuildInfo.protocolVersion)
-  // Might not be `latest` at some point in the future
-  val default: ProtocolVersion = latest
+
+  /** Should be used when hardcoding a protocol version for a test to signify that a hardcoded protocol version is safe
+    * in this instance.
+    */
+  @VisibleForTesting
+  val latestForTest: ProtocolVersion = latest
 
   def create(rawVersion: String): Either[String, ProtocolVersion] =
     createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
@@ -285,6 +290,9 @@ object ProtocolVersion extends CompanionTrait {
 
   lazy val v2_0_0_snapshot: ProtocolVersion = ProtocolVersion(2, 0, 0, Some("SNAPSHOT"))
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
+  // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
+  // passed in via propagating the protocol version set in the domain parameters
+  lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
   lazy val v2_1_0_snapshot: ProtocolVersion = ProtocolVersion(2, 1, 0, Some("SNAPSHOT"))
   lazy val v2_1_0: ProtocolVersion = ProtocolVersion(2, 1, 0)
 }

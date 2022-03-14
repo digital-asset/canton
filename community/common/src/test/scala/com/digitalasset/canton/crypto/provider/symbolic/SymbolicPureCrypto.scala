@@ -67,6 +67,7 @@ class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi 
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] =
     for {
       _ <- Either.cond(
@@ -77,7 +78,11 @@ class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi 
       // For a symbolic encrypted message, prepend the key id that was used to encrypt
       payload = DeterministicEncoding
         .encodeString(publicKey.id.toProtoPrimitive)
-        .concat(DeterministicEncoding.encodeBytes(message.toByteString(ProtocolVersion.default)))
+        .concat(
+          DeterministicEncoding.encodeBytes(
+            message.toByteString(version)
+          )
+        )
       encrypted = new Encrypted[M](payload)
     } yield encrypted
 
@@ -126,6 +131,7 @@ class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi 
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SymmetricKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] =
     for {
       _ <- Either.cond(
@@ -136,16 +142,25 @@ class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi 
       // For a symbolic symmetric encrypted message, prepend the symmetric key
       payload = DeterministicEncoding
         .encodeBytes(symmetricKey.key)
-        .concat(DeterministicEncoding.encodeBytes(message.toByteString(ProtocolVersion.default)))
+        .concat(
+          DeterministicEncoding.encodeBytes(
+            message.toByteString(version)
+          )
+        )
       encrypted = new Encrypted[M](payload)
     } yield encrypted
 
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SecureRandomness,
+      version: ProtocolVersion,
       scheme: SymmetricKeyScheme,
   ): Either[EncryptionError, Encrypted[M]] = {
-    encryptWith(message, SymmetricKey.create(CryptoKeyFormat.Symbolic, symmetricKey.unwrap, scheme))
+    encryptWith(
+      message,
+      SymmetricKey.create(CryptoKeyFormat.Symbolic, symmetricKey.unwrap, scheme),
+      version,
+    )
   }
 
   override def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(

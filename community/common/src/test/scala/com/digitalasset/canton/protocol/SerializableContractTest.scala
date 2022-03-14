@@ -39,7 +39,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         CantonTimestamp.now(),
       )
       SerializableContract.fromProtoVersioned(
-        sci.toProtoVersioned(ProtocolVersion.default)
+        sci.toProtoVersioned(ProtocolVersion.latestForTest)
       ) shouldEqual Right(sci)
     }
   }

@@ -278,6 +278,16 @@ class TransactionProcessingSteps(
       val result = for {
         _ <-
           if (staticDomainParameters.uniqueContractKeys) {
+            // Daml engine does not check in UCK mode whether there are contract key inconsistencies
+            // coming from non-byKey nodes. This is safe for computing the resolved keys for the `ViewParticipantData`
+            // because the resolved keys are constrained to byKey nodes.
+            // Yet, there is no point in submitting the transaction in the first place to a UCK domain
+            // because either some input contracts have already been archived or there is a duplicate contract key conflict.
+            // Unfortunately, we cannot distinguish inactive inputs from duplicate contract keys at this point
+            // and therefore return a generic contract key consistency error.
+            //
+            // TODO(M40) As this is merely an optimization, ensure that we test validation with transactions
+            //  that fail this check.
             val duplicates = LfTransactionUtil.duplicatedContractKeys(wfTransaction.unwrap)
             EitherTUtil.condUnitET[Future](
               duplicates.isEmpty,
@@ -325,6 +335,7 @@ class TransactionProcessingSteps(
               recentSnapshot,
               TransactionTreeFactory.contractInstanceLookup(contractLookup),
               None,
+              staticDomainParameters.protocolVersion,
             )
             .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>

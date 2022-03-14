@@ -17,13 +17,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
-@SuppressWarnings(
-  Array(
-    "org.wartremover.warts.Null",
-    "org.wartremover.warts.Var",
-    "com.digitalasset.canton.DiscardedFuture", // TODO(#8448) Do not discard futures
-  )
-)
+@SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
 class PingServiceTest
     extends AnyWordSpec
     with BaseTest
@@ -101,15 +95,17 @@ class PingServiceTest
     "happy ping path of single ping is reported correctly" in {
       val recipients = Set(bobId)
       val (service, id, pingRes) = setupTest(recipients, 5000, 5)
-      respond(id, bobId, service, recipients)
+      val respondF = respond(id, bobId, service, recipients)
       verifySuccess(pingRes)
+      respondF.futureValue
     }
 
     "happy bong is reported correctly" in {
       val recipients = Set(bobId, charlieId)
       val (service, id, pingRes) = setupTest(recipients, 5000, 5)
-      respond(id, charlieId, service, recipients)
+      val respondF = respond(id, charlieId, service, recipients)
       verifySuccess(pingRes)
+      respondF.futureValue
     }
 
     "ping times out gracefully" in {
@@ -123,10 +119,11 @@ class PingServiceTest
         val (service, id, pingRes) = setupTest(recipients, 5000, 2000)
         // we don't really care about the results of these responses
         // but we want to avoid running them concurrently to mirror how transactions are processed (one at a time)
-        respond(id, charlieId, service, recipients)
+        val respondF = respond(id, charlieId, service, recipients)
           .flatMap(_ => respond(id, bobId, service, Set(bobId, charlieId)))
 
         verifyFailure(pingRes)
+        respondF.futureValue
       }
     }
   }

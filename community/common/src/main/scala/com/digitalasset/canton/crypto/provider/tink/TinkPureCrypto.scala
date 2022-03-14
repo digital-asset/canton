@@ -34,8 +34,9 @@ class TinkPureCrypto private (
   private def encryptWith[M <: HasVersionedToByteString](
       message: M,
       encrypt: Array[Byte] => Array[Byte],
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] = {
-    val bytes = message.toByteString(ProtocolVersion.default).toByteArray
+    val bytes = message.toByteString(version).toByteArray
     Either
       .catchOnly[GeneralSecurityException](encrypt(bytes))
       .bimap(
@@ -110,11 +111,12 @@ class TinkPureCrypto private (
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SymmetricKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] =
     for {
       keysetHandle <- keysetNonCached(symmetricKey, EncryptionError.InvalidSymmetricKey)
       aead <- getPrimitive[Aead, EncryptionError](keysetHandle, EncryptionError.InvalidSymmetricKey)
-      encrypted <- encryptWith(message, in => aead.encrypt(in, Array[Byte]()))
+      encrypted <- encryptWith(message, in => aead.encrypt(in, Array[Byte]()), version)
     } yield encrypted
 
   /** Decrypts a message encrypted using `encryptWith` */
@@ -131,6 +133,7 @@ class TinkPureCrypto private (
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]] =
     for {
       keysetHandle <- keysetCached(publicKey, EncryptionError.InvalidEncryptionKey)
@@ -138,7 +141,7 @@ class TinkPureCrypto private (
         keysetHandle,
         EncryptionError.InvalidEncryptionKey,
       )
-      encrypted <- encryptWith(message, in => hybrid.encrypt(in, Array[Byte]()))
+      encrypted <- encryptWith(message, in => hybrid.encrypt(in, Array[Byte]()), version)
     } yield encrypted
 
   override def decryptWith[M](encrypted: Encrypted[M], privateKey: EncryptionPrivateKey)(
@@ -156,6 +159,7 @@ class TinkPureCrypto private (
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SecureRandomness,
+      version: ProtocolVersion,
       scheme: SymmetricKeyScheme,
   ): Either[EncryptionError, Encrypted[M]] = {
     scheme match {
@@ -164,7 +168,7 @@ class TinkPureCrypto private (
           aead <- Either
             .catchOnly[GeneralSecurityException](new AesGcmJce(symmetricKey.unwrap.toByteArray))
             .leftMap(e => EncryptionError.InvalidSymmetricKey(e.getMessage))
-          res <- encryptWith(message, in => aead.encrypt(in, Array.emptyByteArray))
+          res <- encryptWith(message, in => aead.encrypt(in, Array.emptyByteArray), version)
         } yield res
     }
   }

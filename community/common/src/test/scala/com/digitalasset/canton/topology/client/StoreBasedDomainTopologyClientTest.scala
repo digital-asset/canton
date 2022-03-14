@@ -8,7 +8,6 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
@@ -54,10 +53,6 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
     override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] = ???
-
-    override def listDynamicDomainParametersChanges()(implicit
-        traceContext: TraceContext
-    ): Future[Seq[DynamicDomainParameters.WithValidity]] = ???
   }
 
   "waiting for snapshots" should {

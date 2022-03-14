@@ -533,7 +533,7 @@ trait BaseLedgerApiAdministration {
         ConsoleMacros.utils.retry_until_true(timeout) {
           val tmp = filter(partyId, companion, predicate)
           result.set(tmp.headOption)
-          tmp.headOption.isDefined
+          tmp.nonEmpty
         }
         consoleEnvironment.run {
           ConsoleCommandResult.fromEither(

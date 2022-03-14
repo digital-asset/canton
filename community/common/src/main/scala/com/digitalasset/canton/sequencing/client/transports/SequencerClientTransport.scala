@@ -16,6 +16,7 @@ import com.digitalasset.canton.sequencing.handshake.SupportsHandshake
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
@@ -27,11 +28,15 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
     * If we failed to make the request, an error will be returned.
     * If the sequencer accepted (or may have accepted) the request this call will return successfully.
     */
-  def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
-      traceContext: TraceContext
+  def sendAsync(request: SubmissionRequest, timeout: Duration, protocolVersion: ProtocolVersion)(
+      implicit traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
 
-  def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit]
 

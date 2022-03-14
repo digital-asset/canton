@@ -127,12 +127,13 @@ class SyncDomain(
   private val seedGenerator =
     new SeedGenerator(domainCrypto.crypto.privateCrypto, domainCrypto.crypto.pureCrypto)
 
-  private val requestGenerator = ConfirmationRequestFactory(participantId, domainId)(
-    domainCrypto.crypto.pureCrypto,
-    seedGenerator,
-    packageService,
-    loggerFactory,
-  )
+  private val requestGenerator =
+    ConfirmationRequestFactory(participantId, domainId)(
+      domainCrypto.crypto.pureCrypto,
+      seedGenerator,
+      packageService,
+      loggerFactory,
+    )
 
   private val transactionProcessor: TransactionProcessor = new TransactionProcessor(
     participantId,
@@ -162,6 +163,7 @@ class SyncDomain(
     sequencerClient,
     timeouts,
     futureSupervisor,
+    staticDomainParameters.protocolVersion,
     loggerFactory,
   )
 
@@ -178,6 +180,7 @@ class SyncDomain(
     parameters.enableCausalityTracking,
     timeouts,
     futureSupervisor,
+    staticDomainParameters.protocolVersion,
     loggerFactory,
   )
 

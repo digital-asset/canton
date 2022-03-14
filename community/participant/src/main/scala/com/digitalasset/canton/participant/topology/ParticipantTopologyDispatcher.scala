@@ -104,9 +104,6 @@ class ParticipantTopologyDispatcher(
     *                     this is used to avoid race conditions between connect / disconnect
     *                     during initial onboarding
     */
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.DiscardedFuture")
-  ) // TODO(#8448) Do not discard futures
   def domainConnected(
       domain: DomainAlias,
       domainId: DomainId,
@@ -123,12 +120,12 @@ class ParticipantTopologyDispatcher(
     def notifyDomainHandshake(dispatcher: FutureUnlessShutdown[Unit]): Unit =
       FutureUtil.doNotAwait(
         dispatcher.unwrap.transform { result =>
-          promise.success(
+          promise.trySuccess(
             result.sequence
               .map(
                 _.toEither
                   .leftMap(
-                    DomainRegistryError.DomainRegistryInternalError.IdentityHandshakeError(_)
+                    DomainRegistryError.DomainRegistryInternalError.TopologyHandshakeError(_)
                   )
               )
           )
@@ -172,7 +169,18 @@ class ParticipantTopologyDispatcher(
       }
     }.onShutdown(())
     // running this on the managers sequential processing queue to avoid race conditions
-    manager.sequentialStoreRead(run, s"connect to $domain")
+    FutureUtil.doNotAwait(
+      manager
+        .sequentialStoreRead(run, s"connect to $domain")
+        .transform(
+          identity,
+          ex => {
+            promise.tryFailure(ex)
+            ex
+          },
+        ),
+      "sequential operation on topology manager failed",
+    )
     FutureUnlessShutdown(promise.future)
   }
 

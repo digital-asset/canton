@@ -41,7 +41,9 @@ final case class DomainParametersConfig(
     requiredSymmetricKeySchemes: Option[NonEmptySet[SymmetricKeyScheme]] = None,
     requiredHashAlgorithms: Option[NonEmptySet[HashAlgorithm]] = None,
     requiredCryptoKeyFormats: Option[NonEmptySet[CryptoKeyFormat]] = None,
-    protocolVersion: DomainProtocolVersion = DomainProtocolVersion(ProtocolVersion.default),
+    protocolVersion: DomainProtocolVersion = DomainProtocolVersion(
+      ProtocolVersion.latest
+    ),
 ) {
 
   /** Converts the domain parameters config into a domain parameters protocol message.

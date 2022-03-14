@@ -92,20 +92,29 @@ class GrpcSequencerClientTransport(
         .toEitherT[Future]
     } yield response
 
-  override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    sendAsyncInternal(request, timeout, requiresAuthentication = true)
+    sendAsyncInternal(request, timeout, requiresAuthentication = true, protocolVersion)
 
-  override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    sendAsyncInternal(request, timeout, requiresAuthentication = false)
+    sendAsyncInternal(request, timeout, requiresAuthentication = false, protocolVersion)
 
   private def sendAsyncInternal(
       request: SubmissionRequest,
       timeout: Duration,
       requiresAuthentication: Boolean,
+      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     def fromGrpcError(error: GrpcError): Either[SendAsyncClientError, Unit] = {
       val result = EitherUtil.condUnitE(
@@ -137,7 +146,7 @@ class GrpcSequencerClientTransport(
       .sendGrpcRequest(sequencerServiceClient, "sequencer")(
         stub =>
           (if (requiresAuthentication) stub.sendAsync _ else stub.sendAsyncUnauthenticated _)(
-            request.toProtoV0(ProtocolVersion.default)
+            request.toProtoV0(protocolVersion)
           ),
         requestDescription =
           s"send-async${if (!requiresAuthentication) "-unauthenticated" else ""}/${request.messageId}",

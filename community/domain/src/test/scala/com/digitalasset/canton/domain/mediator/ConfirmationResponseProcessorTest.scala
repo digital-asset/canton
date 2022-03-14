@@ -115,7 +115,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
       when(
         sequencerClient.sendAsync(
-          any[Batch[Envelope[ProtocolMessage]]],
+          any[Batch[OpenEnvelope[ProtocolMessage]]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],
@@ -212,7 +212,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         )
         _ = verify(sut.sequencerClient, times(1))
           .sendAsync(
-            any[Batch[Envelope[ProtocolMessage]]],
+            any[Batch[OpenEnvelope[ProtocolMessage]]],
             any[SendType],
             eqMatch[Option[CantonTimestamp]](Some(requestTimestamp)),
             any[CantonTimestamp],
@@ -310,7 +310,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           _ <- handleEvents(sut.processor)
           _ = verify(sut.sequencerClient, timeout(1000).times(1))
             .sendAsync(
-              any[Batch[Envelope[ProtocolMessage]]],
+              any[Batch[OpenEnvelope[ProtocolMessage]]],
               any[SendType],
               eqMatch[Option[CantonTimestamp]](Some(requestTimestamp)),
               any[CantonTimestamp],
@@ -351,7 +351,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           List(OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))),
         )
         _ = verify(sut.sequencerClient, never).sendAsync(
-          any[Batch[Envelope[ProtocolMessage]]],
+          any[Batch[OpenEnvelope[ProtocolMessage]]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],

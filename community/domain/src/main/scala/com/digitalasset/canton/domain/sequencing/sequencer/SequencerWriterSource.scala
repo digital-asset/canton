@@ -127,7 +127,7 @@ class SequencerWriterQueues private[sequencer] (
       })
     } yield ()
 
-  def complete(): Future[Unit] = {
+  def complete(): Unit = {
     implicit val tc: TraceContext = TraceContext.empty
     // the queue completions throw IllegalStateExceptions if you call close more than once
     // so guard to ensure they're only called once
@@ -137,7 +137,6 @@ class SequencerWriterQueues private[sequencer] (
       logger.debug(s"Completing deliver event queue")
       deliverEventQueue.complete()
     }
-    Future.unit
   }
 }
 
@@ -264,7 +263,10 @@ class SendEventGenerator(store: SequencerWriterStore, payloadIdGenerator: () => 
 
       def deliver(recipientIds: Set[SequencerMemberId]): StoreEvent[Payload] = {
         val payload =
-          Payload(payloadIdGenerator(), submission.batch.toByteString(ProtocolVersion.default))
+          Payload(
+            payloadIdGenerator(),
+            submission.batch.toByteString(ProtocolVersion.v2_0_0_Todo_i8793),
+          )
         DeliverStoreEvent.ensureSenderReceivesEvent(
           senderId,
           submission.messageId,

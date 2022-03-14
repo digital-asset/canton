@@ -57,9 +57,6 @@ object TestSubscriptionError {
 
 case class TestHandlerError(message: String)
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard the futures
 class ResilientSequencerSubscriptionTest
     extends AsyncWordSpec
     with BaseTest
@@ -176,11 +173,9 @@ class ResilientSequencerSubscriptionTest
 
       for {
         subscription1 <- subscription1F
-        _ = {
+        _ <-
           // provide an event then close with a recoverable error
-          subscription1.handleCounter(1L)
-          subscription1.closeWithReason(RetryableError)
-        }
+          subscription1.handleCounter(1L).map(_ => subscription1.closeWithReason(RetryableError))
         subscription2 <- subscription2F
         _ = {
           // don't provide an event and close immediately

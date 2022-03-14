@@ -223,11 +223,20 @@ object LfTransactionUtil {
     }
   }
 
-  /** @throws java.lang.IllegalArgumentException if transaction's keys contain contract Ids.
+  /** Checks that the transaction is consistent w.r.t. contract keys, taking into account all nodes
+    * instead of only-by key nodes as done by Daml engine when run in mode
+    * [[com.daml.lf.transaction.ContractKeyUniquenessMode.On]].
+    *
+    * For example, if a transaction fetches a contract by contract id and creates
+    * another contract that has the same contract key as the fetched contract, Daml engine will
+    * not complain about duplicate contract keys because the fetch does not have the
+    * [[com.daml.lf.transaction.Node.Action.byKey]] field set.
+    *
+    * @throws java.lang.IllegalArgumentException if transaction's keys contain contract Ids.
+    * @see com.daml.lf.speedy.PartialTransaction.keys for Daml engine's tracking of unique keys
     */
   def duplicatedContractKeys(tx: LfVersionedTransaction): Set[LfGlobalKey] = {
-    // The original non-rollback-aware function is from LfTransaction.duplicatedContractKeys
-    // TODO(#6750): Define and/or fix up the semantics and also move to the daml-repo
+    // TODO(#6754): Define and/or fix up the semantics and also move to the daml-repo
 
     case class State(
         active: Set[(LfGlobalKey, RollbackScope)],

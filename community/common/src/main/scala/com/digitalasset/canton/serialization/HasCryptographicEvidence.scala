@@ -68,7 +68,7 @@ trait MemoizedEvidence extends HasCryptographicEvidence {
   final override lazy val getCryptographicEvidence: ByteString = {
     deserializedFrom match {
       case Some(bytes) => bytes
-      case None => toByteStringUnmemoized(ProtocolVersion.default)
+      case None => toByteStringUnmemoized(ProtocolVersion.v2_0_0_Todo_i8793)
     }
   }
 }

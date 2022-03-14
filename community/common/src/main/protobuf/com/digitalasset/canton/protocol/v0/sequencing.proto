@@ -103,6 +103,8 @@ message DynamicDomainParameters {
 
 // Messages for performing a version handshake with a sequencer service
 // Reused between sequencer services
+// IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
+// when changing the handshake message format
 message Handshake {
     message Request {
         repeated string client_protocol_versions = 1;

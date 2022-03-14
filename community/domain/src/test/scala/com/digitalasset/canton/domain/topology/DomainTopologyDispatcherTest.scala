@@ -56,9 +56,6 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 
 import scala.util.{Failure, Success}
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard futures
 class DomainTopologyDispatcherTest
     extends FixtureAsyncWordSpec
     with BaseTest
@@ -88,17 +85,22 @@ class DomainTopologyDispatcherTest
         append: Seq[SignedTopologyTransaction[TopologyChangeOp]],
         recps: Set[Member],
     ): Awaiter = {
-      val updated =
+      val updated = {
         copy(
           current = current ++ append,
           recipients = recipients ++ recps,
           observation = observation :+ System.nanoTime(),
         )
-      if (updated.current.length >= atLeast && atLeast > 0) {
-        promise.trySuccess(updated)
-        Awaiter(0, Seq(), Seq(), Set())
-      } else updated
+      }
+      updated.updateAtLeast(updated.atLeast)
     }
+
+    def updateAtLeast(atLeast: Int): Awaiter =
+      if (current.length >= atLeast && atLeast > 0) {
+        // try, as might be called several times (with same result) during contention
+        promise.trySuccess(this)
+        Awaiter(0, Seq(), Seq(), Set())
+      } else copy(atLeast = atLeast)
 
     def compare(expected: SignedTopologyTransaction[TopologyChangeOp]*): Assertion = {
       current.map(_.transaction.element.mapping) shouldBe expected.map(
@@ -140,14 +142,7 @@ class DomainTopologyDispatcherTest
       logger.debug(s"Expecting $atLeast")
       lock.synchronized {
         awaiter
-          .getAndUpdate(cur =>
-            if (cur.current.length >= atLeast) {
-              cur.promise.trySuccess(
-                cur
-              ) // try, as might be called several times (with same result) during contention
-              Awaiter(atLeast, Seq(), Seq(), Set())
-            } else cur.copy(atLeast = atLeast)
-          )
+          .getAndUpdate(cur => cur.updateAtLeast(atLeast))
           .promise
           .future
           .thereafter {
@@ -378,8 +373,8 @@ class DomainTopologyDispatcherTest
         sendDelay.set(p.future)
         senderFailure.set(Some(EitherT.right(FutureUnlessShutdown.abortedDueToShutdown)))
         val grabF = expect(1)
-        submit(ts0, txs.ns1k1)
         for {
+          _ <- submit(ts0, txs.ns1k1)
           res <- grabF
           _ = submit(ts1, txs.okm1)
           _ = dispatcher.close()
@@ -492,9 +487,6 @@ trait MockClock {
   }
 }
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard futures
 class DomainTopologySenderTest
     extends FixtureAsyncWordSpec
     with BaseTest
@@ -542,7 +534,7 @@ class DomainTopologySenderTest
             FutureUnlessShutdown.pure(Left(RequestInvalid("unexpected send")))
           case one :: _ =>
             one.sendNotification.success(batch)
-            one.await.map { _ =>
+            one.await.foreach { _ =>
               one.async.foreach(callback)
             }
             FutureUnlessShutdown.pure(one.sync)
@@ -604,7 +596,7 @@ class DomainTopologySenderTest
     "abort" when {
       "on fatal submission failures" in { f =>
         import f._
-        respond(
+        val respondF = respond(
           Response(sync = Left(RequestRefused(SendAsyncError.RequestInvalid("booh"))), async = None)
         )
         loggerFactory.assertLogs(
@@ -612,9 +604,9 @@ class DomainTopologySenderTest
             val submF = submit(Set(participant1), txs.id1k1)
             for {
               res <- submF
+              _ <- respondF
             } yield {
               assert(res.isLeft, res)
-
             }
           },
           _.shouldBeCantonErrorCode(TopologyDispatchingInternalError),
@@ -622,7 +614,7 @@ class DomainTopologySenderTest
       }
       "on fatal send tracker failures" in { f =>
         import f._
-        respond(
+        val respondF = respond(
           Response(
             sync = Right(()),
             async = Some(
@@ -639,9 +631,11 @@ class DomainTopologySenderTest
           )
         )
         loggerFactory.assertLogs(
-          submit(Set(participant1), txs.id1k1).map { res =>
-            assert(res.isLeft, res)
-          },
+          submit(Set(participant1), txs.id1k1).flatMap(res =>
+            respondF.map { _ =>
+              assert(res.isLeft, res)
+            }
+          ),
           _.shouldBeCantonErrorCode(TopologyDispatchingInternalError),
         )
       }

@@ -65,6 +65,12 @@ trait HasVersionedWrapper[ProtoClass <: scalapb.GeneratedMessage] extends HasVer
   /** Yields a byte array representation of the corresponding `Versioned...` wrapper of this instance.
     */
   def toByteArray(version: ProtocolVersion): Array[Byte] = toByteString(version).toByteArray
+
+  /** Writes the byte string representation of the corresponding `Versioned...` wrapper of this instance to a file. */
+  def writeToFile(outputFile: String, version: ProtocolVersion = ProtocolVersion.latest): Unit = {
+    val bytes = toByteString(version)
+    BinaryFileUtil.writeByteStringToFile(outputFile, bytes)
+  }
 }
 
 /** Trait for the companion objects of classes that implement [[HasVersionedWrapper]].
@@ -96,6 +102,19 @@ trait HasVersionedWrapperCompanion[
       .protoParserArray(ProtoClassCompanion.parseFrom)(bytes)
       .flatMap(fromProtoVersioned)
 
+  def readFromFile(
+      inputFile: String
+  ): Either[String, ValueClass] = {
+    for {
+      bs <- BinaryFileUtil.readByteStringFromFile(inputFile)
+      value <- fromByteString(bs).leftMap(_.toString)
+    } yield value
+  }
+
+  def tryReadFromFile(inputFile: String): ValueClass = readFromFile(inputFile).valueOr(err =>
+    throw new IllegalArgumentException(s"Reading $name from file $inputFile failed: $err")
+  )
+
   implicit def hasVersionedWrapperGetResult(implicit
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[ValueClass] = GetResult { r =>
@@ -118,11 +137,11 @@ trait HasVersionedWrapperCompanion[
   implicit def hasVersionedWrapperSetParameter(implicit
       setParameterByteArray: SetParameter[Array[Byte]]
   ): SetParameter[ValueClass] = { (value, pp) =>
-    pp >> value.toByteArray(ProtocolVersion.default)
+    pp >> value.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
   }
 
   implicit def hasVersionedWrapperSetParameterO(implicit
       setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
   ): SetParameter[Option[ValueClass]] =
-    (valueO, pp) => pp >> valueO.map(_.toByteArray(ProtocolVersion.default))
+    (valueO, pp) => pp >> valueO.map(_.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
 }

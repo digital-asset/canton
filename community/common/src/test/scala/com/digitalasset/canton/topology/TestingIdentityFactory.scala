@@ -231,18 +231,11 @@ class TestingIdentityFactory(
           FutureUnlessShutdown.pure(trySnapshot(timestamp))
         override def close(): Unit = ()
         override def topologyKnownUntilTimestamp: CantonTimestamp = approximateTimestamp
-
-        override def listDynamicDomainParametersChanges()(implicit
-            traceContext: TraceContext
-        ): Future[Seq[DynamicDomainParameters.WithValidity]] = ???
       })
     )
     ips
   }
 
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.DiscardedFuture")
-  ) // TODO(#8448) Do not discard the futures
   def topologySnapshot(
       domainId: DomainId = DefaultTestIdentities.domainId,
       packages: Seq[PackageId] = Seq(),
@@ -277,12 +270,16 @@ class TestingIdentityFactory(
       )
     )
 
-    store.updateState(
+    val updateF = store.updateState(
       CantonTimestamp.Epoch.immediatePredecessor,
       deactivate = Seq(),
       positive =
         participantTxs ++ domainMembers ++ mediatorOnboarding ++ partyDataTx ++ domainGovernanceTxs,
     )(TraceContext.empty)
+    Await.result(
+      updateF,
+      1.seconds,
+    ) // The in-memory topology store should complete the state update immediately
 
     new StoreBasedTopologySnapshot(
       CantonTimestamp.Epoch,

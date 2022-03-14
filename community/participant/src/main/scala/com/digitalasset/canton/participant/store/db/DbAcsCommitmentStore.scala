@@ -253,7 +253,7 @@ class DbAcsCommitmentStore(
     val sender = commitment.message.sender
     val from = commitment.message.period.fromExclusive
     val to = commitment.message.period.toInclusive
-    val serialized = commitment.toByteArray(ProtocolVersion.default)
+    val serialized = commitment.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
 
     val upsertQuery = storage.profile match {
       case _: DbStorage.Profile.H2 =>

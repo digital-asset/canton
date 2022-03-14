@@ -137,7 +137,11 @@ class HttpSequencerClient(
     }
   }
 
-  def sendAsync(submission: SubmissionRequest, requiresAuthentication: Boolean)(implicit
+  def sendAsync(
+      submission: SubmissionRequest,
+      requiresAuthentication: Boolean,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
     for {
@@ -148,7 +152,7 @@ class HttpSequencerClient(
             "SequencerService",
             if (requiresAuthentication) "SendAsync" else "SendAsyncUnauthenticated",
           ),
-          submission.toByteArrayV0(ProtocolVersion.default),
+          submission.toByteArrayV0(protocolVersion),
           generateHeaders,
         )
         .leftMap[SendAsyncClientError](err => SendAsyncClientError.RequestFailed(err.toString))

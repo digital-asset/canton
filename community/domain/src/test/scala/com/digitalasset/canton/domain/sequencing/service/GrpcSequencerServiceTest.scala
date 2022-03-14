@@ -177,7 +177,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
       loggerFactory.assertLogs(
         sendAndCheckError(
-          request.toProtoV0(ProtocolVersion.default),
+          request.toProtoV0(ProtocolVersion.latestForTest),
           { case SendAsyncError.RequestInvalid(message) =>
             message shouldBe "Batch contains envelope without content."
           },
@@ -187,11 +187,12 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "reject envelopes with invalid sender" in { implicit env =>
-      val requestP = defaultRequest.toProtoV0(ProtocolVersion.default).focus(_.sender).modify {
-        case "" => fail("sender should be set")
-        case _sender =>
-          "THISWILLFAIL"
-      }
+      val requestP =
+        defaultRequest.toProtoV0(ProtocolVersion.latestForTest).focus(_.sender).modify {
+          case "" => fail("sender should be set")
+          case _sender =>
+            "THISWILLFAIL"
+        }
 
       loggerFactory.assertLogs(
         {
@@ -219,7 +220,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         {
           sendAndCheckError(
-            request.toProtoV0(ProtocolVersion.default),
+            request.toProtoV0(ProtocolVersion.latestForTest),
             { case SendAsyncError.RequestRefused(message) =>
               message should fullyMatch regex "Request from '.*' of size \\(.* bytes\\) is exceeding maximum size \\(1000 bytes\\)\\."
             },
@@ -237,7 +238,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         {
           sendAndCheckError(
-            request.toProtoV0(ProtocolVersion.default),
+            request.toProtoV0(ProtocolVersion.latestForTest),
             { case SendAsyncError.RequestRefused(message) =>
               message should (include("is not authorized to send:")
                 and include("just tried to use sequencer on behalf of"))
@@ -257,7 +258,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         {
           sendAndCheckError(
-            request.toProtoV0(ProtocolVersion.default),
+            request.toProtoV0(ProtocolVersion.latestForTest),
             { case SendAsyncError.RequestRefused(message) =>
               message should include("needs to use authenticated send operation")
             },
@@ -276,7 +277,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         {
           sendAndCheckError(
-            request.toProtoV0(ProtocolVersion.default),
+            request.toProtoV0(ProtocolVersion.latestForTest),
             { case SendAsyncError.RequestRefused(message) =>
               message should include("needs to use unauthenticated send operation")
             },
@@ -295,7 +296,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         loggerFactory.assertLogs(
           {
             sendAndCheckError(
-              request.toProtoV0(ProtocolVersion.default),
+              request.toProtoV0(ProtocolVersion.latestForTest),
               { case SendAsyncError.RequestRefused(message) =>
                 message should include("Member is trying to send message to unauthenticated")
               },
@@ -313,7 +314,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         .focus(_.batch)
         .replace(Batch(List(ClosedEnvelope(content, Recipients.cc(unauthenticatedMember)))))
       val domEnvironment = new Environment(DefaultTestIdentities.domainManager)
-      sendAndSucceed(request.toProtoV0(ProtocolVersion.default))(domEnvironment)
+      sendAndSucceed(request.toProtoV0(ProtocolVersion.latestForTest))(domEnvironment)
     }
 
     "reject unauthenticated member sending message to non domain manager member" in { _ =>
@@ -323,7 +324,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         {
           sendAndCheckError(
-            request.toProtoV0(ProtocolVersion.default),
+            request.toProtoV0(ProtocolVersion.latestForTest),
             { case SendAsyncError.RequestRefused(message) =>
               message should include(
                 "Unauthenticated member is trying to send message to members other than the domain manager"
@@ -347,7 +348,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           Batch(List(ClosedEnvelope(content, Recipients.cc(DefaultTestIdentities.domainManager))))
         )
       new Environment(unauthenticatedMember).service
-        .sendAsyncUnauthenticated(request.toProtoV0(ProtocolVersion.default))
+        .sendAsyncUnauthenticated(request.toProtoV0(ProtocolVersion.latestForTest))
         .map { responseP =>
           val response = SendAsyncResponse.fromProtoV0(responseP)
           response.value.error shouldBe None
@@ -356,14 +357,14 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
     "reject on rate excess" in { implicit env =>
       def expectSuccess(): Future[Assertion] = {
-        sendAndSucceed(defaultRequest.toProtoV0(ProtocolVersion.default))
+        sendAndSucceed(defaultRequest.toProtoV0(ProtocolVersion.latestForTest))
       }
 
       def expectOverloaded(): Future[Assertion] = {
         loggerFactory.assertLogs(
           {
             sendAndCheckError(
-              defaultRequest.toProtoV0(ProtocolVersion.default),
+              defaultRequest.toProtoV0(ProtocolVersion.latestForTest),
               { case SendAsyncError.Overloaded(message) =>
                 message should endWith("Submission rate exceeds rate limit of 5/s.")
               },
@@ -435,7 +436,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             loggerFactory.assertLogs(
               {
                 sendAndCheckError(
-                  badRequest.toProtoV0(ProtocolVersion.default),
+                  badRequest.toProtoV0(ProtocolVersion.latestForTest),
                   { case SendAsyncError.RequestRefused(message) =>
                     message shouldBe "Batch from participant contains multiple mediators as recipients."
                   },
@@ -451,7 +452,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         _ <- goodRequests.zipWithIndex.traverse_ { case ((goodRequest, sender), index) =>
           withClue(s"good request #$index") {
             val senderEnv = new Environment(sender)
-            sendAndSucceed(goodRequest.toProtoV0(ProtocolVersion.default))(senderEnv)
+            sendAndSucceed(goodRequest.toProtoV0(ProtocolVersion.latestForTest))(senderEnv)
           }
         }
       } yield succeed

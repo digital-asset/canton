@@ -221,7 +221,7 @@ class SequencerClient(
     *  monitor the sequenced events when read, so actions can be taken even if in-memory state is lost.
     */
   def sendAsync(
-      batch: Batch[Envelope[ProtocolMessage]],
+      batch: Batch[OpenEnvelope[ProtocolMessage]],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
@@ -252,7 +252,7 @@ class SequencerClient(
     * such as requesting that a participant's topology data gets accepted by the topology manager
     */
   def sendAsyncUnauthenticated(
-      batch: Batch[Envelope[ProtocolMessage]],
+      batch: Batch[OpenEnvelope[ProtocolMessage]],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
@@ -279,7 +279,7 @@ class SequencerClient(
     }
 
   private def sendAsyncInternal(
-      batch: Batch[Envelope[ProtocolMessage]],
+      batch: Batch[OpenEnvelope[ProtocolMessage]],
       requiresAuthentication: Boolean,
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
@@ -292,14 +292,14 @@ class SequencerClient(
         member,
         messageId,
         sendType.isRequest,
-        batch.closeEnvelopes,
+        Batch.closeEnvelopes(batch, staticDomainParameters.protocolVersion),
         maxSequencingTime,
         timestampOfSigningKey,
       )
 
       span.setAttribute("member", member.show)
       span.setAttribute("message_id", messageId.unwrap)
-
+      // TODO(i8810): don't serialize a batch again here
       val unitOrBatchSizeErr = verifyBatchSize(request.batch)
 
       def trackSend: EitherT[Future, SendAsyncClientError, Unit] =
@@ -314,8 +314,14 @@ class SequencerClient(
         EitherTUtil
           .timed(metrics.submissions.sends) {
             val timeout = timeouts.network.duration
-            if (requiresAuthentication) transport.sendAsync(request, timeout)
-            else transport.sendAsyncUnauthenticated(request, timeout)
+            if (requiresAuthentication)
+              transport.sendAsync(request, timeout, staticDomainParameters.protocolVersion)
+            else
+              transport.sendAsyncUnauthenticated(
+                request,
+                timeout,
+                staticDomainParameters.protocolVersion,
+              )
           }
           .leftSemiflatMap { err =>
             // increment appropriate error metrics
@@ -360,7 +366,8 @@ class SequencerClient(
     }
 
   private def verifyBatchSize(batch: Batch[_]): Either[SendAsyncClientError, Unit] = {
-    val batchSerializedSize = batch.toProtoVersioned(ProtocolVersion.default).serializedSize
+    val batchSerializedSize =
+      batch.toProtoVersioned(staticDomainParameters.protocolVersion).serializedSize
     val maxBatchMessageSize = staticDomainParameters.maxBatchMessageSize.unwrap
     Either.cond(
       batchSerializedSize <= maxBatchMessageSize,
@@ -728,11 +735,7 @@ class SequencerClient(
       }
       if (isIdle) {
         val handlingF = handleReceivedEventsUntilEmpty(eventHandler)
-        addToFlush("signalHandler")(handlingF)
-        FutureUtil.doNotAwait(
-          handlingF,
-          "An internal error occurred while invoking the application handler.",
-        )
+        addToFlushAndLogError("invoking the application handler")(handlingF)
       }
     }.discard
 
@@ -864,11 +867,9 @@ class SequencerClient(
                   Success(UnlessShutdown.unit)
                 }.unwrap
                 // note, we are adding our async processing to the flush future, so we know once the async processing has finished
-                addToFlush(s"handle async result for counters $firstSc to $lastSc")(asyncSignalledF)
-                FutureUtil.doNotAwait(
-                  asyncSignalledF,
-                  s"Failed to signal error from asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc.",
-                )
+                addToFlushAndLogError(
+                  s"asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc"
+                )(asyncSignalledF)
                 // we do not wait for the async results to finish, we are done here once the synchronous part is done
                 Right(())
               case UnlessShutdown.AbortedDueToShutdown =>

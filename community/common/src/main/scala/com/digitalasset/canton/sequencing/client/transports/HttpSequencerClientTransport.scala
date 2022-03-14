@@ -25,6 +25,7 @@ import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -52,15 +53,23 @@ class HttpSequencerClientTransport(
   ): EitherT[Future, HandshakeRequestError, HandshakeResponse] =
     client.handshakeUnauthenticated(request).leftMap(err => HandshakeRequestError(err.toString))
 
-  override def sendAsync(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsync(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    client.sendAsync(request, requiresAuthentication = true)
+    client.sendAsync(request, requiresAuthentication = true, protocolVersion)
 
-  override def sendAsyncUnauthenticated(request: SubmissionRequest, timeout: Duration)(implicit
+  override def sendAsyncUnauthenticated(
+      request: SubmissionRequest,
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    client.sendAsync(request, requiresAuthentication = false)
+    client.sendAsync(request, requiresAuthentication = false, protocolVersion)
 
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext

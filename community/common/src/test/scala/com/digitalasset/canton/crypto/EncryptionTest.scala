@@ -58,7 +58,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             crypto <- newCrypto
             message = Message(ByteString.copyFromUtf8("foobar"))
             key = newSymmetricKey(crypto)
-            encrypted = crypto.pureCrypto.encryptWith(message, key).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, key, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             message2 = crypto.pureCrypto
               .decryptWith(encrypted, key)(Message.fromByteString)
               .valueOrFail("decrypt")
@@ -74,7 +76,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             message = Message(ByteString.copyFromUtf8("foobar"))
             key = newSymmetricKey(crypto)
             key2 = newSymmetricKey(crypto)
-            encrypted = crypto.pureCrypto.encryptWith(message, key).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, key, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             message2 = crypto.pureCrypto.decryptWith(encrypted, key2)(Message.fromByteString)
           } yield message2.left.value shouldBe a[FailedToDecrypt]
         }
@@ -84,7 +88,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             crypto <- newCrypto
             message = Message(ByteString.copyFromUtf8("foobar"))
             key = newSecureRandomKey()
-            encrypted = crypto.pureCrypto.encryptWith(message, key).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, key, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             message2 = crypto.pureCrypto
               .decryptWith(encrypted, key)(Message.fromByteString)
               .valueOrFail("decrypt")
@@ -100,7 +106,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             message = Message(ByteString.copyFromUtf8("foobar"))
             key = newSecureRandomKey()
             key2 = newSecureRandomKey()
-            encrypted = crypto.pureCrypto.encryptWith(message, key).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, key, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             message2 = crypto.pureCrypto.decryptWith(encrypted, key2)(Message.fromByteString)
           } yield message2.left.value shouldBe a[FailedToDecrypt]
         }
@@ -120,7 +128,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           for {
             crypto <- newCrypto
             key <- newPublicKey(crypto)
-            keyP = key.toProtoVersioned(ProtocolVersion.default)
+            keyP = key.toProtoVersioned(ProtocolVersion.latestForTest)
             key2 = EncryptionPublicKey.fromProtoVersioned(keyP).valueOrFail("serialize key")
           } yield key shouldEqual key2
         }
@@ -134,7 +142,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
               .leftMap(_.toString)
               .subflatMap(_.toRight("Private key not found"))
               .valueOrFail("get key")
-            keyP = privateKey.toProtoVersioned(ProtocolVersion.default)
+            keyP = privateKey.toProtoVersioned(ProtocolVersion.latestForTest)
             key2 = EncryptionPrivateKey.fromProtoVersioned(keyP).valueOrFail("serialize key")
           } yield privateKey shouldEqual key2
         }
@@ -144,7 +152,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           for {
             crypto <- newCrypto
             publicKey <- newPublicKey(crypto)
-            encrypted = crypto.pureCrypto.encryptWith(message, publicKey).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, publicKey, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             message2 <- crypto.privateCrypto
               .decrypt(encrypted, publicKey.id)(Message.fromByteString)
               .valueOrFail("decrypt")
@@ -157,7 +167,9 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             crypto <- newCrypto
             publicKey <- newPublicKey(crypto)
             publicKey2 <- newPublicKey(crypto)
-            encrypted = crypto.pureCrypto.encryptWith(message, publicKey).valueOrFail("encrypt")
+            encrypted = crypto.pureCrypto
+              .encryptWith(message, publicKey, ProtocolVersion.latestForTest)
+              .valueOrFail("encrypt")
             _ = assert(message.bytes != encrypted.ciphertext)
             message2 <- crypto.privateCrypto
               .decrypt(encrypted, publicKey2.id)(Message.fromByteString)

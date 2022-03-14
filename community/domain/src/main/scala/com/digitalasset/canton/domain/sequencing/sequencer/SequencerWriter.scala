@@ -68,8 +68,12 @@ private[sequencer] class RunningSequencerWriterFlow(
     */
   val done: Future[Unit] = doneF.thereafter(_ => completed.set(true))
 
-  def complete(): Future[Unit] =
-    if (!completed.get()) queues.complete().flatMap(_ => done) else done
+  def complete(): Future[Unit] = {
+    if (!completed.get()) {
+      queues.complete()
+    }
+    done
+  }
 }
 
 /** Create instances for a [[store.SequencerWriterStore]] and a predicate to know whether we can recreate a sequencer writer

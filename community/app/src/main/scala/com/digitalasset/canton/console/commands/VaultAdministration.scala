@@ -187,7 +187,7 @@ class LocalSecretKeyAdministration(
       // only current user has permissions with the file
       Files.setPosixFilePermissions(file.toPath, Set(OWNER_READ, OWNER_WRITE).asJava)
       // todo: version
-      BinaryFileUtil.writeByteStringToFile(filename, bytes)
+      BinaryFileUtil.writeByteStringToFile(filename, bytes) // TODO(#8825)
     }
 
   @Help.Summary("Delete private key")

@@ -79,7 +79,7 @@ trait CantonHealthAdministration[Status <: CantonStatus] extends Helpful {
     case class EnvironmentInfo(os: String, javaVersion: String)
 
     case class CantonDump(
-        version: String,
+        releaseVersion: String,
         environment: EnvironmentInfo,
         config: String,
         status: Status,

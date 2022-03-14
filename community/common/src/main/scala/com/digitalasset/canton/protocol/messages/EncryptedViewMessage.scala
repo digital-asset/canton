@@ -81,10 +81,13 @@ object EncryptedView {
 
   def compressed[VT <: ViewType](
       encryptionOps: EncryptionOps,
-      symmetricKey: SecureRandomness,
+      secureRandomness: SecureRandomness,
       aViewType: VT,
+      version: ProtocolVersion,
   )(aViewTree: aViewType.View): Either[EncryptionError, EncryptedView[VT]] =
-    encryptionOps.encryptWith(CompressedView(aViewTree), symmetricKey).map(apply(aViewType))
+    encryptionOps
+      .encryptWith(CompressedView(aViewTree), secureRandomness, version)
+      .map(apply(aViewType))
 
   def decrypt[VT <: ViewType](
       encryptionOps: EncryptionOps,

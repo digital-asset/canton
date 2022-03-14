@@ -270,7 +270,7 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         id = "DOMAIN_REGISTRY_INTERNAL_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    case class IdentityHandshakeError(throwable: Throwable)(implicit
+    case class TopologyHandshakeError(throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Handshake with remote topology transaction registrations service failed",

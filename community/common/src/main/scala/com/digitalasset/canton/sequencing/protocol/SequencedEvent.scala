@@ -61,14 +61,13 @@ object SequencedEvent {
   )(bytes: ByteString): ParsingResult[SequencedEvent[Env]] =
     ProtoConverter
       .protoParser(VersionedSequencedEvent.parseFrom)(bytes)
-      .flatMap(fromProtoWith(envelopeDeserializer)(_, Some(bytes)))
+      .flatMap(fromProtoWith(envelopeDeserializer)(_, bytes))
 
   private[sequencing] def fromProtoWith[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
   )(
       sequencedEventP: VersionedSequencedEvent,
-      // TODO(Andreas): Disallow fromProtoWith without providing the serialized bytes
-      bytes: Option[ByteString],
+      bytes: ByteString,
   ): ParsingResult[SequencedEvent[Env]] = {
     sequencedEventP.version match {
       case VersionedSequencedEvent.Version.Empty =>
@@ -78,22 +77,11 @@ object SequencedEvent {
     }
   }
 
-  def noEnvelopesFromProtoWithV0(
-      sequencedEventP: v0.SequencedEvent
-  ): ParsingResult[SequencedEvent[Nothing]] =
-    fromProtoWithV0[Nothing](_ =>
-      Left(ProtoDeserializationError.OtherError("Envelopes are not supported"))
-    )(
-      sequencedEventP,
-      None,
-    )
-
   private[sequencing] def fromProtoWithV0[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
   )(
       sequencedEventP: v0.SequencedEvent,
-      // TODO(Andreas): Disallow fromProtoWith without providing the serialized bytes
-      bytes: Option[ByteString],
+      bytes: ByteString,
   ): ParsingResult[SequencedEvent[Env]] = {
     import cats.syntax.traverse._
     val v0.SequencedEvent(counter, tsP, domainIdP, mbMsgIdP, mbBatchP, mbDeliverErrorReasonP) =
@@ -116,15 +104,17 @@ object SequencedEvent {
             msgId <- ProtoConverter
               .required("DeliverError", mbMsgIdP)
               .flatMap(MessageId.fromProtoPrimitive)
-          } yield new DeliverError(counter, timestamp, domainId, msgId, deliverErrorReason)(bytes)
+          } yield new DeliverError(counter, timestamp, domainId, msgId, deliverErrorReason)(
+            Some(bytes)
+          )
         case (None, Some(batch)) =>
           mbMsgIdP match {
-            case None => Right(new Deliver(counter, timestamp, domainId, None, batch)(bytes))
+            case None => Right(new Deliver(counter, timestamp, domainId, None, batch)(Some(bytes)))
             case Some(msgId) =>
               MessageId
                 .fromProtoPrimitive(msgId)
                 .flatMap(e =>
-                  Right(new Deliver(counter, timestamp, domainId, Some(e), batch)(bytes))
+                  Right(new Deliver(counter, timestamp, domainId, Some(e), batch)(Some(bytes)))
                 )
           }
       }): ParsingResult[SequencedEvent[Env]]

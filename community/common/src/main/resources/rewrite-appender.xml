@@ -194,28 +194,23 @@
             <testing>true</testing>
         </rewrite>
 
-        <!-- Some UserManagementServiceIT conformance tests (CreateUsersRaceCondition, GrantRightsRaceCondition)
+        <!-- Some UserManagementServiceIT conformance tests (RaceConditionCreateUsers, RaceConditionGrantRights)
              log some duplicate key violation errors.
         -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.daml.platform.store.appendonlydao.DbDispatcher</logger>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Postgres -->
+            <logger>com.daml.platform.store.appendonlydao.DbDispatcherImpl</logger>
             <contains>Processing the request failed due to a non-transient database error: ERROR: duplicate key value violates unique constraint</contains>
             <exceptionMessage>ERROR: duplicate key value violates unique constraint</exceptionMessage>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
-
-        <!-- Parallel indexer has been augmented (by us) to log details about RejectedExecutionExceptions to help track
-             down the root cause. Until we do so our tests flake too frequently, so for now lower severity to info.
-             TODO(#4652)
-         -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.daml.platform.indexer.parallel.ParallelIndexerFactory</logger>
-            <contains>ExecutionContext has failed with an exception</contains>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Oracle -->
+            <logger>com.daml.platform.store.appendonlydao.DbDispatcherImpl</logger>
+            <contains>Processing the request failed due to a non-transient database error: ORA-00001: unique constraint</contains>
+            <exceptionMessage>ORA-00001: unique constraint</exceptionMessage>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
-
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.digitalasset.canton.integration.tests.LoggingIntegrationTestDefault</logger>
             <maxLevel>INFO</maxLevel>

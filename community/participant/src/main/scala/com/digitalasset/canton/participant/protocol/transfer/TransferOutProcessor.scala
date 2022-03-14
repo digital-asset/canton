@@ -20,6 +20,7 @@ import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.messages.TransferOutResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -35,6 +36,7 @@ class TransferOutProcessor(
     sequencerClient: SequencerClient,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
+    version: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
@@ -50,6 +52,7 @@ class TransferOutProcessor(
         damle,
         transferCoordination,
         seedGenerator,
+        version,
         loggerFactory,
       ),
       inFlightSubmissionTracker,

@@ -138,18 +138,6 @@ trait CantonError extends BaseCantonError {
 }
 
 object BaseCantonError {
-  private val ignoreFields = Set("cause", "throwable", "loggingContext", "definiteAnswer")
-
-  def extractContext[D](obj: D): Map[String, String] = {
-    obj.getClass.getDeclaredFields
-      .filterNot(x => ignoreFields.contains(x.getName) || x.getName.startsWith("_"))
-      .map { field =>
-        field.setAccessible(true)
-        (field.getName, field.get(obj).toString)
-      }
-      .toMap
-  }
-
   def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean = {
     val code = errorCode.category.grpcCode.getOrElse(
       throw new IllegalArgumentException(s"Error code $errorCode does not have a gRPC code")

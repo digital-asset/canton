@@ -173,7 +173,9 @@ class DbMultiDomainEventLog private[db] (
     } yield {
       result match {
         case QueueOfferResult.Enqueued => // nothing to do
-          addToFlush(s"Publish offset ${data.localOffset} from ${data.eventLogId}")(promise.future)
+          addToFlushAndLogError(s"Publish offset ${data.localOffset} from ${data.eventLogId}")(
+            promise.future
+          )
         case _: QueueCompletionResult =>
           ErrorUtil.internalError(
             new IllegalStateException(

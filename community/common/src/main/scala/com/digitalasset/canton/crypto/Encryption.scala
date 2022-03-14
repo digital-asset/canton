@@ -47,6 +47,7 @@ trait EncryptionOps {
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]]
 
   /** Decrypts a message encrypted using `encryptWith` */
@@ -58,6 +59,7 @@ trait EncryptionOps {
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SymmetricKey,
+      version: ProtocolVersion,
   ): Either[EncryptionError, Encrypted[M]]
 
   /** Decrypts a message encrypted using `encryptWith` */
@@ -74,6 +76,7 @@ trait EncryptionOps {
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       symmetricKey: SecureRandomness,
+      version: ProtocolVersion,
       scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme,
   ): Either[EncryptionError, Encrypted[M]]
 

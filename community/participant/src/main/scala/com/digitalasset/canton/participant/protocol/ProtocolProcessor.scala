@@ -745,9 +745,8 @@ abstract class ProtocolProcessor[
   }
 
   @VisibleForTesting
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.DiscardedFuture")
-  ) // TODO(#8448) Do not discard futures
+  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private[protocol] def performResultProcessing(
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, Result],

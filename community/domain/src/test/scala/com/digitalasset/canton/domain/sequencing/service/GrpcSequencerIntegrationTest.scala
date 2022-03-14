@@ -22,7 +22,7 @@ import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncCloseable}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
@@ -168,7 +168,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         FutureSupervisor.Noop,
         loggerFactory,
         ProtocolVersion.supportedProtocolsParticipant,
-        Some(ProtocolVersion.default),
+        Some(ProtocolVersion.latestForTest),
       )(
         participant,
         sequencedEventStore,
@@ -188,7 +188,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
 
   def mockSubscription(
       subscribeCallback: Unit => Unit = _ => (),
-      unsubscribeCallback: Unit => Future[Unit] = _ => Future.unit,
+      unsubscribeCallback: Unit => Unit = _ => (),
   ): Unit = {
     // when a subscription is made resolve the subscribe promise
     // return to caller a subscription that will resolve the unsubscribe promise on close
@@ -207,10 +207,9 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
           new SequencerSubscription[NotUsed] {
             override protected def loggerFactory: NamedLoggerFactory = Env.this.loggerFactory
             override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
-              AsyncCloseable(
+              SyncCloseable(
                 "anonymous-sequencer-subscription",
                 unsubscribeCallback(()),
-                timeouts.shutdownShort.duration,
               )
             )
             override protected def timeouts: ProcessingTimeout = Env.this.timeouts
@@ -220,9 +219,6 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   }
 }
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) Do not discard futures
 class GrpcSequencerIntegrationTest
     extends FixtureAnyWordSpec
     with BaseTest
@@ -242,19 +238,19 @@ class GrpcSequencerIntegrationTest
 
       // when a subscription is made resolve the subscribe promise
       // return to caller a subscription that will resolve the unsubscribe promise on close
-      env.mockSubscription(_ => subscribePromise.success(()), _ => unsubscribePromise.future)
+      env.mockSubscription(_ => subscribePromise.success(()), _ => unsubscribePromise.success(()))
 
       // kick of subscription
-      env.client.subscribeAfter(
+      val initF = env.client.subscribeAfter(
         CantonTimestamp.MinValue,
         _ => HandlerResult.done,
         mock[DomainTimeTracker],
       )
 
       val result = for {
+        _ <- initF
         _ <- subscribePromise.future
         _ = env.client.close()
-        _ = unsubscribePromise.success(())
         _ <- unsubscribePromise.future
       } yield succeed // just getting here is good enough
 

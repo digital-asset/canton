@@ -21,7 +21,7 @@ object Dependencies {
   lazy val pprint_version = "0.7.1"
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"
-  lazy val bouncy_castle_version = "1.68"
+  lazy val bouncy_castle_version = "1.70"
 
   lazy val pureconfig_version = "0.14.0"
 

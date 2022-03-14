@@ -33,7 +33,7 @@ trait SigningTest extends BaseTest {
           for {
             crypto <- newCrypto
             publicKey <- newPublicKey(crypto)
-            publicKeyP = publicKey.toProtoVersioned(ProtocolVersion.default)
+            publicKeyP = publicKey.toProtoVersioned(ProtocolVersion.latestForTest)
             publicKey2 = SigningPublicKey
               .fromProtoVersioned(publicKeyP)
               .valueOrFail("serialize key")
@@ -49,7 +49,7 @@ trait SigningTest extends BaseTest {
               .leftMap(_.toString)
               .subflatMap(_.toRight("Private key not found"))
               .valueOrFail("get key")
-            privateKeyP = privateKey.toProtoVersioned(ProtocolVersion.default)
+            privateKeyP = privateKey.toProtoVersioned(ProtocolVersion.latestForTest)
             privateKey2 = SigningPrivateKey
               .fromProtoVersioned(privateKeyP)
               .valueOrFail("serialize key")
@@ -62,7 +62,7 @@ trait SigningTest extends BaseTest {
             publicKey <- newPublicKey(crypto)
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
-            sigP = sig.toProtoVersioned(ProtocolVersion.default)
+            sigP = sig.toProtoVersioned(ProtocolVersion.latestForTest)
             sig2 = Signature.fromProtoVersioned(sigP).valueOrFail("serialize signature")
           } yield sig shouldEqual sig2
         }
