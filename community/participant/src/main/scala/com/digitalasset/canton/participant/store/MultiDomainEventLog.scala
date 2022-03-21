@@ -37,9 +37,10 @@ import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, Local
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{DomainId, LedgerSubmissionId, LedgerTransactionId}
+import com.digitalasset.canton.{LedgerSubmissionId, LedgerTransactionId}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}

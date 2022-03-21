@@ -4,11 +4,10 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{Crypto, KeyName, PublicKey, SigningPublicKey}
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -47,7 +46,7 @@ object DomainNodeMediatorFactory {
         traceContext: TraceContext,
     ): EitherT[Future, String, SigningPublicKey] =
       for {
-        keyName <- EitherT.fromEither[Future](KeyName.create(s"$domainName-mediator"))
+        keyName <- EitherT.fromEither[Future](KeyName.create(s"$domainName-mediator-signing"))
         res <- crypto
           .generateSigningKey(name = Some(keyName))
           .leftMap(err => s"Failed to generate mediator signing key: $err")

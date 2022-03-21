@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console.commands
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.admin.api.client.commands.DomainTimeCommands
 import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdministrationCommands.{
   Initialize,
@@ -24,7 +23,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 

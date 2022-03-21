@@ -16,10 +16,11 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, Trans
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{DomainId, LedgerTransactionId, checked}
+import com.digitalasset.canton.{LedgerTransactionId, checked}
 import slick.jdbc.SetParameter
 
 import scala.collection.SortedMap
@@ -108,10 +109,8 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
 
   def prune(beforeAndIncluding: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]
 
-  // TODO(#6959) Move to SingleDimesionEventLogLookup
   def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset]
 
-  // TODO(#6959) Move to SingleDimesionEventLogLookup
   def eventById(eventId: EventId)(implicit
       traceContext: TraceContext
   ): OptionT[Future, TimestampedEventAndCausalChange]
@@ -127,7 +126,6 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
     * In an event logs where timestamps need not increase with offsets,
     * this can be used to check that whether there are events with lower offsets and larger timestamps.
     */
-  // TODO(#6959) This method seems to be unused. Consider deleting it.
   def existsBetween(timestampInclusive: CantonTimestamp, localOffsetInclusive: LocalOffset)(implicit
       traceContext: TraceContext
   ): Future[Boolean]

@@ -25,15 +25,14 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.IndexedDomain
-import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  BaseTest,
-  DefaultDamlValues,
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
   DomainId,
-  HasExecutionContext,
-  LfPartyId,
+  ParticipantId,
+  UniqueIdentifier,
 }
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues, HasExecutionContext, LfPartyId}
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 

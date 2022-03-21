@@ -53,9 +53,9 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.{DomainId, LedgerTransactionId, LfPartyId}
+import com.digitalasset.canton.{LedgerTransactionId, LfPartyId}
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
 

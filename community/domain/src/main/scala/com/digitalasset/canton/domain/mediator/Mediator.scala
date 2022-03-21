@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.{EitherT, NonEmptySeq}
 import cats.instances.future._
 import cats.syntax.bifunctor._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,7 +20,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}

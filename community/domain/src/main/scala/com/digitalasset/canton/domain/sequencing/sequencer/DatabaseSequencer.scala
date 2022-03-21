@@ -12,7 +12,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
-import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member}
+import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -23,7 +23,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}

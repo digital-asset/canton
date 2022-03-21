@@ -8,7 +8,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, InvariantViolation}
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.version.VersionedMediatorResponse
@@ -17,7 +17,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
 /** Payload of a response sent to the mediator in reaction to a request.

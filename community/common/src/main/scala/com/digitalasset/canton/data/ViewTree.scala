@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, ViewHash}
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 
 /** Common supertype of all view trees that are sent as [[com.digitalasset.canton.protocol.messages.EncryptedViewMessage]]s */
 trait ViewTree extends PrettyPrinting {

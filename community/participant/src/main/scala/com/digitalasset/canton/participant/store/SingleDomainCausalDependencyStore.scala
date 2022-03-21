@@ -14,7 +14,8 @@ import com.digitalasset.canton.participant.store.SingleDomainCausalDependencySto
 }
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap

@@ -14,9 +14,9 @@ import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PingSer
 import com.digitalasset.canton.participant.ledger.api.LedgerApiDependentCantonServices
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration

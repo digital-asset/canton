@@ -11,17 +11,14 @@ import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.Ev
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore.CausalityWriteFinished
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.VectorClock
-import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.HashSet
 import scala.concurrent.Future
 
-@SuppressWarnings(
-  Array("com.digitalasset.canton.DiscardedFuture")
-) // TODO(#8448) do not discard futures
 class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   lazy val participant: ParticipantId = ParticipantId("p1-mydomain")
 
@@ -67,7 +64,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish1F = sut.waitPublishable(clock1.clock)
     val canPublish2F = sut.waitPublishable(clock2.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     val () = canPublish2F.futureValue
@@ -98,7 +95,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish2F = sut.waitPublishable(clock2.clock)
     val canPublish4F = sut.waitPublishable(clock4.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish4F.isCompleted shouldBe false
 
     canPublish1F.futureValue
@@ -106,7 +103,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
 
     sut.registerPublished(clock1.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish4F.isCompleted shouldBe false
 
     sut.registerPublished(clock2.clock)
@@ -127,7 +124,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish2F = sut.waitPublishable(clock2.clock)
     val canPublish3F = sut.waitPublishable(clock3.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     // clock3 is publishable before clock1 despite being a later event on the same domain
@@ -151,7 +148,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish2F = sut.waitPublishable(clock2.clock)
     val canPublish3F = sut.waitPublishable(clock3.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish2F.isCompleted shouldBe false
     canPublish3F.isCompleted shouldBe false
 
@@ -173,7 +170,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish2F = sut.waitPublishable(clock2.clock)
     val canPublish3F = sut.waitPublishable(clock3.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     val () = canPublish2F.futureValue
@@ -181,7 +178,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
 
     sut.registerPublished(clock2.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     sut.registerPublished(clock3.clock)
@@ -206,7 +203,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
     val canPublish2F = sut.waitPublishable(clock2.clock)
     val canPublish3F = sut.waitPublishable(clock3.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     val () = canPublish2F.futureValue
@@ -214,7 +211,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
 
     sut.registerPublished(clock2.clock)
 
-    sut.flush()
+    sut.flush().futureValue
     canPublish1F.isCompleted shouldBe false
 
     sut.registerPublished(clock3.clock)
@@ -233,12 +230,12 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
 
     val registeredF = sut.awaitTransferOutRegistered(id, Set(party))
 
-    sut.flush()
+    sut.flush().futureValue
     registeredF.isCompleted shouldBe false
 
     sut.domainCausalityStore.registerTransferOut(id, Set(vc))
 
-    sut.flush()
+    sut.flush().futureValue
     val map = registeredF.futureValue
     map shouldBe Map(party -> VectorClock(domain1, CantonTimestamp.Epoch, party, Map.empty))
 

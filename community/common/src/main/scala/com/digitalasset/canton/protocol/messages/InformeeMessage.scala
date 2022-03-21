@@ -11,10 +11,10 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessage
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 /** The informee message to be sent to the mediator.

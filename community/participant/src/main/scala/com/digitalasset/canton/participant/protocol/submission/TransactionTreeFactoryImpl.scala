@@ -17,7 +17,7 @@ import com.digitalasset.canton._
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService

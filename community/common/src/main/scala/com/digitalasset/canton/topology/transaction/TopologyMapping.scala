@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.transaction
 import cats.syntax.traverse._
 import cats.syntax.either._
 import cats.syntax.option._
-import com.digitalasset.canton.{DomainId, LfPackageId, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.digitalasset.canton.ProtoDeserializationError._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

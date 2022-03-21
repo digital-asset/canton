@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
@@ -12,7 +11,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.processing._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext

@@ -14,9 +14,9 @@ import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.SequencedEventStore._
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainId, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

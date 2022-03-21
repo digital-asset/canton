@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,6 +16,7 @@ import com.digitalasset.canton.participant.store.db.DbInFlightSubmissionStore
 import com.digitalasset.canton.participant.store.memory.InMemoryInFlightSubmissionStore
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.MessageId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -61,7 +61,7 @@ trait InFlightSubmissionStore extends AutoCloseable {
       implicit traceContext: TraceContext
   ): Future[Seq[InFlightSubmission[SequencedSubmission]]]
 
-  /** Returns one of the in-flight submissions with the given [[com.digitalasset.canton.DomainId]]
+  /** Returns one of the in-flight submissions with the given [[com.digitalasset.canton.topology.DomainId]]
     * and [[com.digitalasset.canton.sequencing.protocol.MessageId]], if any.
     */
   def lookupSomeMessageId(domainId: DomainId, messageId: MessageId)(implicit

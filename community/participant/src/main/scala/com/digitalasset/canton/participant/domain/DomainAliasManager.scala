@@ -11,7 +11,8 @@ import com.digitalasset.canton.participant.store.DomainAliasAndIdStore
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 import com.google.common.collect.{BiMap, HashBiMap}
 
 import scala.jdk.CollectionConverters._

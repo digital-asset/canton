@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client.transports
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.{v0 => cryptoproto}
 import com.digitalasset.canton.domain.api.{v0 => v0domain}
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.protocol.v0
@@ -14,7 +14,7 @@ import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ByteStringUtil
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.Context.CancellableContext

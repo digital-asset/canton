@@ -7,7 +7,8 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap

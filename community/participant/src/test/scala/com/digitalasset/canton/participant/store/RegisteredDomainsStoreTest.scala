@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainAlias, DomainId}
+import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait RegisteredDomainsStoreTest {

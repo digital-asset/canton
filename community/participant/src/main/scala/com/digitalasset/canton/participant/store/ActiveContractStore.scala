@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.kernel.Order
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.RequestCounter
@@ -14,6 +13,7 @@ import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveCo
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.CheckedT
 import com.google.common.annotations.VisibleForTesting

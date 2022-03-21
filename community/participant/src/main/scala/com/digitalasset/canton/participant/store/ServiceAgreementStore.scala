@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future

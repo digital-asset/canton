@@ -5,10 +5,10 @@ package com.digitalasset.canton.console
 
 import better.files.File
 import com.codahale.metrics
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, CommunityCantonStatus}
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.metrics.MetricsSnapshot
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.ReleaseVersion
 import io.circe.generic.semiauto.deriveEncoder
 import io.circe.syntax._

@@ -64,7 +64,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,

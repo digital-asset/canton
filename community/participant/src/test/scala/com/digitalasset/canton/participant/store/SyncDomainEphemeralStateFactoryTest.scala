@@ -31,11 +31,11 @@ import com.digitalasset.canton.store.memory.{
 }
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
   BaseTest,
   DefaultDamlValues,
-  DomainId,
   GenesisSequencerCounter,
   SequencerCounter,
 }

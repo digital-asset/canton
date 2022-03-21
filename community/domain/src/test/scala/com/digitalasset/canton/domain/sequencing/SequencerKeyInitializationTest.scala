@@ -8,10 +8,10 @@ import com.digitalasset.canton.domain.sequencing.admin.protocol
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, TestingIdentityFactory}
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -48,7 +48,7 @@ class SequencerKeyInitializationTest extends FixtureAsyncWordSpec with BaseTest 
         // only a single key should be registered
         verify(cryptoSpy, times(1)).generateSigningKey(
           scheme = eqTo(crypto.privateCrypto.defaultSigningKeyScheme),
-          name = eqTo(Some(KeyName.tryCreate("sequencer-initial-da::default"))),
+          name = eqTo(Some(KeyName.tryCreate("sequencer-signing-da::default"))),
         )(anyTraceContext)
 
         // all responses should return the same public key

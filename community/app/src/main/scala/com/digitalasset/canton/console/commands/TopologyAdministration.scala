@@ -6,8 +6,8 @@ package com.digitalasset.canton.console.commands
 import java.util.concurrent.atomic.AtomicReference
 import cats.syntax.either._
 import cats.syntax.traverseFilter._
-import com.digitalasset.canton.DomainId
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
 import com.digitalasset.canton.admin.api.client.data._
 import com.digitalasset.canton.config.TimeoutDuration
@@ -20,13 +20,20 @@ import com.digitalasset.canton.console.{
   FeatureFlagFilter,
   Help,
   Helpful,
+  InstanceReference,
 }
-import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose, X509Certificate}
+import com.digitalasset.canton.crypto.{
+  CertificateId,
+  Fingerprint,
+  KeyPurpose,
+  PublicKey,
+  X509Certificate,
+}
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
@@ -34,12 +41,14 @@ import com.google.protobuf.ByteString
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery}
 
 class TopologyAdministrationGroup(
-    runner: AdminCommandRunner,
+    instance: InstanceReference,
     topologyQueueStatus: => Option[TopologyQueueStatus],
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends Helpful
     with FeatureFlagFilter {
+
+  private val runner: AdminCommandRunner = instance
 
   import runner._
 
@@ -58,7 +67,10 @@ class TopologyAdministrationGroup(
     idCache.set(None)
   }
 
-  private[console] def idHelper[T](name: String, apply: UniqueIdentifier => T): T =
+  private[console] def idHelper[T](
+      name: String,
+      apply: UniqueIdentifier => T,
+  ): T =
     fetchId().fold(
       throw new IllegalStateException(
         s"Unable to get uid of $name. Has the node been started and is it initialized?"
@@ -363,7 +375,44 @@ class TopologyAdministrationGroup(
         )
       }
 
+    @Help.Summary("Rotate the key for an owner to key mapping")
+    @Help.Description(
+      """Rotates the key for an existing owner to key mapping by issuing a new owner to key mapping with the new key
+        |and removing the previous owner to key mapping with the previous key.
+
+        owner: The owner of the owner to key mapping
+        currentKey: The current public key that will be rotated
+        newKey: The new public key that has been generated
+        |"""
+    )
+    def rotate_key(
+        owner: KeyOwner,
+        currentKey: PublicKey,
+        newKey: PublicKey,
+    ): Unit = {
+
+      require(currentKey.purpose == newKey.purpose, "The rotated keys must have the same purpose")
+
+      // Authorize the new key
+      // The owner will now have two keys, but by convention the first one added is always
+      // used by everybody.
+      authorize(
+        TopologyChangeOp.Add,
+        owner,
+        newKey.fingerprint,
+        newKey.purpose,
+      ).discard
+
+      // Remove the old key by sending the matching `Remove` transaction
+      authorize(
+        TopologyChangeOp.Remove,
+        owner,
+        currentKey.fingerprint,
+        currentKey.purpose,
+      ).discard
+    }
   }
+
   @Help.Summary("Manage party to participant mappings")
   @Help.Group("Party to participant mappings")
   object party_to_participant_mappings extends Helpful {

@@ -10,7 +10,6 @@ import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter
@@ -21,6 +20,7 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._

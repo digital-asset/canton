@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
@@ -64,7 +63,7 @@ import com.digitalasset.canton.time.{
   DomainTimeTrackerConfig,
   NonNegativeFiniteDuration,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStore

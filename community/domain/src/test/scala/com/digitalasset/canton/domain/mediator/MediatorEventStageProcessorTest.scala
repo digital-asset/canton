@@ -29,6 +29,7 @@ import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
+  DomainId,
   SequencerId,
   TestingIdentityFactory,
   TestingTopology,
@@ -36,7 +37,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

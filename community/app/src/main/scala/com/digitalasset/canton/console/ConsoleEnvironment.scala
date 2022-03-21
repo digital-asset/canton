@@ -325,6 +325,7 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
 
   protected val topicNodeReferences = "Node References"
   protected val topicGenericNodeReferences = "Generic Node References"
+  protected val genericNodeReferencesDoc = " (.all, .local, .remote)"
 
   protected def domainsTopLevelValue(
       h: TopLevelValue.Partial,
@@ -376,12 +377,18 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
     val referencesTopic = Seq(topicGenericNodeReferences)
     localParticipantBinds ++ remoteParticipantBinds ++
       localDomainBinds ++ remoteDomainBinds ++ clockBinds.toList :+
-      TopLevelValue("participants", "All participant nodes", participants, referencesTopic) :+
+      TopLevelValue(
+        "participants",
+        "All participant nodes" + genericNodeReferencesDoc,
+        participants,
+        referencesTopic,
+      ) :+
       domainsTopLevelValue(
-        TopLevelValue.Partial("domains", "All domain nodes", referencesTopic),
+        TopLevelValue
+          .Partial("domains", "All domain nodes" + genericNodeReferencesDoc, referencesTopic),
         domains,
       ) :+
-      TopLevelValue("nodes", "All nodes", nodes, referencesTopic)
+      TopLevelValue("nodes", "All nodes" + genericNodeReferencesDoc, nodes, referencesTopic)
   }
 
   /** Bindings for ammonite

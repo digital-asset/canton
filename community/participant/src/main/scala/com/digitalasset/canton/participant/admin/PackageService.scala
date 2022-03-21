@@ -7,7 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.daml_lf_dev.DamlLf
-import com.daml.error.definitions.PackageServiceError
+import com.daml.error.definitions.{DamlError, PackageServiceError}
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.archive.{DarParser, Decode, Error => LfArchiveError}
 import com.daml.lf.data.Ref.PackageId
@@ -16,7 +16,7 @@ import com.daml.lf.language.Ast.Package
 import com.daml.lf.value.Value.ContractId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
-import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
+import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PackageServiceErrorGroup
 import com.digitalasset.canton.error._
@@ -31,15 +31,18 @@ import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerEr
 import com.digitalasset.canton.protocol.{PackageDescription, PackageInfoService}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PathUtils
-import com.digitalasset.canton.{DomainId, LedgerSubmissionId}
+import com.digitalasset.canton.LedgerSubmissionId
+import com.digitalasset.canton.topology.DomainId
 import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
+import io.grpc.StatusRuntimeException
 import slick.jdbc.GetResult
 
 import java.io._
 import java.nio.file.Paths
 import java.util.UUID
 import java.util.zip.ZipInputStream
+import scala.annotation.nowarn
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -50,7 +53,7 @@ trait DarService {
       filename: String,
       vetAllPackages: Boolean,
       synchronizeVetting: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, Hash]
+  )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Hash]
   def getDar(hash: Hash)(implicit traceContext: TraceContext): Future[Option[PackageService.Dar]]
   def listDars(limit: Option[Int])(implicit
       traceContext: TraceContext
@@ -131,7 +134,7 @@ class PackageService(
       filename: String,
       vetAllPackages: Boolean,
       synchronizeVetting: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, Hash] =
+  )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Hash] =
     appendDar(
       payload,
       PathUtils.getFilenameWithoutExtension(Paths.get(filename).getFileName),
@@ -141,7 +144,7 @@ class PackageService(
 
   private def catchUpstreamErrors[E](
       attempt: Either[LfArchiveError, E]
-  )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, E] =
+  )(implicit traceContext: TraceContext): EitherT[Future, DamlError, E] =
     EitherT.fromEither(attempt match {
       case Right(value) => Right(value)
       case Left(LfArchiveError.InvalidDar(entries, cause)) =>
@@ -165,10 +168,10 @@ class PackageService(
       darName: String,
       vetAllPackages: Boolean,
       synchronizeVetting: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, Hash] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Hash] = {
     val hash = hashOps.digest(HashPurpose.DarIdentifier, payload)
     val stream = new ZipInputStream(payload.newInput())
-    val ret: EitherT[Future, PackageServiceError, Hash] = for {
+    val ret: EitherT[Future, DamlError, Hash] = for {
       lengthValidatedName <- EitherT
         .fromEither[Future](
           String255
@@ -207,7 +210,7 @@ class PackageService(
 
   private def validateArchives(archives: List[DamlLf.Archive])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, PackageServiceError, Unit] =
+  ): EitherT[Future, DamlError, Unit] =
     for {
       packages <- archives
         .traverse(archive => catchUpstreamErrors(Decode.decodeArchive(archive)))
@@ -216,16 +219,19 @@ class PackageService(
         engine
           .validatePackages(packages)
           .leftMap(
-            PackageServiceError.Validation.handleLfEnginePackageError(_): PackageServiceError
+            PackageServiceError.Validation.handleLfEnginePackageError(_): DamlError
           )
       )
     } yield ()
 
   private def vetPackages(archives: List[DamlLf.Archive], synchronizeVetting: Boolean)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, PackageServiceError, Unit] =
+  ): EitherT[Future, DamlError, Unit] =
     vetPackages(Traced((archives.map(DamlPackageStore.readPackageId), synchronizeVetting)))
-      .leftMap(CantonPackageServiceError.IdentityManagerParentError(_): PackageServiceError)
+      .leftMap[DamlError] { err =>
+        implicit val code = err.code
+        CantonPackageServiceError.IdentityManagerParentError(err)
+      }
 
   private val dependencyCache = Scaffeine()
     .maximumSize(10000)
@@ -304,7 +310,7 @@ class PackageService(
       dar: Option[Dar],
       vetAllPackages: Boolean,
       synchronizeVetting: Boolean,
-  )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Unit] = {
 
     EitherT
       .right(
@@ -384,13 +390,20 @@ object PackageService {
 
 }
 object CantonPackageServiceError extends PackageServiceErrorGroup {
+  @nowarn("msg=early initializers are deprecated")
   case class IdentityManagerParentError(parent: ParticipantTopologyManagerError)(implicit
-      val loggingContext: ErrorLoggingContext
-  ) extends PackageServiceError
+      val loggingContext: ErrorLoggingContext,
+      override val code: ErrorCode,
+  ) extends {
+        override val cause: String = parent.cause
+      }
+      with DamlError(parent.cause)
       with CantonError
       with ParentCantonError[ParticipantTopologyManagerError] {
 
     override def logOnCreation: Boolean = false
+
+    override def asGrpcError: StatusRuntimeException = parent.asGrpcError
 
     override def mixinContext: Map[String, String] = Map("action" -> "package-vetting")
   }

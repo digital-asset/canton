@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.option._
-
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
 import com.digitalasset.canton.participant.protocol.submission._
@@ -13,9 +12,10 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
 }
 import com.digitalasset.canton.sequencing.protocol.{DeliverErrorReason, MessageId}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{BaseTest, DefaultDamlValues, DomainId}
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID

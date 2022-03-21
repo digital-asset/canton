@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.{GetDomainId, GetDomainParameters}
 import com.digitalasset.canton.domain.api.v0.{
@@ -13,7 +12,7 @@ import com.digitalasset.canton.domain.api.v0.{
   SequencerConnect => proto,
 }
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse

@@ -11,7 +11,13 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOp
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.topology.{DefaultTestIdentities, MediatorId, Member, ParticipantId}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  DomainId,
+  MediatorId,
+  Member,
+  ParticipantId,
+}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
@@ -46,7 +52,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HasVersionedToByteString
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, DomainId, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent

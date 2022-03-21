@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.Functor
-import com.digitalasset.canton.{DomainId, LedgerSubmissionId, SequencerCounter}
+import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.store.SerializableSubmissionId
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbSerializationException
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import slick.jdbc.GetResult
 

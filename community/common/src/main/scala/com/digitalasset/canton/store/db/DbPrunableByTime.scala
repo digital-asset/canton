@@ -115,7 +115,7 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
   }
 }
 
-/** Specialized [[DbPrunableByTime]] that uses the [[com.digitalasset.canton.DomainId]] as discriminator */
+/** Specialized [[DbPrunableByTime]] that uses the [[com.digitalasset.canton.topology.DomainId]] as discriminator */
 trait DbPrunableByTimeDomain[E] extends DbPrunableByTime[IndexedDomain, E] {
   this: DbStore =>
 

@@ -15,9 +15,9 @@ import com.digitalasset.canton.participant.protocol.submission.SeedGenerator.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutRequest
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
-import com.digitalasset.canton._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.DeterministicEncoding
+import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -27,7 +27,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class SeedGenerator(val hmacOps: HmacPrivateOps, hashOps: HashOps)(implicit ec: ExecutionContext) {
 
-  /** Yields a hash from the method parameters and [[crypto.HmacPrivateOps.hmac]].
+  /** Yields a hash from the method parameters and [[com.digitalasset.canton.crypto.HmacPrivateOps.hmac]].
     * It is assumed that the hash uniquely identifies the method parameters.
     *
     * If two instances of this class have different `hmacOps`, they will create different hashes, even if

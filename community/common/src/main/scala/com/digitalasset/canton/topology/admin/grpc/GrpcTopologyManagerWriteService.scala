@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.bifunctor._
 import cats.syntax.traverse._
-import com.digitalasset.canton.{DomainId, LfPackageId, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, PublicKey, SigningPublicKey}

@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
 import com.digitalasset.canton.topology.transaction.{
@@ -26,7 +26,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, retry}
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap

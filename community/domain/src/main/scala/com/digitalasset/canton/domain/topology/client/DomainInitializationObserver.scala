@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.topology.client
 import cats.instances.future._
 import cats.instances.list._
 import cats.syntax.traverse._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -17,7 +16,7 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedTopologySnapshot,
 }
 import com.digitalasset.canton.topology.store.TopologyStore
-import com.digitalasset.canton.topology.{DomainTopologyManagerId, SequencerId}
+import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, SequencerId}
 import com.digitalasset.canton.tracing.NoTracing
 
 import scala.concurrent.{ExecutionContext, Future}

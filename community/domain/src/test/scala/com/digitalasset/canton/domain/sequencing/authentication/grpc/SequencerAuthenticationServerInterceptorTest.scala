@@ -23,9 +23,14 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.{ParticipantId, UnauthenticatedMemberId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  ParticipantId,
+  UnauthenticatedMemberId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.StreamObserver
 import io.grpc.{ManagedChannel, ServerInterceptors, Status}

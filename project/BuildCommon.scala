@@ -439,7 +439,7 @@ object BuildCommon {
         bundlePack := sharedAppPack,
         additionalBundleSources := Seq.empty,
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
-        assembly / assemblyJarName := s"canton-community-${version.value}.jar",
+        assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // specifying the damlSourceDirectory to non-default location enables checking/updating of daml version
         Compile / damlSourceDirectory := sourceDirectory.value / "pack" / "examples" / "06-messaging",
         // clearing the damlBuild tasks to prevent compiling which does not work due to relative file "data-dependencies";

@@ -39,11 +39,11 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.{MediatorId, Member, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 

@@ -13,9 +13,9 @@ import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.DomainId
 import com.google.protobuf.ByteString
 
 /** Sent by the mediator to indicate that a mediator request was malformed.

@@ -13,7 +13,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 
 /** Causality messages are sent along with a transfer-in response. They propagate causality information on
   * the events a participant has "seen" for a party at the time of the transfer-out.

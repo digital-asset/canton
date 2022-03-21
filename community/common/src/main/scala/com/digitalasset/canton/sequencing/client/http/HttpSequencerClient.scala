@@ -24,12 +24,12 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.sequencing.{HttpSequencerConnection, OrdinarySerializedEvent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.{TraceContext, Traced, TracingConfig}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, ProtoDeserializationError, SequencerCounter}
+import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import io.circe.Codec
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveEnumerationCodec

@@ -20,7 +20,7 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactor
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{DomainId, ProtoDeserializationError}
+import com.digitalasset.canton.ProtoDeserializationError
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference

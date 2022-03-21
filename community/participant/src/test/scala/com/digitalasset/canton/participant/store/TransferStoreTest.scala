@@ -24,7 +24,7 @@ import com.digitalasset.canton.protocol.{RequestId, TransferId}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.util.{Checked, FutureUtil}
-import com.digitalasset.canton.{BaseTest, DomainId, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.duration._

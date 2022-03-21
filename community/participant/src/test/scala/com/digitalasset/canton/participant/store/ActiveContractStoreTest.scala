@@ -22,9 +22,9 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.store.PrunableByTimeTest
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{BaseTest, DomainId, LfPackageId}
+import com.digitalasset.canton.{BaseTest, LfPackageId}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String256M
@@ -14,6 +13,7 @@ import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 

@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton
 
-import cats.Order
-import cats.instances.string._
 import cats.syntax.either._
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
@@ -12,11 +10,8 @@ import com.digitalasset.canton.config.RequireTypes.{
   String255,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.UniqueIdentifier
-import io.circe.Encoder
-import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
+import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.Instant
 
@@ -34,49 +29,6 @@ object DomainAlias extends LengthLimitedStringWrapperCompanion[String255, Domain
   override protected def companion: String255.type = String255
   override def instanceName: String = "DomainAlias"
   override protected def factoryMethodWrapper(str: String255): DomainAlias = DomainAlias(str)
-}
-
-case class DomainId(private val uid: UniqueIdentifier) extends PrettyPrinting {
-  def unwrap: UniqueIdentifier = uid
-
-  def toProtoPrimitive: String = uid.toProtoPrimitive
-  def toLengthLimitedString: String255 = uid.toLengthLimitedString
-
-  /** filter string to be used in console commands */
-  def filterString: String = uid.toProtoPrimitive
-
-  override def pretty: Pretty[DomainId] = prettyOfParam(_.uid)
-
-}
-
-object DomainId {
-
-  implicit val orderDomainId: Order[DomainId] = Order.by[DomainId, String](_.toProtoPrimitive)
-  implicit val domainIdEncoder: Encoder[DomainId] =
-    Encoder.encodeString.contramap(_.unwrap.toProtoPrimitive)
-
-  // Instances for slick (db) queries
-  implicit val getResultDomainId: GetResult[DomainId] =
-    UniqueIdentifier.getResult.andThen(DomainId(_))
-  implicit val getResultDomainIdO: GetResult[Option[DomainId]] =
-    UniqueIdentifier.getResultO.andThen(_.map(DomainId(_)))
-
-  implicit val setParameterDomainId: SetParameter[DomainId] =
-    (d: DomainId, pp: PositionedParameters) => pp >> d.toLengthLimitedString
-  implicit val setParameterDomainIdO: SetParameter[Option[DomainId]] =
-    (d: Option[DomainId], pp: PositionedParameters) => pp >> d.map(_.toLengthLimitedString)
-
-  def fromProtoPrimitive(
-      proto: String,
-      fieldName: String,
-  ): ParsingResult[DomainId] =
-    UniqueIdentifier.fromProtoPrimitive(proto, fieldName).map(DomainId(_))
-
-  def tryFromString(str: String) = DomainId(UniqueIdentifier.tryFromProtoPrimitive(str))
-
-  def fromString(str: String): Either[String, DomainId] =
-    UniqueIdentifier.fromProtoPrimitive_(str).map(DomainId(_))
-
 }
 
 case class TimedValue[A](timestamp: Instant, value: A)

@@ -61,7 +61,8 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.{DomainId, LedgerTransactionId}
+import com.digitalasset.canton.LedgerTransactionId
+import com.digitalasset.canton.topology.DomainId
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 

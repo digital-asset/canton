@@ -4,12 +4,12 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.LocalNodeParameters
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 

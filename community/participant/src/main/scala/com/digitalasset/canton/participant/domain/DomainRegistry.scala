@@ -19,7 +19,8 @@ import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 
 /** A registry of domains. */
 trait DomainRegistry extends AutoCloseable {

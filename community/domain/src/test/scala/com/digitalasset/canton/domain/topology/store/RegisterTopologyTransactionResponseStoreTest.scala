@@ -6,11 +6,11 @@ package com.digitalasset.canton.domain.topology.store
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
-import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingIdentityFactory}
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 

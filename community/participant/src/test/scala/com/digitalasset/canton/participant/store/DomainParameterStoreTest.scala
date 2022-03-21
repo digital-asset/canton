@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait DomainParameterStoreTest { this: AsyncWordSpec with BaseTest =>

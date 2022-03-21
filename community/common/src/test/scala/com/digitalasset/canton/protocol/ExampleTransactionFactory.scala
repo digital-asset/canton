@@ -33,6 +33,7 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.topology.{
+  DomainId,
   MediatorId,
   ParticipantId,
   TestingIdentityFactory,

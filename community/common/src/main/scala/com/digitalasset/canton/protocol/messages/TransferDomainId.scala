@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.data.ViewType.{TransferInViewType, TransferOutViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.TransferDomainId.TransferDomainIdCast
+import com.digitalasset.canton.topology.DomainId
 
 sealed trait TransferDomainId extends Product with Serializable with PrettyPrinting {
   protected def domain: DomainId

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.initialization
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.config.{DomainConfig, DomainNodeParameters}
@@ -17,6 +16,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerInterceptors
 import io.grpc.protobuf.services.ProtoReflectionService

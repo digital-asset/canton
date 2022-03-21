@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.Lifecycle
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.http.{
@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   VerifyActiveRequest,
   VerifyActiveResponse,
 }
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContextExecutor, Future}

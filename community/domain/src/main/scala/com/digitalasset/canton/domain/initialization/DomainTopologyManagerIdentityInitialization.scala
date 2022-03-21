@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.initialization
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{KeyName, PublicKey, X509Certificate}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
@@ -17,7 +16,7 @@ import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   OwnerToKeyMapping,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -40,7 +39,7 @@ trait DomainTopologyManagerIdentityInitialization {
       ns <- crypto
         .generateSigningKey(name = Some(nsName))
         .leftMap(err => s"Failed to generate namespace key: $err")
-      idmName <- KeyName.create(s"$name-identity").toEitherT[Future]
+      idmName <- KeyName.create(s"$name-signing").toEitherT[Future]
       idmKey <- crypto
         .generateSigningKey(name = Some(idmName))
         .leftMap(err => s"Failed to generate identity key: $err")

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.daml.error.definitions.PackageServiceError
+import com.daml.error.definitions.{DamlError, PackageServiceError}
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command
@@ -388,7 +388,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
         name: String,
         vetAllPackages: Boolean,
         synchronizeVetting: Boolean,
-    )(implicit traceContext: TraceContext): EitherT[Future, PackageServiceError, Hash] = {
+    )(implicit traceContext: TraceContext): EitherT[Future, DamlError, Hash] = {
 
       name match {
         case SuccessfulSetup.name =>

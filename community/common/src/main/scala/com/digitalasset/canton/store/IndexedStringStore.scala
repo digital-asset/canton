@@ -5,14 +5,14 @@ package com.digitalasset.canton.store
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
-import com.digitalasset.canton.{DomainId, checked}
+import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbIndexedStringStore
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.github.blemale.scaffeine.{AsyncLoadingCache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.{PositionedParameters, SetParameter}

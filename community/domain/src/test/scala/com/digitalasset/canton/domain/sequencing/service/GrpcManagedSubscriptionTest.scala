@@ -14,8 +14,13 @@ import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  DomainId,
+  ParticipantId,
+  UniqueIdentifier,
+}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.stub.ServerCallStreamObserver
 import org.scalatest.wordspec.AnyWordSpec
 

@@ -7,7 +7,6 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative._
 import cats.syntax.either._
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -18,6 +17,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightReference,
 }
 import com.digitalasset.canton.sequencing.protocol.MessageId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MapsUtil
 import com.digitalasset.canton.util.ShowUtil._

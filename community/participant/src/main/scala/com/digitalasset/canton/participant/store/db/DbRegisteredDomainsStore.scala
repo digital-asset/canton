@@ -18,7 +18,8 @@ import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
 import com.digitalasset.canton.participant.store.RegisteredDomainsStore
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

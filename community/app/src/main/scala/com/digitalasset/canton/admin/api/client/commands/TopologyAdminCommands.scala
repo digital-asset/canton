@@ -6,7 +6,6 @@ package com.digitalasset.canton.admin.api.client.commands
 import java.time.Instant
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -14,7 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.admin.api.client.data._
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.admin.v0

@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.store.ParticipantEventLog
 import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 

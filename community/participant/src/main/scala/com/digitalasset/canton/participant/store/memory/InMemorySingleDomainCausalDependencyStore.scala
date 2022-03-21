@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore
 import com.digitalasset.canton.protocol.TransferId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.concurrent.TrieMap

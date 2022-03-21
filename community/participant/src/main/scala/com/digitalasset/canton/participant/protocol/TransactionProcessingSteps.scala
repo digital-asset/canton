@@ -26,7 +26,7 @@ import com.digitalasset.canton.error.TransactionError
 import com.daml.error.ErrorCode
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
@@ -82,7 +82,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, IterableUtil, LfTransactionUtil}
 import com.digitalasset.canton.{
   DiscardOps,
-  DomainId,
   LedgerSubmissionId,
   LfPartyId,
   SequencerCounter,
@@ -898,7 +897,7 @@ class TransactionProcessingSteps(
       val rejection = LedgerSyncEvent.CommandRejected.FinalReason(
         TransactionProcessor.SubmissionErrors.InactiveMediatorError
           .Error(mediatorId, ts)
-          .rpcStatus
+          .rpcStatus()
       )
 
       TimestampedEvent(
@@ -945,13 +944,13 @@ class TransactionProcessingSteps(
           LedgerSyncEvent.CommandRejected.FinalReason(
             LedgerApiErrors.ConsistencyErrors.DuplicateContractKey
               .Reject(duplicateKeyReject.cause)
-              .rpcStatus(loggingContext.correlationId)
+              .rpcStatus()
           )
         case inconsistentKeyReject: LocalReject.ConsistencyRejections.InconsistentKey.Reject =>
           LedgerSyncEvent.CommandRejected.FinalReason(
             LedgerApiErrors.ConsistencyErrors.InconsistentContractKey
               .Reject(inconsistentKeyReject.cause)
-              .rpcStatus(loggingContext.correlationId)
+              .rpcStatus()
           )
         case reason => reason.createRejection
       }

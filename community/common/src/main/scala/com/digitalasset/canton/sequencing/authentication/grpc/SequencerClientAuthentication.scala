@@ -5,14 +5,13 @@ package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
 import cats.implicits._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{AuthenticatedMember, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.{AuthenticatedMember, DomainId, UnauthenticatedMemberId}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener

@@ -28,7 +28,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.{DomainAlias, DomainId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.{DomainAlias, LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 /** A tagged class used to return exported private keys */
@@ -70,7 +70,12 @@ case class ListKeyOwnersResult(
     owner: KeyOwner,
     signingKeys: Seq[SigningPublicKey],
     encryptionKeys: Seq[EncryptionPublicKey],
-)
+) {
+  def keys(purpose: KeyPurpose): Seq[PublicKey] = purpose match {
+    case KeyPurpose.Signing => signingKeys
+    case KeyPurpose.Encryption => encryptionKeys
+  }
+}
 
 object ListKeyOwnersResult {
   def fromProtoV0(

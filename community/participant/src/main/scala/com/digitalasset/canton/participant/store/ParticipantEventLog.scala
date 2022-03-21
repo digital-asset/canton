@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.{DomainId, checked}
+import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.store.memory.InMemoryParticipantEvent
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.IndexedStringStore
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 

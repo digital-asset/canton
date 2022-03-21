@@ -26,7 +26,7 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.HasVersionedToByteString
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

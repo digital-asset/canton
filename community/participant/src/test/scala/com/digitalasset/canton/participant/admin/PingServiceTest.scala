@@ -95,17 +95,15 @@ class PingServiceTest
     "happy ping path of single ping is reported correctly" in {
       val recipients = Set(bobId)
       val (service, id, pingRes) = setupTest(recipients, 5000, 5)
-      val respondF = respond(id, bobId, service, recipients)
+      respond(id, bobId, service, recipients)
       verifySuccess(pingRes)
-      respondF.futureValue
     }
 
     "happy bong is reported correctly" in {
       val recipients = Set(bobId, charlieId)
       val (service, id, pingRes) = setupTest(recipients, 5000, 5)
-      val respondF = respond(id, charlieId, service, recipients)
+      respond(id, charlieId, service, recipients)
       verifySuccess(pingRes)
-      respondF.futureValue
     }
 
     "ping times out gracefully" in {
@@ -119,11 +117,10 @@ class PingServiceTest
         val (service, id, pingRes) = setupTest(recipients, 5000, 2000)
         // we don't really care about the results of these responses
         // but we want to avoid running them concurrently to mirror how transactions are processed (one at a time)
-        val respondF = respond(id, charlieId, service, recipients)
-          .flatMap(_ => respond(id, bobId, service, Set(bobId, charlieId)))
+        respond(id, charlieId, service, recipients)
+        respond(id, bobId, service, Set(bobId, charlieId))
 
         verifyFailure(pingRes)
-        respondF.futureValue
       }
     }
   }

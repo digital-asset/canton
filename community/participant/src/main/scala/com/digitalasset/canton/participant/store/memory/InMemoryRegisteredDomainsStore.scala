@@ -12,8 +12,9 @@ import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
   DomainIdAlreadyAdded,
   Error,
 }
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.participant.store.RegisteredDomainsStore
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.collect.{BiMap, HashBiMap}
 

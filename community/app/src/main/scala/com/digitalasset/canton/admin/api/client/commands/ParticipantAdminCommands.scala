@@ -30,10 +30,10 @@ import com.digitalasset.canton.participant.domain.{
 }
 import com.digitalasset.canton.protocol.{LfContractId, TransferId, v0 => v0proto}
 import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.{DomainId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.{DomainAlias, DomainId, LedgerTransactionId}
+import com.digitalasset.canton.{DomainAlias, LedgerTransactionId}
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.ManagedChannel

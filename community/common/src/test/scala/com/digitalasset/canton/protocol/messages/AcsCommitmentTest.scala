@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.BaseTest
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
-
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp

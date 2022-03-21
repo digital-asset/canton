@@ -22,12 +22,12 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.Traced.withTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{DomainId, SequencerCounter, checked}
+import com.digitalasset.canton.{SequencerCounter, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
 

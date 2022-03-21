@@ -12,7 +12,6 @@ import cats.syntax.option._
 import cats.syntax.traverseFilter._
 import cats.syntax.traverse._
 import com.daml.ledger.api.DeduplicationPeriod
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -27,6 +26,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejection
 import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.util.ShowUtil._

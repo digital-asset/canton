@@ -4,11 +4,10 @@
 package com.digitalasset.canton.protocol
 
 import java.util.UUID
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.serialization.DeterministicEncoding
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 
 /** A blinded cryptographic hash of the information that ensures uniqueness of [[Unicum]]s in Canton.
   * The hash can be used to unblind the [[Unicum]]'s cryptographic commitment to the contract data.

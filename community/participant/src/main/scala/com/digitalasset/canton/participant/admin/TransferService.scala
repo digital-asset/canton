@@ -12,7 +12,8 @@ import com.digitalasset.canton.participant.protocol.transfer.{
 }
 import com.digitalasset.canton.participant.store.TransferLookup
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
-import com.digitalasset.canton.{DomainAlias, DomainId, LfPartyId}
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}
 

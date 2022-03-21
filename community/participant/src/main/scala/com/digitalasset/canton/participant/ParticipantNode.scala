@@ -86,7 +86,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
-import com.digitalasset.canton.{DomainId, LedgerParticipantId}
+import com.digitalasset.canton.LedgerParticipantId
 import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
@@ -253,7 +253,7 @@ class ParticipantNodeBootstrap(
     withNewTraceContext { implicit traceContext =>
       for {
         // create keys
-        nsName <- EitherT.fromEither[Future](KeyName.create(s"$name-identity"))
+        nsName <- EitherT.fromEither[Future](KeyName.create(s"$name-namespace"))
         namespaceKey <- crypto
           .generateSigningKey(name = Some(nsName))
           .leftMap(err => s"Failed to generate key for namespace: $err")

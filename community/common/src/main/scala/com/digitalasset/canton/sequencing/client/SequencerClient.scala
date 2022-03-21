@@ -56,7 +56,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, GenesisSequencerCounter, SequencerCounter}
+import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 

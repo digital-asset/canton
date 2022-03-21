@@ -38,9 +38,9 @@ import com.digitalasset.canton.store.{
   SequencedEventRangeOverlapsWithPruning,
   SequencedEventStore,
 }
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainAlias, DomainId, LedgerTransactionId}
+import com.digitalasset.canton.{DomainAlias, LedgerTransactionId}
 
 import java.time.Instant
 import java.util.NoSuchElementException

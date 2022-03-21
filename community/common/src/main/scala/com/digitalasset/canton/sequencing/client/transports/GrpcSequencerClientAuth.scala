@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
@@ -19,7 +18,12 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenProvider,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{AuthenticatedMember, Member, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.{
+  AuthenticatedMember,
+  DomainId,
+  Member,
+  UnauthenticatedMemberId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ManagedChannel
 import io.grpc.stub.AbstractStub

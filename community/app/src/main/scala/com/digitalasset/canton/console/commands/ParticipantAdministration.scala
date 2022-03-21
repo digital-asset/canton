@@ -60,10 +60,10 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 
 import java.time.Instant
 import scala.concurrent.TimeoutException

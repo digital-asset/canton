@@ -22,7 +22,13 @@ import com.digitalasset.canton.data.SubmitterMetadata.InvalidSubmitterMetadata
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
-import com.digitalasset.canton.topology.{MediatorId, Member, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  MediatorId,
+  Member,
+  ParticipantId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.version.{
   VersionedCommonMetadata,
