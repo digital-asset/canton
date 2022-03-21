@@ -27,7 +27,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration._

@@ -7,10 +7,10 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
-import com.digitalasset.canton.{BaseTest, DomainId, LfPartyId, topology}
+import com.digitalasset.canton.{BaseTest, LfPartyId, topology}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 

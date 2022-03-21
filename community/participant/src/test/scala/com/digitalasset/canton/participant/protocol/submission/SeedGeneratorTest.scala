@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, TestingIdentityFactory}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator.SeedForTransaction
-import com.digitalasset.canton.{BaseTest, DefaultDamlValues, DomainId}
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
 import com.digitalasset.platform.daml.lf.testing.SampleParties.{Alice, Bob}
 import org.scalatest.wordspec.AsyncWordSpec
 

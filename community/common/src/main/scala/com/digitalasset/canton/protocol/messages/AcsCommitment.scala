@@ -19,7 +19,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, ProtoDeserializationError}
+import com.digitalasset.canton.ProtoDeserializationError
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
 

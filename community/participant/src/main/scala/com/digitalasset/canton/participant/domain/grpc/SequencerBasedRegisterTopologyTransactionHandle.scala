@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
@@ -22,7 +21,7 @@ import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
-import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}

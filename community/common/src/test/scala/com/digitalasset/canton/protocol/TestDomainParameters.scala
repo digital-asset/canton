@@ -3,12 +3,16 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology.{SequencerId, TestingIdentityFactory, TestingTopology}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  SequencerId,
+  TestingIdentityFactory,
+  TestingTopology,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 
 /** Domain parameters used for unit testing with sane default values. */

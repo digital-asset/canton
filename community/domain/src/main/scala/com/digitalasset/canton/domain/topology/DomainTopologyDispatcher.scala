@@ -42,7 +42,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
-import com.digitalasset.canton.{DiscardOps, DomainId, SequencerCounter, checked}
+import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.collection.mutable

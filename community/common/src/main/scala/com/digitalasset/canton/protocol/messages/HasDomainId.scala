@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.DomainId
+import com.digitalasset.canton.topology.DomainId
 
 trait HasDomainId {
   def domainId: DomainId

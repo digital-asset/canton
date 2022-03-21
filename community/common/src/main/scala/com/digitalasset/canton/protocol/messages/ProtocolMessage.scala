@@ -10,8 +10,8 @@ import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 
 /** Parent trait of messages that are sent through the sequencer

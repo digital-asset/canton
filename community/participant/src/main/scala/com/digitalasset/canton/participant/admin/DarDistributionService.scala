@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.error.definitions.PackageServiceError
+import com.daml.error.definitions.DamlError
 
 import java.util.Base64
 import com.daml.ledger.api.v1.commands.Command
@@ -21,6 +21,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AcceptRejectError.OfferNotFound
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
 import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.util.FutureUtil
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -83,7 +84,7 @@ object AcceptRejectError {
   object OfferNotFound extends AcceptRejectError
 
   /** We could not append the DAR to our ledger. May indicate a problem with the DAR. */
-  case class FailedToAppendDar(reason: PackageServiceError) extends AcceptRejectError
+  case class FailedToAppendDar(reason: DamlError) extends AcceptRejectError
 
   /** Failed to submit the response to the share offer to the ledger */
   case class SubmissionFailed(result: CommandResult) extends AcceptRejectError
@@ -156,7 +157,7 @@ class DarDistributionService(
     */
   override private[admin] def processTransaction(
       tx: Transaction
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit traceContext: TraceContext): Unit = {
     if (isActive) {
       val actions = Seq(
         decodeAllCreated(M.ShareDar)(tx) map processShareCreated,
@@ -166,9 +167,10 @@ class DarDistributionService(
       )
       val flatActions = actions.flatten
 
-      flatActions.sequence_
-    } else {
-      Future.unit
+      FutureUtil.doNotAwait(
+        flatActions.sequence_,
+        s"failed to process Dar distribution service transaction ${tx.transactionId}",
+      )
     }
   }
 

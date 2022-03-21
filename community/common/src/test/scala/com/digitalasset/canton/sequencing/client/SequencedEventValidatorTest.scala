@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTes
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

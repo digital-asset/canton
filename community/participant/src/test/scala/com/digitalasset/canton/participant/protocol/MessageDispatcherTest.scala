@@ -48,12 +48,12 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, DiscardOps, DomainId, LfPartyId, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, DiscardOps, LfPartyId, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.{eq => isEq}
 import org.scalatest.Assertion

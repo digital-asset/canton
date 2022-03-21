@@ -22,7 +22,7 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap

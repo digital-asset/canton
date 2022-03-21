@@ -7,18 +7,19 @@ import cats.kernel.Order
 import cats.syntax.either._
 import com.daml.ledger.client.binding.Primitive.{Party => ClientParty}
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String300}
+import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String300}
 import com.digitalasset.canton.crypto.SecureRandomness
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.HexString
-import com.digitalasset.canton.{DomainId, LedgerParticipantId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
+import io.circe.Encoder
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 /** Top level trait representing an identity within the system */
-sealed trait Identity extends PrettyPrinting {
+sealed trait Identity extends Product with Serializable with PrettyPrinting {
   def uid: UniqueIdentifier
 
   def toProtoPrimitive: String = uid.toProtoPrimitive
@@ -192,6 +193,41 @@ object UnauthenticatedMemberId {
         namespace.fingerprint.unwrap,
       )
     )
+}
+
+case class DomainId(uid: UniqueIdentifier) extends Identity {
+  def unwrap: UniqueIdentifier = uid
+  def toLengthLimitedString: String255 = uid.toLengthLimitedString
+}
+
+object DomainId {
+
+  implicit val orderDomainId: Order[DomainId] = Order.by[DomainId, String](_.toProtoPrimitive)
+  implicit val domainIdEncoder: Encoder[DomainId] =
+    Encoder.encodeString.contramap(_.unwrap.toProtoPrimitive)
+
+  // Instances for slick (db) queries
+  implicit val getResultDomainId: GetResult[DomainId] =
+    UniqueIdentifier.getResult.andThen(DomainId(_))
+  implicit val getResultDomainIdO: GetResult[Option[DomainId]] =
+    UniqueIdentifier.getResultO.andThen(_.map(DomainId(_)))
+
+  implicit val setParameterDomainId: SetParameter[DomainId] =
+    (d: DomainId, pp: PositionedParameters) => pp >> d.toLengthLimitedString
+  implicit val setParameterDomainIdO: SetParameter[Option[DomainId]] =
+    (d: Option[DomainId], pp: PositionedParameters) => pp >> d.map(_.toLengthLimitedString)
+
+  def fromProtoPrimitive(
+      proto: String,
+      fieldName: String,
+  ): ParsingResult[DomainId] =
+    UniqueIdentifier.fromProtoPrimitive(proto, fieldName).map(DomainId(_))
+
+  def tryFromString(str: String) = DomainId(UniqueIdentifier.tryFromProtoPrimitive(str))
+
+  def fromString(str: String): Either[String, DomainId] =
+    UniqueIdentifier.fromProtoPrimitive_(str).map(DomainId(_))
+
 }
 
 /** A participant identifier */

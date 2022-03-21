@@ -13,10 +13,10 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedP
 import com.digitalasset.canton.protocol.messages.LocalReject.Malformed
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, RequestId, ViewHash}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LfPartyId, checked}
+import com.digitalasset.canton.{LfPartyId, checked}
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}

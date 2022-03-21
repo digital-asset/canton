@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.traverse._
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,7 +18,7 @@ import com.digitalasset.canton.participant.topology.ParticipantTopologyManager.P
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantErrorGroup
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction._

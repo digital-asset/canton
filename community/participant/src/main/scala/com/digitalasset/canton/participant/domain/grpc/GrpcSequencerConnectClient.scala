@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.VerifyActive
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}

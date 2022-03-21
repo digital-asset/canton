@@ -23,7 +23,7 @@ import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQ
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 
 import java.time.{Duration => JDuration}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}

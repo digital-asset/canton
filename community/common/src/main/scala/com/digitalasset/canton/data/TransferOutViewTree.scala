@@ -18,7 +18,7 @@ import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.{
   EitherUtil,
   HasVersionedToByteString,
@@ -26,7 +26,7 @@ import com.digitalasset.canton.util.{
   NoCopy,
 }
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
 import java.util.UUID

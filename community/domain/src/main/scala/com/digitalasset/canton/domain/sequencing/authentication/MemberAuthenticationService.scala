@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 
 import scala.concurrent.{ExecutionContext, Future}
 

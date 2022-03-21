@@ -36,12 +36,12 @@ import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveSeconds}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.util.retry.Policy
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.google.common.annotations.VisibleForTesting
 
 import java.time.temporal.ChronoUnit

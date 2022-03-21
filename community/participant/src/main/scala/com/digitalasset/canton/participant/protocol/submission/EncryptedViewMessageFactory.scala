@@ -8,12 +8,12 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{EncryptedView, EncryptedViewMessage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 
 import scala.concurrent.{ExecutionContext, Future}
 

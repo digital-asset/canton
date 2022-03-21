@@ -8,7 +8,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
 import com.digitalasset.canton.protocol.version.VersionedTopologyTransactions
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -117,6 +117,23 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
         (certs, rest :+ tx)
     }
     StoredTopologyTransactions.CertsAndRest(certs, rest)
+  }
+
+  /** The timestamp of the last topology transaction (if there is at least one)
+    * adjusted by topology change delay
+    */
+  def lastChangeTimestamp: Option[CantonTimestamp] = {
+    val epsilon = toDomainTopologyTransactions
+      .map(_.transaction.element.mapping)
+      .collect { case DomainParametersChange(_, domainParameters) =>
+        domainParameters.topologyChangeDelay
+      }
+      .lastOption
+      .getOrElse(DynamicDomainParameters.topologyChangeDelayIfAbsent)
+    val timestamp = result
+      .map(_.validFrom)
+      .maxOption
+    timestamp.map(_.minus(epsilon.duration))
   }
 
   override protected def toProtoVersioned(

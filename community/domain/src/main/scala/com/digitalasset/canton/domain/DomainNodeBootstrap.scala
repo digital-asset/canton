@@ -10,7 +10,6 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.error.ErrorGroup
 import com.digitalasset.canton
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -57,7 +56,7 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.TopologyManagerError.DomainErrorGroup
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.admin.grpc.{
   GrpcTopologyAggregationService,
   GrpcTopologyManagerReadService,

@@ -62,7 +62,7 @@ import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 
 import scala.collection.{concurrent, mutable}
 import scala.concurrent.{ExecutionContext, Future}

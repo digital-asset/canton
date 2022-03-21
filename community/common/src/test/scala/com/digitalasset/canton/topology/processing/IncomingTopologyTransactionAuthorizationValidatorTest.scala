@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainManager
 import com.digitalasset.canton.topology.store.{
@@ -12,6 +12,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
+  DomainId,
   Identifier,
   Namespace,
   ParticipantId,

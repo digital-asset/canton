@@ -4,7 +4,6 @@
 package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   CustomClientTimeout,
   TimeoutType,
@@ -19,6 +18,7 @@ import com.digitalasset.canton.time.{
   FetchTimeResponse,
   NonNegativeFiniteDuration,
 }
+import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 

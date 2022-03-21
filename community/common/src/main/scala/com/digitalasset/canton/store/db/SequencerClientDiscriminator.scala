@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.store.{IndexedDomain, IndexedMember, IndexedStringStore}
-import com.digitalasset.canton.topology.DomainMember
+import com.digitalasset.canton.topology.{DomainId, DomainMember}
 import com.digitalasset.canton.util.NoCopy
 import slick.jdbc.SetParameter
 

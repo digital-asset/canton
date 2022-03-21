@@ -19,9 +19,10 @@ import com.digitalasset.canton.protocol.v0.{
 import com.digitalasset.canton.protocol.version.VersionedCausalityUpdate
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** Represents the causal dependencies of a given request.
   */

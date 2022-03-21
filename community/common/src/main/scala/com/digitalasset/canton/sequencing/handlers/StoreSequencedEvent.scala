@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinaryApplicationHandler
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.store.SequencedEventStore
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,7 +12,7 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Topolo
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add

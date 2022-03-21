@@ -21,7 +21,7 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult, UnsignedProtocolEventHandler}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.KeyOwner
+import com.digitalasset.canton.topology.{DomainId, KeyOwner}
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   StoreBasedDomainTopologyClient,
@@ -36,7 +36,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicBoolean

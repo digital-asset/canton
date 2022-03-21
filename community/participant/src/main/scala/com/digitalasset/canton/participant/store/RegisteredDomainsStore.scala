@@ -10,7 +10,8 @@ import com.digitalasset.canton.participant.store.db.DbRegisteredDomainsStore
 import com.digitalasset.canton.participant.store.memory.InMemoryRegisteredDomainsStore
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContext, Future}
 

@@ -54,7 +54,7 @@ import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID

@@ -41,12 +41,12 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
 }
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
-import com.digitalasset.canton.{DomainAlias, DomainId, LfPartyId}
+import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.collection.immutable.SortedSet
 import scala.collection.mutable

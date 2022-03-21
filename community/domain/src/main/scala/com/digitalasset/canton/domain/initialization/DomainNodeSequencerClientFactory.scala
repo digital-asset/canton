@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
@@ -13,7 +12,13 @@ import com.digitalasset.canton.domain.Domain
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.{DomainTopologyManagerId, MediatorId, Member, SequencerId}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  DomainTopologyManagerId,
+  MediatorId,
+  Member,
+  SequencerId,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection

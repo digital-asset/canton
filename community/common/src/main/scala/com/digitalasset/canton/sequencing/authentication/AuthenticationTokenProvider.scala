@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.list._
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -21,7 +20,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.retry.Pause
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable

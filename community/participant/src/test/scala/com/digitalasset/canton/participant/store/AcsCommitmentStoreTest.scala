@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint, HashPurpose, LtHash16}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
@@ -17,7 +17,7 @@ import com.digitalasset.canton.protocol.ContractMetadata
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.{BaseTest, DomainId, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

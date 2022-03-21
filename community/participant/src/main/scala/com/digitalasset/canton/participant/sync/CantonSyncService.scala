@@ -331,8 +331,9 @@ class CantonSyncService(
   ): CompletionStage[PruningResult] =
     (withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
+
       pruneInternally(pruneUpToInclusive).fold(
-        err => PruningResult.NotPruned(err.asGrpcError.getStatus),
+        err => PruningResult.NotPruned(err.asGrpcStatusFromContext),
         _ => PruningResult.ParticipantPruned,
       )
     }).asJava
@@ -384,7 +385,7 @@ class CantonSyncService(
       error.logWithContext(
         Map("commandId" -> submitterInfo.commandId, "applicationId" -> submitterInfo.applicationId)
       )
-      Future.successful(SubmissionResult.SynchronousError(error.rpcStatus))
+      Future.successful(SubmissionResult.SynchronousError(error.rpcStatus()))
     }
 
     if (isClosing) {
@@ -398,7 +399,7 @@ class CantonSyncService(
       err.logWithContext(
         Map("commandId" -> submitterInfo.commandId, "applicationId" -> submitterInfo.applicationId)
       )
-      Future.successful(SubmissionResult.SynchronousError(err.rpcStatus))
+      Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
     } else if (!existsReadyDomain) {
       processSubmissionError(SyncServiceInjectionError.NotConnectedToAnyDomain.Error())
     } else {
@@ -423,11 +424,11 @@ class CantonSyncService(
             submitterInfo.applicationId,
             submitterInfo.commandId,
           )
-          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus))
+          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
         case Failure(exception) =>
           val err = SyncServiceInjectionError.InjectionFailure.Failure(exception)
           err.logWithContext()
-          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus))
+          Future.successful(SubmissionResult.SynchronousError(err.rpcStatus()))
       }
     }
   }

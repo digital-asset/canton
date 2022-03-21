@@ -28,7 +28,8 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable

@@ -8,8 +8,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, SignedContent}
 import com.digitalasset.canton.serialization.MemoizedEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.DefaultTestIdentities
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
+import com.digitalasset.canton.BaseTest
 import com.google.protobuf.ByteString
 
 object SequencerTestUtils extends BaseTest {

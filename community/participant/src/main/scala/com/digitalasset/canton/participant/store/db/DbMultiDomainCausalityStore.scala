@@ -13,7 +13,8 @@ import com.digitalasset.canton.protocol.messages.VectorClock
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

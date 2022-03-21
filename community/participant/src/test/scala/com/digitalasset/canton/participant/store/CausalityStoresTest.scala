@@ -11,13 +11,8 @@ import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, Reque
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
-import com.digitalasset.canton.{
-  BaseTest,
-  DomainId,
-  HasExecutionContext,
-  LedgerSubmissionId,
-  LfPartyId,
-}
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerSubmissionId, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future

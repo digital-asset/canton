@@ -10,7 +10,8 @@ import com.digitalasset.canton.participant.store.EventLogId.ParticipantEventLogI
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.participant.sync.TimestampedEventAndCausalChange
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.topology.DomainId
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID

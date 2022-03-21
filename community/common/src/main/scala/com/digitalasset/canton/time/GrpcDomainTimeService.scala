@@ -12,9 +12,9 @@ import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, HasProtoV0}
-import com.digitalasset.canton.DomainId
 import com.google.protobuf.empty.Empty
 import io.grpc.Status
 

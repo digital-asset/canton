@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
 }
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration => JDuration}

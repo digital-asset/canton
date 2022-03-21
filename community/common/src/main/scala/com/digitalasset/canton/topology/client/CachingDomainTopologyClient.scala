@@ -25,7 +25,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{DomainId, SequencerCounter}
+import com.digitalasset.canton.SequencerCounter
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration

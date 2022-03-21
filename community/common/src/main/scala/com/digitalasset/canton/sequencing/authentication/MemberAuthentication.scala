@@ -5,7 +5,6 @@ package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.traverseFilter._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
@@ -13,7 +12,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   FailedToSign,
   NoKeysRegistered,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}

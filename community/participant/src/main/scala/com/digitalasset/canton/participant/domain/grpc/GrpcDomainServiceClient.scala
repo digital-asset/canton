@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.domain.grpc
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
@@ -19,10 +18,10 @@ import com.digitalasset.canton.domain.api.v0.{
   GetServiceAgreementResponse,
 }
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TracingConfig
 
 import java.util.concurrent.TimeUnit
-
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 

@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.traverse._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapRequest
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapServiceGrpc.TopologyBootstrapService
@@ -13,7 +12,7 @@ import com.digitalasset.canton.domain.initialization.TopologyManagementInitializ
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.topology.DomainMember
+import com.digitalasset.canton.topology.{DomainId, DomainMember}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil

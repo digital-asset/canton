@@ -55,7 +55,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutorService, LfPartyId}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec

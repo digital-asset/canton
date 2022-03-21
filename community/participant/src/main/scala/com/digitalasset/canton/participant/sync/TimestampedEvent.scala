@@ -16,9 +16,10 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{DomainId, LedgerTransactionId, SequencerCounter, checked}
+import com.digitalasset.canton.{LedgerTransactionId, SequencerCounter, checked}
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.util.UUID
@@ -99,8 +100,8 @@ object TimestampedEvent {
     val transactionEventIdPrefix = "T"
     val timelyRejectionEventIdPrefix = "M"
 
-    /** Separator between the [[com.digitalasset.canton.DomainId]] and the [[com.digitalasset.canton.sequencing.protocol.MessageId]].
-      * Since a [[com.digitalasset.canton.DomainId]] is a [[com.digitalasset.canton.topology.SafeSimpleString]],
+    /** Separator between the [[com.digitalasset.canton.topology.DomainId]] and the [[com.digitalasset.canton.sequencing.protocol.MessageId]].
+      * Since a [[com.digitalasset.canton.topology.DomainId]] is a [[com.digitalasset.canton.topology.SafeSimpleString]],
       * it cannot contain a #.
       */
     val timelyRejectionEventSeparator = "#"

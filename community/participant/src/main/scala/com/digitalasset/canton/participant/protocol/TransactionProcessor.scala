@@ -39,7 +39,7 @@ import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.event.Level
 
@@ -118,7 +118,7 @@ object TransactionProcessor {
   trait TransactionSubmissionError extends TransactionProcessorError with TransactionError {
     override def pretty: Pretty[TransactionSubmissionError] = {
       this.prettyOfString(_ =>
-        this.code.toMsg(cause, None) + "; " + ErrorCode.formatContextAsString(context)
+        this.code.toMsg(cause, None) + "; " + CantonError.formatContextAsString(context)
       )
     }
   }

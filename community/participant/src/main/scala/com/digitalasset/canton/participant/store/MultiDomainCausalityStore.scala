@@ -13,8 +13,9 @@ import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -39,14 +40,11 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
   protected val transferOutPromises: TrieMap[TransferId, Promise[Unit]] =
     new TrieMap()
 
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.DiscardedFuture")
-  ) // TODO(#8448) Do not discard futures
   def awaitTransferOutRegistered(id: TransferId, parties: Set[LfPartyId])(implicit
       tc: TraceContext
   ): Future[Map[LfPartyId, VectorClock]] = {
     val storedPromise = transferOutPromises.getOrElseUpdate(id, Promise())
-    transferOutState(id, parties).map(seen =>
+    val fetchStoredTransferOutState = transferOutState(id, parties).map(seen =>
       if (seen.isDefined) {
         val keys = seen.fold(Set.empty[LfPartyId])(m => m.keySet)
         ErrorUtil.requireState(
@@ -55,6 +53,10 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
         )
         storedPromise.trySuccess(())
       }
+    )
+    FutureUtil.doNotAwait(
+      fetchStoredTransferOutState,
+      failureMessage = s"Fetch stored transfer out state for $id",
     )
 
     storedPromise.future.map { case () =>

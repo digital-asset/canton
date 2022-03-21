@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.{
   RequestCounter,
 }
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}

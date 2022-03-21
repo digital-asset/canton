@@ -12,6 +12,7 @@ import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.version.VersionedSequencedEvent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.{HasVersionedWrapper, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting

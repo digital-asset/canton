@@ -19,7 +19,8 @@ import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerCon
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.topology.DomainId
 import io.grpc.StatusRuntimeException
 
 import scala.concurrent.{ExecutionContext, Future}

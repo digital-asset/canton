@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.participant.store.EventLogId
 import com.digitalasset.canton.participant.store.EventLogId.{
   DomainEventLogId,
@@ -11,6 +10,7 @@ import com.digitalasset.canton.participant.store.EventLogId.{
 }
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
+import com.digitalasset.canton.topology.DomainId
 
 /** Resources shared between tests acceding DbEventLogs.
   * Make sure that the resources here do not overlap for different tests.

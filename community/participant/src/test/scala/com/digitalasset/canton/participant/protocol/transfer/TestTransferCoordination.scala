@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -22,7 +21,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology.{ParticipantId, TestingTopology}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}

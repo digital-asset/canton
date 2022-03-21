@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{
+  BatchAggregatorConfig,
   CachingConfigs,
   DefaultProcessingTimeouts,
-  BatchAggregatorConfig,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.ContractStoreTest
@@ -15,7 +15,8 @@ import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDb
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbStorageIdempotency, DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.topology.DomainId
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 

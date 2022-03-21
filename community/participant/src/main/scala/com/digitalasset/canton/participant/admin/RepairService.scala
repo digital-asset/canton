@@ -54,7 +54,7 @@ import com.digitalasset.canton.store.{
   IndexedStringStore,
   SequencedEventStore,
 }
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.{
   CachingTopologySnapshot,
   StoreBasedTopologySnapshot,

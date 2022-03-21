@@ -23,7 +23,8 @@ import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, TimeProof}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -138,7 +139,7 @@ class TransferCoordination(
     } yield ()
   }
 
-  /** Removes the given [[com.digitalasset.canton.protocol.TransferId]] from the given [[DomainId]]'s [[store.TransferStore]]. */
+  /** Removes the given [[com.digitalasset.canton.protocol.TransferId]] from the given [[com.digitalasset.canton.topology.DomainId]]'s [[store.TransferStore]]. */
   def deleteTransfer(targetDomain: DomainId, transferId: TransferId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, Unit] =

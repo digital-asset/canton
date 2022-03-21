@@ -17,7 +17,7 @@ import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCall
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.Traced
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 

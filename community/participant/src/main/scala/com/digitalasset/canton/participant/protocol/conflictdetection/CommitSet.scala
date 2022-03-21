@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.syntax.functor._
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.protocol.{
@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.{
   WithContractHash,
   WithContractMetadata,
 }
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 
 /** Describes the effect of a confirmation request on the active contracts, contract keys, and transfers.

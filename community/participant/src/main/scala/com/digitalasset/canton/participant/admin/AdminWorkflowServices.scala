@@ -195,7 +195,7 @@ class AdminWorkflowServices(
     val (offset, connection) = createConnection(applicationId, applicationId)
     val service = createService(connection)
 
-    val subscription = connection.subscribeAsync(subscriptionName = applicationId, offset)(tx =>
+    val subscription = connection.subscribe(subscriptionName = applicationId, offset)(tx =>
       withSpan(s"$applicationId.processTransaction") { implicit traceContext => _ =>
         service.processTransaction(tx)
       }

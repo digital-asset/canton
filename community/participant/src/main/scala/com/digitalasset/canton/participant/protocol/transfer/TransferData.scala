@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.OptionUtil
 
 /** Stores the data for a transfer that needs to be passed from the origin domain to the target domain. */

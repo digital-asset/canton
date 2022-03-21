@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
@@ -19,7 +18,7 @@ import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.messages.TransferInResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext

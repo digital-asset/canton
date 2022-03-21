@@ -247,6 +247,14 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- TODO(i8846) upstream sequencing actor does throw on shutdown -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.grpc.adapter.RunnableSequencingActor</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>Unexpected exception while executing</contains>
+            <testing>true</testing>
+        </rewrite>
+
         <!-- Disable warnings about leaked connections for test containers
              See: https://github.com/testcontainers/testcontainers-java/issues/2209
         -->
@@ -254,6 +262,20 @@
             <logger>org.testcontainers.shaded.okhttp3.OkHttpClient</logger>
             <maxLevel>INFO</maxLevel>
             <contains>A connection to http://docker.socket/ was leaked. Did you forget to close a response body?</contains>
+            <testing>true</testing>
+        </rewrite>
+
+        <!-- Disable warning related to image pulling for testcontainers (data continuity tests) -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>🐳 [postgres:11]</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>Retrying pull for image: postgres</contains>
+            <testing>true</testing>
+        </rewrite>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>🐳 [postgres:11]</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>Docker image pull has not made progress in</contains>
             <testing>true</testing>
         </rewrite>
 

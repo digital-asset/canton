@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology.transaction
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.ProtoDeserializationError._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,6 +20,7 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 import scala.concurrent.{ExecutionContext, Future}
 import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 
 /** A signed topology transaction
   *

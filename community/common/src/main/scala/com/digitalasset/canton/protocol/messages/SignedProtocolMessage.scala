@@ -6,7 +6,6 @@ package com.digitalasset.canton.protocol.messages
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
 import com.digitalasset.canton.crypto.{
   CryptoPureApi,
@@ -22,6 +21,7 @@ import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.Si
 import com.digitalasset.canton.protocol.version.VersionedSignedProtocolMessage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
 import com.digitalasset.canton.version.ProtocolVersion

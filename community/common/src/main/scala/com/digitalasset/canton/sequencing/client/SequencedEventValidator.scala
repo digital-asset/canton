@@ -10,10 +10,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
-import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.topology.{DomainId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{DomainId, GenesisSequencerCounter, SequencerCounter}
+import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference

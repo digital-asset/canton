@@ -44,7 +44,8 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.{DomainId, LedgerTransactionId}
+import com.digitalasset.canton.LedgerTransactionId
+import com.digitalasset.canton.topology.DomainId
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}

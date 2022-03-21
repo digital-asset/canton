@@ -9,7 +9,7 @@ import com.daml.lf.engine
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.RequestCounter
@@ -44,7 +44,7 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LfPartyId, SequencerCounter}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter}
 
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -98,7 +98,7 @@ trait TransferProcessingSteps[
       pendingSubmission: PendingTransferSubmission,
   )(implicit traceContext: TraceContext): Unit = {
     val error = SubmissionErrors.InactiveMediatorError.Error(declaredMediator, ts)
-    pendingSubmission.transferCompletion.success(error.rpcStatus)
+    pendingSubmission.transferCompletion.success(error.rpcStatus())
   }
 
   override def postProcessResult(
@@ -109,11 +109,11 @@ trait TransferProcessingSteps[
       case Approve =>
         com.google.rpc.status.Status(com.google.rpc.Code.OK_VALUE)
       case Timeout =>
-        MediatorReject.Timeout.Reject().rpcStatus
+        MediatorReject.Timeout.Reject().rpcStatus()
       case reject: MediatorReject =>
-        reject.rpcStatus
+        reject.rpcStatus()
       case reasons: RejectReasons =>
-        reasons.keyEvent.rpcStatus
+        reasons.keyEvent.rpcStatus()
     }
     pendingSubmission.transferCompletion.success(status)
   }

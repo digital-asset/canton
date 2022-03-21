@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.participant.store.TransferStoreTest
+import com.digitalasset.canton.topology.DomainId
 import org.scalatest.wordspec.AsyncWordSpec
 
 class TransferStoreTestInMemory extends AsyncWordSpec with BaseTest with TransferStoreTest {

@@ -24,10 +24,10 @@ import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemoryS
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStore
-import com.digitalasset.canton.topology.{NodeId, ParticipantId, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.{DomainId, NodeId, ParticipantId, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor

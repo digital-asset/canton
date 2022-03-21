@@ -13,15 +13,9 @@ import com.digitalasset.canton.participant.store.SingleDomainCausalDependencySto
 import com.digitalasset.canton.participant.store.memory.SingleDomainCausalTrackerTest._
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.{
-  BaseTest,
-  DomainId,
-  HasExecutionContext,
-  LfPartyId,
-  RepeatableTestSuiteTest,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId, RepeatableTestSuiteTest}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future

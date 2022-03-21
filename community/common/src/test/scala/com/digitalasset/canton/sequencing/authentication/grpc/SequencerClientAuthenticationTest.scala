@@ -13,8 +13,8 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
 }
-import com.digitalasset.canton.topology.{DefaultTestIdentities, UniqueIdentifier}
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, UniqueIdentifier}
+import com.digitalasset.canton.BaseTest
 import io.grpc._
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.StreamObserver

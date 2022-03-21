@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.submission.{

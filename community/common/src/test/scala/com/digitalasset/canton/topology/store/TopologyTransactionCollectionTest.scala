@@ -14,7 +14,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Replace,
 }
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 class TopologyTransactionCollectionTest extends AnyWordSpec with BaseTest with HasExecutionContext {

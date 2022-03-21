@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.console.commands
 
-import com.digitalasset.canton.{DiscardOps, DomainId}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.DomainAdminCommands.GetDomainParameters
 import com.digitalasset.canton.admin.api.client.commands.{
   DomainAdminCommands,

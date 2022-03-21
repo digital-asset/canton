@@ -623,7 +623,6 @@ object TestingTimeServiceConfig {
   *                                  Only configurable to reduce the amount of secure random numbers consumed by tests and to avoid flaky timeouts during continuous integration.
   *
   * The following specialized participant node performance tuning parameters may be grouped once a more final set of configs emerges.
-  * TODO(#4986): Consider making such configuration dynamically changeable without requiring participant restarts to take effect.
   * @param indexer                   parameters how the participant populates the index db used to serve the ledger api
   * @param transferTimeProofFreshnessProportion Proportion of the target domain exclusivity timeout that is used as a freshness bound when
   *                                             requesting a time proof. Setting to 3 means we'll take a 1/3 of the target domain exclusivity timeout

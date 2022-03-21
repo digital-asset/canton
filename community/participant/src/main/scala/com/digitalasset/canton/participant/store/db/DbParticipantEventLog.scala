@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -13,6 +12,7 @@ import com.digitalasset.canton.participant.store.ParticipantEventLog
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 

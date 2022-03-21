@@ -5,12 +5,12 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.participant.store.RequestJournalStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 

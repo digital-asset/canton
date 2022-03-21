@@ -25,15 +25,9 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  BaseTest,
-  DomainId,
-  HasExecutorService,
-  LfPartyId,
-  ScalaFuturesWithPatience,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, ScalaFuturesWithPatience}
 import org.scalactic.source.Position
 import org.scalatest.AsyncTestSuite
 import org.scalatest.exceptions.TestFailedException

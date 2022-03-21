@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyJournalError
 import com.digitalasset.canton.participant.store.EventLogId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ShowUtil._
 
 object Pruning {

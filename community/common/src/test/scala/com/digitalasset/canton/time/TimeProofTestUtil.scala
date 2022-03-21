@@ -4,12 +4,11 @@
 package com.digitalasset.canton.time
 
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
 import com.digitalasset.canton.tracing.TraceContext
 
 object TimeProofTestUtil {

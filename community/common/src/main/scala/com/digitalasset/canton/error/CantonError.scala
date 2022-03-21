@@ -4,7 +4,6 @@
 package com.digitalasset.canton.error
 
 import cats.data.NonEmptyList
-import com.daml.error.ErrorCode.formatContextAsString
 import com.daml.error._
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.error_details.ErrorInfo
@@ -62,6 +61,9 @@ object ErrorCodeUtils {
   */
 trait BaseCantonError extends BaseError {
 
+  override def context: Map[String, String] =
+    super.context ++ BaseCantonError.extractContext(this)
+
   // note that all of the following arguments must be constructor arguments, not body values
   // as otherwise we won't be able to log on creation (parent class is initialized before derived class,
   // but constructor arguments are initialized first).
@@ -70,9 +72,6 @@ trait BaseCantonError extends BaseError {
 
   /** The error code, usually passed in as implicit where the error class is defined */
   def code: ErrorCode
-
-  /** A human readable string indicating the error */
-  def cause: String
 }
 
 object CantonErrorResource {
@@ -138,6 +137,18 @@ trait CantonError extends BaseCantonError {
 }
 
 object BaseCantonError {
+  private val ignoreFields = Set("cause", "throwable", "loggingContext", "definiteAnswer")
+
+  private[error] def extractContext[D](obj: D): Map[String, String] = {
+    obj.getClass.getDeclaredFields
+      .filterNot(x => ignoreFields.contains(x.getName) || x.getName.startsWith("_"))
+      .map { field =>
+        field.setAccessible(true)
+        (field.getName, field.get(obj).toString)
+      }
+      .toMap
+  }
+
   def isStatusErrorCode(errorCode: ErrorCode, status: com.google.rpc.status.Status): Boolean = {
     val code = errorCode.category.grpcCode.getOrElse(
       throw new IllegalArgumentException(s"Error code $errorCode does not have a gRPC code")
@@ -180,6 +191,15 @@ object CantonError {
           errorCodeMsg
         }
     }
+
+  def formatContextAsString(contextMap: Map[String, String]): String = {
+    contextMap
+      .filter(_._2.nonEmpty)
+      .toSeq
+      .sortBy(_._1)
+      .map { case (k, v) => s"$k=$v" }
+      .mkString(", ")
+  }
 }
 
 /** Mixing trait for nested errors

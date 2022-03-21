@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
 import cats.syntax.foldable._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
@@ -13,6 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContextExecutor, Future}

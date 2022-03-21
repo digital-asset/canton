@@ -27,7 +27,7 @@ trait ResourceManagementService {
         val status =
           ParticipantBackpressure
             .Rejection(s"too many requests (count: $currentLoad, limit: $limit)")
-            .rpcStatus(loggingContext.correlationId)
+            .rpcStatus()
         // Choosing SynchronousReject instead of Overloaded, because that allows us to specify a custom error message.
         SubmissionResult.SynchronousError(status)
       })

@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, NonEmptyList, OptionT}
 import cats.syntax.alternative._
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,6 +28,7 @@ import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbBulkUpdateProcessor.BulkUpdatePendingCheck
 import com.digitalasset.canton.store.db.{DbBulkUpdateProcessor, DbSerializationException}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}

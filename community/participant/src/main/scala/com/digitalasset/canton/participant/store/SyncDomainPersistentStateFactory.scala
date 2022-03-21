@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.foldable._
 import cats.syntax.functor._
-import com.digitalasset.canton.{DomainAlias, DomainId}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, SequencedEventStore}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 

@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.DelayedSequencerClient.{
   Immediate,
   SequencedEventDelayPolicy,
 }
+import com.digitalasset.canton.topology.DomainId
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent

@@ -9,12 +9,11 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
 import com.digitalasset.canton.health.admin.v0
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.DomainId
 import com.google.protobuf.ByteString
 
 import java.time.Duration

@@ -11,10 +11,10 @@ import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.Ev
 import com.digitalasset.canton.participant.store.MultiDomainCausalityStore
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap

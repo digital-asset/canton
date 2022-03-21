@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.sequencing
 
 import akka.actor.ActorSystem
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -27,6 +26,7 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStore
 import io.opentelemetry.api.trace.Tracer

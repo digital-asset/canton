@@ -18,7 +18,8 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{DomainId, LfPartyId}
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent

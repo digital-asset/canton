@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.{BaseTest, DomainId}
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._

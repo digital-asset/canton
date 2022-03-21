@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.either._
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
@@ -18,6 +17,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
 

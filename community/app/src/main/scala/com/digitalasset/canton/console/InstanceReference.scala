@@ -29,7 +29,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
@@ -43,6 +43,8 @@ trait InstanceReference
     with FeatureFlagFilter
     with PrettyPrinting
     with CertificateAdministration {
+
+  type InstanceId <: Identity
 
   val name: String
   protected val instanceType: String
@@ -71,6 +73,8 @@ trait InstanceReference
   }
 
   type Status <: NodeStatus.Status
+
+  def id: InstanceId
 
   def health: HealthAdministration[Status]
 
@@ -211,6 +215,8 @@ trait DomainReference
     with InstanceReferenceWithSequencerConnection {
   val consoleEnvironment: ConsoleEnvironment
   val name: String
+
+  override type InstanceId = DomainId
 
   override protected val instanceType = "Domain"
 
@@ -429,6 +435,8 @@ abstract class ParticipantReference(
     with LedgerApiAdministration
     with LedgerApiCommandRunner {
 
+  override type InstanceId = ParticipantId
+
   override protected val instanceType = "Participant"
 
   override protected val loggerFactory: NamedLoggerFactory =
@@ -444,7 +452,7 @@ abstract class ParticipantReference(
     "Yields the globally unique id of this participant. " +
       "Throws an exception, if the id has not yet been allocated (e.g., the participant has not yet been started)."
   )
-  def id: ParticipantId = topology.idHelper(name, ParticipantId(_))
+  override def id: ParticipantId = topology.idHelper(name, ParticipantId(_))
 
   private lazy val topology_ =
     new TopologyAdministrationGroup(

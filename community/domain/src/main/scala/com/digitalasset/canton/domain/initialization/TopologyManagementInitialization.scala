@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.initialization
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{
   Crypto,
@@ -47,7 +46,13 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TopologyStore}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.topology.{DomainMember, DomainTopologyManagerId, KeyOwner, NodeId}
+import com.digitalasset.canton.topology.{
+  DomainId,
+  DomainMember,
+  DomainTopologyManagerId,
+  KeyOwner,
+  NodeId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 

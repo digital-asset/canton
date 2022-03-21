@@ -35,7 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{DomainId, LedgerParticipantId}
+import com.digitalasset.canton.LedgerParticipantId
 import com.google.protobuf.ByteString
 
 import java.time.Instant

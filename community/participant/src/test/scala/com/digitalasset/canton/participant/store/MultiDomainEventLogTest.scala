@@ -33,6 +33,7 @@ import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, Local
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{Clock, SimClock}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{AkkaUtil, MonadUtil}

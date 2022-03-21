@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.data.EitherT
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -14,7 +14,6 @@ import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.DomainId
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

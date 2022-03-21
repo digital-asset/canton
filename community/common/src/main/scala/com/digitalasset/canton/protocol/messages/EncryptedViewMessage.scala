@@ -7,7 +7,6 @@ import cats.Functor
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType
@@ -16,7 +15,7 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessage
 import com.digitalasset.canton.protocol.{ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, ProtoConverter}
-import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString

@@ -43,9 +43,9 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.{Member, TestingOwnerWithKeys}
+import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 

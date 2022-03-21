@@ -23,7 +23,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission._
 import com.digitalasset.canton.topology.transaction.TrustLevel._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, DomainId, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.duration.Duration

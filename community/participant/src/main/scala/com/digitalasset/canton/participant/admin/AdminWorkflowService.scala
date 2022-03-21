@@ -6,12 +6,13 @@ package com.digitalasset.canton.participant.admin
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.concurrent.Future
-
 /** Admin service that connects to the ledger and process events
   */
 trait AdminWorkflowService extends AutoCloseable {
-  private[admin] def processTransaction(tx: Transaction)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
+
+  /** Processing the transaction must not block; shutdown problems occur otherwise.
+    * Long-running computations or blocking calls should be spawned off into an asynchronous computation
+    * so that the service itself can synchronize its closing with the spawned-off computation if needed.
+    */
+  private[admin] def processTransaction(tx: Transaction)(implicit traceContext: TraceContext): Unit
 }

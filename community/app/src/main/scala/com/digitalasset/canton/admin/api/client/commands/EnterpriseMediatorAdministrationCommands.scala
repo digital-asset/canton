@@ -5,7 +5,6 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either._
 import cats.syntax.option._
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -20,7 +19,7 @@ import com.digitalasset.canton.domain.mediator.admin.gprc.{
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel

@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainId
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
+import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
