@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{Future, Promise, blocking}
 
 /** Synchronizes the request processing of phases 3 and 7.
   * At the end of phase 3, every request must signal that it has reached
@@ -60,7 +60,7 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
     * [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Confirmed]].
     */
   def awaitConfirmed(requestId: RequestId)(implicit traceContext: TraceContext): Future[Unit] =
-    synchronized {
+    blocking(synchronized {
       val timestamp = requestId.unwrap
       logger.debug(
         s"Request ${requestId.unwrap}: Awaiting confirmed state; lower bound is ${confirmedLowerBound.get}"
@@ -70,7 +70,7 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
       } else {
         byTimestamp.getOrElseUpdate(timestamp, Promise[Unit]()).future
       }
-    }
+    })
 
   /** Marks the given request as having reached
     * [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Confirmed]].
@@ -100,14 +100,14 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
     */
   def skipRequestCounter(
       requestCounter: RequestCounter
-  )(implicit traceContext: TraceContext): Unit = synchronized {
+  )(implicit traceContext: TraceContext): Unit = blocking(synchronized {
     logger.debug(s"Request $requestCounter: Skipping; head is ${queue.head}")
     insert(requestCounter, None)
-  }
+  })
 
   private[this] def insert(requestCounter: RequestCounter, timestampO: Option[CantonTimestamp])(
       implicit traceContext: TraceContext
-  ): Unit = synchronized {
+  ): Unit = blocking(synchronized {
     queue.insert(requestCounter, timestampO)
     timestampO.foreach { timestamp =>
       byTimestamp.get(timestamp).foreach(_.trySuccess(()))
@@ -116,7 +116,7 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
       }
     }
     collectGarbage()
-  }
+  })
 
   private[this] def collectGarbage()(implicit traceContext: TraceContext): Unit = {
     @tailrec

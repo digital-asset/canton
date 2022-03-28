@@ -54,7 +54,7 @@ class GrpcPackageService(
       } yield UploadDarResponse(
         UploadDarResponse.Value.Success(UploadDarResponse.Success(hash.toHexString))
       )
-      EitherTUtil.toFuture(ret.leftMap(_.asGrpcErrorFromContext))
+      EitherTUtil.toFuture(ret.leftMap(err => err.code.asGrpcError(err)))
   }
 
   override def removePackage(request: RemovePackageRequest): Future[RemovePackageResponse] =
@@ -77,7 +77,7 @@ class GrpcPackageService(
               packageId,
               request.force,
             )
-            .leftMap(_.asGrpcErrorFromContext)
+            .leftMap(err => err.code.asGrpcError(err))
         } yield {
           RemovePackageResponse(success = Some(Empty()))
         }
@@ -86,6 +86,34 @@ class GrpcPackageService(
       EitherTUtil.toFuture(ret)
     }
 
+  override def removeDar(request: RemoveDarRequest): Future[RemoveDarResponse] = {
+
+    fromGrpcContext { implicit traceContext =>
+      val hashE = Hash
+        .fromHexString(request.darHash)
+        .left
+        .map(err =>
+          Status.INVALID_ARGUMENT
+            .withDescription(s"Invalid dar hash: ${request.darHash} [$err]")
+            .asRuntimeException()
+        )
+      val ret = {
+        for {
+          hash <- EitherT.fromEither[Future](hashE)
+          _unit <- service
+            .removeDar(
+              hash
+            )
+            .leftMap(_.asGrpcError)
+        } yield {
+          RemoveDarResponse(success = Some(Empty()))
+        }
+      }
+
+      EitherTUtil.toFuture(ret)
+    }
+
+  }
   override def getDar(request: GetDarRequest): Future[GetDarResponse] =
     TraceContext.fromGrpcContext { implicit traceContext =>
       val darHash = Hash.tryFromHexString(request.hash)
@@ -168,7 +196,7 @@ class GrpcPackageService(
 
   private def acceptRejectResultToResponse(
       name: String
-  )(result: Either[AcceptRejectError, Unit])(implicit traceContext: TraceContext): Try[Empty] = {
+  )(result: Either[AcceptRejectError, Unit]): Try[Empty] = {
     import cats.implicits._
 
     def errorToStatus: AcceptRejectError => Status = {
@@ -177,7 +205,7 @@ class GrpcPackageService(
       case AcceptRejectError.SubmissionFailed(_) =>
         Status.INTERNAL.withDescription(s"Submission of $name to ledger failed")
       case AcceptRejectError.FailedToAppendDar(error) =>
-        error.asGrpcErrorFromContext.getStatus
+        error.asGrpcError.getStatus
       case AcceptRejectError.InvalidOffer(error) =>
         Status.INTERNAL.withDescription(s"Invalid offer: $error")
     }

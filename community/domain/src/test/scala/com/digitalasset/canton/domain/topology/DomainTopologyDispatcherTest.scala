@@ -51,7 +51,7 @@ import org.scalatest.{Assertion, FutureOutcome}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration._
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{Future, Promise, blocking}
 import com.digitalasset.canton.util.Thereafter.syntax._
 
 import scala.util.{Failure, Success}
@@ -140,7 +140,7 @@ class DomainTopologyDispatcherTest
     val awaiter = new AtomicReference[Awaiter](Awaiter(0, Seq(), Seq(), Set()))
     def expect(atLeast: Int): Future[Awaiter] = {
       logger.debug(s"Expecting $atLeast")
-      lock.synchronized {
+      blocking(lock.synchronized {
         awaiter
           .getAndUpdate(cur => cur.updateAtLeast(atLeast))
           .promise
@@ -149,7 +149,7 @@ class DomainTopologyDispatcherTest
             case Success(cur) => logger.debug(s"Awaiter returned $cur")
             case Failure(ex) => logger.debug("Awaiter failed with an exception", ex)
           }
-      }
+      })
     }
 
     val sendDelay = new AtomicReference[Future[Unit]](Future.unit)
@@ -164,9 +164,9 @@ class DomainTopologyDispatcherTest
         logger.debug(
           s"Observed ${transactions.map(_.transaction.element.mapping)}"
         )
-        lock.synchronized {
+        blocking(lock.synchronized {
           awaiter.updateAndGet(_.add(transactions, recipients))
-        }
+        })
         val ret = EitherT.right[String](
           FutureUnlessShutdown.outcomeF(sendDelay.get())
         )

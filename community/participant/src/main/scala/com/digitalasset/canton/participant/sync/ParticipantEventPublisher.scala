@@ -68,6 +68,9 @@ class ParticipantEventPublisher(
         None,
         EventId.fromLedgerSyncEvent(event),
       )
+      _ = logger.debug(
+        s"Publishing event with local offset ${localOffset} at record time ${event.recordTime}: ${event.description}"
+      )
       _ <- participantEventLog.insert(timestampedEvent, None)
       publicationData = PublicationData(
         participantEventLog.id,
@@ -152,8 +155,9 @@ class ParticipantEventPublisher(
         maybeFirstOffset <- multiDomainEventLog.locateOffset(1).value
         _ <-
           if (maybeFirstOffset.isEmpty) {
+            logger.debug("Attempt to publish ledger configuration update")
             val event = LedgerSyncEvent.ConfigurationChanged(
-              recordTime = ParticipantEventPublisher.now.toLf,
+              recordTime = participantClock.uniqueTime().toLf,
               submissionId = LedgerSubmissionId.assertFromString("TimeModel config"),
               participantId = participantId.toLf,
               newConfiguration = LedgerConfiguration(
@@ -162,6 +166,7 @@ class ParticipantEventPublisher(
                 maxDeduplicationDuration = maxDeduplicationDuration,
               ),
             )
+            // Do not call `publish` because this is already running inside the execution queue
             publishInternal(event)
           } else Future.unit
       } yield (),

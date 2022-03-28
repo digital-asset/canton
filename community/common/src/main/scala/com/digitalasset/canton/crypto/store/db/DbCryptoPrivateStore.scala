@@ -41,16 +41,16 @@ class DbCryptoPrivateStore(
 
   private def insertHmacSecret(hmacSecret: HmacSecret): DbAction.WriteOnly[Int] =
     storage.profile match {
-      case _: Profile.Oracle =>
-        sqlu"""insert
-             /*+ IGNORE_ROW_ON_DUPKEY_INDEX ( CRYPTO_HMAC_SECRET ( hmac_secret_id ) ) */
-             into crypto_hmac_secret(data)
-             values ($hmacSecret)"""
+      case _: Profile.Oracle | _: Profile.H2 =>
+        sqlu"""merge into crypto_hmac_secret using dual on (hmac_secret_id = 1)
+               when matched then update set data = $hmacSecret
+               when not matched then insert (data) values ($hmacSecret)"""
 
-      case _: Profile.H2 | _: Profile.Postgres =>
+      case _: Profile.Postgres =>
         sqlu"""insert into crypto_hmac_secret(data)
              values ($hmacSecret)
-             on conflict do nothing"""
+             on conflict (hmac_secret_id)
+             do update set data = $hmacSecret"""
     }
 
   private def queryKeys[K: GetResult](purpose: KeyPurpose): DbAction.ReadOnly[Set[K]] =

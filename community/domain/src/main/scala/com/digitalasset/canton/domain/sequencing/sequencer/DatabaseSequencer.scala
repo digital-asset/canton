@@ -14,7 +14,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
@@ -24,14 +24,61 @@ import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.util.ErrorUtil
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
+
+object DatabaseSequencer {
+
+  /** Creates a single instance of a database sequencer. */
+  def single(
+      config: DatabaseSequencerConfig,
+      timeouts: ProcessingTimeout,
+      storage: Storage,
+      clock: Clock,
+      domainId: DomainId,
+      cryptoApi: DomainSyncCryptoClient,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext,
+      tracer: Tracer,
+      actorMaterializer: Materializer,
+  ): DatabaseSequencer = {
+
+    val logger = TracedLogger(DatabaseSequencer.getClass, loggerFactory)
+
+    ErrorUtil.requireArgument(
+      !config.highAvailabilityEnabled,
+      "Single database sequencer creation must not have HA enabled",
+    )(ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
+
+    new DatabaseSequencer(
+      SequencerWriterStoreFactory.singleInstance,
+      config,
+      TotalNodeCountValues.SingleSequencerTotalNodeCount,
+      new LocalSequencerStateEventSignaller(
+        timeouts,
+        loggerFactory,
+      ),
+      None,
+      // Dummy config which will be ignored anyway as `config.highAvailabilityEnabled` is false
+      OnlineSequencerCheckConfig(),
+      timeouts,
+      storage,
+      clock,
+      domainId,
+      cryptoApi,
+      loggerFactory,
+    )
+  }
+}
 
 class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     config: DatabaseSequencerConfig,
     totalNodeCount: Int,
+    eventSignaller: EventSignaller,
     keepAliveInterval: Option[NonNegativeFiniteDuration],
     onlineSequencerCheckConfig: OnlineSequencerCheckConfig,
     override protected val timeouts: ProcessingTimeout,
@@ -50,15 +97,6 @@ class DatabaseSequencer(
       timeouts,
       loggerFactory,
     )
-
-  // if high availability is configured we will assume that more than one sequencer is being used
-  // and we will switch to using the polling based event signalling as we won't have visibility
-  // of all writes locally.
-  private val eventSignaller =
-    if (config.highAvailabilityEnabled)
-      new PollingEventSignaller(config.reader.pollingInterval, loggerFactory)
-    else
-      new LocalSequencerStateEventSignaller(timeouts, loggerFactory)
 
   private val writer = SequencerWriter(
     config.writer,

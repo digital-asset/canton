@@ -93,7 +93,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     // create a spy so we can add verifications on how many times methods were called
     val storeSpy = spy[InMemorySequencerStore](store)
     val testConfig =
-      SequencerReaderConfig(
+      CommunitySequencerReaderConfig(
         readBatchSize = 10,
         checkpointInterval = NonNegativeFiniteDuration.ofMillis(200),
       )

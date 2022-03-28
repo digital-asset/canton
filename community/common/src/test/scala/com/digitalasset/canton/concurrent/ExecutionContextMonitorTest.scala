@@ -14,6 +14,7 @@ import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
+@SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
 class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
 
   def runAndCheck(loggerFactory: SuppressingLogger, check: Seq[LogEntry] => Assertion): Unit = {
@@ -44,6 +45,7 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
           val futs = (1 to (numThreads * 2)).map(_ =>
             Future {
               logger.debug("Starting to block")
+              // Do not use `blocking` because we do not want to spawn a new thread in this test
               Thread.sleep(2000)
               logger.debug("Stopping to block")
             }

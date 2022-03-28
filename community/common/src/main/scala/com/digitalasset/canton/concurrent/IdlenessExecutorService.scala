@@ -20,7 +20,13 @@ trait IdlenessExecutorService extends ExecutorService {
     *                This time may be exceeded up to the run-time of the longest running task in the pool.
     * @return true if all threads are idle; false if the timeout elapsed
     */
-  @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.While"))
+  @SuppressWarnings(
+    Array(
+      "org.wartremover.warts.Var",
+      "org.wartremover.warts.While",
+      "com.digitalasset.canton.RequireBlocking",
+    )
+  )
   def awaitIdleness(timeout: FiniteDuration): Boolean = {
     // Check whether this is idle for 5 consecutive times.
     // We check several times, as awaitIdlenessOnce may incorrectly indicate idleness.
@@ -28,6 +34,7 @@ trait IdlenessExecutorService extends ExecutorService {
     var idleCount = 0
     var remainingTime = deadline.timeLeft
     while (remainingTime.toMillis > 0 && idleCount < 5) {
+      // Do not use `blocking` because we do not want the execution context to spawn new threads now
       Thread.sleep(1L)
       if (awaitIdlenessOnce(remainingTime))
         idleCount += 1
@@ -114,12 +121,14 @@ class ThreadPoolIdlenessExecutorService(
     val minSleep = 1L
     val maxSleep = Math.max(timeout.toMillis >> 2, minSleep)
 
+    @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
     @tailrec def go(sleep: Long): Boolean = {
       if (deadline.isOverdue())
         false
       else if (pool.getQueue.isEmpty && pool.getActiveCount == 0)
         true
       else {
+        // Do not use `blocking` because we do not want the execution context to spawn new threads now
         Thread.sleep(sleep)
         go(Math.min(sleep * 2, maxSleep))
       }

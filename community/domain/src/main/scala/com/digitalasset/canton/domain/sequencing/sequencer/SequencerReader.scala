@@ -37,18 +37,20 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class CounterCheckpointInconsistentException(message: String) extends RuntimeException(message)
 
-/** Configuration for the database based sequence reader.
-  * @param readBatchSize max number of events to fetch from the datastore in one page
-  * @param checkpointInterval how frequently to checkpoint state
-  * @param pollingInterval how frequently to poll for new events from the database.
-  *                        only used if high availability has been configured,
-  *                        otherwise will rely on local writes performed by this sequencer to indicate that new events are available.
-  */
-case class SequencerReaderConfig(
-    readBatchSize: Int = 100,
-    checkpointInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
-    pollingInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100),
-)
+/** Configuration for the database based sequence reader. */
+trait SequencerReaderConfig {
+
+  /** max number of events to fetch from the datastore in one page */
+  def readBatchSize: Int
+
+  /** how frequently to checkpoint state */
+  def checkpointInterval: NonNegativeFiniteDuration
+}
+
+object SequencerReaderConfig {
+  val defaultReadBatchSize: Int = 100
+  val defaultCheckpointInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
+}
 
 class SequencerReader(
     config: SequencerReaderConfig,

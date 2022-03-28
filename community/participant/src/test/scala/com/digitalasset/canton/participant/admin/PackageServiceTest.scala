@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.protocol.PackageDescription
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -54,6 +55,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
   val darName = String255.tryCreate("CantonExamples")
   private val eventPublisher = mock[ParticipantEventPublisher]
   when(eventPublisher.publish(any[LedgerSyncEvent])(anyTraceContext)).thenAnswer(Future.unit)
+  val participantId = DefaultTestIdentities.participant1
 
   private class Env {
     val packageStore = new InMemoryDamlPackageStore(loggerFactory)
@@ -65,7 +67,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
         eventPublisher,
         new SymbolicPureCrypto,
         _ => EitherT.rightT(()),
-        new PackageInspectionOpsForTesting(loggerFactory),
+        new PackageInspectionOpsForTesting(participantId, loggerFactory),
         ProcessingTimeout(),
         loggerFactory,
       )

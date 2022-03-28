@@ -75,7 +75,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent.{ExecutionContextExecutorService, Future}
+import scala.concurrent.{ExecutionContextExecutorService, Future, blocking}
 
 /** Startup / Bootstrapping class for domain
   *
@@ -134,9 +134,11 @@ class DomainNodeBootstrap(
       } yield ()
     }
 
-  override def close(): Unit = synchronized {
-    logger.info("Stopping domain node")
-    super.close()
+  override def onClosed(): Unit = blocking {
+    synchronized {
+      logger.info("Stopping domain node")
+      super.onClosed()
+    }
   }
 
   private lazy val staticDomainParametersET =

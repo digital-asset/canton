@@ -77,7 +77,11 @@ trait StorageFactory {
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[Storage] =
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): Future[Storage] =
     create(connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory).valueOr(
       err => throw new StorageCreationException(err)
     )
@@ -88,7 +92,11 @@ trait StorageFactory {
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, String, Storage]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): EitherT[Future, String, Storage]
 }
 
 object StorageFactory {
@@ -102,7 +110,11 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, String, Storage] =
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+      closeContext: CloseContext,
+  ): EitherT[Future, String, Storage] =
     config match {
       case CommunityStorageConfig.Memory(_) => EitherT.rightT(new MemoryStorage)
       case db: DbConfig =>
@@ -487,7 +499,9 @@ object DbStorage {
       logQueryCost: Option[QueryCostMonitoringConfig] = None,
       forMigration: Boolean = false,
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
-  )(loggerFactory: NamedLoggerFactory): Either[String, Database] = {
+  )(
+      loggerFactory: NamedLoggerFactory
+  )(implicit closeContext: CloseContext): Either[String, Database] = {
     val baseLogger = loggerFactory.getLogger(classOf[DbStorage])
     val logger = TracedLogger(baseLogger)
 
@@ -547,7 +561,7 @@ object DbStorage {
             .catchOnly[SQLException](db.createSession().close())
             .leftMap(err => show"Failed to create session with database: $err")
         } yield db
-      }(ErrorLoggingContext.fromTracedLogger(logger))
+      }(ErrorLoggingContext.fromTracedLogger(logger), closeContext)
     }
   }
 

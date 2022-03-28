@@ -22,7 +22,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{Duration, FiniteDuration}
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, blocking}
 
 /** Attempt to run a grpc admin-api command against whatever is pointed at in the config
   */
@@ -77,7 +77,7 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
       instanceName: String,
       clientConfig: ClientConfig,
   ): CloseableChannel =
-    synchronized {
+    blocking(synchronized {
       val addr = (instanceName, clientConfig.address, clientConfig.port)
       channels.getOrElseUpdate(
         addr,
@@ -87,7 +87,7 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
           s"ConsoleCommand",
         ),
       )
-    }
+    })
 
   override def close(): Unit = {
     channels.values.foreach(_.close())

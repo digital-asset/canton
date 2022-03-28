@@ -35,7 +35,7 @@ class GrpcPruningService(sync: CantonSyncService, protected val loggerFactory: N
         _ <- sync.pruneInternally(ledgerSyncOffset).leftWiden[BaseError]
       } yield v0.PruneResponse()
 
-      EitherTUtil.toFuture(eithert.leftMap(_.asGrpcErrorFromContext))
+      EitherTUtil.toFuture(eithert.leftMap(err => err.code.asGrpcError(err)))
     }
 
 }
@@ -79,16 +79,17 @@ object PruningServiceError extends PruningServiceErrorGroup {
        older events. In particular, the events must be older than the sum of mediator reaction timeout
        and participant timeout for every domain. And, you can only prune events that are older than the
        deduplication time configured for this participant.
-       Therefore, if you observe this error, you either just prune older events or your adjust the settings
+       Therefore, if you observe this error, you either just prune older events or you adjust the settings
        for this participant.
+       The error details field `safe_offset` contains the highest offset that can currently be pruned, if any.
       """
   )
   object UnsafeToPrune
       extends ErrorCode(id = "UNSAFE_TO_PRUNE", ErrorCategory.InvalidGivenCurrentSystemStateOther) {
-    case class Error(reason: String)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
-          cause =
-            "Participant cannot prune at specified offset pending background reconciliation of active contracts"
+    case class Error(_cause: String, reason: String, safe_offset: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Participant cannot prune at specified offset due to ${_cause}"
         )
         with PruningServiceError
   }

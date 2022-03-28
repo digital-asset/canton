@@ -791,7 +791,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         mock[ParticipantEventPublisher],
         pureCrypto,
         _ => EitherT.rightT(()),
-        new PackageInspectionOpsForTesting(loggerFactory),
+        new PackageInspectionOpsForTesting(participant, loggerFactory),
         ProcessingTimeout(),
         loggerFactory,
       )

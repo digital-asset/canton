@@ -330,28 +330,17 @@ object BuildCommon {
     }
   }
 
-  // use explicit protoc executable if it exists. currently, apple M1 can not build canton without this
-  // as in the protoc-jar, there is no protoc compiler that supports aarch64. however, we can just
-  // use an x86_64 compiler which will run on rosetta 2.
-  // i can't use sys.env as i can't easily pass env variables to intellij
-  lazy val protocFile = file("protoc.exe")
-  lazy val pbSettings =
-    if (protocFile.exists())
-      Seq(
-        (Compile / PB.protocExecutable := protocFile)
-      )
-    else Seq()
-
   // applies to all sub-projects
   lazy val sharedSettings = Seq(
     printTestTask,
     unitTestTask,
     oracleUnitTestTask,
-  ) ++ pbSettings
+  )
 
   lazy val cantonWarts = Seq(
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
     wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
   ).flatMap(_.settings)
 
@@ -481,6 +470,9 @@ object BuildCommon {
           scalatestMockito % Test,
           daml_lf_transaction % Test,
           daml_lf_transaction_test_lib % Test,
+          daml_test_evidence_tag % Test,
+          daml_test_evidence_scalatest % Test,
+          daml_test_evidence_generator_scalatest % Test,
           better_files,
           cats,
           cats_law % Test,
@@ -531,6 +523,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
+          BuildInfoKey("vmbc" -> Dependencies.daml_libraries_version),
           // For now, the release version is the same as the protocol version
           BuildInfoKey("protocolVersion" -> version.value),
         ),

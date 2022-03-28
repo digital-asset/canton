@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.authentication
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.IdempotentInsert.insertIgnoringConflicts
@@ -16,7 +17,7 @@ import io.functionmeta.functionFullName
 
 import java.time.Duration
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait HasExpiry {
   val expireAt: CantonTimestamp
@@ -72,13 +73,18 @@ trait MemberAuthenticationStore extends AutoCloseable {
 }
 
 object MemberAuthenticationStore {
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit executionContext: ExecutionContext
+  def apply(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+      closeContext: CloseContext,
+  )(implicit
+      executionContext: ExecutionContext
   ): MemberAuthenticationStore =
     storage match {
       case _: MemoryStorage => new InMemoryMemberAuthenticationStore
       case dbStorage: DbStorage =>
-        new DbMemberAuthenticationStore(dbStorage, timeouts, loggerFactory)
+        new DbMemberAuthenticationStore(dbStorage, timeouts, loggerFactory, closeContext)
     }
 }
 
@@ -92,53 +98,56 @@ class InMemoryMemberAuthenticationStore extends MemberAuthenticationStore {
 
   override def saveNonce(
       storedNonce: StoredNonce
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = blocking {
     lock.synchronized {
       nonces += storedNonce
       Future.unit
     }
+  }
 
   override def fetchAndRemoveNonce(member: Member, nonce: Nonce)(implicit
       traceContext: TraceContext
-  ): Future[Option[StoredNonce]] = lock.synchronized {
+  ): Future[Option[StoredNonce]] = blocking(lock.synchronized {
     val storedNonce = nonces.find(n => n.member == member && n.nonce == nonce)
 
     storedNonce.foreach(nonces.-=) // remove the nonce
 
     Future.successful(storedNonce)
-  }
+  })
 
   override def saveToken(
       token: StoredAuthenticationToken
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = blocking {
     lock.synchronized {
       tokens += token
       Future.unit
     }
+  }
 
   override def fetchTokens(member: Member)(implicit
       traceContext: TraceContext
-  ): Future[Seq[StoredAuthenticationToken]] = lock.synchronized {
+  ): Future[Seq[StoredAuthenticationToken]] = blocking(lock.synchronized {
     val memberTokens = tokens.filter(_.member == member)
 
     Future.successful(memberTokens.toSeq)
-  }
+  })
 
   override def expireNoncesAndTokens(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = blocking {
     lock.synchronized {
       nonces --= nonces.filter(_.expireAt <= timestamp)
       tokens --= tokens.filter(_.expireAt <= timestamp)
       Future.unit
     }
+  }
 
   override def invalidateMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
-    lock.synchronized {
+    blocking(lock.synchronized {
       nonces --= nonces.filter(_.member == member)
       tokens --= tokens.filter(_.member == member)
       Future.unit
-    }
+    })
 
   override def close(): Unit = ()
 }
@@ -147,9 +156,11 @@ class DbMemberAuthenticationStore(
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
+    override implicit val closeContext: CloseContext,
 )(implicit executionContext: ExecutionContext)
     extends MemberAuthenticationStore
     with DbStore {
+
   import storage.api._
   import Member.DbStorageImplicits._
 

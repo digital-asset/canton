@@ -57,7 +57,7 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
         )
         element <- EitherT.fromEither[Future](elementE)
         (op, fingerprint, replace, force) = authData
-        tx <- genTransaction(op, element).leftMap(x => x: CantonError)
+        tx <- manager.genTransaction(op, element).leftMap(x => x: CantonError)
         success <- manager
           .authorize(tx, fingerprint, force = force, replaceExisting = replace)
           .leftWiden[CantonError]
@@ -67,36 +67,6 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
       case x: RuntimeException =>
         logger.error("Caught runtime exception {}", x)
         throw x
-    }
-  }
-
-  private def genTransaction(op: TopologyChangeOp, mapping: TopologyMapping)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
-    import TopologyChangeOp._
-    (op, mapping) match {
-      case (Add, mapping: TopologyStateUpdateMapping) =>
-        EitherT.rightT(TopologyStateUpdate.createAdd(mapping))
-      case (Remove, mapping: TopologyStateUpdateMapping) =>
-        for {
-          tx <- EitherT(
-            store
-              .findActiveTransactionsForMapping(mapping)
-              .map(
-                _.headOption.toRight[TopologyManagerError](
-                  TopologyManagerError.NoCorrespondingActiveTxToRevoke.Mapping(mapping)
-                )
-              )
-          )
-        } yield tx.transaction.reverse
-
-      case (Replace, mapping: DomainGovernanceMapping) =>
-        EitherT.pure(DomainGovernanceTransaction(mapping))
-
-      case (op, mapping) =>
-        EitherT.fromEither(
-          Left(TopologyManagerError.InternalError.IncompatibleOpMapping(op, mapping))
-        )
     }
   }
 

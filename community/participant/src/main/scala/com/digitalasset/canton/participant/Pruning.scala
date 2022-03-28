@@ -7,6 +7,7 @@ import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmen
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyJournalError
 import com.digitalasset.canton.participant.store.EventLogId
+import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ShowUtil._
 
@@ -31,9 +32,11 @@ object Pruning {
       globalOffset: GlobalOffset,
       eventLog: EventLogId,
       localOffset: LocalOffset,
+      cause: String,
+      lastSafeOffset: Option[GlobalOffset],
   ) extends LedgerPruningError {
     override def message =
-      show"Unsafe to prune offset $globalOffset due to the event in $eventLog with local offset $localOffset"
+      show"Unsafe to prune offset ${UpstreamOffsetConvert.fromGlobalOffset(globalOffset)} due to the event in $eventLog with local offset $localOffset"
   }
 
   case class LedgerPruningOffsetNonCantonFormat(message: String) extends LedgerPruningError

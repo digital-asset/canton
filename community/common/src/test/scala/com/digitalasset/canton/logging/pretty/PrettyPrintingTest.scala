@@ -71,12 +71,24 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   val adHocObjectInst: ExampleAdHocObject.type = ExampleAdHocObject
   val adHocObjectStr: String = "ExampleAdHocObject"
 
+  sealed abstract case class ExampleAbstractCaseClass(content: Int) extends PrettyPrinting {
+    override def pretty: Pretty[ExampleAbstractCaseClass] = prettyOfClass(
+      param("content", _.content)
+    )
+  }
+  object ExampleAbstractCaseClass {
+    def apply(content: Int): ExampleAbstractCaseClass = new ExampleAbstractCaseClass(content) {}
+  }
+  val abstractCaseClass: ExampleAbstractCaseClass = ExampleAbstractCaseClass(42)
+  val abstractCaseClassStr: String = "ExampleAbstractCaseClass(content = 42)"
+
   "show is pretty" in {
     singletonInst.show shouldBe singletonStr
     alienInst.show shouldBe alienStr
     caseClassInst.show shouldBe caseClassStr
     adHocCaseClassInst.show shouldBe adHocCaseClassStr
     adHocObjectInst.show shouldBe adHocObjectStr
+    abstractCaseClass.show shouldBe abstractCaseClassStr
   }
 
   "show interpolator is pretty" in {
@@ -85,6 +97,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     show"Showing $caseClassInst" shouldBe s"Showing $caseClassStr"
     show"Showing $adHocCaseClassInst" shouldBe s"Showing $adHocCaseClassStr"
     show"Showing $adHocObjectInst" shouldBe s"Showing $adHocObjectStr"
+    show"Showing $abstractCaseClass" shouldBe s"Showing $abstractCaseClassStr"
   }
 
   "toString is pretty" in {
@@ -92,6 +105,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     caseClassInst.toString shouldBe caseClassStr
     adHocCaseClassInst.toString shouldBe adHocCaseClassStr
     adHocObjectInst.toString shouldBe adHocObjectStr
+    abstractCaseClass.toString shouldBe abstractCaseClassStr
   }
 
   "toString is not pretty" in {
@@ -108,5 +122,33 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     import Pretty.PrettyOps
     (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
       endWith("exampleCaseClass.pretty();\n")
+  }
+
+  "prettyOfClass" should {
+    "work for primitive classes" in {
+      Pretty
+        .prettyOfClass[Long](Pretty.unnamedParam(Predef.identity))
+        .treeOf(13L)
+        .show shouldBe "Long(13)"
+    }
+
+    "work for Null" in {
+      @SuppressWarnings(Array("org.wartremover.warts.Null"))
+      val nulll = Pretty.prettyOfClass[Null]().treeOf(null)
+      nulll.show shouldBe "Null()"
+    }
+
+    "work for AnyRef" in {
+      Pretty.prettyOfClass[AnyRef]().treeOf(new Object).show shouldBe "Object()"
+    }
+
+    "work for Java interfaces" in {
+      Pretty
+        .prettyOfClass[Runnable]()
+        .treeOf(new Runnable() {
+          override def run(): Unit = ???
+        })
+        .show shouldBe "Object()"
+    }
   }
 }

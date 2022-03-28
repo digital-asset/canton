@@ -96,7 +96,7 @@ class DomainTopologyDispatcher(
 
   override protected val timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  def queueSize: Int = lock.synchronized { queue.size + inflight.get() }
+  def queueSize: Int = blocking { lock.synchronized { queue.size + inflight.get() } }
 
   private val topologyClient =
     new StoreBasedDomainTopologyClient(

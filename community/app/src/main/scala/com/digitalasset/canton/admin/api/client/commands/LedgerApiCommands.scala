@@ -109,7 +109,7 @@ import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import scala.annotation.nowarn
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 @nowarn(
   "cat=deprecation&origin=com\\.daml\\.ledger\\.api\\.v1\\.ledger_identity_service\\..*"
@@ -1026,10 +1026,10 @@ object LedgerApiCommands {
     val promise = Promise[Seq[Result]]()
     val buffer = ListBuffer[Result]()
     val context = Context.ROOT.withCancellation()
-    def success(): Unit = buffer.synchronized {
+    def success(): Unit = blocking(buffer.synchronized {
       context.close()
       promise.trySuccess(buffer.toList).discard[Boolean]
-    }
+    })
 
     context.run(() =>
       service(
@@ -1037,14 +1037,14 @@ object LedgerApiCommands {
         new StreamObserver[Response]() {
           override def onNext(value: Response): Unit = {
             val extracted = extract(value)
-            buffer.synchronized {
+            blocking(buffer.synchronized {
               if (buffer.lengthCompare(expected) < 0) {
                 buffer ++= extracted
                 if (buffer.lengthCompare(expected) >= 0) {
                   success()
                 }
               }
-            }
+            })
           }
 
           override def onError(t: Throwable): Unit = {

@@ -738,9 +738,9 @@ object CantonConfig {
     lazy implicit val communitySequencerConfigDatabaseReader
         : ConfigReader[CommunitySequencerConfig.Database] =
       deriveReader[CommunitySequencerConfig.Database]
-    lazy implicit val communityNewDatabaseSequencerReaderConfigReader
-        : ConfigReader[SequencerReaderConfig] =
-      deriveReader[SequencerReaderConfig]
+    lazy implicit val communityDatabaseSequencerReaderConfigReader
+        : ConfigReader[CommunitySequencerReaderConfig] =
+      deriveReader[CommunitySequencerReaderConfig]
     lazy implicit val communitySequencerWriterCommitModeConfigReader: ConfigReader[CommitMode] =
       deriveEnumerationReader[CommitMode]
     lazy implicit val communityNewDatabaseSequencerWriterConfigReader
@@ -1072,8 +1072,8 @@ object CantonConfig {
         : ConfigWriter[CommunitySequencerConfig.Database] =
       deriveWriter[CommunitySequencerConfig.Database]
     lazy implicit val communityDatabaseSequencerReaderConfigWriter
-        : ConfigWriter[SequencerReaderConfig] =
-      deriveWriter[SequencerReaderConfig]
+        : ConfigWriter[CommunitySequencerReaderConfig] =
+      deriveWriter[CommunitySequencerReaderConfig]
     lazy implicit val communitySequencerWriterCommitModeConfigWriter: ConfigWriter[CommitMode] =
       deriveEnumerationWriter[CommitMode]
     lazy implicit val communityDatabaseSequencerWriterConfigWriter

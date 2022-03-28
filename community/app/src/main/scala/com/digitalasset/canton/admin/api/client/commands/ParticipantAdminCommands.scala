@@ -196,6 +196,29 @@ object ParticipantAdminCommands {
 
     }
 
+    final case class RemoveDar(
+        darHash: String
+    ) extends PackageCommand[RemoveDarRequest, RemoveDarResponse, Unit] {
+
+      override def createRequest() = Right(RemoveDarRequest(darHash))
+
+      override def submitRequest(
+          service: PackageServiceStub,
+          request: RemoveDarRequest,
+      ): Future[RemoveDarResponse] =
+        service.removeDar(request)
+
+      override def handleResponse(
+          response: RemoveDarResponse
+      ): Either[String, Unit] = {
+        response.success match {
+          case None => Left("unexpected empty response")
+          case Some(success) => Right(())
+        }
+      }
+
+    }
+
     final case class ListDars(limit: Option[Int])
         extends PackageCommand[ListDarsRequest, ListDarsResponse, Seq[DarDescription]] {
       override def createRequest(): Either[String, ListDarsRequest] = Right(

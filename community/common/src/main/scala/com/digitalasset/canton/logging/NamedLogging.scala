@@ -8,7 +8,6 @@ import com.typesafe.scalalogging.Logger
 import org.slf4j
 import org.slf4j.helpers.NOPLogger
 import com.daml.error.{BaseError, ContextualizedErrorLogger}
-import com.digitalasset.canton.error.CantonError
 import org.slf4j.MDC
 import org.slf4j.event.Level
 
@@ -34,7 +33,7 @@ case class ErrorLoggingContext(
     // for text logging, we'll use the err-context string, for json logging, we use the arguments and ignore the err-context
     val arguments = mergedContext ++ Map(
       "error-code" -> err.code.codeStr(traceContext.traceId),
-      "err-context" -> ("{" + CantonError.formatContextAsString(mergedContext) + "}"),
+      "err-context" -> ("{" + ContextualizedErrorLogger.formatContextAsString(mergedContext) + "}"),
     )
     val message = err.code.toMsg(err.cause, traceContext.traceId)
     arguments.foreach { case (name, value) =>

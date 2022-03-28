@@ -43,11 +43,13 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
     "global execution context is busy" must {
       def withGlobalEcBusy(body: => Unit): Unit =
         withTaskRunner(
+          s"global-$numberOfTasksToMakeExecutionContextBusy-blocking",
           numberOfTasksToMakeExecutionContextBusy,
           wrapInBlocking = true,
           ExecutionContext.global,
         ) { taskRunner =>
           taskRunner.startTasks()
+          taskRunner.assertTasksRunning()
           body
         }
 
@@ -84,6 +86,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         withTaskRunnerOnNewEc(numberOfTasksToMakeExecutionContextBusy, wrapInBlocking = true) {
           taskRunner =>
             taskRunner.startTasks()
+            taskRunner.assertTasksRunning()
 
             withTaskRunnerOnNewEc(expectedNumberOfParallelTasks, wrapInBlocking = false) {
               taskRunner =>
@@ -98,6 +101,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         withTaskRunnerOnNewEc(numberOfTasksToMakeExecutionContextBusy, wrapInBlocking = true) {
           taskRunner =>
             taskRunner.startTasks()
+            taskRunner.assertTasksRunning()
 
             withTaskRunnerOnNewEc(
               expectedNumberOfParallelTasksWrappedInBlocking,
@@ -115,7 +119,9 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         body: TaskRunner => Unit
     ): Unit =
       withNewExecutionContext { ec =>
-        withTaskRunner(numberOfTasksToRun, wrapInBlocking, ec)(body)
+        val description =
+          if (wrapInBlocking) s"ec-$numberOfTasksToRun-blocking" else s"ec-$numberOfTasksToRun"
+        withTaskRunner(description, numberOfTasksToRun, wrapInBlocking, ec)(body)
       }
 
     def withNewExecutionContext(body: ExecutionContext => Unit): Unit =
@@ -127,12 +133,23 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         body(ec)
       }
 
-    def withTaskRunner(numberOfTasksToRun: Int, wrapInBlocking: Boolean, ec: ExecutionContext)(
+    def withTaskRunner(
+        description: String,
+        numberOfTasksToRun: Int,
+        wrapInBlocking: Boolean,
+        ec: ExecutionContext,
+    )(
         body: TaskRunner => Unit
     ): Unit =
-      ResourceUtil.withResource(new TaskRunner(numberOfTasksToRun, wrapInBlocking)(ec))(body)
+      ResourceUtil.withResource(
+        new TaskRunner(description, numberOfTasksToRun, wrapInBlocking)(ec)
+      )(body)
 
-    class TaskRunner(val numberOfTasksToRun: Int, val wrapInBlocking: Boolean)(implicit
+    class TaskRunner(
+        val description: String,
+        val numberOfTasksToRun: Int,
+        val wrapInBlocking: Boolean,
+    )(implicit
         val ec: ExecutionContext
     ) extends AutoCloseable {
 
@@ -151,12 +168,19 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         // Start computation, if no computation is running
         val idle = taskFuture.compareAndSet(
           None,
-          Some((0 until numberOfTasksToRun).toList.traverse { _ =>
+          Some((0 until numberOfTasksToRun).toList.traverse { i =>
             Future {
-              if (!closed.get()) {
+              logger.debug(s"$description: Starting task $i...")
+              if (closed.get()) {
+                logger.warn(s"$description: Task $i started after closing. Aborting...")
+              } else {
                 // Only do this, if the runner has not been closed.
                 // So that tasks running after close are not counted.
                 running.release()
+
+                logger.info(
+                  s"$description: Started task $i. (Total: ${running.availablePermits()})\n$ec"
+                )
 
                 if (wrapInBlocking)
                   blocking {
@@ -164,6 +188,8 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
                   }
                 else
                   blocker.acquire()
+
+                logger.debug(s"$description: Terminated task $i")
               }
             }
           }),
@@ -180,12 +206,15 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
           if (running.tryAcquire(numberOfTasksToRun, 10, TimeUnit.SECONDS)) numberOfTasksToRun
           else running.availablePermits()
 
+        logger.info(s"$description: Found $runningTasks running tasks.\n$ec")
+
         withClue(s"Number of tasks running in parallel:") {
           runningTasks shouldEqual numberOfTasksToRun
         }
       }
 
       override def close(): Unit = {
+        logger.info(s"$description: Initiating shutdown...")
         closed.set(true)
         blocker.release(numberOfTasksToRun)
         withClue(s"Tasks properly terminating") {

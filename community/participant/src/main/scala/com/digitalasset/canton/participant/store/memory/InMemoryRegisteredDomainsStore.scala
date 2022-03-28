@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.collect.{BiMap, HashBiMap}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class InMemoryRegisteredDomainsStore(override protected val loggerFactory: NamedLoggerFactory)
     extends RegisteredDomainsStore
@@ -33,7 +33,7 @@ class InMemoryRegisteredDomainsStore(override protected val loggerFactory: Named
 
   override def addMapping(alias: DomainAlias, domainId: DomainId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Error, Unit] = lock.synchronized {
+  ): EitherT[Future, Error, Unit] = blocking(lock.synchronized {
     val swapped = for {
       _ <- Option(domainAliasMap.get(alias)).fold(Either.right[Either[Error, Unit], Unit](())) {
         oldDomainId =>
@@ -49,15 +49,16 @@ class InMemoryRegisteredDomainsStore(override protected val loggerFactory: Named
       val _ = domainAliasMap.put(alias, domainId)
     }
     EitherT.fromEither[Future](swapped.swap.getOrElse(Right(())))
-  }
+  })
 
   override def aliasToDomainIdMap(implicit
       traceContext: TraceContext
-  ): Future[Map[DomainAlias, DomainId]] =
+  ): Future[Map[DomainAlias, DomainId]] = blocking {
     lock.synchronized {
       import scala.jdk.CollectionConverters._
       Future.successful(Map(domainAliasMap.asScala.toSeq: _*))
     }
+  }
 
   override def close(): Unit = ()
 }

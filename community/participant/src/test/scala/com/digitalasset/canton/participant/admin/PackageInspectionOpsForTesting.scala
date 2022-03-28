@@ -5,16 +5,30 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
   PackageVetted,
 }
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.transaction.{
+  TopologyChangeOp,
+  TopologyElementId,
+  TopologyStateUpdate,
+  TopologyStateUpdateElement,
+  TopologyTransaction,
+  VettedPackages,
+}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class PackageInspectionOpsForTesting(val loggerFactory: NamedLoggerFactory)(implicit
+class PackageInspectionOpsForTesting(
+    val participantId: ParticipantId,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit
     ec: ExecutionContext
 ) extends PackageInspectionOps {
 
@@ -29,4 +43,20 @@ class PackageInspectionOpsForTesting(val loggerFactory: NamedLoggerFactory)(impl
     EitherT.rightT(())
   }
 
+  override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, Unit] = EitherT.rightT(())
+
+  override def genRevokePackagesTx(packages: List[LfPackageId])(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
+
+    val mapping = VettedPackages(participantId, Seq.empty)
+    val tx: TopologyTransaction[TopologyChangeOp] = TopologyStateUpdate(
+      TopologyChangeOp.Remove,
+      TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
+    )()
+
+    EitherT.rightT(tx)
+  }
 }

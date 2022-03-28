@@ -11,11 +11,12 @@ import com.digitalasset.canton.config.{
   DbConfig,
   LocalNodeConfig,
   LocalNodeParameters,
+  ProcessingTimeout,
   StorageConfig,
 }
 import com.digitalasset.canton.domain.config.{DomainConfig, DomainNodeParameters}
 import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.{
   LocalParticipantConfig,
@@ -30,13 +31,13 @@ import com.digitalasset.canton.util.LoggerUtil
 
 import scala.Function.tupled
 import scala.collection.mutable
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration.Duration
 import scala.util.Try
 
 /** Group of CantonNodes of the same type (domains, participants, sequencers). */
 trait Nodes[+Node <: CantonNode, +NodeBootstrap <: CantonNodeBootstrap[Node]]
-    extends AutoCloseable {
+    extends FlagCloseable {
 
   /** Start all configured nodes but stop on first error */
   def attemptStartAll(implicit traceContext: TraceContext): Either[StartupError, Unit]
@@ -75,19 +76,21 @@ class ManagedNodes[
 ](
     create: (String, NodeConfig) => NodeBootstrap,
     migrationsFactory: DbMigrationsFactory,
+    override protected val timeouts: ProcessingTimeout,
     configs: Map[String, NodeConfig],
     parametersFor: String => LocalNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
 ) extends Nodes[Node, NodeBootstrap]
-    with NamedLogging {
+    with NamedLogging
+    with HasCloseContext {
 
   // this is a mutable collections so modifications must be synchronized
   // (this may not be necessary if all calls are happening from the same startup thread or console)
   private val nodes = mutable.Map[String, NodeBootstrap]()
 
-  override def running: Seq[NodeBootstrap] = synchronized {
+  override def running: Seq[NodeBootstrap] = blocking(synchronized {
     nodes.values.toSeq
-  }
+  })
 
   override def attemptStartAll(implicit traceContext: TraceContext): Either[StartupError, Unit] =
     configs.toList.traverse_(tupled(start(_, _)))
@@ -114,7 +117,7 @@ class ManagedNodes[
 
   private def start(name: String, config: NodeConfig)(implicit
       traceContext: TraceContext
-  ): Either[StartupError, NodeBootstrap] = synchronized {
+  ): Either[StartupError, NodeBootstrap] = blocking(synchronized {
     for {
       instance <- nodes.get(name) match {
         case Some(instance) => Right(instance)
@@ -144,43 +147,48 @@ class ManagedNodes[
           } yield instance
       }
     } yield instance
-  }
+  })
 
-  override def migrateDatabase(name: String): Either[StartupError, Unit] = synchronized {
+  override def migrateDatabase(name: String): Either[StartupError, Unit] = blocking(synchronized {
     for {
       config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
       _ <- checkNotRunning(name)
       _ <- runMigration(name, config.storage)
     } yield ()
-  }
+  })
 
-  override def repairDatabaseMigration(name: String): Either[StartupError, Unit] = synchronized {
-    for {
-      config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
-      _ <- checkNotRunning(name)
-      _ <- runRepairMigration(name, config.storage)
-    } yield ()
-  }
+  override def repairDatabaseMigration(name: String): Either[StartupError, Unit] = blocking(
+    synchronized {
+      for {
+        config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
+        _ <- checkNotRunning(name)
+        _ <- runRepairMigration(name, config.storage)
+      } yield ()
+    }
+  )
 
-  override def isRunning(name: String): Boolean = synchronized {
+  override def isRunning(name: String): Boolean = blocking(synchronized {
     nodes.contains(name)
-  }
+  })
 
-  override def getRunning(name: String): Option[NodeBootstrap] = nodes.get(name)
+  override def getRunning(name: String): Option[NodeBootstrap] =
+    blocking(synchronized(nodes.get(name)))
 
   override def stop(name: String): Either[ShutdownError, Unit] =
     for {
       _ <- configs.get(name).toRight[ShutdownError](ConfigurationNotFound(name))
-    } yield synchronized {
+    } yield blocking(synchronized {
       nodes.remove(name).foreach { instance =>
         Lifecycle.close(instance)(logger)
       }
-    }
+    })
 
-  override def close(): Unit = synchronized {
-    val runningInstances = nodes.values.toList
-    nodes.clear()
-    Lifecycle.close(runningInstances: _*)(logger)
+  override def onClosed(): Unit = blocking {
+    synchronized {
+      val runningInstances = nodes.values.toList
+      nodes.clear()
+      Lifecycle.close(runningInstances: _*)(logger)
+    }
   }
 
   protected def runIfUsingDatabase[F[_]](storageConfig: StorageConfig)(
@@ -261,6 +269,7 @@ class ManagedNodes[
 class ParticipantNodes[PC <: LocalParticipantConfig](
     create: (String, PC) => ParticipantNodeBootstrap,
     migrationsFactory: DbMigrationsFactory,
+    timeouts: ProcessingTimeout,
     configs: Map[String, PC],
     parametersFor: String => ParticipantNodeParameters,
     loggerFactory: NamedLoggerFactory,
@@ -269,6 +278,7 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
 ) extends ManagedNodes[ParticipantNode, PC, ParticipantNodeParameters, ParticipantNodeBootstrap](
       create,
       migrationsFactory,
+      timeouts,
       configs,
       parametersFor,
       loggerFactory,
@@ -279,7 +289,7 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
     for {
       config <- configs.get(name).toRight(ConfigurationNotFound(name))
       parameters = parametersFor(name)
-      _ = parameters.processingTimeouts.unbounded.await() {
+      _ = parameters.processingTimeouts.unbounded.await("migrate indexer database") {
         runIfUsingDatabase[Future](config.storage) { dbConfig: DbConfig =>
           CantonLedgerApiServerWrapper
             .migrateSchema(
@@ -305,6 +315,7 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
 class DomainNodes[DC <: DomainConfig](
     create: (String, DC) => DomainNodeBootstrap,
     migrationsFactory: DbMigrationsFactory,
+    timeouts: ProcessingTimeout,
     configs: Map[String, DC],
     parameters: String => DomainNodeParameters,
     loggerFactory: NamedLoggerFactory,
@@ -313,6 +324,7 @@ class DomainNodes[DC <: DomainConfig](
 ) extends ManagedNodes[Domain, DC, DomainNodeParameters, DomainNodeBootstrap](
       create,
       migrationsFactory,
+      timeouts,
       configs,
       parameters,
       loggerFactory,

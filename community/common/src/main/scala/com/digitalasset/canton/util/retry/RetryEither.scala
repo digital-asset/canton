@@ -6,6 +6,7 @@ package com.digitalasset.canton.util.retry
 import cats.syntax.either._
 import cats.syntax.flatMap._
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.util.LoggerUtil
 import org.slf4j.event.Level
@@ -23,12 +24,20 @@ object RetryEither {
       stopOnLeft: Option[A => Boolean] = None,
       retryLogLevel: Level = Level.INFO,
       failLogLevel: Level = Level.WARN,
-  )(body: => Either[A, B])(implicit loggingContext: ErrorLoggingContext): Either[A, B] = {
+  )(
+      body: => Either[A, B]
+  )(implicit
+      loggingContext: ErrorLoggingContext,
+      closeContext: CloseContext,
+  ): Either[A, B] = {
     maxRetries.tailRecM { retryCount =>
       body
         .map(Right(_))
         .leftFlatMap { err =>
-          if (stopOnLeft.exists(fn => fn(err))) {
+          if (closeContext.flagCloseable.isClosing) {
+            // Stop the retry attempts if caller is closing
+            Left(err)
+          } else if (stopOnLeft.exists(fn => fn(err))) {
             // Stop the retry attempts on this particular Left if stopOnLeft is true
             Left(err)
           } else if (retryCount <= 0) {

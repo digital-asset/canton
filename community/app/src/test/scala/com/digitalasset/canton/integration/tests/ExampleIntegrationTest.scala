@@ -24,6 +24,8 @@ import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.util.ShowUtil._
 import monocle.macros.syntax.lens._
 
+import scala.concurrent.blocking
+
 abstract class ExampleIntegrationTest(configPaths: File*)
     extends CommunityIntegrationTest
     with IsolatedCommunityEnvironments
@@ -59,7 +61,7 @@ object ExampleIntegrationTest {
   lazy val advancedConfTestEnv: File =
     "community" / "app" / "src" / "test" / "resources" / "advancedConfDef.env"
 
-  def ensureSystemProperties(kvs: (String, String)*): Unit = synchronized {
+  def ensureSystemProperties(kvs: (String, String)*): Unit = blocking(synchronized {
     kvs.foreach { case (key, value) =>
       Option(System.getProperty(key)) match {
         case Some(oldValue) =>
@@ -71,7 +73,7 @@ object ExampleIntegrationTest {
           System.setProperty(key, value)
       }
     }
-  }
+  })
 }
 
 class SimplePingExampleIntegrationTest

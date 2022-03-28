@@ -412,6 +412,7 @@ class ParticipantNodeBootstrap(
             syncDomainPersistentStateManager,
             syncCrypto,
             cantonParameterConfig.processingTimeouts,
+            topologyManager,
             loggerFactory,
           ),
           cantonParameterConfig.processingTimeouts,

@@ -130,7 +130,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       mock[ParticipantEventPublisher],
       pureCrypto,
       _ => EitherT.rightT(()),
-      new PackageInspectionOpsForTesting(loggerFactory),
+      new PackageInspectionOpsForTesting(submittingParticipant, loggerFactory),
       ProcessingTimeout(),
       loggerFactory,
     )

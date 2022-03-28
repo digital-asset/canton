@@ -673,6 +673,22 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   @Help.Summary("Manage DAR packages")
   @Help.Group("DAR Management")
   object dars extends Helpful {
+    @Help.Summary(
+      "Remove a DAR from the participant",
+      FeatureFlag.Preview,
+    )
+    @Help.Description(
+      """Can be used to remove a DAR from the participant, when:
+        | - The main package of the DAR is unused
+        | - Other packages in the DAR are either unused or found in another DAR
+        | - The main package of the DAR can be automatically un-vetted (or is already not vetted)  
+        | """
+    )
+    def remove(darHash: String): Unit = {
+      check(FeatureFlag.Preview)(consoleEnvironment.run {
+        adminCommand(ParticipantAdminCommands.Package.RemoveDar(darHash))
+      })
+    }
 
     @Help.Summary("List installed DAR files")
     def list(limit: Option[Int] = None): Seq[v0.DarDescription] = consoleEnvironment.run {

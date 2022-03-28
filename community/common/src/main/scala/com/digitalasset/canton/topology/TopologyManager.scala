@@ -429,6 +429,36 @@ abstract class TopologyManager[E <: CantonError](
     }
   }
 
+  def genTransaction(op: TopologyChangeOp, mapping: TopologyMapping)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, TopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
+    import TopologyChangeOp._
+    (op, mapping) match {
+      case (Add, mapping: TopologyStateUpdateMapping) =>
+        EitherT.rightT(TopologyStateUpdate.createAdd(mapping))
+      case (Remove, mapping: TopologyStateUpdateMapping) =>
+        for {
+          tx <- EitherT(
+            store
+              .findActiveTransactionsForMapping(mapping)
+              .map(
+                _.headOption.toRight[TopologyManagerError](
+                  TopologyManagerError.NoCorrespondingActiveTxToRevoke.Mapping(mapping)
+                )
+              )
+          )
+        } yield tx.transaction.reverse
+
+      case (Replace, mapping: DomainGovernanceMapping) =>
+        EitherT.pure(DomainGovernanceTransaction(mapping))
+
+      case (op, mapping) =>
+        EitherT.fromEither(
+          Left(TopologyManagerError.InternalError.IncompatibleOpMapping(op, mapping))
+        )
+    }
+  }
+
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty._
     Seq(

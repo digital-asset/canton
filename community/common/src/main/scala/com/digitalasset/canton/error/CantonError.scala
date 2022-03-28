@@ -186,20 +186,11 @@ object CantonError {
         val contextMap = error.context ++ loggingContext.properties
         val errorCodeMsg = error.code.toMsg(error.cause, loggingContext.traceContext.traceId)
         if (contextMap.nonEmpty) {
-          errorCodeMsg + "; " + formatContextAsString(contextMap)
+          errorCodeMsg + "; " + ContextualizedErrorLogger.formatContextAsString(contextMap)
         } else {
           errorCodeMsg
         }
     }
-
-  def formatContextAsString(contextMap: Map[String, String]): String = {
-    contextMap
-      .filter(_._2.nonEmpty)
-      .toSeq
-      .sortBy(_._1)
-      .map { case (k, v) => s"$k=$v" }
-      .mkString(", ")
-  }
 }
 
 /** Mixing trait for nested errors

@@ -20,7 +20,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLoggerFactory)(
     implicit val executionContext: ExecutionContext
@@ -30,9 +30,8 @@ class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLo
   private val stores = TrieMap.empty[TopologyStoreId, TopologyStore]
   private val metadata = new InMemoryPartyMetadataStore()
 
-  override def forId(storeId: TopologyStoreId): TopologyStore = synchronized {
+  override def forId(storeId: TopologyStoreId): TopologyStore =
     stores.getOrElseUpdate(storeId, new InMemoryTopologyStore(loggerFactory))
-  }
 
   def allNonDiscriminated(implicit
       traceContext: TraceContext
@@ -142,7 +141,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
   private[topology] override def doAppend(
       timestamp: CantonTimestamp,
       transactions: Seq[ValidatedTopologyTransaction],
-  )(implicit traceContext: TraceContext): Future[Unit] = synchronized {
+  )(implicit traceContext: TraceContext): Future[Unit] = blocking(synchronized {
 
     val (updates, appends) = TopologyStore.appends(timestamp, transactions)
 
@@ -179,7 +178,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       }
     }
     Future.unit
-  }
+  })
 
   private def asOfFilter(
       asOf: CantonTimestamp,
@@ -212,7 +211,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[Positive]] =
     filteredState(
-      synchronized(topologyTransactionStore.toSeq),
+      blocking(synchronized(topologyTransactionStore.toSeq)),
       x => x.until.isEmpty,
     ).map(_.collectOfType[Positive])
 
@@ -224,7 +223,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       traceContext: TraceContext
   ): Future[Seq[SignedTopologyTransaction[Remove]]] =
     Future.successful(
-      synchronized(topologyTransactionStore.toSeq)
+      blocking(synchronized(topologyTransactionStore.toSeq))
         .map(_.transaction)
         .mapFilter(TopologyChangeOp.select[Remove])
         .collect {
@@ -240,7 +239,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       traceContext: TraceContext
   ): Future[Seq[SignedTopologyTransaction[Add]]] =
     Future.successful(
-      synchronized(topologyTransactionStore.toSeq)
+      blocking(synchronized(topologyTransactionStore.toSeq))
         .collect { case entry if entry.until.isEmpty => entry.transaction }
         .mapFilter(TopologyChangeOp.select[Add])
         .collect {
@@ -251,7 +250,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
   override def allTransactions(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
-    filteredState(synchronized(topologyTransactionStore.toSeq), _ => true)
+    filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
 
   override def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
@@ -324,7 +323,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
         )
 
     filteredState(
-      synchronized { store.toSeq },
+      blocking(synchronized { store.toSeq }),
       entry => {
         timeFilter(entry.from, entry.until) &&
         types.contains(entry.transaction.uniquePath.dbType) &&
@@ -373,7 +372,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       deactivate: Seq[UniquePath],
       positive: Seq[SignedTopologyTransaction[Positive]],
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    synchronized {
+    blocking(synchronized {
       val deactivateS = deactivate.toSet
       // UPDATE topology_state SET valid_until = ts WHERE store_id = ... AND valid_from < ts AND valid_until is NULL and path_id in Deactivate)
       deactivate.foreach { _up =>
@@ -396,7 +395,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
           topologyStateStore.append(TopologyStoreEntry(sit.operation, sit, timestamp, None, None))
         }
       }
-    }
+    })
     Future.unit
   }
 
@@ -446,7 +445,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       }
     }
     filteredState(
-      synchronized(store.toSeq),
+      blocking(synchronized(store.toSeq)),
       entry =>
         typ.forall(_ == entry.transaction.uniquePath.dbType) && filter1(entry) && filter2(
           entry
@@ -458,7 +457,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       traceContext: TraceContext
   ): Future[Seq[CantonTimestamp]] =
     Future.successful(
-      synchronized(topologyTransactionStore.toSeq)
+      blocking(synchronized(topologyTransactionStore.toSeq))
         .map(_.from)
         .filter(_ > timestamp)
         .sorted
@@ -487,7 +486,7 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
   override def findDispatchingTransactionsAfter(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] =
-    synchronized {
+    blocking(synchronized {
       val res = topologyTransactionStore
         .filter(x =>
           x.from > timestamp && (x.until.isEmpty || x.operation == TopologyChangeOp.Remove) && x.rejected.isEmpty
@@ -495,13 +494,13 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
         .map(_.toStoredTransaction)
         .toSeq
       Future.successful(StoredTopologyTransactions(res))
-    }
+    })
 
   override def findTsOfParticipantStateChangesBefore(
       beforeExclusive: CantonTimestamp,
       participantId: ParticipantId,
       limit: Int,
-  )(implicit traceContext: TraceContext): Future[Seq[CantonTimestamp]] = synchronized {
+  )(implicit traceContext: TraceContext): Future[Seq[CantonTimestamp]] = blocking(synchronized {
     val ret = topologyTransactionStore
       .filter(x =>
         x.from < beforeExclusive &&
@@ -512,18 +511,18 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       .sorted(CantonTimestamp.orderCantonTimestamp.toOrdering.reverse)
       .take(limit)
     Future.successful(ret.toSeq)
-  }
+  })
 
   override def findTransactionsInRange(
       asOfExclusive: CantonTimestamp,
       upToExclusive: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] =
-    synchronized {
+    blocking(synchronized {
       val ret = topologyTransactionStore
         .filter(x => x.from > asOfExclusive && x.from < upToExclusive && x.rejected.isEmpty)
         .map(_.toStoredTransaction)
       Future.successful(StoredTopologyTransactions(ret.toSeq))
-    }
+    })
 
   override def close(): Unit = ()
 }

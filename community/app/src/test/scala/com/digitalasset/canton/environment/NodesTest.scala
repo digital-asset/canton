@@ -56,8 +56,9 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def start(): EitherT[Future, String, Unit] = EitherT.pure[Future, String](())
     override def initializeWithProvidedId(id: NodeId): EitherT[Future, String, Unit] = ???
     override def getNode: Option[TestNode] = ???
-    override def close(): Unit = ???
+    override def onClosed(): Unit = ()
     override protected def loggerFactory: NamedLoggerFactory = ???
+    override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
   }
 
   class TestNodeFactory {
@@ -77,6 +78,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
       extends ManagedNodes[TestNode, TestNodeConfig, TestNodeParameters.type, TestNodeBootstrap](
         factory.create,
         new CommunityDbMigrationsFactory(loggerFactory),
+        timeouts,
         configs,
         _ => TestNodeParameters,
         NodesTest.this.loggerFactory,
@@ -118,7 +120,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     "return an initialization failure if an exception is thrown during shutdown" in new Fixture {
       val anException = new RuntimeException("Nope!")
       val node = new TestNodeBootstrap {
-        override def close() = {
+        override def onClosed() = {
           throw anException
         }
       }

@@ -56,7 +56,7 @@ trait Sequencer extends AutoCloseable {
       traceContext: TraceContext
   ): Future[Boolean]
 
-  /** Currently this method is only implemented by the enterprise-only Ethereum driver. It immediately returns an error
+  /** Currently this method is only implemented by the enterprise-only Ethereum driver. It immediately returns a Left
     * for ledgers where it is not implemented.
     *
     * This method authorizes a [[com.digitalasset.canton.domain.sequencing.sequencer.LedgerIdentity]] on the underlying ledger.
@@ -68,8 +68,6 @@ trait Sequencer extends AutoCloseable {
     * already authorized. Else the authorization itself will fail.
     * To bootstrap the authorization, the Ethereum account that deploys the `Sequencer.sol` contract is the first account
     * to be authorized.
-    *
-    * TODO(Danilo): investigate fabric authorization
     */
   def authorizeLedgerIdentity(identity: LedgerIdentity)(implicit
       traceContext: TraceContext

@@ -57,7 +57,7 @@ object DbStorageSingle {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
-  )(implicit ec: ExecutionContext): DbStorageSingle =
+  )(implicit ec: ExecutionContext, closeContext: CloseContext): DbStorageSingle =
     create(
       config,
       connectionPoolForParticipant,
@@ -77,7 +77,7 @@ object DbStorageSingle {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
-  )(implicit ec: ExecutionContext): Either[String, DbStorageSingle] =
+  )(implicit ec: ExecutionContext, closeContext: CloseContext): Either[String, DbStorageSingle] =
     for {
       db <- DbStorage.createDatabase(
         config,

@@ -17,7 +17,7 @@ import com.digitalasset.canton.util.MapsUtil
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactory)
     extends RequestJournalStore
@@ -67,7 +67,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
         )
       )
     else
-      requestTable.synchronized {
+      blocking(requestTable.synchronized {
         requestTable.get(rc) match {
           case None => EitherT.leftT(UnknownRequestCounter(rc))
           case Some(oldResult) =>
@@ -84,7 +84,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
               EitherT.rightT(())
             }
         }
-      }
+      })
 
   def delete(rc: RequestCounter)(implicit traceContext: TraceContext): Future[Unit] = {
     val oldState = requestTable.remove(rc)

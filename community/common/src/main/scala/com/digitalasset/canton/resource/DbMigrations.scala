@@ -5,6 +5,7 @@ package com.digitalasset.canton.resource
 
 import cats.syntax.either._
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.{Profile, RetryConfig}
@@ -26,13 +27,15 @@ import scala.util.Try
 
 trait DbMigrationsFactory {
 
-  def create(dbConfig: DbConfig): DbMigrations
+  def create(dbConfig: DbConfig)(implicit closeContext: CloseContext): DbMigrations
 
-  def create(dbConfig: DbConfig, name: String): DbMigrations
+  def create(dbConfig: DbConfig, name: String)(implicit closeContext: CloseContext): DbMigrations
 
 }
 
 trait DbMigrations { this: NamedLogging =>
+
+  implicit protected def closeContext: CloseContext
 
   protected def createDataSource(jdbcDataSource: JdbcDataSource): DataSource =
     jdbcDataSource match {
@@ -391,17 +394,20 @@ trait DbMigrations { this: NamedLogging =>
 }
 
 class CommunityDbMigrationsFactory(loggerFactory: NamedLoggerFactory) extends DbMigrationsFactory {
-  override def create(dbConfig: DbConfig, name: String): DbMigrations =
+  override def create(dbConfig: DbConfig, name: String)(implicit
+      closeContext: CloseContext
+  ): DbMigrations =
     new CommunityDbMigrations(dbConfig, loggerFactory.appendUnnamedKey("node", name))
 
-  override def create(dbConfig: DbConfig): DbMigrations =
+  override def create(dbConfig: DbConfig)(implicit closeContext: CloseContext): DbMigrations =
     new CommunityDbMigrations(dbConfig, loggerFactory)
 }
 
 class CommunityDbMigrations(
     protected val dbConfig: DbConfig,
     protected val loggerFactory: NamedLoggerFactory,
-) extends DbMigrations
+)(implicit override protected val closeContext: CloseContext)
+    extends DbMigrations
     with NamedLogging {
 
   override protected def withDb[A](fn: Database => Either[DbMigrations.Error, A])(implicit
