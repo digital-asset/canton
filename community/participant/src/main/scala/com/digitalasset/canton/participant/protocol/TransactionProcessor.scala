@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, NonEmptyChain}
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.participant.state.v2.{ChangeId, SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton._
@@ -118,7 +118,9 @@ object TransactionProcessor {
   trait TransactionSubmissionError extends TransactionProcessorError with TransactionError {
     override def pretty: Pretty[TransactionSubmissionError] = {
       this.prettyOfString(_ =>
-        this.code.toMsg(cause, None) + "; " + CantonError.formatContextAsString(context)
+        this.code.toMsg(cause, None) + "; " + ContextualizedErrorLogger.formatContextAsString(
+          context
+        )
       )
     }
   }

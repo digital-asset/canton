@@ -19,7 +19,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 /** The task scheduler manages tasks with associated timestamps and sequencer counters.
   * Tasks may be inserted in any order; they will be executed nevertheless in the correct order
@@ -113,20 +113,22 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     *         if the `timestamp` or `sequencer counter` of the task is earlier
     *         than to where the task scheduler has already progressed
     */
-  def scheduleTask(task: Task)(implicit traceContext: TraceContext): Unit = lock.synchronized {
-    if (task.timestamp < latestPolledTimestamp.get) {
-      ErrorUtil.internalError(
-        new IllegalArgumentException(
-          s"Timestamp ${task.timestamp} of new task $task lies before current time $latestPolledTimestamp."
+  def scheduleTask(task: Task)(implicit traceContext: TraceContext): Unit = blocking {
+    lock.synchronized {
+      if (task.timestamp < latestPolledTimestamp.get) {
+        ErrorUtil.internalError(
+          new IllegalArgumentException(
+            s"Timestamp ${task.timestamp} of new task $task lies before current time $latestPolledTimestamp."
+          )
         )
+      }
+      ErrorUtil.requireArgument(
+        task.sequencerCounter >= sequencerCounterQueue.head,
+        s"Sequencer counter already processed; head is at ${sequencerCounterQueue.head}, task is ${task}",
       )
+      logger.trace(s"Adding task $task to the task scheduler.")
+      taskQueue.enqueue(Traced(task))
     }
-    ErrorUtil.requireArgument(
-      task.sequencerCounter >= sequencerCounterQueue.head,
-      s"Sequencer counter already processed; head is at ${sequencerCounterQueue.head}, task is ${task}",
-    )
-    logger.trace(s"Adding task $task to the task scheduler.")
-    taskQueue.enqueue(Traced(task))
   }
 
   /** Schedules a new barrier at the given timestamp.
@@ -134,12 +136,14 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     * @return A future that completes when all sequencer counters up to the given timestamp have been signalled.
     *         [[scala.None$]] if all sequencer counters up to the given timestamp have already been signalled.
     */
-  def scheduleBarrier(timestamp: CantonTimestamp): Option[Future[Unit]] = lock.synchronized {
-    if (latestPolledTimestamp.get >= timestamp) None
-    else {
-      val barrier = TaskScheduler.TimeBarrier(timestamp)
-      barrierQueue.enqueue(barrier)
-      Some(barrier.completion.future)
+  def scheduleBarrier(timestamp: CantonTimestamp): Option[Future[Unit]] = blocking {
+    lock.synchronized {
+      if (latestPolledTimestamp.get >= timestamp) None
+      else {
+        val barrier = TaskScheduler.TimeBarrier(timestamp)
+        barrierQueue.enqueue(barrier)
+        Some(barrier.completion.future)
+      }
     }
   }
 
@@ -169,7 +173,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     */
   def addTick(sequencerCounter: SequencerCounter, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Unit =
+  ): Unit = blocking {
     // We lock the whole method here because the priority queue and the peano queue are not thread-safe.
     // TODO (#1406): Avoid the coarse-grained locking.
     lock.synchronized {
@@ -232,6 +236,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
 
       performActionsAndCompleteBarriers()
     }
+  }
 
   /** The returned future completes after all tasks that can be currently performed have completed. Never fails. */
   @VisibleForTesting

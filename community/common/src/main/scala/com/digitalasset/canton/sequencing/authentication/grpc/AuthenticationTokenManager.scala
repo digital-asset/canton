@@ -17,7 +17,7 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 import io.grpc.Status
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success}
 
 case class AuthenticationTokenWithExpiry(token: AuthenticationToken, expiresAt: CantonTimestamp)
@@ -49,7 +49,7 @@ class AuthenticationTokenManager(
     * If there is no token it will cause a token refresh to start and be completed once obtained.
     * If there is a refresh already in progress it will be completed with this refresh.
     */
-  def getToken: EitherT[Future, Status, AuthenticationToken] = {
+  def getToken: EitherT[Future, Status, AuthenticationToken] = blocking {
     // updates must be synchronized, as we are triggering refreshes from here
     // and the AtomicReference.updateAndGet requires the update to be side-effect free
     synchronized {

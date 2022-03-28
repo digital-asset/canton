@@ -286,5 +286,6 @@ object Threading extends NoTracing {
   val maxThreadsProp = "scala.concurrent.context.maxThreads"
   val threadingProps = List(numThreadsProp, minThreadsProp, maxThreadsProp)
 
+  @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
   def sleep(millis: Long, nanos: Int = 0): Unit = blocking { Thread.sleep(millis, nanos) }
 }

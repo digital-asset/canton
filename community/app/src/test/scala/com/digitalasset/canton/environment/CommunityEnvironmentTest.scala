@@ -236,14 +236,6 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
 
         environment.domains.running.toSet shouldBe Set(d1, d2)
         environment.participants.running should contain.only(p1)
-
-        // pull down the environment
-        environment.close()
-
-        // check we tore down the started instances
-        verify(p1).close()
-        verify(d1).close()
-        verify(d2).close()
       }
     }
   }

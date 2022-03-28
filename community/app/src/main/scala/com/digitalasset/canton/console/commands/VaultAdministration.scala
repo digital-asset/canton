@@ -74,6 +74,19 @@ class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     }
   }
 
+  @Help.Summary("Rotate the HMAC secret")
+  @Help.Description(
+    """Replace the stored HMAC secret with a new generated secret of the given length.
+    
+      length: Length of the HMAC secret. Must be at least 128 bits, but less than the internal block size of the hash function.
+      |"""
+  )
+  def rotate_hmac_secret(length: Int = HmacSecret.defaultLength): Unit = {
+    consoleEnvironment.run {
+      adminCommand(VaultAdminCommands.RotateHmacSecret(length))
+    }
+  }
+
 }
 
 class LocalSecretKeyAdministration(
@@ -86,7 +99,7 @@ class LocalSecretKeyAdministration(
     import TraceContext.Implicits.Empty._
     implicit val loggingContext = ErrorLoggingContext.fromTracedLogger(runner.tracedLogger)
     consoleEnvironment.environment.config.parameters.timeouts.processing.default
-      .await()(eitherT.value) match {
+      .await(action)(eitherT.value) match {
       case Left(error) =>
         throw new IllegalArgumentException(s"Problem while $action. Error: $error")
       case Right(value) => value

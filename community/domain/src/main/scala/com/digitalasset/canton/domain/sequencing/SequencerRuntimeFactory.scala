@@ -17,7 +17,6 @@ import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   CommunitySequencerConfig,
   SequencerFactory,
-  SequencerWriterStoreFactory,
 }
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
@@ -87,7 +86,7 @@ object SequencerRuntimeFactory {
     ): SequencerRuntime =
       new SequencerRuntime(
         SequencerFactory
-          .database(sequencerConfig, SequencerWriterStoreFactory.singleInstance, loggerFactory),
+          .database(sequencerConfig, loggerFactory),
         staticDomainParameters,
         localParameters,
         domainConfig.timeTracker,

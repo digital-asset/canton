@@ -45,6 +45,12 @@ object W3CTraceContext {
     builder.build
   }
 
+  def fromHeaders(headers: Map[String, String]): Option[W3CTraceContext] =
+    W3CTraceContextBuilder(
+      headers.get(TRACEPARENT_HEADER_NAME),
+      headers.get(TRACESTATE_HEADER_NAME),
+    ).build
+
   private case class W3CTraceContextBuilder(
       parent: Option[String] = None,
       state: Option[String] = None,

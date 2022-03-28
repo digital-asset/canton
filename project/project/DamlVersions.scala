@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.1.0-snapshot.20220315.9543.0.0b5ad7a7"
+  val version: String = "2.1.0-snapshot.20220324.9615.0.467b8fbb"
 
   /** Custom Daml artifacts override version.
     */
@@ -22,4 +22,17 @@ object DamlVersions {
     * (needed to load the corresponding daml-libs dependencies when building packaged dars)
     */
   val daml_language_versions = Seq("1.14", "1.dev")
+
+  /** The version of the VMBC driver libraries in use.
+    */
+  val vmbc_driver_libraries_base_version: String = "2.1.0-snapshot.20220311.9514.0.ab6e085f-0.0"
+
+  /** Custom VMBC driver libraries override version.
+    */
+  val customVmbcDriverLibrariesVersion = "0.0.0-0.0"
+
+  val vmbc_driver_libraries_version: String =
+    if (!sys.env.contains("VMBC_DRIVER_LIBRARIES_SNAPSHOT")) vmbc_driver_libraries_base_version
+    else customVmbcDriverLibrariesVersion
+
 }

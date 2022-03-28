@@ -27,7 +27,7 @@ import com.digitalasset.canton.util.ShowUtil._
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait ParticipantTopologyManagerObserver {
   def addedNewTransactions(
@@ -58,9 +58,9 @@ class ParticipantTopologyManager(
     )(ec) {
 
   private val observers = mutable.ListBuffer[ParticipantTopologyManagerObserver]()
-  def addObserver(observer: ParticipantTopologyManagerObserver): Unit = synchronized {
+  def addObserver(observer: ParticipantTopologyManagerObserver): Unit = blocking(synchronized {
     val _ = observers += observer
-  }
+  })
 
   private val postInitCallbacks = new AtomicReference[Option[PostInitCallbacks]](None)
   def setPostInitCallbacks(callbacks: PostInitCallbacks): Unit =
@@ -95,7 +95,7 @@ class ParticipantTopologyManager(
       timestamp: CantonTimestamp,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    observers.toList
+    blocking(synchronized(observers.toList))
       .traverse(_.addedNewTransactions(timestamp, transactions))
       .map(_ => ())
       .onShutdown(())

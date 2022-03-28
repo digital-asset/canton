@@ -4,6 +4,7 @@ object Dependencies {
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
   val daml_language_versions = metabuild.BuildInfo.daml_language_versions
   val daml_compiler_version = metabuild.BuildInfo.daml_compiler_version
+  val vmbc_driver_libraries_version = metabuild.BuildInfo.vmbc_driver_libraries_version
 
   lazy val osClassifier: String =
     if (sys.props("os.name").contains("Mac")) "osx" else sys.props("os.name").toLowerCase
@@ -55,6 +56,12 @@ object Dependencies {
   lazy val scalapb_runtime_grpc =
     "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion
 
+  lazy val daml_test_evidence_tag =
+    "com.daml" %% "test-evidence-tag" % daml_libraries_version
+  lazy val daml_test_evidence_scalatest =
+    "com.daml" %% "test-evidence-scalatest" % daml_libraries_version
+  lazy val daml_test_evidence_generator_scalatest =
+    "com.daml" %% "test-evidence-generator" % daml_libraries_version
   lazy val daml_lf_dev_archive_java_proto =
     "com.daml" % "daml-lf-dev-archive-java-proto" % daml_libraries_version
   lazy val daml_lf_archive_reader = "com.daml" %% "daml-lf-archive-reader" % daml_libraries_version
@@ -208,6 +215,14 @@ object Dependencies {
   lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.4"
 
   lazy val web3j = "org.web3j" % "core" % "4.8.9"
+
+  // From digitalasset.jfrog.io
+  lazy val vmbc_protos =
+    "com.digitalasset.daml.driver.vmbc" % "vmbc-grpc" % vmbc_driver_libraries_version
+
+  // From digitalasset.jfrog.io
+  lazy val vmbc_sequencer_protos =
+    "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

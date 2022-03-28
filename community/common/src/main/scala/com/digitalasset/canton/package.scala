@@ -4,7 +4,7 @@
 package com.digitalasset
 
 import com.daml.ledger.configuration
-import com.daml.lf.command
+import com.daml.lf.command.ReplayCommand
 import com.daml.lf.data.{IdString, Ref, Time}
 import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
@@ -62,25 +62,26 @@ package object canton {
   val LfVersioned: Versioned.type = Versioned
 
   // Lf commands for use by lf engine.reinterpret
-  type LfCommand = command.Command
+  type LfCommand = ReplayCommand
+  val LfCommand: ReplayCommand.type = ReplayCommand
 
-  type LfCreateCommand = command.CreateCommand
-  val LfCreateCommand: command.CreateCommand.type = command.CreateCommand
+  type LfCreateCommand = LfCommand.CreateByTemplate
+  val LfCreateCommand: LfCommand.CreateByTemplate.type = LfCommand.CreateByTemplate
 
-  type LfExerciseCommand = command.ExerciseCommand
-  val LfExerciseCommand: command.ExerciseCommand.type = command.ExerciseCommand
+  type LfExerciseCommand = LfCommand.ExerciseTemplate
+  val LfExerciseCommand: LfCommand.ExerciseTemplate.type = LfCommand.ExerciseTemplate
 
-  type LfExerciseByKeyCommand = command.ExerciseByKeyCommand
-  val LfExerciseByKeyCommand: command.ExerciseByKeyCommand.type = command.ExerciseByKeyCommand
+  type LfExerciseByKeyCommand = LfCommand.ExerciseTemplateByKey
+  val LfExerciseByKeyCommand: LfCommand.ExerciseTemplateByKey.type = LfCommand.ExerciseTemplateByKey
 
-  type LfFetchCommand = command.FetchCommand
-  val LfFetchCommand: command.FetchCommand.type = command.FetchCommand
+  type LfFetchCommand = LfCommand.FetchTemplate
+  val LfFetchCommand: LfCommand.FetchTemplate.type = LfCommand.FetchTemplate
 
-  type LfFetchByKeyCommand = command.FetchByKeyCommand
-  val LfFetchByKeyCommand: command.FetchByKeyCommand.type = command.FetchByKeyCommand
+  type LfFetchByKeyCommand = LfCommand.FetchTemplateByKey
+  val LfFetchByKeyCommand: LfCommand.FetchTemplateByKey.type = LfCommand.FetchTemplateByKey
 
-  type LfLookupByKeyCommand = command.LookupByKeyCommand
-  val LfLookupByKeyCommand: command.LookupByKeyCommand.type = command.LookupByKeyCommand
+  type LfLookupByKeyCommand = LfCommand.LookupTemplateByKey
+  val LfLookupByKeyCommand: LfCommand.LookupTemplateByKey.type = LfCommand.LookupTemplateByKey
 
   /** The counter assigned by the sequencer to messages sent to the participant.
     * The counter is specific to every participant.

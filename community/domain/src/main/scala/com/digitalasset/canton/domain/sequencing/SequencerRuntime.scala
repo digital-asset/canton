@@ -40,7 +40,7 @@ import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
@@ -63,10 +63,10 @@ import com.digitalasset.canton.time.{
   DomainTimeTrackerConfig,
   NonNegativeFiniteDuration,
 }
-import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
@@ -115,6 +115,7 @@ class SequencerRuntime(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer, actorSystem: ActorSystem)
     extends FlagCloseable
+    with HasCloseContext
     with NamedLogging {
 
   override protected def timeouts: ProcessingTimeout = localNodeParameters.processingTimeouts
@@ -292,7 +293,7 @@ class SequencerRuntime(
     val authenticationService = new MemberAuthenticationService(
       domainId,
       syncCrypto,
-      MemberAuthenticationStore(storage, timeouts, loggerFactory),
+      MemberAuthenticationStore(storage, timeouts, loggerFactory, closeContext),
       authenticationConfig.agreementManager,
       clock,
       authenticationConfig.nonceExpirationTime.unwrap,
@@ -303,6 +304,7 @@ class SequencerRuntime(
       // can still re-subscribe with the token just before we removed it
       Traced.lift(sequencerService.disconnectMember(_)(_)),
       isTopologyInitializedF,
+      localNodeParameters.processingTimeouts,
       loggerFactory,
       auditLogger,
     )

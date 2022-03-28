@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{Executor, TimeUnit}
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.mutable
-import scala.concurrent.{Await, ExecutionContextExecutor}
+import scala.concurrent.{Await, ExecutionContextExecutor, blocking}
 import scala.util.{Failure, Success, Try}
 
 sealed trait Step
@@ -306,13 +306,13 @@ class ParticipantTab(
             )
             event.event.archived.foreach(ae =>
               Platform.runLater {
-                txdata.synchronized {
+                blocking(txdata.synchronized {
                   val idx = txdata.indexWhere(x => x.cIdO == ae.contractId)
                   if (idx > -1) {
                     val item = txdata.get(idx)
                     txdata.update(idx, item.copy(activeO = false))
                   }
-                }
+                })
               }
             )
           })

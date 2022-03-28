@@ -5,6 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import java.util.concurrent.atomic.AtomicReference
 import cats.syntax.either._
+import cats.syntax.option._
 import cats.syntax.traverseFilter._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DiscardOps
@@ -216,8 +217,8 @@ class TopologyAdministrationGroup(
                    TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
         operation: Optionally, what type of operation the transaction should have. State store only has "Add".
         filterSigningKey: Filter for transactions that are authorized with a key that starts with the given filter string.
-
         filterNamespace: Filter for namespaces starting with the given filter string.
+        filterTargetKey: Filter for namespaces delegations for the given target key.
         """)
     def list(
         filterStore: String = "",
@@ -226,8 +227,9 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = None,
         filterNamespace: String = "",
         filterSigningKey: String = "",
-    ): Seq[ListNamespaceDelegationResult] =
-      consoleEnvironment.run {
+        filterTargetKey: Option[Fingerprint] = None,
+    ): Seq[ListNamespaceDelegationResult] = {
+      val delegations = consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Read.ListNamespaceDelegation(
             BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
@@ -236,6 +238,13 @@ class TopologyAdministrationGroup(
         )
       }
 
+      // TODO(i6300): Move authorization key filtering to the server side
+      filterTargetKey
+        .map { targetKey =>
+          delegations.filter(_.item.target.fingerprint == targetKey)
+        }
+        .getOrElse(delegations)
+    }
   }
 
   @Help.Summary("Manage identifier delegations")
@@ -290,8 +299,9 @@ class TopologyAdministrationGroup(
         operation: Option[TopologyChangeOp] = None,
         filterUid: String = "",
         filterSigningKey: String = "",
-    ): Seq[ListIdentifierDelegationResult] =
-      consoleEnvironment.run {
+        filterTargetKey: Option[Fingerprint] = None,
+    ): Seq[ListIdentifierDelegationResult] = {
+      val delegations = consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Read.ListIdentifierDelegation(
             BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey),
@@ -299,6 +309,14 @@ class TopologyAdministrationGroup(
           )
         )
       }
+
+      // TODO(i6300): Move authorization key filtering to the server side
+      filterTargetKey
+        .map { targetKey =>
+          delegations.filter(_.item.target.fingerprint == targetKey)
+        }
+        .getOrElse(delegations)
+    }
 
   }
 
@@ -520,6 +538,7 @@ class TopologyAdministrationGroup(
                    TimeQuery.Snapshot(ts): The state at a certain point in time.
                    TimeQuery.Range(fromO, toO): Time-range of when the transaction was added to the store
         operation: Optionally, what type of operation the transaction should have. State store only has "Add".
+        filterAuthorizedKey: Filter the topology transactions by the key that has authorized the transactions.
         |"""
     )
     def list(
@@ -527,12 +546,226 @@ class TopologyAdministrationGroup(
         useStateStore: Boolean = true,
         timeQuery: TimeQuery = TimeQuery.HeadState,
         operation: Option[TopologyChangeOp] = None,
-    ): StoredTopologyTransactions[TopologyChangeOp] = consoleEnvironment.run {
-      adminCommand(
-        TopologyAdminCommands.Read.ListAll(
-          BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey = "")
-        )
-      )
+        filterAuthorizedKey: Option[Fingerprint] = None,
+    ): StoredTopologyTransactions[TopologyChangeOp] = {
+      val storedTransactions = consoleEnvironment
+        .run {
+          adminCommand(
+            TopologyAdminCommands.Read.ListAll(
+              BaseQuery(filterStore, useStateStore, timeQuery, operation, filterSigningKey = "")
+            )
+          )
+        }
+
+      // TODO(i6300): Move authorization key filtering to the server side
+      filterAuthorizedKey
+        .map { authKey =>
+          val filteredResult =
+            storedTransactions.result.filter(_.transaction.key.fingerprint == authKey)
+          storedTransactions.copy(result = filteredResult)
+        }
+        .getOrElse(storedTransactions)
+    }
+
+    @Help.Summary(
+      "Renew all topology transactions that have been authorized with a previous key using a new key"
+    )
+    @Help.Description(
+      """Finds all topology transactions that have been authorized by `filterAuthorizedKey` and renews those topology transactions
+      |by authorizing them with the new key `authorizeWith`.
+
+        filterAuthorizedKey: Filter the topology transactions by the key that has authorized the transactions.
+        authorizeWith: The key to authorize the renewed topology transactions.
+        |"""
+    )
+    def renew(
+        filterAuthorizedKey: Fingerprint,
+        authorizeWith: Fingerprint,
+    ): Unit = {
+
+      // First we check that the new key has at least the same permissions as the previous key in terms of namespace
+      // delegations and identifier delegations.
+
+      // The namespaces and identifiers that the old key can operate on
+      val oldKeyNamespaces = namespace_delegations
+        .list(filterStore = AuthorizedStore.filterName, filterTargetKey = filterAuthorizedKey.some)
+        .map(_.item.namespace)
+      val oldKeyIdentifiers = identifier_delegations
+        .list(filterStore = AuthorizedStore.filterName, filterTargetKey = filterAuthorizedKey.some)
+        .map(_.item.identifier)
+
+      // The namespaces and identifiers that the new key can operate on
+      val newKeyNamespaces = namespace_delegations
+        .list(filterStore = AuthorizedStore.filterName, filterTargetKey = authorizeWith.some)
+        .map(_.item.namespace)
+        .toSet
+      val newKeyIdentifiers = identifier_delegations
+        .list(filterStore = AuthorizedStore.filterName, filterTargetKey = authorizeWith.some)
+        .map(_.item.identifier)
+        .toSet
+
+      oldKeyNamespaces.foreach { ns =>
+        if (!newKeyNamespaces.contains(ns))
+          throw new IllegalArgumentException(
+            s"The new key is not authorized for namespace $ns"
+          )
+      }
+
+      oldKeyIdentifiers.foreach { uid =>
+        if (!newKeyIdentifiers.contains(uid) && !newKeyNamespaces.contains(uid.namespace))
+          throw new IllegalArgumentException(
+            s"The new key is not authorized for the identifier $uid nor the namespace of the identifier ${uid.namespace}"
+          )
+      }
+
+      val existingTxs = list(filterAuthorizedKey = Some(filterAuthorizedKey))
+
+      // TODO(i6300): Move renewal to the server side
+      existingTxs.result
+        .foreach { storedTx =>
+          storedTx.transaction.transaction match {
+            case TopologyStateUpdate(
+                  TopologyChangeOp.Add,
+                  TopologyStateUpdateElement(_id, update),
+                ) =>
+              update match {
+                case NamespaceDelegation(namespace, target, isRootDelegation) =>
+                  def renewNamespaceDelegations(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    namespace_delegations
+                      .authorize(
+                        op,
+                        namespace.fingerprint,
+                        target.fingerprint,
+                        isRootDelegation,
+                        key.some,
+                      )
+                      .discard
+
+                  renewNamespaceDelegations(TopologyChangeOp.Add, authorizeWith)
+                  renewNamespaceDelegations(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case IdentifierDelegation(identifier, target) =>
+                  def renewIdentifierDelegation(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    identifier_delegations
+                      .authorize(
+                        op,
+                        identifier,
+                        target.fingerprint,
+                        key.some,
+                      )
+                      .discard
+
+                  renewIdentifierDelegation(TopologyChangeOp.Add, authorizeWith)
+                  renewIdentifierDelegation(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case OwnerToKeyMapping(owner, key) =>
+                  def renewOwnerToKeyMapping(op: TopologyChangeOp, nsKey: Fingerprint): Unit =
+                    owner_to_key_mappings
+                      .authorize(
+                        op,
+                        owner,
+                        key.fingerprint,
+                        key.purpose,
+                        nsKey.some,
+                      )
+                      .discard
+
+                  renewOwnerToKeyMapping(TopologyChangeOp.Add, authorizeWith)
+                  renewOwnerToKeyMapping(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case signedClaim: SignedLegalIdentityClaim =>
+                  def renewSignedClaim(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    legal_identities
+                      .authorize(
+                        op,
+                        signedClaim,
+                        key.some,
+                      )
+                      .discard
+
+                  renewSignedClaim(TopologyChangeOp.Add, authorizeWith)
+                  renewSignedClaim(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case ParticipantState(side, domain, participant, permission, trustLevel) =>
+                  def renewParticipantState(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    participant_domain_states
+                      .authorize(
+                        op,
+                        domain,
+                        participant,
+                        side,
+                        permission,
+                        trustLevel,
+                        key.some,
+                      )
+                      .discard
+
+                  renewParticipantState(TopologyChangeOp.Add, authorizeWith)
+                  renewParticipantState(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case MediatorDomainState(side, domain, mediator) =>
+                  def renewMediatorState(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    mediator_domain_states
+                      .authorize(
+                        op,
+                        domain,
+                        mediator,
+                        side,
+                        key.some,
+                      )
+                      .discard
+
+                  renewMediatorState(TopologyChangeOp.Add, authorizeWith)
+                  renewMediatorState(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case PartyToParticipant(side, party, participant, permission) =>
+                  def renewPartyToParticipant(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    party_to_participant_mappings
+                      .authorize(
+                        op,
+                        party,
+                        participant,
+                        side,
+                        permission,
+                        key.some,
+                      )
+                      .discard
+
+                  renewPartyToParticipant(TopologyChangeOp.Add, authorizeWith)
+                  renewPartyToParticipant(TopologyChangeOp.Remove, filterAuthorizedKey)
+
+                case VettedPackages(participant, packageIds) =>
+                  def renewVettedPackages(op: TopologyChangeOp, key: Fingerprint): Unit =
+                    vetted_packages
+                      .authorize(
+                        op,
+                        participant,
+                        packageIds,
+                        key.some,
+                      )
+                      .discard
+
+                  renewVettedPackages(TopologyChangeOp.Add, authorizeWith)
+                  renewVettedPackages(TopologyChangeOp.Remove, filterAuthorizedKey)
+              }
+
+            case TopologyStateUpdate(TopologyChangeOp.Remove, _element) =>
+              // We don't have to renew removed topology transactions
+              ()
+
+            case DomainGovernanceTransaction(element) =>
+              element.mapping match {
+                case DomainParametersChange(domainId, domainParameters) =>
+                  domain_parameters_changes.authorize(
+                    domainId,
+                    domainParameters,
+                    authorizeWith.some,
+                  )
+              }
+          }
+
+        }
+
     }
   }
 

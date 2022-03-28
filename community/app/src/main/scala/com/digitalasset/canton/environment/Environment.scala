@@ -38,7 +38,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.Await
+import scala.concurrent.{Await, blocking}
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
@@ -77,7 +77,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     Threading.newExecutionContext(loggerFactory.threadName + "-env-execution-context", logger)
 
   private val deadlockConfig = config.monitoring.deadlockDetection
-  private def timeouts: ProcessingTimeout = config.parameters.timeouts.processing
+  protected def timeouts: ProcessingTimeout = config.parameters.timeouts.processing
 
   protected val futureSupervisor =
     if (config.monitoring.logSlowFutures)
@@ -164,6 +164,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     new DomainNodes(
       createDomain,
       migrationsFactory,
+      timeouts,
       config.domainsByString,
       config.domainNodeParametersByString,
       loggerFactory,
@@ -172,6 +173,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
     new ParticipantNodes(
       createParticipant,
       migrationsFactory,
+      timeouts,
       config.participantsByString,
       config.participantNodeParametersByString,
       loggerFactory,
@@ -204,7 +206,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       configs.traverse_ { config =>
         val connectET =
           node.autoConnectLocalDomain(config).leftMap(err => StartFailed(name, err.toString))
-        this.config.parameters.timeouts.processing.unbounded.await()(connectET.value)
+        this.config.parameters.timeouts.processing.unbounded
+          .await("auto-connect to local domain")(connectET.value)
       }
     logger.info(s"Auto-connecting local participants ${connectParticipants
       .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
@@ -358,7 +361,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
   def addUserCloseable(closeable: AutoCloseable): Unit = userCloseables.append(closeable)
 
-  override def close(): Unit = this.synchronized {
+  override def close(): Unit = blocking(this.synchronized {
     val closeActorSystem: AutoCloseable =
       Lifecycle.toCloseableActorSystem(actorSystem, logger, timeouts)
 
@@ -373,7 +376,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       monitorO.toList ++ userCloseables ++ allNodes.reverse :+ metricsFactory :+ clock :+ closeHealthServer :+
         executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+ closeScheduler
     Lifecycle.close((instances.toSeq): _*)(logger)
-  }
+  })
 }
 
 object Environment {

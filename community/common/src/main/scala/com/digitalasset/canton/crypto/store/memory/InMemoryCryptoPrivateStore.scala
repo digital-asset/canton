@@ -86,12 +86,7 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
   override protected def writeHmacSecret(
       hmacSecret: HmacSecret
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit] = {
-    EitherT
-      .cond(
-        storedHmacSecret.compareAndSet(None, Some(hmacSecret)),
-        (),
-        CryptoPrivateStoreError.HmacSecretAlreadyExists,
-      )
+    EitherT.rightT(storedHmacSecret.set(Some(hmacSecret)))
   }
 
   override private[store] def listSigningKeys(implicit

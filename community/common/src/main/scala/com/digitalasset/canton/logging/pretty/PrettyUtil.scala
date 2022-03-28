@@ -7,6 +7,7 @@ import cats.syntax.functorFilter._
 import com.digitalasset.canton.logging.pretty.Pretty
 import pprint.{Tree, Walker}
 
+import scala.annotation.tailrec
 import scala.reflect.ClassTag
 
 /** Utility methods for constructing [[Pretty]] instances.
@@ -18,7 +19,26 @@ trait PrettyUtil {
   /** A tree representing the type name and parameter trees.
     */
   def prettyOfClass[T](getParamTrees: (T => Option[Tree])*): Pretty[T] =
-    inst => Tree.Apply(inst.getClass.getSimpleName, getParamTrees.mapFilter(_(inst)).iterator)
+    inst => {
+      // getSimpleName on an anonymous class returns an empty string
+      // so we search for the first non-anonymous superclass.
+      //
+      // To guard against the possibility that the direct superclass of an anonymous
+      // class is again anonymous (not sure whether this can happen in Scala)
+      // we go up in the hierarchy until we find a non-anonymous class.
+      @tailrec
+      def firstNonAnonmymousSuperclass(clazz: Class[_]): Class[_] =
+        if (clazz.isAnonymousClass) {
+          // The superclass cannot be `null` as neither java.lang.Object
+          // nor Java interfaces nor primitive types nor void are anonymous classes.
+          firstNonAnonmymousSuperclass(clazz.getSuperclass)
+        } else clazz
+
+      val simpleName =
+        if (inst == null) "Null" else firstNonAnonmymousSuperclass(inst.getClass).getSimpleName
+
+      Tree.Apply(simpleName, getParamTrees.mapFilter(_(inst)).iterator)
+    }
 
   /** A tree presenting the type name only. (E.g., for case objects.)
     */

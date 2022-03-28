@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 class TimedLoadGauge(interval: FiniteDuration, timer: Timer) extends LoadGauge(interval) {
 
@@ -53,7 +53,7 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
 
   record(false)
 
-  private def record(loaded: Boolean): Unit = synchronized {
+  private def record(loaded: Boolean): Unit = blocking(synchronized {
     val count = if (loaded) {
       eventCount.getAndIncrement()
     } else {
@@ -63,7 +63,7 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
       measure.append((loaded, now))
     }
     cleanup(now)
-  }
+  })
 
   def event[T](fut: => Future[T])(implicit ec: ExecutionContext): Future[T] = {
     record(true)
@@ -98,7 +98,7 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
     def computeLoad(lastLoaded: Boolean, lastTs: Long, ts: Long): Long =
       if (lastLoaded) ts - lastTs else 0
 
-    synchronized {
+    blocking(synchronized {
       cleanup(endTs)
       // We know that t0 <= t1 <= ... <= tn <= endTs and
       // startTs < t1, if t1 exists.
@@ -119,7 +119,7 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
       load += computeLoad(lastLoaded, lastTs, endTs)
 
       load.toDouble / intervalNanos
-    }
+    })
   }
 }
 

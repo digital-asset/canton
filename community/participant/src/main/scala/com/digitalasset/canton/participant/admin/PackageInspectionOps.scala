@@ -18,6 +18,10 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
 }
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
+import com.digitalasset.canton.participant.topology.{
+  ParticipantTopologyManager,
+  ParticipantTopologyManagerError,
+}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.{
@@ -27,19 +31,33 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.store.{TopologyStoreFactory, TopologyStoreId}
+import com.digitalasset.canton.topology.transaction.{
+  TopologyChangeOp,
+  TopologyTransaction,
+  VettedPackages,
+}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{LfPackageId, participant}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 trait PackageInspectionOps extends NamedLogging {
 
-  def packageVetted(pkg: PackageId)(implicit
+  def packageVetted(packageId: PackageId)(implicit
       tc: TraceContext
   ): EitherT[Future, PackageVetted, Unit]
 
   def packageUnused(packageId: PackageId)(implicit
       tc: TraceContext
   ): EitherT[Future, PackageInUse, Unit]
+
+  def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, Unit]
+
+  def genRevokePackagesTx(packages: List[LfPackageId])(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, TopologyTransaction[TopologyChangeOp]]
 
 }
 
@@ -50,6 +68,7 @@ class PackageInspectionOpsImpl(
     stateManager: SyncDomainPersistentStateManager,
     syncCryptoApiProvider: SyncCryptoApiProvider,
     timeouts: ProcessingTimeout,
+    topologyManager: ParticipantTopologyManager,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends PackageInspectionOps {
@@ -144,5 +163,26 @@ class PackageInspectionOpsImpl(
         )
 
       }
+  }
+
+  override def runTx(tx: TopologyTransaction[TopologyChangeOp], force: Boolean)(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+    for {
+      _signedTx <- topologyManager.authorize(tx, signingKey = None, force)
+    } yield ()
+  }
+
+  override def genRevokePackagesTx(packages: List[LfPackageId])(implicit
+      tc: TraceContext
+  ): EitherT[Future, ParticipantTopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
+    val op = TopologyChangeOp.Remove
+    val mapping = VettedPackages(participantId, packages)
+    topologyManager
+      .genTransaction(op, mapping)
+      .leftMap(err =>
+        participant.topology.ParticipantTopologyManagerError
+          .IdentityManagerParentError(err)
+      )
   }
 }

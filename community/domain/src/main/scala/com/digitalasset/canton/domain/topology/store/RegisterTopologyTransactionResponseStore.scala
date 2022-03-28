@@ -23,7 +23,7 @@ import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait RegisterTopologyTransactionResponseStore extends AutoCloseable {
   def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
@@ -91,13 +91,14 @@ class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionCon
 
   override def completeResponse(
       requestId: TopologyRequestId
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = blocking {
     synchronized {
       responseMap
         .get(requestId)
         .foreach(response => responseMap.put(requestId, response.copy(isCompleted = true)))
       Future.unit
     }
+  }
 
   override def getResponse(requestId: TopologyRequestId)(implicit
       traceContext: TraceContext

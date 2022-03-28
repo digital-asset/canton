@@ -54,12 +54,8 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     )("building crypto")
 
     val sequencer =
-      new DatabaseSequencer(
-        SequencerWriterStoreFactory.singleInstance,
+      DatabaseSequencer.single(
         CommunitySequencerConfig.Database(),
-        TotalNodeCountValues.SingleSequencerTotalNodeCount,
-        None,
-        OnlineSequencerCheckConfig(),
         DefaultProcessingTimeouts.testing,
         new MemoryStorage(),
         clock,

@@ -21,7 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import scala.annotation.nowarn
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** Simple callback trait to inform system about changes on the topology manager
   */
@@ -110,12 +110,12 @@ class DomainTopologyManager(
   val managerId = DomainTopologyManagerId(id)
 
   private val observers = mutable.ListBuffer[DomainIdentityStateObserver]()
-  def addObserver(observer: DomainIdentityStateObserver): Unit = synchronized {
+  def addObserver(observer: DomainIdentityStateObserver): Unit = blocking(synchronized {
     val _ = observers += observer
-  }
+  })
 
   private def sendToObservers(action: DomainIdentityStateObserver => Unit): Unit =
-    observers.foreach(action)
+    blocking(synchronized(observers.foreach(action)))
 
   override protected def notifyObservers(
       timestamp: CantonTimestamp,

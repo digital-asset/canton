@@ -15,7 +15,7 @@ addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
 
-addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.0")
+addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.6")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.8"
 
 // Required to for packaging into a tarball and zip archive
@@ -43,3 +43,6 @@ libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"
 addDependencyTreePlugin
 
 addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.2.16")
+
+// Allows using some convenient Cats syntax in build files
+libraryDependencies += "org.typelevel" %% "cats-core" % "2.6.1"

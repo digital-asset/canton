@@ -10,6 +10,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import java.io.{File, RandomAccessFile}
 import java.nio.channels.OverlappingFileLockException
+import scala.concurrent.blocking
 import scala.util.control.NonFatal
 
 trait AmmoniteCacheLock {
@@ -86,7 +87,7 @@ object AmmoniteCacheLock {
 
   private def acquireLock(logger: TracedLogger, path: os.Path, isRepl: Boolean)(implicit
       traceContext: TraceContext
-  ): Either[Throwable, Option[AmmoniteCacheLock]] = synchronized {
+  ): Either[Throwable, Option[AmmoniteCacheLock]] = blocking(synchronized {
     try {
       val myLockFile = path / "lock"
       if (myLockFile.toIO.exists()) {
@@ -129,6 +130,6 @@ object AmmoniteCacheLock {
       case e: OverlappingFileLockException => Right(None)
       case NonFatal(e) => Left(e)
     }
-  }
+  })
 
 }

@@ -117,228 +117,233 @@ case class Cli(
 }
 
 object Cli {
-  def parse(args: Array[String]): Option[Cli] = parser.parse(args, Cli())
+  // The `additionalVersions` parameter allows the enterprise CLI to output the version of additional,
+  // enterprise-only dependencies (see `CantonAppDriver`).
+  def parse(args: Array[String], additionalVersions: Map[String, String] = Map.empty): Option[Cli] =
+    parser(additionalVersions).parse(args, Cli())
 
-  private val parser: OptionParser[Cli] = new scopt.OptionParser[Cli]("canton") {
+  private def parser(additionalVersions: Map[String, String]): OptionParser[Cli] =
+    new scopt.OptionParser[Cli]("canton") {
 
-    private def inColumns(first: String = "", second: String = ""): String =
-      f"  $first%-25s$second"
+      private def inColumns(first: String = "", second: String = ""): String =
+        f"  $first%-25s$second"
 
-    head("Canton", s"v${BuildInfo.version}")
+      head("Canton", s"v${BuildInfo.version}")
 
-    help('h', "help").text("Print usage")
-    opt[Unit]("version").text("Print versions").action { (_, _) =>
-      Map(
-        "Canton" -> BuildInfo.version,
-        "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
-        "Canton protocol" -> BuildInfo.protocolVersion,
-      ) foreach { case (name, version) =>
-        Console.out.println(s"$name: $version")
-      }
-      sys.exit(0)
-    }
-
-    opt[Seq[File]]('c', "config")
-      .text(
-        "Set configuration file(s).\n" +
-          inColumns(second = "If several configuration files assign values to the same key,\n") +
-          inColumns(second = "the last value is taken.")
-      )
-      .valueName("<file1>,<file2>,...")
-      .unbounded()
-      .action((files, cli) => cli.copy(configFiles = cli.configFiles ++ files))
-
-    opt[Map[String, String]]('C', "config key-value's")
-      .text(
-        "Set configuration key value pairs directly.\n" +
-          inColumns(second = "Can be useful for providing simple short config info.")
-      )
-      .valueName("<key1>=<value1>,<key2>=<value2>")
-      .unbounded()
-      .action { (map, cli) =>
-        cli.copy(configMap =
-          map ++ cli.configMap
-        ) // the values on the right of the ++ operator are preferred for the same key. thus in case of repeated keys, the first defined is taken.
-      }
-
-    opt[File]("bootstrap")
-      .text("Set a script to run on startup")
-      .valueName("<file>")
-      .action((script, cli) => cli.copy(bootstrapScriptPath = Some(script)))
-
-    opt[Unit]("no-tty")
-      .text("Do not use a tty")
-      .action((_, cli) => cli.copy(noTty = true))
-
-    opt[Unit]("manual-start")
-      .text("Don't automatically start the nodes")
-      .action((_, cli) => cli.copy(manualStart = true))
-
-    opt[Unit]("auto-connect-local")
-      .text("Automatically connect all local participants to all local domains")
-      .action((_, cli) => cli.copy(autoConnectLocal = true))
-
-    note(inColumns(first = "-D<property>=<value>", second = "Set a JVM property value"))
-
-    note("\nLogging Options:") // Enforce a newline in the help text
-
-    opt[Unit]('v', "verbose")
-      .text("Canton logger level -> DEBUG")
-      .action((_, cli) => cli.copy(levelCanton = Some(Level.DEBUG)))
-
-    opt[Unit]("debug")
-      .text("Console/stdout level -> INFO, root logger -> DEBUG")
-      .action((_, cli) =>
-        cli.copy(
-          levelRoot = Some(Level.DEBUG),
-          levelCanton = Some(Level.DEBUG),
-          levelStdout = Level.INFO,
-        )
-      )
-
-    opt[Unit]("log-truncate")
-      .text("Truncate log file on startup.")
-      .action((_, cli) => cli.copy(logTruncate = true))
-
-    implicit val levelRead: scopt.Read[Level] = scopt.Read.reads(Level.valueOf)
-    opt[Level]("log-level-root")
-      .text("Log-level of the root logger")
-      .valueName("<LEVEL>")
-      .action((level, cli) => cli.copy(levelRoot = Some(level), levelCanton = Some(level)))
-
-    opt[Level]("log-level-canton")
-      .text("Log-level of the Canton logger")
-      .valueName("<LEVEL>")
-      .action((level, cli) => cli.copy(levelCanton = Some(level)))
-
-    opt[Level]("log-level-stdout")
-      .text("Log-level of stdout")
-      .valueName("<LEVEL>")
-      .action((level, cli) => cli.copy(levelStdout = level))
-
-    opt[String]("log-file-appender")
-      .text("Type of log file appender")
-      .valueName("rolling(default)|flat|off>")
-      .action((typ, cli) =>
-        typ.toLowerCase match {
-          case "rolling" => cli.copy(logFileAppender = LogFileAppender.Rolling)
-          case "off" => cli.copy(logFileAppender = LogFileAppender.Off)
-          case "flat" => cli.copy(logFileAppender = LogFileAppender.Flat)
-          case _ =>
-            throw new IllegalArgumentException(
-              s"Invalid command line argument: unknown log-file-appender $typ"
-            )
+      help('h', "help").text("Print usage")
+      opt[Unit]("version").text("Print versions").action { (_, _) =>
+        (Map(
+          "Canton" -> BuildInfo.version,
+          "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
+          "Canton protocol" -> BuildInfo.protocolVersion,
+        ) ++ additionalVersions) foreach { case (name, version) =>
+          Console.out.println(s"$name: $version")
         }
-      )
-
-    opt[String]("log-file-name")
-      .text("Name and location of log-file, default is log/canton.log")
-      .action((name, cli) => cli.copy(logFileName = Some(name)))
-
-    opt[Int]("log-file-rolling-history")
-      .text("Number of history files to keep when using rolling log file appender.")
-      .action((history, cli) => cli.copy(logFileHistory = Some(history)))
-
-    opt[String]("log-file-rolling-pattern")
-      .text("Log file suffix pattern of rolling file appender. Default is 'yyyy-MM-dd'.")
-      .action((pattern, cli) => cli.copy(logFileRollingPattern = Some(pattern)))
-
-    opt[String]("log-encoder")
-      .text("Log encoder: plain|json")
-      .action {
-        case ("json", cli) => cli.copy(logEncoder = LogEncoder.Json)
-        case ("plain", cli) => cli.copy(logEncoder = LogEncoder.Plain)
-        case (other, _) => throw new IllegalArgumentException(s"Unsupported logging encoder $other")
+        sys.exit(0)
       }
 
-    opt[Boolean]("log-immediate-flush")
-      .text(
-        """Determines whether to immediately flush log output to the log file.
+      opt[Seq[File]]('c', "config")
+        .text(
+          "Set configuration file(s).\n" +
+            inColumns(second = "If several configuration files assign values to the same key,\n") +
+            inColumns(second = "the last value is taken.")
+        )
+        .valueName("<file1>,<file2>,...")
+        .unbounded()
+        .action((files, cli) => cli.copy(configFiles = cli.configFiles ++ files))
+
+      opt[Map[String, String]]('C', "config key-value's")
+        .text(
+          "Set configuration key value pairs directly.\n" +
+            inColumns(second = "Can be useful for providing simple short config info.")
+        )
+        .valueName("<key1>=<value1>,<key2>=<value2>")
+        .unbounded()
+        .action { (map, cli) =>
+          cli.copy(configMap =
+            map ++ cli.configMap
+          ) // the values on the right of the ++ operator are preferred for the same key. thus in case of repeated keys, the first defined is taken.
+        }
+
+      opt[File]("bootstrap")
+        .text("Set a script to run on startup")
+        .valueName("<file>")
+        .action((script, cli) => cli.copy(bootstrapScriptPath = Some(script)))
+
+      opt[Unit]("no-tty")
+        .text("Do not use a tty")
+        .action((_, cli) => cli.copy(noTty = true))
+
+      opt[Unit]("manual-start")
+        .text("Don't automatically start the nodes")
+        .action((_, cli) => cli.copy(manualStart = true))
+
+      opt[Unit]("auto-connect-local")
+        .text("Automatically connect all local participants to all local domains")
+        .action((_, cli) => cli.copy(autoConnectLocal = true))
+
+      note(inColumns(first = "-D<property>=<value>", second = "Set a JVM property value"))
+
+      note("\nLogging Options:") // Enforce a newline in the help text
+
+      opt[Unit]('v', "verbose")
+        .text("Canton logger level -> DEBUG")
+        .action((_, cli) => cli.copy(levelCanton = Some(Level.DEBUG)))
+
+      opt[Unit]("debug")
+        .text("Console/stdout level -> INFO, root logger -> DEBUG")
+        .action((_, cli) =>
+          cli.copy(
+            levelRoot = Some(Level.DEBUG),
+            levelCanton = Some(Level.DEBUG),
+            levelStdout = Level.INFO,
+          )
+        )
+
+      opt[Unit]("log-truncate")
+        .text("Truncate log file on startup.")
+        .action((_, cli) => cli.copy(logTruncate = true))
+
+      implicit val levelRead: scopt.Read[Level] = scopt.Read.reads(Level.valueOf)
+      opt[Level]("log-level-root")
+        .text("Log-level of the root logger")
+        .valueName("<LEVEL>")
+        .action((level, cli) => cli.copy(levelRoot = Some(level), levelCanton = Some(level)))
+
+      opt[Level]("log-level-canton")
+        .text("Log-level of the Canton logger")
+        .valueName("<LEVEL>")
+        .action((level, cli) => cli.copy(levelCanton = Some(level)))
+
+      opt[Level]("log-level-stdout")
+        .text("Log-level of stdout")
+        .valueName("<LEVEL>")
+        .action((level, cli) => cli.copy(levelStdout = level))
+
+      opt[String]("log-file-appender")
+        .text("Type of log file appender")
+        .valueName("rolling(default)|flat|off>")
+        .action((typ, cli) =>
+          typ.toLowerCase match {
+            case "rolling" => cli.copy(logFileAppender = LogFileAppender.Rolling)
+            case "off" => cli.copy(logFileAppender = LogFileAppender.Off)
+            case "flat" => cli.copy(logFileAppender = LogFileAppender.Flat)
+            case _ =>
+              throw new IllegalArgumentException(
+                s"Invalid command line argument: unknown log-file-appender $typ"
+              )
+          }
+        )
+
+      opt[String]("log-file-name")
+        .text("Name and location of log-file, default is log/canton.log")
+        .action((name, cli) => cli.copy(logFileName = Some(name)))
+
+      opt[Int]("log-file-rolling-history")
+        .text("Number of history files to keep when using rolling log file appender.")
+        .action((history, cli) => cli.copy(logFileHistory = Some(history)))
+
+      opt[String]("log-file-rolling-pattern")
+        .text("Log file suffix pattern of rolling file appender. Default is 'yyyy-MM-dd'.")
+        .action((pattern, cli) => cli.copy(logFileRollingPattern = Some(pattern)))
+
+      opt[String]("log-encoder")
+        .text("Log encoder: plain|json")
+        .action {
+          case ("json", cli) => cli.copy(logEncoder = LogEncoder.Json)
+          case ("plain", cli) => cli.copy(logEncoder = LogEncoder.Plain)
+          case (other, _) =>
+            throw new IllegalArgumentException(s"Unsupported logging encoder $other")
+        }
+
+      opt[Boolean]("log-immediate-flush")
+        .text(
+          """Determines whether to immediately flush log output to the log file.
           |Enable to avoid an incomplete log file in case of a crash.
           |Disable to reduce the load on the disk caused by logging.""".stripMargin
-      )
-      .valueName("true(default)|false")
-      .action((enabled, cli) => cli.copy(logImmediateFlush = Some(enabled)))
-
-    opt[String]("log-profile")
-      .text("Preconfigured logging profiles: (container)")
-      .action((profile, cli) =>
-        profile.toLowerCase match {
-          case "container" =>
-            cli.copy(
-              logFileAppender = LogFileAppender.Rolling,
-              logFileHistory = Some(10),
-              logFileRollingPattern = Some("yyyy-MM-dd-HH"),
-              levelStdout = Level.DEBUG,
-            )
-          case _ => throw new IllegalArgumentException(s"Unknown log profile $profile")
-        }
-      )
-
-    opt[Boolean]("log-last-errors")
-      .text("Capture events for logging.last_errors command")
-      .action((isEnabled, cli) => cli.copy(logLastErrors = isEnabled))
-
-    note("") // Enforce a newline in the help text
-
-    note("Use the JAVA_OPTS environment variable to set JVM parameters.")
-
-    note("") // Enforce a newline in the help text
-
-    cmd("daemon")
-      .text(
-        "Start all nodes automatically and run them without having a console (REPL).\n" +
-          "Nodes can be controlled through the admin API."
-      )
-      .action((_, cli) => cli.copy(command = Some(Command.Daemon)))
-      .children()
-
-    note("") // Enforce a newline in the help text
-
-    cmd("run")
-      .text(
-        "Run a console script.\n" +
-          "Stop all nodes when the script has terminated."
-      )
-      .children(
-        arg[File]("<file>")
-          .text("the script to run")
-          .action((script, cli) => cli.copy(command = Some(Command.RunScript(script))))
-      )
-
-    implicit val readTarget: scopt.Read[Command.Generate.Target] = scopt.Read.reads {
-      case "remote-config" => Command.Generate.RemoteConfig
-      case x => throw new IllegalArgumentException(s"Unknown target $x")
-    }
-    cmd("generate")
-      .text("Generate configurations")
-      .children(
-        arg[Command.Generate.Target]("<type>")
-          .text("generation target (remote-config)")
-          .action((target, cli) => cli.copy(command = Some(Command.Generate(target))))
-      )
-
-    checkConfig(cli =>
-      if (cli.configFiles.isEmpty && cli.configMap.isEmpty) {
-        failure(
-          "at least one config has to be defined either as files (-c) or as key-values (-C)"
         )
-      } else success
-    )
+        .valueName("true(default)|false")
+        .action((enabled, cli) => cli.copy(logImmediateFlush = Some(enabled)))
 
-    checkConfig(cli =>
-      if (
-        cli.autoConnectLocal && (cli.command.exists {
-          case Command.Daemon => false
-          case Command.RunScript(_) => true
-          case Command.Generate(_) => true
-        })
-      ) {
-        failure(s"auto-connect-local does not work with run-script or generate")
-      } else success
-    )
+      opt[String]("log-profile")
+        .text("Preconfigured logging profiles: (container)")
+        .action((profile, cli) =>
+          profile.toLowerCase match {
+            case "container" =>
+              cli.copy(
+                logFileAppender = LogFileAppender.Rolling,
+                logFileHistory = Some(10),
+                logFileRollingPattern = Some("yyyy-MM-dd-HH"),
+                levelStdout = Level.DEBUG,
+              )
+            case _ => throw new IllegalArgumentException(s"Unknown log profile $profile")
+          }
+        )
 
-    override def showUsageOnError: Option[Boolean] = Some(true)
+      opt[Boolean]("log-last-errors")
+        .text("Capture events for logging.last_errors command")
+        .action((isEnabled, cli) => cli.copy(logLastErrors = isEnabled))
 
-  }
+      note("") // Enforce a newline in the help text
+
+      note("Use the JAVA_OPTS environment variable to set JVM parameters.")
+
+      note("") // Enforce a newline in the help text
+
+      cmd("daemon")
+        .text(
+          "Start all nodes automatically and run them without having a console (REPL).\n" +
+            "Nodes can be controlled through the admin API."
+        )
+        .action((_, cli) => cli.copy(command = Some(Command.Daemon)))
+        .children()
+
+      note("") // Enforce a newline in the help text
+
+      cmd("run")
+        .text(
+          "Run a console script.\n" +
+            "Stop all nodes when the script has terminated."
+        )
+        .children(
+          arg[File]("<file>")
+            .text("the script to run")
+            .action((script, cli) => cli.copy(command = Some(Command.RunScript(script))))
+        )
+
+      implicit val readTarget: scopt.Read[Command.Generate.Target] = scopt.Read.reads {
+        case "remote-config" => Command.Generate.RemoteConfig
+        case x => throw new IllegalArgumentException(s"Unknown target $x")
+      }
+      cmd("generate")
+        .text("Generate configurations")
+        .children(
+          arg[Command.Generate.Target]("<type>")
+            .text("generation target (remote-config)")
+            .action((target, cli) => cli.copy(command = Some(Command.Generate(target))))
+        )
+
+      checkConfig(cli =>
+        if (cli.configFiles.isEmpty && cli.configMap.isEmpty) {
+          failure(
+            "at least one config has to be defined either as files (-c) or as key-values (-C)"
+          )
+        } else success
+      )
+
+      checkConfig(cli =>
+        if (
+          cli.autoConnectLocal && (cli.command.exists {
+            case Command.Daemon => false
+            case Command.RunScript(_) => true
+            case Command.Generate(_) => true
+          })
+        ) {
+          failure(s"auto-connect-local does not work with run-script or generate")
+        } else success
+      )
+
+      override def showUsageOnError: Option[Boolean] = Some(true)
+
+    }
 }

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
@@ -69,6 +70,7 @@ class SequencerAuthenticationServerInterceptorTest
     JDuration.ofHours(1),
     _ => (),
     Future.unit,
+    DefaultProcessingTimeouts.testing,
     loggerFactory,
     ParticipantAuditor.noop,
   ) {

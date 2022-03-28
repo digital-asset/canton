@@ -249,4 +249,34 @@ object VaultAdminCommands {
       )
   }
 
+  case class RotateHmacSecret(length: Int)
+      extends BaseVaultAdminCommand[
+        v0.RotateHmacSecretRequest,
+        v0.RotateHmacSecretResponse,
+        Unit,
+      ] {
+
+    override def createRequest(): Either[String, v0.RotateHmacSecretRequest] =
+      Right(
+        v0.RotateHmacSecretRequest(
+          length = length
+        )
+      )
+
+    override def submitRequest(
+        service: VaultServiceStub,
+        request: v0.RotateHmacSecretRequest,
+    ): Future[v0.RotateHmacSecretResponse] = {
+      service.rotateHmacSecret(request)
+    }
+
+    override def handleResponse(
+        response: v0.RotateHmacSecretResponse
+    ): Either[String, Unit] = Right(())
+
+    // may time some time if we need to wait for entropy
+    override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
+  }
+
 }

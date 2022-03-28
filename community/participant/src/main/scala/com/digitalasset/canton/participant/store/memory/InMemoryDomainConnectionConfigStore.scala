@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.memory
 
 import java.util.concurrent.ConcurrentHashMap
-
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
@@ -42,15 +41,12 @@ class InMemoryDomainConnectionConfigStore(protected override val loggerFactory: 
   override def replace(
       config: DomainConnectionConfig
   )(implicit traceContext: TraceContext): EitherT[Future, MissingConfigForAlias, Unit] =
-    configuredDomainMap.synchronized {
-      EitherT.fromEither[Future](configuredDomainMap.get(config.domain) match {
-        case Some(_) =>
-          configuredDomainMap.put(config.domain, config)
-          Right(())
-        case None =>
-          Left(MissingConfigForAlias(config.domain))
-      })
-    }
+    EitherT.fromEither[Future](configuredDomainMap.replace(config.domain, config) match {
+      case Some(_) =>
+        Right(())
+      case None =>
+        Left(MissingConfigForAlias(config.domain))
+    })
 
   override def get(alias: DomainAlias): Either[MissingConfigForAlias, DomainConnectionConfig] =
     configuredDomainMap.get(alias).toRight(MissingConfigForAlias(alias))

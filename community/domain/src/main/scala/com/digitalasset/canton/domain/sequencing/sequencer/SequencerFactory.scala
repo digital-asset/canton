@@ -30,7 +30,6 @@ trait SequencerFactory {
 object SequencerFactory {
   def database(
       config: DatabaseSequencerConfig,
-      writerStorageFactory: SequencerWriterStoreFactory,
       loggerFactory: NamedLoggerFactory,
   ): SequencerFactory =
     new SequencerFactory {
@@ -47,13 +46,8 @@ object SequencerFactory {
           tracer: Tracer,
           actorMaterializer: Materializer,
       ): Sequencer = {
-        val sequencer = new DatabaseSequencer(
-          writerStorageFactory,
+        val sequencer = DatabaseSequencer.single(
           config,
-          TotalNodeCountValues.SingleSequencerTotalNodeCount,
-          None,
-          // Dummy config which will be ignored anyway as `config.highAvailabiltyEnabled` is false
-          OnlineSequencerCheckConfig(),
           localNodeParameters.processingTimeouts,
           storage,
           clock,

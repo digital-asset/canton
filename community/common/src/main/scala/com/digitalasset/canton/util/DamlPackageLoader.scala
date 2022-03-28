@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.util
 
-import java.io.{ByteArrayInputStream, File, InputStream}
-import java.util.zip.ZipInputStream
 import cats.implicits._
 import com.daml.lf.archive.{DarDecoder, DarReader}
 import com.daml.lf.data.Ref
 import com.daml.lf.language.Ast
 import com.google.protobuf.ByteString
+
+import java.io.{ByteArrayInputStream, File, InputStream}
+import java.util.zip.ZipInputStream
 
 /** Wrapper that retrieves parsed packages from a DAR file consumable by the Daml interpreter.
   */

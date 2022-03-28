@@ -148,7 +148,9 @@ trait PrettyInstances {
   }
 
   implicit val prettyReadServiceOffset: Pretty[offset.Offset] = prettyOfString(
-    _.toHexString.readableHash.toString
+    // Do not use `toReadableHash` because this is not a hash but a hex-encoded string
+    // whose end contains the most important information
+    _.toHexString
   )
 
   implicit def prettyLfParticipantId: Pretty[Ref.ParticipantId] = prettyOfString(prettyUidString(_))

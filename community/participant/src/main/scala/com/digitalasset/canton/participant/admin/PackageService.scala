@@ -5,44 +5,46 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
+import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.definitions.{DamlError, PackageServiceError}
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.lf.archive
 import com.daml.lf.archive.{DarParser, Decode, Error => LfArchiveError}
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.daml.lf.language.Ast.Package
-import com.daml.lf.value.Value.ContractId
+import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
-import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PackageServiceErrorGroup
-import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
-import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.PackageRemovalError
+import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
+import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
+  CannotRemoveOnlyDarForPackage,
+  DarUnvettingError,
+  MainPackageInUse,
+  PackageRemovalError,
+}
 import com.digitalasset.canton.participant.admin.PackageService._
 import com.digitalasset.canton.participant.store.DamlPackageStore
+import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.protocol.{PackageDescription, PackageInfoService}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PathUtils
-import com.digitalasset.canton.LedgerSubmissionId
-import com.digitalasset.canton.topology.DomainId
 import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
-import io.grpc.StatusRuntimeException
 import slick.jdbc.GetResult
 
 import java.io._
 import java.nio.file.Paths
 import java.util.UUID
 import java.util.zip.ZipInputStream
-import scala.annotation.nowarn
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -121,6 +123,118 @@ class PackageService(
         }
       } yield ()
     }
+  }
+
+  def removeDar(darHash: Hash)(implicit
+      tc: TraceContext
+  ): EitherT[Future, PackageRemovalError, Unit] = {
+
+    for {
+      darOpt <- EitherT.liftF(packagesDarsStore.getDar(darHash))
+
+      _unit <- darOpt.fold({
+        logger.info(s"Trying to remove a DAR that isn't stored. Operation is trivially successful.")
+        EitherT.pure[Future, PackageRemovalError](())
+      })({ dar =>
+        val darLfE = PackageService.darToLf(dar)
+        val (descriptor, lfArchive) =
+          darLfE.left.map(msg => throw new IllegalStateException(msg)).merge
+        removeDarLf(lfArchive, descriptor)
+      })
+
+    } yield { () }
+  }
+
+  private def removeDarLf(
+      dar: archive.Dar[DamlLf.Archive],
+      darDescriptor: DarDescriptor,
+  )(implicit
+      tc: TraceContext
+  ): EitherT[Future, PackageRemovalError, Unit] = {
+
+    // Can remove the DAR if:
+    // 1. The main package of the dar is unused
+    // 2. For all dependencies of the DAR, either:
+    //     - They are unused
+    //     - Or they are contained in another vetted DAR
+    // 3. The main package of the dar is either:
+    //     - Already un-vetted
+    //     - Or can be automatically un-vetted, by revoking a vetting transaction corresponding to all packages in the DAR
+
+    val packages =
+      dar.all.map { d =>
+        d.getHash
+        readPackageId(d)
+      }
+
+    val mainPkg = readPackageId(dar.main)
+    for {
+      _mainUnused <- inspectionOps
+        .packageUnused(mainPkg)
+        .leftMap(err => new MainPackageInUse(err.pkg, darDescriptor, err.contract, err.domain))
+
+      packageUsed <- EitherT.liftF(packages.traverse(p => inspectionOps.packageUnused(p).value))
+
+      usedPackages = packageUsed.mapFilter {
+        case Left(packageInUse: PackageRemovalErrorCode.PackageInUse) => Some(packageInUse.pkg)
+        case Right(()) => None
+      }
+
+      _unit <- packagesDarsStore
+        .anyPackagePreventsDarRemoval(usedPackages, darDescriptor)
+        .toLeft(())
+        .leftMap(p => new CannotRemoveOnlyDarForPackage(p, darDescriptor): PackageRemovalError)
+
+      isVetted <- EitherT.liftF(inspectionOps.packageVetted(mainPkg).value.map(e => e.isLeft))
+
+      _unit <-
+        if (isVetted) {
+          revokeVettingForDar(mainPkg, packages, darDescriptor)
+        } else {
+          EitherT.pure[Future, PackageRemovalError](())
+        }
+
+      _unit <-
+        EitherT.liftF(packagesDarsStore.removePackage(mainPkg))
+
+      _removed <- {
+        logger.info(s"Removing dar ${darDescriptor.hash}")
+        EitherT.liftF[Future, PackageRemovalError, Unit](
+          packagesDarsStore.removeDar(darDescriptor.hash)
+        )
+      }
+
+    } yield {
+      ()
+    }
+  }
+
+  private def revokeVettingForDar(
+      mainPkg: PackageId,
+      packages: List[PackageId],
+      darDescriptor: DarDescriptor,
+  )(implicit
+      tc: TraceContext
+  ): EitherT[Future, PackageRemovalError, Unit] = {
+    for {
+      tx <- EitherT.liftF(inspectionOps.genRevokePackagesTx(packages).value)
+
+      _unvetted <- tx match {
+        case Left(err) =>
+          logger.info(
+            s"Unable to automatically revoke the vetting the dar $darDescriptor."
+          )
+
+          val removalError = new DarUnvettingError(err, darDescriptor, mainPkg): PackageRemovalError
+          EitherT.leftT[Future, Unit](removalError)
+
+        case Right(op) =>
+          logger.debug(s"Revoking vetting for dar $darDescriptor")
+          inspectionOps
+            .runTx(op, true)
+            .leftMap(err => new DarUnvettingError(err, darDescriptor, mainPkg): PackageRemovalError)
+      }
+    } yield ()
   }
 
   /** Stores DAR file from given byte string with the provided filename.
@@ -360,7 +474,6 @@ class PackageService(
   override def onClosed(): Unit = Lifecycle.close(packagesDarsStore)(logger)
 
 }
-
 object PackageService {
 
   def getArchives(filename: String): Either[Throwable, Seq[DamlLf.Archive]] =
@@ -388,56 +501,20 @@ object PackageService {
       GetResult(r => Dar(r.<<, r.<<))
   }
 
-}
-object CantonPackageServiceError extends PackageServiceErrorGroup {
-  @nowarn("msg=early initializers are deprecated")
-  case class IdentityManagerParentError(parent: ParticipantTopologyManagerError)(implicit
-      val loggingContext: ErrorLoggingContext,
-      override val code: ErrorCode,
-  ) extends {
-        override val cause: String = parent.cause
-      }
-      with DamlError(parent.cause)
-      with CantonError
-      with ParentCantonError[ParticipantTopologyManagerError] {
-
-    override def logOnCreation: Boolean = false
-
-    override def asGrpcError: StatusRuntimeException = parent.asGrpcError
-
-    override def mixinContext: Map[String, String] = Map("action" -> "package-vetting")
-  }
-
-  @Explanation(
-    """Errors raised by the Package Service on package removal."""
-  )
-  object PackageRemovalErrorCode
-      extends ErrorCode(
-        id = "PACKAGE_REMOVAL_ERROR",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
-      ) {
-
-    abstract class PackageRemovalError(override val cause: String)(
-        implicit override implicit val code: ErrorCode
-    ) extends CantonError
-
-    @Resolution(
-      s"""To cleanly remove the package, you must archive all contracts from the package."""
-    )
-    class PackageInUse(pkg: PackageId, contract: ContractId, domain: DomainId)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends PackageRemovalError(
-          s"Package $pkg is currently in-use by contract $contract on domain $domain. " +
-            s"It may also be in-use by other contracts."
-        )
-
-    @Resolution(
-      s"""To cleanly remove the package, you must first revoke authorization for the package."""
-    )
-    class PackageVetted(pkg: PackageId)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends PackageRemovalError(s"Package $pkg is currently vetted and available to use.")
-
+  def darToLf(
+      dar: Dar
+  ): Either[String, (DarDescriptor, archive.Dar[DamlLf.Archive])] = {
+    val bytes = dar.bytes
+    val payload = ByteString.copyFrom(bytes)
+    val stream = new ZipInputStream(payload.newInput())
+    DarParser
+      .readArchive(dar.descriptor.name.str, stream)
+      .fold(
+        { _ =>
+          Left(s"Cannot parse stored dar $dar")
+        },
+        x => Right(dar.descriptor -> x),
+      )
   }
 
 }

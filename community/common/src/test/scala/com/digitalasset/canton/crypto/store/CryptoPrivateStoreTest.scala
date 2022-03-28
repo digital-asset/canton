@@ -39,16 +39,6 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       }
     }
 
-    "second storage of a different HMAC secret fails" in {
-      val store = newStore
-      val res = for {
-        _ <- store.storeHmacSecret(secret1)
-        _ <- store.storeHmacSecret(secret2)
-      } yield ()
-
-      res.value.map(_.left.value shouldBe a[CryptoPrivateStoreError])
-    }
-
     "store encryption keys correctly when added incrementally" in {
       val store = newStore
       for {
@@ -131,6 +121,16 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       }
 
       res.valueOr(err => fail(err.toString))
+    }
+
+    "rotate the HMAC secret" in {
+      val store = newStore
+      for {
+        _ <- store.storeHmacSecret(secret1).valueOrFail("store first hmac secret")
+        _ <- store.storeHmacSecret(secret2).valueOrFail("store second hmac secret")
+      } yield {
+        succeed
+      }
     }
   }
 

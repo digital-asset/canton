@@ -47,6 +47,22 @@ trait HmacPrivateTest extends BaseTest { this: AsyncWordSpec =>
         } yield assert(true)
       }
 
+      "rotate an HMAC secret" in {
+        for {
+          privateCrypto <- newHmacPrivateOps
+          data = ByteString.copyFromUtf8("foobar")
+          _ <- privateCrypto.initializeHmacSecret().valueOrFail("init hmac secret")
+          hmac1 <- privateCrypto.hmac(data).valueOrFail("create hmac1")
+          hmac2 <- privateCrypto.hmac(data).valueOrFail("create hmac2")
+          _ <- privateCrypto.rotateHmacSecret().valueOrFail("rotate hmac secret")
+          hmac3 <- privateCrypto.hmac(data).valueOrFail("create hmac3")
+        } yield {
+          hmac1 shouldEqual hmac2
+          hmac1 should not equal hmac3
+        }
+
+      }
+
     }
 
   }

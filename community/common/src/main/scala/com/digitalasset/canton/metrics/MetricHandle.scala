@@ -9,7 +9,7 @@ import com.codahale.metrics.{Gauge, Timer}
 import com.daml.metrics.{MetricName, Timed, VarGauge}
 
 import scala.annotation.StaticAnnotation
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 import scala.reflect.runtime.{universe => ru}
@@ -38,7 +38,7 @@ object MetricHandle {
         name: MetricName,
         newGauge: => T,
         resetExisting: (T => Unit),
-    ): GaugeM[T, M] =
+    ): GaugeM[T, M] = blocking {
       synchronized {
         val res: GaugeM[T, M] = Option(registry.getGauges.get(name: String)) match {
           case Some(existingGauge) => GaugeM(name, existingGauge.asInstanceOf[T])
@@ -51,6 +51,7 @@ object MetricHandle {
         resetExisting(res.metric)
         res
       }
+    }
 
     def loadGauge(
         name: MetricName,

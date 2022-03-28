@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.PeanoQueue.{
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.mutable
+import scala.concurrent.blocking
 
 /** Implementation of [[PeanoQueue]] for [[java.lang.Long]] keys based on a tree map.
   *
@@ -132,16 +133,18 @@ object PeanoTreeQueue {
 class SynchronizedPeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
   private[this] val queue: PeanoQueue[Long, V] = new PeanoTreeQueue(initHead)
 
-  override def head: Long = queue synchronized queue.head
+  override def head: Long = blocking { queue synchronized queue.head }
 
-  override def front: Long = queue synchronized queue.front
+  override def front: Long = blocking { queue synchronized queue.front }
 
-  override def insert(key: Long, value: V): Boolean = queue synchronized queue.insert(key, value)
+  override def insert(key: Long, value: V): Boolean =
+    blocking { queue synchronized queue.insert(key, value) }
 
-  override def alreadyInserted(key: Long): Boolean = queue synchronized queue.alreadyInserted(key)
+  override def alreadyInserted(key: Long): Boolean =
+    blocking { queue synchronized queue.alreadyInserted(key) }
 
-  override def get(key: Long): AssociatedValue[V] = queue synchronized queue.get(key)
+  override def get(key: Long): AssociatedValue[V] = blocking { queue synchronized queue.get(key) }
 
-  override def poll(): Option[(Long, V)] = queue synchronized queue.poll()
+  override def poll(): Option[(Long, V)] = blocking { queue synchronized queue.poll() }
 
 }

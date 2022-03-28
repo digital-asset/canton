@@ -21,7 +21,11 @@ service PackageService {
     // Upload a DAR file and all packages inside to the participant node
     rpc UploadDar (UploadDarRequest) returns (UploadDarResponse);
 
+    // Remove a package that is not vetted
     rpc RemovePackage (RemovePackageRequest) returns (RemovePackageResponse);
+
+    // Remove a DAR that is not needed
+    rpc RemoveDar (RemoveDarRequest) returns (RemoveDarResponse);
 
     // Obtain a DAR file by hash -- for inspection & download
     rpc GetDar(GetDarRequest) returns (GetDarResponse);
@@ -65,6 +69,14 @@ message RemovePackageRequest {
 }
 
 message RemovePackageResponse {
+    google.protobuf.Empty success = 1;
+}
+
+message RemoveDarRequest {
+    string dar_hash = 1;
+}
+
+message RemoveDarResponse {
     google.protobuf.Empty success = 1;
 }
 

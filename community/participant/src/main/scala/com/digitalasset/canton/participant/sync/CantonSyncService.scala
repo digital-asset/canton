@@ -333,7 +333,7 @@ class CantonSyncService(
       span.setAttribute("submission_id", submissionId)
 
       pruneInternally(pruneUpToInclusive).fold(
-        err => PruningResult.NotPruned(err.asGrpcStatusFromContext),
+        err => PruningResult.NotPruned(err.code.asGrpcStatus(err)),
         _ => PruningResult.ParticipantPruned,
       )
     }).asJava
@@ -366,7 +366,13 @@ class CantonSyncService(
         Left(PruningServiceError.NonCantonOffset.Error(err.message))
       case Left(err: LedgerPruningOffsetUnsafeToPrune) =>
         logger.info(s"Unsafe to prune: ${err.message}")
-        Left(PruningServiceError.UnsafeToPrune.Error(err.message))
+        Left(
+          PruningServiceError.UnsafeToPrune.Error(
+            err.cause,
+            err.message,
+            err.lastSafeOffset.fold("")(UpstreamOffsetConvert.fromGlobalOffset(_).toHexString),
+          )
+        )
       case Left(err) =>
         logger.warn(s"Internal error while pruning: $err")
         Left(PruningServiceError.InternalServerError.Error(err.message))

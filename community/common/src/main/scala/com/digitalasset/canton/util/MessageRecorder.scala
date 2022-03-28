@@ -12,6 +12,7 @@ import java.io._
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
+import scala.concurrent.blocking
 import scala.reflect.ClassTag
 import scala.util.{Failure, Success, Try}
 
@@ -52,15 +53,15 @@ class MessageRecorder(
   /** Serializes and saves the provided message to the output stream.
     * This method is synchronized as the write operations on the underlying [[java.io.ObjectOutputStream]] are not thread safe.
     */
-  def record(message: Serializable): Unit = synchronized {
+  def record(message: Serializable): Unit = blocking(synchronized {
     streamRef.get().foreach(_.writeObject(message))
-  }
+  })
 
   def stopRecording()(implicit traceContext: TraceContext): Unit = {
     logger.debug("Stopping recording...")
     streamRef.getAndSet(None) match {
       case Some(stream) =>
-        synchronized { stream.close() }
+        blocking(synchronized { stream.close() })
       case None =>
         logger.info("Recorder has not been recording.")
     }

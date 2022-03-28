@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
 

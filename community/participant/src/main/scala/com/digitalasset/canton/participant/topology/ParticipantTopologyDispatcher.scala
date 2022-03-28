@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.util.{Failure, Success}
 import com.digitalasset.canton.util.Thereafter.syntax._
 
@@ -203,18 +203,18 @@ private class DomainOutbox(
   private val lock = new Object()
   private val running = new AtomicBoolean(false)
 
-  def queueSize: Int = lock.synchronized {
+  def queueSize: Int = blocking(lock.synchronized {
     queue.size + (if (running.get()) 1 else 0)
-  }
+  })
 
   def enqueue(
       transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = performUnlessClosingF {
     onlyApplicable(transactions).map { filtered =>
-      lock.synchronized {
+      blocking(lock.synchronized {
         queue ++= filtered
         kickOffFlush()
-      }
+      })
     }
   }
 
@@ -249,9 +249,9 @@ private class DomainOutbox(
   }
 
   def recomputeQueue(implicit traceContext: TraceContext): Future[Unit] = {
-    lock.synchronized {
+    blocking(lock.synchronized {
       queue.clear()
-    }
+    })
     for {
       // find the current target watermark
       watermarkTsO <- target.currentDispatchingWatermark
@@ -261,10 +261,10 @@ private class DomainOutbox(
       // filter candidates for domain
       filtered <- onlyApplicable(dispatchingCandidates.result)
     } yield {
-      lock.synchronized {
+      blocking(lock.synchronized {
         ErrorUtil.requireState(queue.isEmpty, s"Queue contains ${queue.size} unexpected elements.")
         queue.appendAll(filtered)
-      }
+      })
       logger.debug(
         s"Resuming dispatching with ${filtered.length} transactions after watermark $watermarkTs"
       )
@@ -274,20 +274,20 @@ private class DomainOutbox(
   def flush()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     performUnlessClosingF {
       if (!running.getAndSet(true)) {
-        val ret = lock.synchronized {
+        val ret = blocking(lock.synchronized {
           val ret = queue.result()
           queue.clear()
           ret
-        }
+        })
         if (ret.nonEmpty) {
           val dp = dispatch(domain, handle, transactions = ret)
           dp.transform {
             case Failure(exception) =>
               logger.warn(s"Pushing ${ret.length} transactions to domain failed.", exception)
               // put stuff back into queue
-              lock.synchronized {
+              blocking(lock.synchronized {
                 queue.insertAll(0, ret)
-              }
+              })
               running.set(false)
               kickOffFlush() // kick off new flush in the background
               Success(())
@@ -334,9 +334,9 @@ private class DomainOutbox(
         )
         Future.unit
       } { newWatermark =>
-        val warnFutureProgrammers = lock.synchronized {
+        val warnFutureProgrammers = blocking(lock.synchronized {
           queue.headOption.exists(x => x.validFrom <= newWatermark)
-        }
+        })
         if (warnFutureProgrammers) {
           // once we add batching on transaction addition to the authorized store, we might get multiple tx with the
           // same timestamp. then we need to get a bit smarter. leaving this warning here in case we miss fixing this

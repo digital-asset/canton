@@ -3,24 +3,25 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import java.time.Duration
 import cats.data.{EitherT, NonEmptyList}
 import cats.instances.future._
 import cats.syntax.bifunctor._
 import cats.syntax.list._
 import cats.syntax.traverse._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.common.domain.ServiceAgreementId
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
-import com.digitalasset.canton.lifecycle.Lifecycle
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.DomainTopologyClient
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication._
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
@@ -30,8 +31,8 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.SequencerCounter
 
+import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The authentication service issues tokens to members after successfully completed the following challenge
@@ -59,11 +60,12 @@ class MemberAuthenticationService(
     tokenExpirationTime: Duration,
     invalidateMemberCallback: Traced[Member] => Unit,
     isTopologyInitialized: Future[Unit],
+    override val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     auditLogger: TracedLogger,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
-    with AutoCloseable
+    with FlagCloseable
     with DomainTopologyClient.Subscriber {
 
   private val tokenCache = new AuthenticationTokenCache(clock, store, loggerFactory)
@@ -169,13 +171,15 @@ class MemberAuthenticationService(
   private def scheduleExpirations(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Unit = {
-    def run(): Unit = {
-      val now = clock.now
-      logger.debug(s"Expiring nonces and tokens up to $now")
-      FutureUtil.doNotAwait(store.expireNoncesAndTokens(now), "Expiring nonces and tokens failed")
-    }
-
-    val _ = clock.scheduleAt(_ => run(), timestamp)
+    def run(): Unit = FutureUtil.doNotAwait(
+      performUnlessClosingF {
+        val now = clock.now
+        logger.debug(s"Expiring nonces and tokens up to $now")
+        store.expireNoncesAndTokens(now)
+      }.unwrap,
+      "Expiring nonces and tokens failed",
+    )
+    clock.scheduleAt(_ => run(), timestamp).discard
   }
 
   private def isActive(
@@ -253,5 +257,5 @@ class MemberAuthenticationService(
     }
   }
 
-  override def close(): Unit = Lifecycle.close(store)(logger)
+  override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }

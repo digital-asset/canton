@@ -16,7 +16,7 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
 import com.digitalasset.canton.health.admin.v0.StatusServiceGrpc
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricHandle.NodeMetrics
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
@@ -37,7 +37,7 @@ import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent.Future
+import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration._
 
 /** When a canton node is created it first has to obtain an identity before most of its services can be started.
@@ -45,7 +45,7 @@ import scala.concurrent.duration._
   * If external action is required before this process can complete `start` will return successfully but `isInitialized` will still be false.
   * When the node is successfully initialized the underlying node will be available through `getNode`.
   */
-trait CantonNodeBootstrap[+T <: CantonNode] extends AutoCloseable with NamedLogging {
+trait CantonNodeBootstrap[+T <: CantonNode] extends FlagCloseable with NamedLogging {
 
   def name: InstanceName
   def clock: Clock
@@ -82,6 +82,7 @@ abstract class CantonNodeBootstrapBase[
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val actorSystem: ActorSystem,
 ) extends CantonNodeBootstrap[T]
+    with HasCloseContext
     with NoTracing {
 
   protected val dbStorageMetrics = nodeMetrics.dbStorage
@@ -121,10 +122,10 @@ abstract class CantonNodeBootstrapBase[
   // This absolutely must be a "def", because it is used during class initialization.
   protected def connectionPoolForParticipant: Boolean = false
 
-  protected val timeouts: ProcessingTimeout = parameterConfig.processingTimeouts
+  val timeouts: ProcessingTimeout = parameterConfig.processingTimeouts
 
   // TODO(soren): Move to a error-safe node initialization approach
-  protected val storage = timeouts.unbounded.await()(
+  protected val storage = timeouts.unbounded.await("create storage factory")(
     storageFactory
       .tryCreate(
         connectionPoolForParticipant,
@@ -143,7 +144,7 @@ abstract class CantonNodeBootstrapBase[
       loggerFactory,
     )
 
-  override val crypto: Crypto = timeouts.unbounded.await()(
+  override val crypto: Crypto = timeouts.unbounded.await("initialize CryptoFactory")(
     CryptoFactory
       .create(cryptoConfig, storage, timeouts, loggerFactory)
       .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
@@ -291,22 +292,24 @@ abstract class CantonNodeBootstrapBase[
 
   def getId: Option[NodeId] = nodeId.get()
 
-  override def close(): Unit = synchronized {
-    if (isRunningVar.getAndSet(false)) {
-      val stores = List(initializationStore, indexedStringStore, topologyStoreFactory)
-      val instances = List(
-        Lifecycle.toCloseableOption(initializationWatcherRef.get()),
-        adminServerRegistry,
-        adminServer,
-        tracerProvider,
-      ) ++ getNode.toList ++ stores ++ List(crypto, storage, clock)
-      Lifecycle.close(instances: _*)(logger)
-      logger.debug(s"Successfully completed shutdown of $name")
-    } else {
-      logger.warn(
-        s"Unnecessary second close of node $name invoked. Ignoring it.",
-        new Exception("location"),
-      )
+  override def onClosed(): Unit = blocking {
+    synchronized {
+      if (isRunningVar.getAndSet(false)) {
+        val stores = List(initializationStore, indexedStringStore, topologyStoreFactory)
+        val instances = List(
+          Lifecycle.toCloseableOption(initializationWatcherRef.get()),
+          adminServerRegistry,
+          adminServer,
+          tracerProvider,
+        ) ++ getNode.toList ++ stores ++ List(crypto, storage, clock)
+        Lifecycle.close(instances: _*)(logger)
+        logger.debug(s"Successfully completed shutdown of $name")
+      } else {
+        logger.warn(
+          s"Unnecessary second close of node $name invoked. Ignoring it.",
+          new Exception("location"),
+        )
+      }
     }
   }
 
@@ -334,12 +337,14 @@ abstract class CantonNodeBootstrapBase[
       .leftMap(_.toString)
 
   /** Poll the datastore to see if the id has been initialized in case a replica initializes the node */
-  private def waitForReplicaInitialization(): Unit = synchronized {
-    withNewTraceContext { implicit traceContext =>
-      if (isRunning && initializationWatcherRef.get().isEmpty) {
-        val initializationWatcher = new InitializationWatcher(loggerFactory)
-        initializationWatcher.watch()
-        initializationWatcherRef.set(initializationWatcher.some)
+  private def waitForReplicaInitialization(): Unit = blocking {
+    synchronized {
+      withNewTraceContext { implicit traceContext =>
+        if (isRunning && initializationWatcherRef.get().isEmpty) {
+          val initializationWatcher = new InitializationWatcher(loggerFactory)
+          initializationWatcher.watch()
+          initializationWatcherRef.set(initializationWatcher.some)
+        }
       }
     }
   }

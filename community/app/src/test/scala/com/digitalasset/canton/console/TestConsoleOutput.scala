@@ -14,6 +14,7 @@ import org.scalatest.Assertion
 import org.scalatest.Inspectors._
 import org.scalatest.matchers.should.Matchers._
 
+import scala.concurrent.blocking
 import scala.jdk.CollectionConverters._
 
 /** Implementation of [[com.digitalasset.canton.console.ConsoleOutput]] for test purposes.
@@ -61,10 +62,10 @@ class TestConsoleOutput(override val loggerFactory: NamedLoggerFactory)
       pos: source.Position
   ): T = {
     // We need to prevent nested usage, because we are clearing messageQueue.
-    this.synchronized {
+    blocking(this.synchronized {
       require(!recording.get(), "Nested use of Unable to record console output messages.")
       recording.set(true)
-    }
+    })
 
     messageQueue.clear()
 

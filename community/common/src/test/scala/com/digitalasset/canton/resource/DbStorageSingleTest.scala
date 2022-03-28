@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.resource
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CommunityDbConfig.Postgres
 import com.digitalasset.canton.config.{DbConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.store.db.DbStorageSetup
 import com.digitalasset.canton.store.db.DbStorageSetup.Config.PostgresBasicConfig
+import com.digitalasset.canton.{BaseTest, CloseableTest}
 import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.jdk.CollectionConverters._
 
-trait DbStorageSingleTest extends AsyncWordSpec with BaseTest {
+trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest {
 
   def baseConfig: DbConfig
   def modifyUser(user: String): DbConfig

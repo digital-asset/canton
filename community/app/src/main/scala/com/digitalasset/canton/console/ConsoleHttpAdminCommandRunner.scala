@@ -21,7 +21,7 @@ import com.digitalasset.canton.tracing.Spanning
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, blocking}
 import scala.concurrent.duration.Duration
 
 /** Attempt to run an http admin-api command against whatever is pointed at in the config
@@ -63,7 +63,7 @@ class ConsoleHttpAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
 
       val timeouts = consoleEnvironment.environment.config.parameters.timeouts.processing
 
-      val clientE = synchronized {
+      val clientE = blocking(synchronized {
         clients.get(instanceName) match {
           case Some(client) =>
             Right(client)
@@ -80,10 +80,10 @@ class ConsoleHttpAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
               }
               .leftMap(err => s"Failed to create http client: $err")
         }
-      }
+      })
 
       val apiResult =
-        awaitTimeout.await()((for {
+        awaitTimeout.await(s"running command $command")((for {
           client <- clientE.toEitherT
           result <- httpRunner
             .run(instanceName, command, sequencerConnection.urls.write, client, timeouts)

@@ -210,10 +210,17 @@ trait HmacPrivateOps extends HmacOps {
       }
 
   /** Initializes the private HMAC secret if not present */
-  def initializeHmacSecret()(implicit
+  def initializeHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, HmacError, Unit]
+
+  /** Rotates the private HMAC secret by replacing the existing one with a newly generated secret. */
+  def rotateHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, HmacError, Unit]
+
 }
 
 /** A default implementation with a private key store for the HMAC secret. */
@@ -228,7 +235,7 @@ trait HmacPrivateStoreOps extends HmacPrivateOps {
     store.hmacSecret
       .leftMap[HmacError](HmacError.HmacPrivateStoreError)
 
-  override def initializeHmacSecret()(implicit
+  override def initializeHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, HmacError, Unit] =
@@ -238,6 +245,14 @@ trait HmacPrivateStoreOps extends HmacPrivateOps {
         store.storeHmacSecret(HmacSecret.generate()).leftMap(HmacError.HmacPrivateStoreError)
       )(_ => EitherT.rightT(()))
     } yield ()
+
+  override def rotateHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, HmacError, Unit] = {
+    store.storeHmacSecret(HmacSecret.generate()).leftMap(HmacError.HmacPrivateStoreError)
+  }
+
 }
 
 sealed trait HmacError extends Product with Serializable with PrettyPrinting
