@@ -41,7 +41,9 @@ sealed trait TopologyStateUpdateMapping extends TopologyMapping
 sealed trait DomainGovernanceMapping extends TopologyMapping {
   def domainId: DomainId
 
-  override def uniquePath(_elementId: TopologyElementId): UniquePath =
+  override def uniquePath(
+      _elementId: TopologyElementId
+  ): UniquePathSignedDomainGovernanceTransaction =
     UniquePathSignedDomainGovernanceTransaction(domainId.unwrap, dbType)
 }
 

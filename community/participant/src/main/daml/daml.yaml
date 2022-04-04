@@ -1,4 +1,4 @@
-sdk-version: 2.1.0-snapshot.20220324.9615.0.467b8fbb
+sdk-version: 2.1.0-snapshot.20220328.9630.0.66c37bad
 name: AdminWorkflows
 source: AdminWorkflows.daml
 version: 2.1.0

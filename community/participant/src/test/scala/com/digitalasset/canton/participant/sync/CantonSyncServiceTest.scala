@@ -12,9 +12,11 @@ import com.daml.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String255}
 import com.digitalasset.canton.config.{
+  ApiLoggingConfig,
+  BatchAggregatorConfig,
   CachingConfigs,
   DefaultProcessingTimeouts,
-  BatchAggregatorConfig,
+  LoggingConfig,
 }
 import com.digitalasset.canton.crypto.{Fingerprint, SyncCryptoApiProvider}
 import com.digitalasset.canton.logging.SuppressingLogger
@@ -77,7 +79,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     tracing = TracingConfig(TracingConfig.Propagation.Disabled),
     delayLoggingThreshold = NonNegativeFiniteDuration.ofMillis(5000),
     enableAdditionalConsistencyChecks = true,
-    logMessagePayloads = true,
+    loggingConfig = LoggingConfig(api = ApiLoggingConfig(messagePayloads = Some(true))),
     logQueryCost = None,
     processingTimeouts = DefaultProcessingTimeouts.testing,
     enablePreviewFeatures = false,

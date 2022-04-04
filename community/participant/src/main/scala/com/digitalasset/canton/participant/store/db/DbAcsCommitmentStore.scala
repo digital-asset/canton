@@ -445,7 +445,7 @@ class DbAcsCommitmentStore(
   ): Future[Option[CantonTimestamp]] = processingTime.metric.event {
     for {
       computed <- lastComputedAndSent
-      adjustedTsOpt = computed.map(_.toTs.min(beforeOrAt))
+      adjustedTsOpt = computed.map(_.forgetSecond.min(beforeOrAt))
       outstandingOpt <- adjustedTsOpt.traverse { ts =>
         storage.query(
           sql"select from_exclusive, to_inclusive from outstanding_acs_commitments where domain_id=$domainId and from_exclusive < $ts"

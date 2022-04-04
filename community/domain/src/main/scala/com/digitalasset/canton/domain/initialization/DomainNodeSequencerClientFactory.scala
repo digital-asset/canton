@@ -100,6 +100,7 @@ class DomainNodeSequencerClientFactory(
         Domain.replaySequencerConfig.get().lift(member).map(Domain.defaultReplayPath(member)),
       clientMetrics,
       futureSupervisor,
+      cantonParameterConfig.loggingConfig,
       clientLoggerFactory,
       supportedProtocolVersions = ProtocolVersion.supportedProtocolsDomain,
       minimumProtocolVersion = None,

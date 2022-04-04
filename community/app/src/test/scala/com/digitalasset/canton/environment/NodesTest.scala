@@ -40,12 +40,12 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def enablePreviewFeatures: Boolean = ???
     override def enableAdditionalConsistencyChecks: Boolean = ???
     override def processingTimeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
-    override def logMessagePayloads: Boolean = ???
     override def logQueryCost: Option[QueryCostMonitoringConfig] = ???
     override def tracing: TracingConfig = ???
     override def sequencerClient: SequencerClientConfig = ???
     override def cachingConfigs: CachingConfigs = ???
     override def nonStandardConfig: Boolean = ???
+    override def loggingConfig: LoggingConfig = ???
   }
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
     override def name: InstanceName = ???

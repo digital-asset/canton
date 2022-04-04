@@ -6,6 +6,7 @@ package com.digitalasset.canton.environment
 import akka.actor.ActorSystem
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option._
+import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{LocalNodeConfig, LocalNodeParameters, ProcessingTimeout}
@@ -24,9 +25,22 @@ import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.admin.grpc.GrpcInitializationService
-import com.digitalasset.canton.topology.admin.v0.InitializationServiceGrpc
-import com.digitalasset.canton.topology.store.{InitializationStore, TopologyStoreFactory}
+import com.digitalasset.canton.topology.admin.grpc.{
+  GrpcInitializationService,
+  GrpcTopologyAggregationService,
+  GrpcTopologyManagerReadService,
+  GrpcTopologyManagerWriteService,
+}
+import com.digitalasset.canton.topology.admin.v0.{
+  InitializationServiceGrpc,
+  TopologyManagerWriteServiceGrpc,
+}
+import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
+import com.digitalasset.canton.topology.store.{
+  InitializationStore,
+  TopologyStore,
+  TopologyStoreFactory,
+}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
@@ -37,8 +51,8 @@ import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration._
+import scala.concurrent.{Future, blocking}
 
 /** When a canton node is created it first has to obtain an identity before most of its services can be started.
   * This process will begin when `start` is called and will try to perform as much as permitted by configuration automatically.
@@ -152,6 +166,7 @@ abstract class CantonNodeBootstrapBase[
   val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)
 
   protected val topologyStoreFactory = TopologyStoreFactory(storage, timeouts, loggerFactory)
+  protected val ips = new IdentityProvidingServiceClient()
 
   protected def isActive: Boolean
 
@@ -170,7 +185,7 @@ abstract class CantonNodeBootstrapBase[
         nodeMetrics,
         executionContext,
         loggerFactory,
-        parameterConfig.logMessagePayloads,
+        parameterConfig.loggingConfig.api,
         parameterConfig.tracing,
       )
 
@@ -191,12 +206,54 @@ abstract class CantonNodeBootstrapBase[
           )
       )
       .addService(ProtoReflectionService.newInstance(), false)
+      .addService(
+        canton.topology.admin.v0.TopologyAggregationServiceGrpc
+          .bindService(
+            new GrpcTopologyAggregationService(
+              topologyStoreFactory.allNonDiscriminated,
+              ips,
+              loggerFactory,
+            ),
+            executionContext,
+          )
+      )
+      .addService(
+        canton.topology.admin.v0.TopologyManagerReadServiceGrpc
+          .bindService(
+            new GrpcTopologyManagerReadService(
+              topologyStoreFactory.allNonDiscriminated,
+              ips,
+              loggerFactory,
+            ),
+            executionContext,
+          )
+      )
       .build
       .start()
     (Lifecycle.toCloseableServer(server, logger, "AdminServer"), registry)
   }
 
-  protected def startWithStoredId(id: NodeId): EitherT[Future, String, Unit] = {
+  protected def startTopologyManagementWriteService[E <: CantonError](
+      topologyManager: TopologyManager[E],
+      authorizedStore: TopologyStore,
+  ): Unit = {
+    adminServerRegistry
+      .addService(
+        TopologyManagerWriteServiceGrpc
+          .bindService(
+            new GrpcTopologyManagerWriteService(
+              topologyManager,
+              authorizedStore,
+              crypto.cryptoPublicStore,
+              loggerFactory,
+            ),
+            executionContext,
+          )
+      )
+      .discard
+  }
+
+  protected def startWithStoredNodeId(id: NodeId): EitherT[Future, String, Unit] = {
     if (nodeId.compareAndSet(None, Some(id))) {
       logger.info(s"Resuming as existing instance with uid=${id}")
 
@@ -254,7 +311,7 @@ abstract class CantonNodeBootstrapBase[
           )
           skipInitialization
         }
-      )(startWithStoredId)
+      )(startWithStoredNodeId)
     } yield {
       // if we're still not initialized and support a replica doing on our behalf, start a watcher to handle that happening
       if (getId.isEmpty && supportsReplicaInitialization) waitForReplicaInitialization()
@@ -295,7 +352,11 @@ abstract class CantonNodeBootstrapBase[
   override def onClosed(): Unit = blocking {
     synchronized {
       if (isRunningVar.getAndSet(false)) {
-        val stores = List(initializationStore, indexedStringStore, topologyStoreFactory)
+        val stores = List(
+          initializationStore,
+          indexedStringStore,
+          topologyStoreFactory,
+        )
         val instances = List(
           Lifecycle.toCloseableOption(initializationWatcherRef.get()),
           adminServerRegistry,
@@ -374,7 +435,7 @@ abstract class CantonNodeBootstrapBase[
             logger.debug("A stored id has been found but the id has already been set so ignoring")
           } else {
             logger.info("Starting node as we have found a stored id")
-            startWithStoredId(id).value.foreach {
+            startWithStoredNodeId(id).value.foreach {
               case Left(error) =>
                 // if we are already successfully initialized likely this was just called twice due to a race between
                 // the waiting and an initialize call

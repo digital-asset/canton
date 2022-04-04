@@ -10,6 +10,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
+  LoggingConfig,
   ProcessingTimeout,
   TestingConfigInternal,
 }
@@ -166,6 +167,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         _ => None,
         CommonMockMetrics.sequencerClient,
         FutureSupervisor.Noop,
+        LoggingConfig(),
         loggerFactory,
         ProtocolVersion.supportedProtocolsParticipant,
         Some(ProtocolVersion.latestForTest),

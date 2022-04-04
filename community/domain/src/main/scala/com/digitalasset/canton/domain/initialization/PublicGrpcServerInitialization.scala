@@ -46,7 +46,7 @@ object PublicGrpcServerInitialization {
         metrics,
         executionContext,
         loggerFactory,
-        cantonParameterConfig.logMessagePayloads,
+        cantonParameterConfig.loggingConfig.api,
         cantonParameterConfig.tracing,
       )
       // Overriding the dummy setting from PublicServerConfig.

@@ -57,11 +57,11 @@ case class CantonTimestamp(underlying: LfTimestamp)
   def +(duration: NonNegativeFiniteDuration): CantonTimestamp = plus(duration.unwrap)
   def -(duration: NonNegativeFiniteDuration): CantonTimestamp = minus(duration.unwrap)
 
-  def <=(other: CantonTimestampSecond): Boolean = this <= other.toTs
-  def <(other: CantonTimestampSecond): Boolean = this < other.toTs
+  def <=(other: CantonTimestampSecond): Boolean = this <= other.forgetSecond
+  def <(other: CantonTimestampSecond): Boolean = this < other.forgetSecond
 
-  def >=(other: CantonTimestampSecond): Boolean = this >= other.toTs
-  def >(other: CantonTimestampSecond): Boolean = this > other.toTs
+  def >=(other: CantonTimestampSecond): Boolean = this >= other.forgetSecond
+  def >(other: CantonTimestampSecond): Boolean = this > other.forgetSecond
 }
 
 object CantonTimestamp {

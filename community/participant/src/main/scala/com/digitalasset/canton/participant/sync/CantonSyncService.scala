@@ -21,7 +21,7 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
+import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
@@ -37,7 +37,10 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.Pruning._
 import com.digitalasset.canton.participant.admin._
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.config.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.{
+  ParticipantNodeParameters,
+  PartyNotificationConfig,
+}
 import com.digitalasset.canton.participant.domain._
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -545,6 +548,16 @@ class CantonSyncService(
             String255
               .fromProtoPrimitive(rawSubmissionId, "LedgerSubmissionId")
               .leftMap(err => TransactionError.internalError(err.toString))
+          )
+          // Allow party allocation via ledger API only if notification is Eager or the participant is connected to a domain
+          // Otherwise the gRPC call will just timeout without a meaning error message
+          _ <- EitherT.cond[Future](
+            parameters.partyChangeNotification == PartyNotificationConfig.Eager ||
+              connectedDomainsMap.nonEmpty,
+            (),
+            SubmissionResult.SynchronousError(
+              SyncServiceError.PartyAllocationNoDomainError.Error(rawSubmissionId).rpcStatus()
+            ),
           )
           _ <- topologyManager
             .authorize(
@@ -1719,4 +1732,22 @@ object SyncServiceError extends SyncServiceErrorGroup {
   ) extends SyncServiceError
       with CombinedError[SyncServiceError]
 
+  @Explanation(
+    """The participant is not connected to a domain and can therefore not allocate a party 
+    because the party notification is configured as ``party-notification.type = via-domain``."""
+  )
+  @Resolution(
+    "Connect the participant to a domain first or change the participant's party notification config to ``eager``."
+  )
+  object PartyAllocationNoDomainError
+      extends ErrorCode(
+        "PARTY_ALLOCATION_WITHOUT_CONNECTED_DOMAIN",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class Error(submission_id: LedgerSubmissionId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = show"Cannot allocate a party without being connected to a domain"
+        )
+  }
 }

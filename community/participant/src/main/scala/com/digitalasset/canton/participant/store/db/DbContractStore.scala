@@ -361,7 +361,10 @@ class DbContractStore(
         )
     }
 
-  private def storeElements[A](elements: Seq[A], fn: A => StoredContract)(implicit
+  private def storeElements(
+      elements: Seq[SerializableContract],
+      fn: SerializableContract => StoredContract,
+  )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[Unit] = {

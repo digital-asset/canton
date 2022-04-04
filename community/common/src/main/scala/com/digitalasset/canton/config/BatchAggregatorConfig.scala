@@ -22,7 +22,7 @@ object BatchAggregatorConfig {
   def apply(
       maximumInFlight: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumInFlight,
       maximumBatchSize: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumBatchSize,
-  ) =
+  ): Batching =
     Batching(
       maximumInFlight = maximumInFlight,
       maximumBatchSize = maximumBatchSize,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
+import cats.implicits.catsSyntaxPartialOrder
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter
@@ -158,4 +159,28 @@ class InMemoryTransferStore(
     Future.successful {
       val _ = transferDataMap.remove(transferId)
     }
+
+  override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TransferData]] = Future.successful {
+    def filter(entry: TransferEntry): Boolean =
+      entry.timeOfCompletion.isEmpty && // Always filter out completed transfers
+        requestAfter.forall(ts =>
+          (entry.transferData.transferId.requestTimestamp, entry.transferData.originDomain) > ts
+        )
+
+    transferDataMap.values
+      .to(LazyList)
+      .filter(filter)
+      .take(limit)
+      .map(_.transferData)
+      .sortBy(t => (t.transferId.requestTimestamp, t.transferId.originDomain))(
+        // Explicitly use the standard ordering on two-tuples here
+        // As Scala does not seem to infer the right implicits to use here
+        Ordering.Tuple2(
+          CantonTimestamp.orderCantonTimestamp.toOrdering,
+          DomainId.orderDomainId.toOrdering,
+        )
+      )
+  }
 }

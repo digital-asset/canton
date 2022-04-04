@@ -335,7 +335,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                 otherInterceptors = List(
                   new ApiRequestLogger(
                     config.loggerFactory,
-                    config.cantonParameterConfig.logMessagePayloads,
+                    config.cantonParameterConfig.loggingConfig.api,
                   ),
                   GrpcTracing
                     .newBuilder(config.tracerProvider.openTelemetry)

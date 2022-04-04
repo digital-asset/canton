@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.{
   String255,
   String300,
 }
-import com.digitalasset.canton.crypto.PublicKey
+import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -469,6 +469,46 @@ class DbTopologyStore(
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     queryForTransactions(transactionStoreIdName, sql"")
 
+  @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
+  override def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Set[PartyId]] = {
+    val p2pm = DomainTopologyTransactionType.PartyToParticipant
+    val pdsm = DomainTopologyTransactionType.ParticipantState
+    val (filterPartyIdentifier, filterPartyNamespace) =
+      UniqueIdentifier.splitFilter(filterParty, "%")
+    val (filterParticipantIdentifier, filterParticipantNamespace) =
+      UniqueIdentifier.splitFilter(filterParticipant, "%")
+    val limitS = storage.limit(limit)
+    val query =
+      sql"""
+        SELECT identifier, namespace FROM topology_transactions WHERE store_id = $stateStoreIdFilterName
+            AND valid_from < $timestamp AND (valid_until IS NULL OR $timestamp <= valid_until)
+            AND (
+                (transaction_type = $p2pm AND identifier LIKE $filterPartyIdentifier AND namespace LIKE $filterPartyNamespace
+                 AND secondary_identifier LIKE $filterParticipantIdentifier AND secondary_namespace LIKE $filterParticipantNamespace)
+             OR (transaction_type = $pdsm AND identifier LIKE $filterPartyIdentifier AND namespace LIKE $filterPartyNamespace
+                 AND identifier LIKE $filterParticipantIdentifier AND namespace LIKE $filterParticipantNamespace)
+            ) AND ignore_reason IS NULL GROUP BY (identifier, namespace) #${limitS}"""
+    readTime.metric.event {
+      storage
+        .query(
+          query.as[
+            (String, String)
+          ],
+          functionFullName,
+        )
+        .map(_.map { case (id, ns) =>
+          PartyId(UniqueIdentifier(Identifier.tryCreate(id), Namespace(Fingerprint.tryCreate(ns))))
+        }.toSet)
+    }
+  }
+
   /** query optimized for inspection */
   override def inspect(
       stateStore: Boolean,
@@ -514,12 +554,10 @@ class DbTopologyStore(
       else if (namespaceOnly) {
         query2 ++ sql" AND namespace LIKE ${idFilter + "%"}"
       } else {
-        val splitted = idFilter.split(SafeSimpleString.delimiter)
-        val prefix = splitted(0)
-        val tmp = query2 ++ sql" AND identifier like ${prefix + "%"} "
-        if (splitted.lengthCompare(1) > 0) {
-          val suffix = splitted(1)
-          tmp ++ sql" AND namespace like ${suffix + "%"} "
+        val (prefix, suffix) = UniqueIdentifier.splitFilter(idFilter, "%")
+        val tmp = query2 ++ sql" AND identifier like $prefix "
+        if (suffix.sizeCompare(1) > 0) {
+          tmp ++ sql" AND namespace like $suffix "
         } else
           tmp
       }

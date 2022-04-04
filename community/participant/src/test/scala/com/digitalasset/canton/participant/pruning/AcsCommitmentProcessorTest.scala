@@ -97,7 +97,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
   def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
   def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
-    TimeOfChange(requestCounter.toLong, ts(timestamp).toTs)
+    TimeOfChange(requestCounter.toLong, ts(timestamp).forgetSecond)
 
   def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
 
@@ -221,12 +221,12 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
 
   def withTestHash[A] = WithContractHash[A](_, testHash)
 
-  def rt(timestamp: Int, tieBreaker: Int) = RecordTime(ts(timestamp).toTs, tieBreaker.toLong)
+  def rt(timestamp: Int, tieBreaker: Int) =
+    RecordTime(ts(timestamp).forgetSecond, tieBreaker.toLong)
 
   val coid = (txId, discriminator) => ExampleTransactionFactory.suffixedId(txId, discriminator)
 }
 
-@SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
 class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcessorBaseTest {
 
   import AcsCommitmentProcessorTestHelpers._
@@ -296,7 +296,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
             CommitmentsPruningBound.Outstanding(_ => Future.successful(None)),
           earliestInFlightSubmissionF = Future.successful(None),
           reconciliationInterval = longInterval,
-          beforeOrAt = CantonTimestamp.now(),
         )
       } yield res shouldBe None
     }
@@ -311,16 +310,17 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           ),
           earliestInFlightSubmissionF = Future.successful(None),
           reconciliationInterval = longInterval,
-          beforeOrAt = CantonTimestamp.now(),
         )
-      } yield res shouldBe Some(CantonTimestamp.MinValue)
+      } yield res shouldBe Some(CantonTimestampSecond.MinValue)
     }
 
     "take checkForOutstandingCommitments flag into account" in {
       val longInterval = PositiveSeconds.ofDays(100)
       val now = CantonTimestamp.now()
 
-      def safeToPrune(checkForOutstandingCommitments: Boolean): Future[Option[CantonTimestamp]] = {
+      def safeToPrune(
+          checkForOutstandingCommitments: Boolean
+      ): Future[Option[CantonTimestampSecond]] = {
         val noOutstandingCommitmentsF: CantonTimestamp => Future[Some[CantonTimestamp]] =
           _ => Future.successful(Some(CantonTimestamp.MinValue))
         val lastComputedAndSentF = Future.successful(Some(now))
@@ -333,7 +333,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
             else CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF),
           earliestInFlightSubmissionF = Future.successful(None),
           reconciliationInterval = longInterval,
-          beforeOrAt = now,
         )
       }
 
@@ -341,8 +340,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res1 <- safeToPrune(true)
         res2 <- safeToPrune(false)
       } yield {
-        res1 shouldBe Some(CantonTimestamp.MinValue)
-        res2 shouldBe Some(AcsCommitmentProcessor.tickBeforeOrAt(now, longInterval).toTs)
+        res1 shouldBe Some(CantonTimestampSecond.MinValue)
+        res2 shouldBe Some(AcsCommitmentProcessor.tickBeforeOrAt(now, longInterval))
       }
     }
   }
@@ -365,7 +364,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       }
 
       val acsF = acsSetup(contractSetup.fmap { case (_, createdAt, archivedAt) =>
-        (createdAt.toTs, archivedAt.toTs)
+        (createdAt.forgetSecond, archivedAt.forgetSecond)
       })
 
       def commitments(
@@ -373,7 +372,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           at: CantonTimestampSecond,
       ): Future[Map[ParticipantId, AcsCommitment.CommitmentType]] =
         for {
-          snapshotOrErr <- acs.snapshot(at.toTs)
+          snapshotOrErr <- acs.snapshot(at.forgetSecond)
           snapshot <- snapshotOrErr.fold(
             _ => Future.failed(new RuntimeException(s"Failed to get snapshot at timestamp $at")),
             sn => Future.successful(sn.map { case (cid, _ts) => cid -> stakeholderLookup(cid) }),
@@ -512,7 +511,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
               TestingTopology().withParticipants(remote).build().forOwnerAndDomain(remote)
             val cmt = commitment(cids)
             val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
-            val period = CommitmentPeriod(fromExclusive.toTs, toInclusive.toTs, interval).value
+            val period =
+              CommitmentPeriod(fromExclusive.forgetSecond, toInclusive.forgetSecond, interval).value
             val payload = AcsCommitment.create(domainId, remote, localId, period, cmt)
 
             snapshotF.flatMap { snapshot =>
@@ -535,14 +535,14 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         )
         // First ask for the remote commitments to be processed, and then compute locally
         _ <- delivered
-          .traverse_ { case (ts, batch) => processor.processBatchInternal(ts.toTs, batch) }
+          .traverse_ { case (ts, batch) => processor.processBatchInternal(ts.forgetSecond, batch) }
           .onShutdown(fail())
         _ = changes.foreach { case (ts, tb, change) =>
           processor.publish(RecordTime(ts, tb), change)
         }
         _ <- processor.queue.flush()
-        computed <- store.searchComputedBetween(CantonTimestamp.Epoch, timeProofs.last)
-        received <- store.searchReceivedBetween(CantonTimestamp.Epoch, timeProofs.last)
+        computed <- store.searchComputedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
+        received <- store.searchReceivedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
       } yield {
         verify(processor.sequencerClient, times(2)).sendAsync(
           any[Batch[OpenEnvelope[ProtocolMessage]]],
@@ -581,7 +581,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
       } yield {
         res shouldEqual None
@@ -607,17 +606,16 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
       } yield {
-        res shouldEqual Some(CantonTimestamp.MinValue)
+        res shouldEqual Some(CantonTimestampSecond.MinValue)
       }
     }
 
     def assertInIntervalBefore(
         before: CantonTimestamp,
         reconciliationInterval: PositiveSeconds,
-    ): Option[CantonTimestamp] => Assertion = {
+    ): Option[CantonTimestampSecond] => Assertion = {
       case None => fail()
       case Some(ts) =>
         val delta = JDuration.between(ts.toInstant, before.toInstant)
@@ -665,7 +663,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.ofEpochSecond(200),
         )
         _ <- requestJournalStore.insert(
           RequestData(4L, RequestState.Pending, ts4, None)
@@ -682,7 +679,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.ofEpochSecond(200),
         )
       } yield {
         withClue("request 1:") {
@@ -729,7 +725,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
       } yield assertInIntervalBefore(tsCleanRequest, reconciliationInterval)(res)
     }
@@ -764,7 +759,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
       } yield {
         assertInIntervalBefore(ts1, reconciliationInterval)(res)
@@ -837,7 +831,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
         // Now remove the timed-out submission 1 and compute the pruning point again
         () <- inFlightSubmissionStore.delete(Seq(submission1.referenceByMessageId))
@@ -849,7 +842,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
         // Now remove the clean request and compute the pruning point again
         () <- inFlightSubmissionStore.delete(Seq(submission2.referenceByMessageId))
@@ -861,7 +853,6 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           inFlightSubmissionStore,
           domainId,
           checkForOutstandingCommitments = true,
-          CantonTimestamp.Epoch.plusSeconds(200),
         )
       } yield {
         assertInIntervalBefore(submission1.associatedTimestamp, reconciliationInterval)(res1)
@@ -1016,7 +1007,6 @@ class AcsCommitmentProcessorSyncTest
 }
 
 /* Scalacheck doesn't play nice with AsyncWordSpec, so using AnyWordSpec and waiting on futures */
-@SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
 class AcsCommitmentProcessorPropertyTest
     extends AnyWordSpec
     with BaseTest

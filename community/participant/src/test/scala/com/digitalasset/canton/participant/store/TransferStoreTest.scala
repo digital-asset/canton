@@ -3,11 +3,9 @@
 
 package com.digitalasset.canton.participant.store
 
-import java.util.UUID
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.{TransferData, TransferOutRequest}
@@ -23,10 +21,12 @@ import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{RequestId, TransferId}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.util.UUID
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 
@@ -183,6 +183,99 @@ trait TransferStoreTest {
             10,
           )
         } yield { assert(lookup.toList == List(transfer4)) }
+
+      }
+    }
+
+    "findAfter" should {
+
+      def populate(store: TransferStore) = for {
+        transfer1 <- mkTransferData(
+          TransferId(domain1, CantonTimestamp.Epoch.plusMillis(200L)),
+          mediator1,
+          LfPartyId.assertFromString("party1"),
+        )
+        transfer2 <- mkTransferData(
+          TransferId(domain1, CantonTimestamp.Epoch.plusMillis(100L)),
+          mediator1,
+          LfPartyId.assertFromString("party2"),
+        )
+        transfer3 <- mkTransferData(
+          TransferId(domain2, CantonTimestamp.Epoch.plusMillis(100L)),
+          mediator2,
+          LfPartyId.assertFromString("party2"),
+        )
+        transfer4 <- mkTransferData(
+          TransferId(domain2, CantonTimestamp.Epoch.plusMillis(200L)),
+          mediator2,
+          LfPartyId.assertFromString("party2"),
+        )
+        _ <- valueOrFail(store.addTransfer(transfer1))("first add failed")
+        _ <- valueOrFail(store.addTransfer(transfer2))("second add failed")
+        _ <- valueOrFail(store.addTransfer(transfer3))("third add failed")
+        _ <- valueOrFail(store.addTransfer(transfer4))("fourth add failed")
+      } yield (List(transfer1, transfer2, transfer3, transfer4))
+
+      "order pending transfers" in {
+        val store = mk(targetDomain)
+
+        for {
+          transfers <- populate(store)
+          lookup <- store.findAfter(None, 10)
+        } yield {
+          val List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
+          assert(lookup == Seq(transfer2, transfer3, transfer1, transfer4))
+        }
+
+      }
+      "give pending transfers after the given timestamp" in {
+        val store = mk(targetDomain)
+
+        for {
+          transfers <- populate(store)
+          List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
+          lookup <- store.findAfter(
+            requestAfter = Some(transfer2.transferId.requestTimestamp -> transfer2.originDomain),
+            10,
+          )
+        } yield {
+          assert(lookup == Seq(transfer3, transfer1, transfer4))
+        }
+      }
+      "give no pending transfers when empty" in {
+        val store = mk(targetDomain)
+        for { lookup <- store.findAfter(None, 10) } yield {
+          lookup shouldBe empty
+        }
+      }
+      "limit the results" in {
+        val store = mk(targetDomain)
+
+        for {
+          transfers <- populate(store)
+          lookup <- store.findAfter(None, 2)
+        } yield {
+          val List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
+          assert(lookup == Seq(transfer2, transfer3))
+        }
+      }
+      "exclude completed transfers" in {
+        val store = mk(targetDomain)
+
+        for {
+          transfers <- populate(store)
+          List(transfer1, transfer2, transfer3, transfer4) = transfers: @unchecked
+          checked <- store
+            .completeTransfer(
+              transfer2.transferId,
+              TimeOfChange(3L, CantonTimestamp.Epoch.plusSeconds(3)),
+            )
+            .value
+          lookup <- store.findAfter(None, 10)
+        } yield {
+          assert(checked.successful)
+          assert(lookup == Seq(transfer3, transfer1, transfer4))
+        }
 
       }
     }

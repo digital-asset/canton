@@ -72,8 +72,8 @@ object Policy {
       flagCloseable,
       maxRetries = Int.MaxValue,
       retryInterval,
-      operationName,
-      actionable,
+      operationName = operationName,
+      actionable = Some(actionable),
     ).unlessShutdown(FutureUnlessShutdown.outcomeF(task), AllExnRetryable)(
       Success.always,
       executionContext,
@@ -85,6 +85,7 @@ abstract class RetryWithDelay(
     logger: TracedLogger,
     operationName: String,
     longDescription: String,
+    actionable: Option[String], // How to mitigate the error
     initialDelay: FiniteDuration,
     totalMaxRetries: Int,
     flagCloseable: FlagCloseable,
@@ -92,6 +93,8 @@ abstract class RetryWithDelay(
 ) extends Policy(logger) {
 
   private val complainAfterRetries: Int = 10
+
+  private val actionableMessage: String = actionable.map(" " + _).getOrElse("")
 
   protected def nextDelay(nextCount: Int, delay: FiniteDuration): FiniteDuration
 
@@ -232,7 +235,7 @@ abstract class RetryWithDelay(
                           invocationP.trySuccess(retryP.future)
                           LoggerUtil.logAtLevel(
                             level,
-                            s"Now retrying operation '$operationName'. $longDescription",
+                            s"Now retrying operation '$operationName'. $longDescription$actionableMessage",
                           )
                           // Run the task again on the normal execution context as the task might take a long time.
                           // `performUnlessClosingF` guards against closing the execution context.
@@ -306,11 +309,14 @@ abstract class RetryWithDelay(
     run(runTask(), 0, NoErrorKind, 0, initialDelay)
   }
 
-  private def messageOfOutcome(outcome: Try[Any], consequence: String): String = outcome match {
+  private def messageOfOutcome(
+      outcome: Try[Any],
+      consequence: String,
+  ): String = outcome match {
     case util.Success(result) =>
       s"The operation '$operationName' was not successful. $consequence Result: $result. $longDescription"
     case Failure(_) =>
-      s"The operation '$operationName' has failed with an exception. $consequence $longDescription"
+      s"The operation '$operationName' has failed with an exception. $consequence $longDescription$actionableMessage"
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
@@ -357,6 +363,7 @@ case class Directly(
       logger,
       operationName,
       longDescription,
+      None,
       Duration.Zero,
       maxRetries,
       flagCloseable,
@@ -374,11 +381,13 @@ case class Pause(
     delay: FiniteDuration,
     operationName: String,
     longDescription: String = "",
+    actionable: Option[String] = None,
     retryLogLevel: Option[Level] = None,
 ) extends RetryWithDelay(
       logger,
       operationName,
       longDescription,
+      actionable,
       delay,
       maxRetries,
       flagCloseable,
@@ -427,12 +436,14 @@ case class Backoff(
     maxDelay: Duration,
     operationName: String,
     longDescription: String = "",
+    actionable: Option[String] = None,
     retryLogLevel: Option[Level] = None,
 )(implicit jitter: Jitter = Jitter.full(maxDelay))
     extends RetryWithDelay(
       logger,
       operationName,
       longDescription,
+      actionable,
       initialDelay,
       maxRetries,
       flagCloseable,

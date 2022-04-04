@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology.client
 import cats.data.EitherT
 import cats.syntax.functorFilter._
 import cats.syntax.list._
-import cats.syntax.traverse._
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -693,35 +692,8 @@ class StoreBasedTopologySnapshot(
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] =
-    findTransactions(
-      asOfInclusive = false,
-      includeSecondary = false,
-      types = Seq(
-        DomainTopologyTransactionType.PartyToParticipant,
-        DomainTopologyTransactionType.ParticipantState,
-      ),
-      filterUid = None,
-      filterNamespace = None,
-    )
-      .flatMap { col =>
-        val parties = col.toIdentityState
-          .collect {
-            case TopologyStateUpdateElement(_, ParticipantState(_, _, participant, _, _)) =>
-              participant.adminParty
-            case TopologyStateUpdateElement(_, PartyToParticipant(_, party, _, _)) => party
-          }
-          .filter { party =>
-            party.filterString.startsWith(filterParty)
-          }
-          .take(limit)
-        parties
-          .traverse { party =>
-            activeParticipantsOf(party.toLf)
-              .map(res => (party, res.filter(_._1.filterString.startsWith(filterParticipant))))
-          } // FIXME(i7397): This will filter out disabled participants, breaking the limit clause.
-          .map(_.toMap)
-      }
+  ): Future[Set[PartyId]] =
+    store.inspectKnownParties(timestamp, filterParty, filterParticipant, limit)
 
   override private[client] def loadUnvettedPackagesOrDependencies(
       participant: ParticipantId,

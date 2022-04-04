@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import io.grpc.ServerInterceptors.intercept
@@ -19,7 +20,7 @@ trait CantonServerInterceptors {
 
 class CantonCommunityServerInterceptors(
     tracingConfig: TracingConfig,
-    logMessagePayloads: Boolean,
+    apiLoggingConfig: ApiLoggingConfig,
     loggerFactory: NamedLoggerFactory,
 ) extends CantonServerInterceptors {
   private def interceptForLogging(
@@ -27,7 +28,7 @@ class CantonCommunityServerInterceptors(
       withLogging: Boolean,
   ): ServerServiceDefinition =
     if (withLogging) {
-      intercept(service, new ApiRequestLogger(loggerFactory, logMessagePayloads))
+      intercept(service, new ApiRequestLogger(loggerFactory, apiLoggingConfig))
     } else {
       service
     }

@@ -5,6 +5,8 @@ package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
 import cats.syntax.traverse._
+
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
@@ -74,42 +76,53 @@ class GrpcTopologyAggregationService(
       )
     }
 
-  private def reorganise(
-      fetched: List[(DomainId, Map[PartyId, Map[ParticipantId, ParticipantAttributes]])]
-  ): Map[PartyId, Map[ParticipantId, Map[DomainId, ParticipantPermission]]] = {
-    val tmp = fetched
-      .flatMap { case (domainId, res) =>
-        res.flatMap { case (partyId, participants) =>
-          participants.map { case (participantId, relationship) =>
-            (domainId, partyId, (participantId, relationship.permission))
-          }
+  private def findMatchingParties(
+      clients: List[(DomainId, StoreBasedTopologySnapshot)],
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  ): Future[Set[PartyId]] = MonadUtil
+    .foldLeftM((Set.empty[PartyId], false), clients) { case ((res, isDone), (_, client)) =>
+      if (isDone) Future.successful((res, true))
+      else
+        client.inspectKnownParties(filterParty, filterParticipant, limit).map { found =>
+          val tmp = found ++ res
+          if (tmp.size >= limit) (tmp.take(limit), true) else (tmp, false)
         }
-      }
-    groupBySnd(tmp).map { case (k, v) =>
-      val tmp = groupBySnd(v.map { case (a, (b, c)) =>
-        (a, b, c)
-      }).map { case (k2, v2) =>
-        (k2, v2.toMap)
-      }
-      (k, tmp)
     }
-  }
+    .map(_._1)
+
+  private def findParticipants(
+      clients: List[(DomainId, StoreBasedTopologySnapshot)],
+      partyId: PartyId,
+  ): Future[Map[ParticipantId, Map[DomainId, ParticipantPermission]]] =
+    clients
+      .flatTraverse { case (domainId, client) =>
+        client
+          .activeParticipantsOf(partyId.toLf)
+          .map(_.map { case (participantId, attributes) =>
+            (domainId, participantId, attributes.permission)
+          }.toList)
+      }
+      .map(_.groupBy { case (_, participantId, _) => participantId }.map { case (k, v) =>
+        (k, v.map { case (domain, _, permission) => (domain, permission) }.toMap)
+      })
 
   override def listParties(request: v0.ListPartiesRequest): Future[v0.ListPartiesResponse] =
     TraceContext.fromGrpcContext { implicit traceContext =>
+      val v0.ListPartiesRequest(asOfP, limit, filterDomain, filterParty, filterParticipant) =
+        request
       val res: EitherT[Future, CantonError, v0.ListPartiesResponse] = for {
-        matched <- snapshots(request.filterDomain, request.asOf)
-        res <- EitherT.right(matched.traverse { case (storeId, client) =>
-          client
-            .inspectKnownParties(request.filterParty, request.filterParticipant, request.limit)
-            .map { res =>
-              (storeId, res)
-            }
+        matched <- snapshots(filterDomain, asOfP)
+        parties <- EitherT.right(
+          findMatchingParties(matched, filterParty, filterParticipant, limit)
+        )
+        results <- EitherT.right(parties.toList.traverse { partyId =>
+          findParticipants(matched, partyId).map(res => (partyId, res))
         })
       } yield {
-        val mapped = reorganise(res)
         v0.ListPartiesResponse(
-          results = mapped.map { case (partyId, participants) =>
+          results = results.map { case (partyId, participants) =>
             v0.ListPartiesResponse.Result(
               party = partyId.toProtoPrimitive,
               participants = participants.map { case (participantId, domains) =>
@@ -124,7 +137,7 @@ class GrpcTopologyAggregationService(
                 )
               }.toSeq,
             )
-          }.toSeq
+          }
         )
       }
       EitherTUtil.toFuture(mapErrNew(res))

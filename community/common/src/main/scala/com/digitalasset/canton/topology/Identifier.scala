@@ -173,4 +173,15 @@ object UniqueIdentifier {
     fromProtoPrimitive_(uid).valueOr(err =>
       throw new DbDeserializationException(s"Failed to parse a unique ID $uid: $err")
     )
+
+  /** Split an uid filter into the two subparts */
+  def splitFilter(filter: String, append: String = ""): (String, String) = {
+    val items = filter.split(SafeSimpleString.delimiter)
+    val prefix = items(0)
+    if (items.lengthCompare(1) > 0) {
+      val suffix = items(1)
+      (prefix ++ append, suffix ++ append)
+    } else (prefix ++ append, append)
+  }
+
 }

@@ -68,8 +68,8 @@ package object canton {
   type LfCreateCommand = LfCommand.CreateByTemplate
   val LfCreateCommand: LfCommand.CreateByTemplate.type = LfCommand.CreateByTemplate
 
-  type LfExerciseCommand = LfCommand.ExerciseTemplate
-  val LfExerciseCommand: LfCommand.ExerciseTemplate.type = LfCommand.ExerciseTemplate
+  type LfExerciseCommand = LfCommand.LenientExercise
+  val LfExerciseCommand: LfCommand.LenientExercise.type = LfCommand.LenientExercise
 
   type LfExerciseByKeyCommand = LfCommand.ExerciseTemplateByKey
   val LfExerciseByKeyCommand: LfCommand.ExerciseTemplateByKey.type = LfCommand.ExerciseTemplateByKey

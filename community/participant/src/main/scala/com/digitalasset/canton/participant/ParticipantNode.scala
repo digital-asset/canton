@@ -12,6 +12,7 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
+import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -67,16 +68,6 @@ import com.digitalasset.canton.resource._
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
 import com.digitalasset.canton.time._
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.admin.grpc.{
-  GrpcTopologyAggregationService,
-  GrpcTopologyManagerReadService,
-  GrpcTopologyManagerWriteService,
-}
-import com.digitalasset.canton.topology.admin.v0.{
-  TopologyAggregationServiceGrpc,
-  TopologyManagerReadServiceGrpc,
-  TopologyManagerWriteServiceGrpc,
-}
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   IdentityProvidingServiceClient,
@@ -86,7 +77,6 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
-import com.digitalasset.canton.LedgerParticipantId
 import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
@@ -144,8 +134,6 @@ class ParticipantNodeBootstrap(
     None
   )
 
-  private val ips = new IdentityProvidingServiceClient()
-
   private val topologyManager =
     new ParticipantTopologyManager(
       clock,
@@ -154,31 +142,8 @@ class ParticipantNodeBootstrap(
       cantonParameterConfig.processingTimeouts,
       loggerFactory,
     )
-
   // add participant node topology manager
-  adminServerRegistry.addService(
-    TopologyManagerWriteServiceGrpc
-      .bindService(
-        new GrpcTopologyManagerWriteService(
-          topologyManager,
-          topologyManager.store,
-          crypto.cryptoPublicStore,
-          loggerFactory,
-        ),
-        executionContext,
-      )
-  )
-  adminServerRegistry.addService(
-    TopologyManagerReadServiceGrpc
-      .bindService(
-        new GrpcTopologyManagerReadService(
-          topologyStoreFactory.allNonDiscriminated,
-          ips,
-          loggerFactory,
-        ),
-        executionContext,
-      )
-  )
+  startTopologyManagementWriteService(topologyManager, topologyManager.store)
 
   private def createAndStartLedgerApiServer(
       ledgerId: String,
@@ -587,17 +552,6 @@ class ParticipantNodeBootstrap(
       adminServerRegistry.addService(
         DomainConnectivityServiceGrpc
           .bindService(new GrpcDomainConnectivityService(stateService), executionContext)
-      )
-      adminServerRegistry.addService(
-        TopologyAggregationServiceGrpc
-          .bindService(
-            new GrpcTopologyAggregationService(
-              topologyStoreFactory.allNonDiscriminated,
-              ips,
-              loggerFactory,
-            ),
-            executionContext,
-          )
       )
       adminServerRegistry.addService(
         TransferServiceGrpc.bindService(

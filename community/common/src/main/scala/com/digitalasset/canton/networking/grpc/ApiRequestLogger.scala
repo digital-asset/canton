@@ -3,51 +3,35 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import com.digitalasset.canton.logging.pretty.Pretty.{
-  DefaultEscapeUnicode,
-  DefaultIndent,
-  DefaultShowFieldNames,
-  DefaultWidth,
-}
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil._
 import com.google.common.annotations.VisibleForTesting
-import com.google.protobuf.ByteString
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
 import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
 import io.grpc.Status.Code._
 import io.grpc._
-import pprint.{PPrinter, Tree}
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /** Server side interceptor that logs incoming and outgoing traffic.
   *
-  * @param logMessagePayloads Indicates whether to log message payloads. (To be disabled in production!)
-  *                           Also applies to metadata.
-  * @param maxMethodLength indicates how much to abbreviate the name of the called method.
-  *                        E.g. "com.digitalasset.canton.MyMethod" may get abbreviated to "c.d.c.MyMethod".
-  *                        The last token will never get abbreviated.
-  * @param maxMessageLines maximum number of lines to log for a message
-  * @param maxStringLength maximum number of characters to log for a string within a message
-  * @param maxMetadataSize maximum size of metadata
+  * @param config Configuration to tailor the output
   */
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
 class ApiRequestLogger(
     override protected val loggerFactory: NamedLoggerFactory,
-    logMessagePayloads: Boolean,
-    maxMethodLength: Int = 30,
-    maxMessageLines: Int = 10,
-    maxStringLength: Int = 20,
-    maxMetadataSize: Int = 200,
+    config: ApiLoggingConfig,
 ) extends ServerInterceptor
     with NamedLogging {
 
   @VisibleForTesting
   private[networking] val cancelled: AtomicBoolean = new AtomicBoolean(false)
+
+  private lazy val printer = config.printer
 
   override def interceptCall[ReqT, RespT](
       call: ServerCall[ReqT, RespT],
@@ -61,7 +45,7 @@ class ApiRequestLogger(
     val method = call.getMethodDescriptor.getFullMethodName
 
     def createLogMessage(message: String): String =
-      show"Request ${method.readableLoggerName(maxMethodLength)} by ${sender.unquoted}: ${message.unquoted}"
+      show"Request ${method.readableLoggerName(config.maxMethodLength)} by ${sender.unquoted}: ${message.unquoted}"
 
     logger.trace(createLogMessage(s"received headers ${stringOfMetadata(headers)}"))(
       requestTraceContext
@@ -205,59 +189,23 @@ class ApiRequestLogger(
     }
   }
 
-  private lazy val pprinter: PPrinter = PPrinter.BlackWhite.copy(
-    defaultWidth = DefaultWidth,
-    defaultHeight = maxMessageLines,
-    defaultIndent = DefaultIndent,
-    defaultEscapeUnicode = DefaultEscapeUnicode,
-    defaultShowFieldNames = DefaultShowFieldNames,
-    additionalHandlers = {
-      case _: ByteString => Tree.Literal("ByteString")
-      case s: String =>
-        import com.digitalasset.canton.logging.pretty.Pretty._
-        s.limit(maxStringLength).toTree
-      case Some(p) =>
-        pprinter.treeify(
-          p,
-          escapeUnicode = DefaultEscapeUnicode,
-          showFieldNames = DefaultShowFieldNames,
-        )
-      case Seq(single) =>
-        pprinter.treeify(
-          single,
-          escapeUnicode = DefaultEscapeUnicode,
-          showFieldNames = DefaultShowFieldNames,
-        )
-    },
-  )
-
   @SuppressWarnings(Array("org.wartremover.warts.Product"))
   private def cutMessage(message: Any): String =
-    if (logMessagePayloads) {
-      message match {
-        case null => ""
-        case product: Product =>
-          pprinter(product).toString
-        case _: Any =>
-          import com.digitalasset.canton.logging.pretty.Pretty._
-          message.toString.limit(maxStringLength).toString
-      }
-    } else {
-      ""
-    }
+    if (config.logMessagePayloads) printer.printAdHoc(message)
+    else ""
 
   private def stringOfTrailers(trailers: Metadata): String =
-    if (!logMessagePayloads || trailers == null || trailers.keys().isEmpty) {
+    if (!config.logMessagePayloads || trailers == null || trailers.keys().isEmpty) {
       ""
     } else {
       s"\n  Trailers: ${stringOfMetadata(trailers)}"
     }
 
   private def stringOfMetadata(metadata: Metadata): String =
-    if (!logMessagePayloads || metadata == null) {
+    if (!config.logMessagePayloads || metadata == null) {
       ""
     } else {
-      metadata.toString.limit(maxMetadataSize).toString
+      metadata.toString.limit(config.maxMetadataSize).toString
     }
 
   private def enhance(status: Status): Status = {

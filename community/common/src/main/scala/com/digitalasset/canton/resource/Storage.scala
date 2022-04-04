@@ -191,6 +191,11 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
     case _ => s"limit $numberOfItems" + (if (skipItems != 0L) s" offset $skipItems" else "")
   }
 
+  /** Automatically performs #$ interpolation for a call to `limit` */
+  def limitSql(numberOfItems: Int, skipItems: Long = 0L): SQLActionBuilder = {
+    sql" #${limit(numberOfItems, skipItems)} "
+  }
+
   def metrics: DbStorageMetrics
 
   lazy val api: profile.DbStorageAPI.type = profile.DbStorageAPI

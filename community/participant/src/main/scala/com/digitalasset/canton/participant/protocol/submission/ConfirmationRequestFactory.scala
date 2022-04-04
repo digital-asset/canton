@@ -8,10 +8,11 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton._
+import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory._
@@ -37,13 +38,16 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * @param transactionTreeFactory used to create the payload
   * @param seedGenerator used to derive the transaction seed
+  * @param logEventDetails if set to true, we'll log the generated transaction view tree
   */
 class ConfirmationRequestFactory(
     submitterNode: ParticipantId,
     domain: DomainId,
+    loggingConfig: LoggingConfig,
+    val loggerFactory: NamedLoggerFactory,
 )(val transactionTreeFactory: TransactionTreeFactory, seedGenerator: SeedGenerator)(implicit
     executionContext: ExecutionContext
-) {
+) extends NamedLogging {
 
   /** Creates a confirmation request from a wellformed transaction.
     *
@@ -108,10 +112,17 @@ class ConfirmationRequestFactory(
         keySeed,
         version,
       )
-    } yield ConfirmationRequest(
-      InformeeMessage(transactionTree.fullInformeeTree),
-      transactionViewEnvelopes,
-    )
+    } yield {
+      if (loggingConfig.eventDetails) {
+        logger.debug(
+          s"Transaction tree is ${loggingConfig.api.printer.printAdHoc(transactionTree)}"
+        )
+      }
+      ConfirmationRequest(
+        InformeeMessage(transactionTree.fullInformeeTree),
+        transactionViewEnvelopes,
+      )
+    }
   }
 
   private def assertSubmittersNodeAuthorization(
@@ -179,6 +190,7 @@ object ConfirmationRequestFactory {
       cryptoOps: HashOps with HmacOps,
       seedGenerator: SeedGenerator,
       packageService: PackageService,
+      loggingConfig: LoggingConfig,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ConfirmationRequestFactory = {
 
@@ -191,7 +203,7 @@ object ConfirmationRequestFactory {
         loggerFactory,
       )
 
-    new ConfirmationRequestFactory(submitterNode, domainId)(
+    new ConfirmationRequestFactory(submitterNode, domainId, loggingConfig, loggerFactory)(
       transactionTreeFactory,
       seedGenerator,
     )

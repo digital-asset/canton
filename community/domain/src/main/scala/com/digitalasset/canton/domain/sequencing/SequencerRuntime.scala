@@ -224,6 +224,7 @@ class SequencerRuntime(
           metrics.sequencerClient,
           None,
           replayEnabled = false,
+          localNodeParameters.loggingConfig,
           loggerFactory,
           snapshot.flatMap(_.heads.get(sequencerId).map(_ + 1)),
         )

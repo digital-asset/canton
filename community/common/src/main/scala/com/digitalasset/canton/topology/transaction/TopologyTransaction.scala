@@ -180,7 +180,7 @@ final case class DomainGovernanceElement(mapping: DomainGovernanceMapping)
     prettyOfClass(param("id", _.id), param("mapping", _.mapping))
 
   lazy val id: TopologyElementId = TopologyElementId(mapping.domainId.toLengthLimitedString)
-  lazy val uniquePath: UniquePath =
+  lazy val uniquePath: UniquePathSignedDomainGovernanceTransaction =
     mapping.uniquePath(id) // TODO(Rafael): id is not used for the path ; improve API?
 }
 

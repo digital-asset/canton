@@ -128,7 +128,7 @@ object CantonServerBuilder {
       nodeMetrics: MetricHandle.Factory,
       executor: Executor,
       loggerFactory: NamedLoggerFactory,
-      logMessagePayloads: Boolean,
+      apiLoggingConfig: ApiLoggingConfig,
       tracing: TracingConfig,
   ): CantonServerBuilder = {
     val builder =
@@ -147,7 +147,7 @@ object CantonServerBuilder {
     new BaseBuilder(
       reifyBuilder(configureKeepAlive(config.keepAliveServer, builderWithSsl)),
       loggerFactory,
-      config.instantiateServerInterceptors(tracing, logMessagePayloads, nodeMetrics, loggerFactory),
+      config.instantiateServerInterceptors(tracing, apiLoggingConfig, nodeMetrics, loggerFactory),
     )
   }
 

@@ -36,6 +36,7 @@ import com.digitalasset.canton.time._
 import com.digitalasset.canton.tracing.TracingConfig
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{Config, ConfigException, ConfigFactory, ConfigRenderOptions}
+import com.typesafe.scalalogging.LazyLogging
 import pureconfig._
 import pureconfig.error.{CannotConvert, FailureReason}
 import pureconfig.generic.{DerivedConfigWriter, FieldCoproductHint, ProductHint}
@@ -46,6 +47,7 @@ import scala.annotation.nowarn
 import scala.concurrent.duration._
 import scala.jdk.DurationConverters._
 import scala.reflect.ClassTag
+import monocle.macros.syntax.lens._
 
 /** Configuration for a check */
 sealed trait CheckConfig
@@ -120,10 +122,26 @@ final case class MonitoringConfig(
     metrics: MetricsConfig = MetricsConfig(),
     delayLoggingThreshold: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
     tracing: TracingConfig = TracingConfig(),
-    logMessagePayloads: Boolean = false,
+    // TODO(i9014) remove (breaking change)
+    @Deprecated // use logging.api.messagePayloads instead
+    logMessagePayloads: Option[Boolean] = None,
     logQueryCost: Option[QueryCostMonitoringConfig] = None,
     logSlowFutures: Boolean = false,
-)
+    logging: LoggingConfig = LoggingConfig(),
+) extends LazyLogging {
+
+  // merge in backwards compatible config options
+  def getLoggingConfig: LoggingConfig = (logMessagePayloads, logging.api.messagePayloads) match {
+    case (Some(fst), _) =>
+      if (!logging.api.messagePayloads.forall(_ == fst))
+        logger.error(
+          "Broken config validation: logging.api.message-payloads differs from logMessagePayloads"
+        )
+      logging.focus(_.api.messagePayloads).replace(Some(fst))
+    case _ => logging
+  }
+
+}
 
 /** Configuration for console command timeouts
   *
@@ -304,7 +322,7 @@ trait CantonConfig {
       DomainNodeParameters(
         monitoring.tracing,
         monitoring.delayLoggingThreshold,
-        monitoring.logMessagePayloads,
+        monitoring.getLoggingConfig,
         monitoring.logQueryCost,
         parameters.enableAdditionalConsistencyChecks,
         features.enablePreviewCommands,
@@ -329,7 +347,7 @@ trait CantonConfig {
       ParticipantNodeParameters(
         monitoring.tracing,
         monitoring.delayLoggingThreshold,
-        monitoring.logMessagePayloads,
+        monitoring.getLoggingConfig,
         monitoring.logQueryCost,
         parameters.enableAdditionalConsistencyChecks,
         features.enablePreviewCommands,
@@ -793,6 +811,10 @@ object CantonConfig {
     lazy implicit val metricsConfigReader: ConfigReader[MetricsConfig] = deriveReader[MetricsConfig]
     lazy implicit val queryCostMonitoringConfigReader: ConfigReader[QueryCostMonitoringConfig] =
       deriveReader[QueryCostMonitoringConfig]
+    lazy implicit val apiLoggingConfigReader: ConfigReader[ApiLoggingConfig] =
+      deriveReader[ApiLoggingConfig]
+    lazy implicit val loggingConfigReader: ConfigReader[LoggingConfig] =
+      deriveReader[LoggingConfig]
     lazy implicit val monitoringConfigReader: ConfigReader[MonitoringConfig] =
       deriveReader[MonitoringConfig]
     lazy implicit val consoleCommandTimeoutReader: ConfigReader[ConsoleCommandTimeout] =
@@ -1124,6 +1146,10 @@ object CantonConfig {
     lazy implicit val metricsConfigWriter: ConfigWriter[MetricsConfig] = deriveWriter[MetricsConfig]
     lazy implicit val queryCostMonitoringConfig: ConfigWriter[QueryCostMonitoringConfig] =
       deriveWriter[QueryCostMonitoringConfig]
+    lazy implicit val apiLoggingConfigWriter: ConfigWriter[ApiLoggingConfig] =
+      deriveWriter[ApiLoggingConfig]
+    lazy implicit val loggingConfigWriter: ConfigWriter[LoggingConfig] =
+      deriveWriter[LoggingConfig]
     lazy implicit val monitoringConfigWriter: ConfigWriter[MonitoringConfig] =
       deriveWriter[MonitoringConfig]
     lazy implicit val consoleCommandTimeoutWriter: ConfigWriter[ConsoleCommandTimeout] =

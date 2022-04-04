@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.sync
 
 import akka.stream.Materializer
+import cats.Monad
 import cats.data.EitherT
+import cats.syntax.functor._
 import cats.syntax.traverse._
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton._
@@ -39,7 +41,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
   TransferProcessorError,
 }
 import com.digitalasset.canton.participant.protocol.transfer._
-import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
+import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruneObserver}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
@@ -64,16 +66,16 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
   TopologyTransactionProcessor,
 }
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -132,6 +134,7 @@ class SyncDomain(
       domainCrypto.crypto.pureCrypto,
       seedGenerator,
       packageService,
+      parameters.loggingConfig,
       loggerFactory,
     )
 
@@ -192,7 +195,7 @@ class SyncDomain(
       domainCrypto,
       staticDomainParameters.reconciliationInterval,
       persistent.acsCommitmentStore,
-      AcsCommitmentProcessor.pruneObserver(
+      new PruneObserver(
         persistent.requestJournalStore,
         persistent.sequencerCounterTrackerStore,
         staticDomainParameters.reconciliationInterval,
@@ -203,7 +206,8 @@ class SyncDomain(
         domainId,
         parameters.stores.acsPruningInterval,
         clock,
-      ),
+        loggerFactory,
+      ).observer(_, _),
       killSwitch = selfKillSwitch,
       pruningMetrics,
       timeouts,
@@ -551,7 +555,82 @@ class SyncDomain(
       logger.debug(s"Started sync domain for $domainId")(initializationTraceContext)
       ephemeral.markAsRecovered()
       logger.debug("Sync domain is ready.")(initializationTraceContext)
+      FutureUtil.doNotAwait(
+        completeTxIn,
+        "Failed to complete outstanding transfer-ins on startup. " +
+          "You may have to complete the transfer-ins manually.",
+      )
+      ()
     }).value
+  }
+
+  def completeTxIn(implicit tc: TraceContext): Future[Unit] = {
+
+    val fetchLimit = 1000
+
+    def completeTransfers(
+        previous: Option[(CantonTimestamp, DomainId)]
+    ): Future[Either[Option[(CantonTimestamp, DomainId)], Unit]] = {
+      logger.debug(s"Fetch $fetchLimit pending transfers")
+      val resF = for {
+        pendingTransfers <- persistent.transferStore.findAfter(
+          requestAfter = previous,
+          limit = fetchLimit,
+        )
+        // TODO(phoebe): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
+        // this up. It may be helpful to use the `RateLimiter`
+        eithers <- MonadUtil
+          .sequentialTraverse(pendingTransfers)({ data =>
+            logger.debug(s"Complete ${data.transferId} after startup")
+            val eitherF = TransferOutProcessingSteps.autoTransferIn(
+              data.transferId,
+              domainId,
+              transferCoordination,
+              data.contract.metadata.stakeholders,
+              participantId,
+              data.transferOutRequest.targetTimeProof.timestamp,
+            )
+            eitherF.value.map(_.left.map(err => data.transferId -> err))
+          })
+
+      } yield {
+        // Log any errors, then discard the errors and continue to complete pending transfers
+        eithers.foreach({
+          case Left((transferId, error)) =>
+            logger.debug(s"Failed to complete pending transfer $transferId. The error was $error.")
+          case Right(()) => ()
+        })
+
+        pendingTransfers.lastOption.map(t => t.transferId.requestTimestamp -> t.originDomain)
+      }
+
+      resF.map({
+        // Continue completing transfers that are after the last completed transfer
+        case Some(value) => Left(Some(value))
+        // We didn't find any uncompleted transfers, so stop
+        case None => Right(())
+      })
+    }
+
+    logger.debug(s"Wait for replay to complete")
+    for {
+      // Wait to see a timestamp >= now from the domain -- when we see such a timestamp, it means that the participant
+      // has "caught up" on messages from the domain (and so should have seen all the transfer-ins)
+      //TODO(i9009): This assumes the participant and domain clocks are synchronized, which may not be the case
+      waitForReplay <- timeTracker
+        .awaitTick(clock.now)
+        .map(_.void)
+        .getOrElse(Future.unit)
+
+      params <- topologyClient.currentSnapshotApproximation.findDynamicDomainParametersOrDefault()
+
+      _bool <- Monad[Future].tailRecM(None: Option[(CantonTimestamp, DomainId)])(ts =>
+        completeTransfers(ts)
+      )
+    } yield {
+      logger.debug(s"Transfer in completion has finished")
+    }
+
   }
 
   /** A [[SyncDomain]] is ready when it has resubscribed to the sequencer client. */

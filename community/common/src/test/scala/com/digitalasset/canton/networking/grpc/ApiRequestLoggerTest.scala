@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.domain.api.v0.HelloServiceGrpc.HelloService
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.logging.{NamedEventCapturingLogger, TracedLogger}
@@ -171,9 +172,11 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     val apiRequestLogger: ApiRequestLogger =
       new ApiRequestLogger(
         capturingLogger,
-        logMessagePayloads,
-        maxStringLength = maxStringLenth,
-        maxMetadataSize = maxMetadataSize,
+        config = ApiLoggingConfig(
+          messagePayloads = Some(logMessagePayloads),
+          maxStringLength = maxStringLenth,
+          maxMetadataSize = maxMetadataSize,
+        ),
       )
 
     val server: Server = InProcessServerBuilder

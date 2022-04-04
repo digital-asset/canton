@@ -244,7 +244,9 @@ class TopologyTransactionProcessor(
       validated <- validatedF
       _ <- incrementalF
       _ <- cascadingF // does synchronize storeF
-      filtered = validated._2.filter(_.rejectionReason.isEmpty).map(_.transaction)
+      filtered = validated._2.collect {
+        case transaction if transaction.rejectionReason.isEmpty => transaction.transaction
+      }
       _ <- listeners.toList.traverse(
         _.observed(
           sequencingTimestamp,
@@ -437,9 +439,23 @@ class TopologyTransactionProcessor(
             filterNamespace = Some(namespaces),
           )
         )
-        targetFiltered = target.signedTransactions.filter(tx =>
-          cascadingFilter(tx) && authValidator.isCurrentlyAuthorized(tx)
-        )
+
+        targetFiltered = target.signedTransactions.filter { tx =>
+          lazy val isDomainGovernance = tx.transaction.element match {
+            case _: TopologyStateUpdateElement => false
+            case _: DomainGovernanceElement => true
+          }
+
+          /*
+            We check that the transaction is properly authorized or is a domain governance.
+            This allows not to drop domain governance transactions with cascading updates.
+            In the scenario where a key authorizes a domain parameters change and is later
+            revoked, the domain parameters stay valid.
+           */
+          val isAuthorized = authValidator.isCurrentlyAuthorized(tx) || isDomainGovernance
+
+          cascadingFilter(tx) && isAuthorized
+        }
 
         current <- performUnlessClosingF(
           store

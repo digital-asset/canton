@@ -14,8 +14,6 @@ import com.google.rpc.code.Code
 import com.google.rpc.status.{Status => RpcStatus}
 import io.grpc.Status
 
-import scala.jdk.CollectionConverters._
-
 abstract class ErrorCodeWithEnum[T](id: String, category: ErrorCategory, val protoCode: T)(implicit
     parent: ErrorClass
 ) extends ErrorCode(id, category) {
@@ -37,20 +35,6 @@ trait TransactionError extends BaseCantonError {
   def definiteAnswer: Boolean = false
 
   final override def definiteAnswerO: Option[Boolean] = Some(definiteAnswer)
-
-  def rpcStatus(
-      overrideCode: Option[Status.Code] = None
-  )(implicit loggingContext: ErrorLoggingContext): RpcStatus = {
-    val status0: com.google.rpc.Status = code.asGrpcStatus(this)
-    val details: Seq[com.google.protobuf.Any] = status0.getDetailsList.asScala.toSeq
-    val detailsScalapb = details.map(com.google.protobuf.any.Any.fromJavaProto)
-
-    com.google.rpc.status.Status(
-      overrideCode.map(_.value()).getOrElse(status0.getCode),
-      status0.getMessage,
-      detailsScalapb,
-    )
-  }
 }
 
 /** Transaction errors are derived from BaseCantonError and need to be logged explicitly */

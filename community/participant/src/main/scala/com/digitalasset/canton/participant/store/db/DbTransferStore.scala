@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.version.VersionedSignedContent
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
-import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -277,6 +277,13 @@ class DbTransferStore(
     storage.update_(query, functionFullName)
   }
 
+  private lazy val findPendingBase = sql"""
+     select transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,
+     contract, creating_transaction_id, transfer_out_result, time_of_completion_request_counter, time_of_completion_timestamp
+     from transfers
+     where target_domain=$domain and time_of_completion_request_counter is null and time_of_completion_timestamp is null
+    """
+
   override def find(
       filterOrigin: Option[DomainId],
       filterTimestamp: Option[CantonTimestamp],
@@ -289,18 +296,40 @@ class DbTransferStore(
           import DbStorage.Implicits.BuilderChain._
           import DbStorage.Implicits._
 
-          val base = sql"""
-     select transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,
-     contract, creating_transaction_id, transfer_out_result, time_of_completion_request_counter, time_of_completion_timestamp
-     from transfers
-     where target_domain=$domain and time_of_completion_request_counter is null and time_of_completion_timestamp is null
-    """
           val originFilter = filterOrigin.fold(sql"")(domain => sql" and origin_domain=${domain}")
           val timestampFilter = filterTimestamp.fold(sql"")(ts => sql" and request_timestamp=${ts}")
           val submitterFilter =
             filterSubmitter.fold(sql"")(submitter => sql" and submitter_lf=${submitter}")
-          val limitSql = sql" #${storage.limit(limit)} "
-          (base ++ originFilter ++ timestampFilter ++ submitterFilter ++ limitSql).as[TransferData]
+          val limitSql = storage.limitSql(limit)
+          (findPendingBase ++ originFilter ++ timestampFilter ++ submitterFilter ++ limitSql)
+            .as[TransferData]
+        },
+        functionFullName,
+      )
+    }
+
+  override def findAfter(
+      requestAfter: Option[(CantonTimestamp, DomainId)],
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
+    processingTime.metric.event {
+      storage.query(
+        {
+          import DbStorage.Implicits.BuilderChain._
+
+          val timestampFilter =
+            requestAfter.fold(sql"")({ case (requestTimestamp, originDomain) =>
+              storage.profile match {
+                case Profile.Oracle(_) =>
+                  sql"and (request_timestamp > ${requestTimestamp} or (request_timestamp = ${requestTimestamp} and origin_domain > ${originDomain}))"
+                case _ =>
+                  sql" and (request_timestamp, origin_domain) > (${requestTimestamp}, ${originDomain}) "
+              }
+            })
+          val order = sql" order by request_timestamp, origin_domain "
+          val limitSql = storage.limitSql(limit)
+
+          (findPendingBase ++ timestampFilter ++ order ++ limitSql).as[TransferData]
         },
         functionFullName,
       )

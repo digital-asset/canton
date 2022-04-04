@@ -268,7 +268,7 @@ private class ForwardingTopologySnapshotClient(
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] =
+  ): Future[Set[PartyId]] =
     parent.inspectKnownParties(filterParty, filterParticipant, limit)
 
   override def findUnvettedPackagesOrDependencies(
@@ -405,7 +405,7 @@ class CachingTopologySnapshot(
       filterParty: String,
       filterParticipant: String,
       limit: Int,
-  ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] =
+  ): Future[Set[PartyId]] =
     parent.inspectKnownParties(filterParty, filterParticipant, limit)
 
   /** returns the list of currently known mediators */

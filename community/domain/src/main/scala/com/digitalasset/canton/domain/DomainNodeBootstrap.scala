@@ -9,7 +9,6 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.error.ErrorGroup
-import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -56,17 +55,12 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.TopologyManagerError.DomainErrorGroup
-import com.digitalasset.canton.topology.{DomainId, _}
-import com.digitalasset.canton.topology.admin.grpc.{
-  GrpcTopologyAggregationService,
-  GrpcTopologyManagerReadService,
-  GrpcTopologyManagerWriteService,
-}
 import com.digitalasset.canton.topology.client._
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
@@ -114,8 +108,6 @@ class DomainNodeBootstrap(
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   var topologyManager: Option[DomainTopologyManager] = None
-
-  private val ips = new IdentityProvidingServiceClient()
 
   override protected def autoInitializeIdentity(): EitherT[Future, String, Unit] =
     withNewTraceContext { implicit traceContext =>
@@ -241,43 +233,7 @@ class DomainNodeBootstrap(
       loggerFactory,
     )
     topologyManager = Some(manager)
-
-    adminServerRegistry
-      .addService(
-        canton.topology.admin.v0.TopologyManagerReadServiceGrpc
-          .bindService(
-            new GrpcTopologyManagerReadService(
-              topologyStoreFactory.allNonDiscriminated,
-              ips,
-              loggerFactory,
-            ),
-            executionContext,
-          )
-      )
-      .addService(
-        canton.topology.admin.v0.TopologyManagerWriteServiceGrpc
-          .bindService(
-            new GrpcTopologyManagerWriteService(
-              manager,
-              manager.store,
-              crypto.cryptoPublicStore,
-              loggerFactory,
-            ),
-            executionContext,
-          )
-      )
-      .addService(
-        canton.topology.admin.v0.TopologyAggregationServiceGrpc
-          .bindService(
-            new GrpcTopologyAggregationService(
-              topologyStoreFactory.allNonDiscriminated,
-              ips,
-              loggerFactory,
-            ),
-            executionContext,
-          )
-      )
-
+    startTopologyManagementWriteService(manager, manager.store)
     manager
   }
 
