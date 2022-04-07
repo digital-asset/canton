@@ -112,8 +112,8 @@ trait AcsCommitmentLookup {
       traceContext: TraceContext
   ): Future[Option[CantonTimestampSecond]]
 
-  /** The latest commitment tick before or at the given timestamp for which no commitments are outstanding.
-    * It is safe to prune the domain at the returned tick as long as the tick is not before the last timestamp needed
+  /** The latest timestamp before or at the given timestamp for which no commitments are outstanding.
+    * It is safe to prune the domain at the returned timestamp as long as it is not before the last timestamp needed
     * for crash recovery (see [[com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.safeToPrune]])
     *
     * Returns None if no such tick is known.

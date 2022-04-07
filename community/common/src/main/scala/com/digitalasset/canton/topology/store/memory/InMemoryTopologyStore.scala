@@ -399,6 +399,38 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
     Future.unit
   }
 
+  override def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]] = {
+    def filter(entry: TopologyStoreEntry[Positive]): Boolean = {
+      // active
+      entry.from < timestamp && entry.until.forall(until => timestamp <= until) &&
+      // not rejected
+      entry.rejected.isEmpty &&
+      // matches either a party to participant mapping (with appropriate filters)
+      ((entry.transaction.uniquePath.dbType == DomainTopologyTransactionType.PartyToParticipant &&
+        entry.transaction.uniquePath.maybeUid.exists(_.toProtoPrimitive.startsWith(filterParty)) &&
+        entry.secondaryUid.exists(_.toProtoPrimitive.startsWith(filterParticipant))) ||
+        // or matches a participant with appropriate filters
+        (entry.transaction.uniquePath.dbType == DomainTopologyTransactionType.ParticipantState &&
+          entry.transaction.uniquePath.maybeUid
+            .exists(_.toProtoPrimitive.startsWith(filterParty)) &&
+          entry.transaction.uniquePath.maybeUid
+            .exists(_.toProtoPrimitive.startsWith(filterParticipant))))
+    }
+    val topologyStateStoreSeq = blocking(synchronized(topologyStateStore.toSeq))
+    Future.successful(
+      topologyStateStoreSeq
+        .foldLeft(Set.empty[PartyId]) {
+          case (acc, elem) if acc.size >= limit || !filter(elem) => acc
+          case (acc, elem) => elem.transaction.uniquePath.maybeUid.fold(acc)(x => acc + PartyId(x))
+        }
+    )
+  }
+
   /** query optimized for inspection */
   override def inspect(
       stateStore: Boolean,
@@ -525,4 +557,5 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
     })
 
   override def close(): Unit = ()
+
 }

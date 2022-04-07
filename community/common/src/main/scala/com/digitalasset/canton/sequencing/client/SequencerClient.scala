@@ -14,6 +14,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   KeepAliveClientConfig,
+  LoggingConfig,
   ProcessingTimeout,
   TestingConfigInternal,
 }
@@ -21,6 +22,7 @@ import com.digitalasset.canton.crypto.{Crypto, CryptoPureApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
@@ -156,6 +158,7 @@ class SequencerClient(
     metrics: SequencerClientMetrics,
     recorderO: Option[SequencerClientRecorder],
     replayEnabled: Boolean,
+    loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
     initialCounter: Option[SequencerCounter] = None,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
@@ -189,6 +192,9 @@ class SequencerClient(
     */
   private val receivedEvents: BlockingQueue[OrdinarySerializedEvent] =
     new ArrayBlockingQueue[OrdinarySerializedEvent](config.eventInboxSize.unwrap)
+
+  private lazy val printer =
+    new CantonPrettyPrinter(loggingConfig.api.maxStringLength, loggingConfig.api.maxMessageLines)
 
   /** returns true if the sequencer subscription is healthy */
   def subscriptionIsHealthy: Boolean = currentSubscription.get().exists(x => !x.isDegraded)
@@ -296,6 +302,11 @@ class SequencerClient(
         maxSequencingTime,
         timestampOfSigningKey,
       )
+      if (loggingConfig.eventDetails) {
+        logger.debug(
+          s"About to send async batch ${printer.printAdHoc(batch)} as request ${printer.printAdHoc(request)}"
+        )
+      }
 
       span.setAttribute("member", member.show)
       span.setAttribute("message_id", messageId.unwrap)
@@ -991,6 +1002,7 @@ object SequencerClient {
       replayConfigForMember: Member => Option[ReplayConfig],
       metrics: SequencerClientMetrics,
       futureSupervisor: FutureSupervisor,
+      loggingConfig: LoggingConfig,
       loggerFactory: NamedLoggerFactory,
       supportedProtocolVersions: Seq[ProtocolVersion],
       minimumProtocolVersion: Option[ProtocolVersion],
@@ -1068,6 +1080,7 @@ object SequencerClient {
           metrics,
           recorderO,
           replayConfigForMember(member).isDefined,
+          loggingConfig,
           loggerFactory,
         )
       }

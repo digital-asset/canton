@@ -288,6 +288,10 @@ object TransferCacheTest {
     )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
       baseStore.find(filterOrigin, filterTimestamp, filterSubmitter, limit)
 
+    override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
+        traceContext: TraceContext
+    ): Future[Seq[TransferData]] = baseStore.findAfter(requestAfter, limit)
+
     override def lookup(transferId: TransferId)(implicit
         traceContext: TraceContext
     ): EitherT[Future, TransferLookupError, TransferData] =

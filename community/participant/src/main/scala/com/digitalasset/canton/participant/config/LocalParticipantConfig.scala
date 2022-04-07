@@ -76,7 +76,8 @@ object PartyNotificationConfig {
   /** Publish party changes when they have become effective on a domain.
     * This ensures that ledger API apps can immediately make use of party changes when they receive the notification.
     * If a party is changed on a participant while the participant is not connected to any domain,
-    * then the notification is delayed up to the point that the participant connects to a domain.
+    * then the party change will fail if triggered via the ledger API
+    * and delayed until the participant connects to a domain if triggered via Canton's admin endpoint.
     */
   case object ViaDomain extends PartyNotificationConfig
 }
@@ -84,7 +85,7 @@ object PartyNotificationConfig {
 case class ParticipantNodeParameters(
     override val tracing: TracingConfig,
     override val delayLoggingThreshold: NonNegativeFiniteDuration,
-    override val logMessagePayloads: Boolean,
+    override val loggingConfig: LoggingConfig,
     override val logQueryCost: Option[QueryCostMonitoringConfig],
     override val enableAdditionalConsistencyChecks: Boolean,
     override val enablePreviewFeatures: Boolean,

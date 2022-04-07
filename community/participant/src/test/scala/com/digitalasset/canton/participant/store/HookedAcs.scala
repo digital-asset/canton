@@ -25,8 +25,9 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
-class HookedAcs(private val acs: ActiveContractStore)(implicit val ec: ExecutionContext)
-    extends ActiveContractStore {
+private[participant] class HookedAcs(private val acs: ActiveContractStore)(implicit
+    val ec: ExecutionContext
+) extends ActiveContractStore {
   import HookedAcs.{noAction, noTransferAction}
 
   private val nextCreateHook: AtomicReference[(Seq[LfContractId], TimeOfChange) => Future[Unit]] =

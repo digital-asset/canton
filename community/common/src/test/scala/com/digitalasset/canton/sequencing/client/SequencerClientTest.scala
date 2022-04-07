@@ -11,6 +11,7 @@ import com.digitalasset.canton._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
+  LoggingConfig,
   ProcessingTimeout,
   TestingConfigInternal,
 }
@@ -726,6 +727,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         CommonMockMetrics.sequencerClient,
         None,
         false,
+        LoggingConfig(),
         loggerFactory,
       )(executionContext, tracer)
       val signedEvents = storedEvents.map(SequencerTestUtils.sign)

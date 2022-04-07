@@ -73,7 +73,7 @@ trait ServerConfig extends Product with Serializable {
   /** Use the configuration to instantiate the interceptors for this server */
   def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
-      logMessagePayloads: Boolean,
+      apiLoggingConfig: ApiLoggingConfig,
       metrics: MetricHandle.Factory,
       loggerFactory: NamedLoggerFactory,
   ): CantonServerInterceptors
@@ -83,10 +83,10 @@ trait ServerConfig extends Product with Serializable {
 trait CommunityServerConfig extends ServerConfig {
   override def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
-      logMessagePayloads: Boolean,
+      apiLoggingConfig: ApiLoggingConfig,
       metrics: MetricHandle.Factory,
       loggerFactory: NamedLoggerFactory,
-  ) = new CantonCommunityServerInterceptors(tracingConfig, logMessagePayloads, loggerFactory)
+  ) = new CantonCommunityServerInterceptors(tracingConfig, apiLoggingConfig, loggerFactory)
 }
 
 object ServerConfig {

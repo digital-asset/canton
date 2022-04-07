@@ -53,7 +53,7 @@ class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest {
           filterParty: String,
           filterParticipant: String,
           limit: Int,
-      ): Future[Map[PartyId, Map[ParticipantId, ParticipantAttributes]]] =
+      ): Future[Set[PartyId]] =
         ???
 
       override def activeParticipantsOfParties(

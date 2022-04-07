@@ -8,6 +8,7 @@ import cats.syntax.either._
 import cats.syntax.functor._
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton._
+import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ViewType.TransactionViewType
@@ -169,7 +170,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       override def saltsFromView(view: TransactionViewTree): Iterable[Salt] = ???
     }
 
-    new ConfirmationRequestFactory(submitterParticipant, domain)(
+    new ConfirmationRequestFactory(submitterParticipant, domain, LoggingConfig(), loggerFactory)(
       transactionTreeFactory,
       seedGenerator,
     )

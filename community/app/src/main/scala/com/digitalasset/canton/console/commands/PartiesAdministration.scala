@@ -49,10 +49,19 @@ class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment:
     "List active parties, their active participants, and the participants' permissions on domains."
   )
   @Help.Description(
-    """This command allows you to deeply inspect the topology state used for synchronisation.
-                      |The response is built from the timestamped topology transactions of each domain.
-                      |The filterDomain parameter is used to filter the results by domain id; 
-                      |the result only contains entries whose domain id starts with `filterDomain`."""
+    """Inspect the parties known by this participant as used for synchronisation.
+      |The response is built from the timestamped topology transactions of each domain, excluding the
+      |authorized store of the given node. For each known party, the list of active
+      |participants and their permission on the domain for that party is given.
+      |
+      filterParty: Filter by parties starting with the given string.
+      filterParticipant: Filter for parties that are hosted by a participant with an id starting with the given string
+      filterDomain: Filter by domains whose id starts with the given string.
+      asOf: Optional timestamp to inspect the topology state at a given point in time.
+      limit: Limit on the number of parties fetched (defaults to 100).
+            
+      Example: participant1.parties.list(filterParty="alice")
+      """
   )
   def list(
       filterParty: String = "",
@@ -81,16 +90,31 @@ class ParticipantPartiesAdministrationGroup(
     consoleEnvironment: ConsoleEnvironment,
 ) extends PartiesAdministrationGroup(runner, consoleEnvironment) {
 
-  @Help.Summary("List parties managed by this participant")
-  @Help.Description("""The filterDomain parameter is used to filter the results by domain id; 
-                      |the result only contains entries whose domain id starts with `filterDomain`.
-                      |Inactive participants hosting the party are not shown in the result.""")
+  @Help.Summary("List parties hosted by this participant")
+  @Help.Description("""Inspect the parties hosted by this participant as used for synchronisation.
+      |The response is built from the timestamped topology transactions of each domain, excluding the
+      |authorized store of the given node. The search will include all hosted parties and is equivalent
+      |to running the `list` method using the participant id of the invoking participant.
+      |
+      filterParty: Filter by parties starting with the given string.
+      filterDomain: Filter by domains whose id starts with the given string.
+      asOf: Optional timestamp to inspect the topology state at a given point in time.
+      limit: How many items to return. Defaults to 100.
+
+      Example: participant1.parties.hosted(filterParty="alice")""")
   def hosted(
       filterParty: String = "",
       filterDomain: String = "",
       asOf: Option[Instant] = None,
+      limit: Int = 100,
   ): Seq[ListPartiesResult] = {
-    list(filterParty, filterParticipant = participantId.filterString, filterDomain, asOf)
+    list(
+      filterParty,
+      filterParticipant = participantId.filterString,
+      filterDomain = filterDomain,
+      asOf = asOf,
+      limit = limit,
+    )
   }
 
   @Help.Summary("Enable/add party to participant")

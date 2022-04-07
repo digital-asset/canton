@@ -178,7 +178,15 @@ class TopologyTransactionProcessorTest
         st2 <- fetch(store, ts(1).immediateSuccessor)
       } yield {
         validate(st1, block1)
-        validate(st2, List(ns1k1_k1)) // dmp1_k2 is revoked because the ns delegation is revoked
+
+        /*
+          dmp1_k2 is not revoked
+          Domain governance transaction are not removed by cascading updates. The
+          idea behind is that the change of domain parameters is authorized and then
+          the new parameters stay valid even if the authorizing key is revoked. That
+          also ensures that we always have some domain parameters set.
+         */
+        validate(st2, List(ns1k1_k1, dmp1_k2))
       }
     }
 

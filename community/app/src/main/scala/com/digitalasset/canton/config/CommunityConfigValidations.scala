@@ -21,7 +21,12 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
   type Validation = CantonCommunityConfig => ValidatedNel[String, Unit]
 
   override protected val validations: List[Validation] =
-    List[Validation](noDuplicateStorage, atLeastOneNode)
+    List[Validation](noDuplicateStorage, atLeastOneNode) ++ genericValidations[
+      CantonCommunityConfig
+    ]
+
+  private[config] def genericValidations[C <: CantonConfig]: List[C => ValidatedNel[String, Unit]] =
+    List(backwardsCompatibleLoggingConfig)
 
   /** Group node configs by db access to find matching db storage configs.
     * Overcomplicated types used are to work around that at this point nodes could have conflicting names so we can't just
@@ -110,5 +115,23 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
     )
 
   }
+
+  /** Check that logging configs are backwards compatible but consistent */
+  private def backwardsCompatibleLoggingConfig(
+      config: CantonConfig
+  ): ValidatedNel[String, Unit] = {
+    (config.monitoring.logMessagePayloads, config.monitoring.logging.api.messagePayloads) match {
+      case (Some(fst), Some(snd)) =>
+        Validated.condNel(
+          fst == snd,
+          (),
+          backwardsCompatibleLoggingConfigErr,
+        )
+      case _ => Valid
+    }
+  }
+
+  private[config] val backwardsCompatibleLoggingConfigErr =
+    "Inconsistent configuration of canton.monitoring.log-message-payloads and canton.monitoring.logging.api.message-payloads. Please use the latter in your configuration"
 
 }

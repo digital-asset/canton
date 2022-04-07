@@ -70,7 +70,7 @@ case class CommunityPublicServerConfig(
 case class DomainNodeParameters(
     tracing: TracingConfig,
     delayLoggingThreshold: NonNegativeFiniteDuration,
-    logMessagePayloads: Boolean,
+    loggingConfig: LoggingConfig,
     logQueryCost: Option[QueryCostMonitoringConfig],
     enableAdditionalConsistencyChecks: Boolean,
     enablePreviewFeatures: Boolean,

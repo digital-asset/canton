@@ -973,19 +973,17 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Summary(
       "Test whether a participant is connected to and permissioned on a domain where we have a healthy subscription."
     )
-    def active(domain: DomainAlias): Boolean = {
+    def active(domain: DomainAlias): Boolean =
       list_connected().find(_.domainAlias == domain) match {
         case Some(item) if item.healthy =>
           topology.participant_domain_states.active(item.domainId, id)
         case _ => false
       }
-    }
 
     @Help.Summary(
-      "Test whether a participant is connected to and permissioned on a domain reference",
-      FeatureFlag.Testing,
+      "Test whether a participant is connected to and permissioned on a domain reference"
     )
-    def active(reference: DomainAdministration): Boolean = check(FeatureFlag.Testing) {
+    def active(reference: DomainAdministration): Boolean = {
       val domainId = reference.id
       list_connected().find(_.domainId == domainId) match {
         case None => false
@@ -994,12 +992,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       }
     }
     @Help.Summary(
-      "Test whether a participant is connected to a domain reference",
-      FeatureFlag.Testing,
+      "Test whether a participant is connected to a domain reference"
     )
-    def is_connected(reference: DomainAdministration): Boolean = check(FeatureFlag.Testing) {
+    def is_connected(reference: DomainAdministration): Boolean =
       list_connected().exists(_.domainId == reference.id)
-    }
 
     private def confirm_agreement(domainAlias: DomainAlias): Unit = {
 

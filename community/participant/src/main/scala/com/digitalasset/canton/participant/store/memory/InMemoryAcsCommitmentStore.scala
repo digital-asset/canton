@@ -178,9 +178,9 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
     Future.successful {
       for {
         lastTs <- lastComputed.get
-        adjustedTs = lastTs.toTs.min(beforeOrAt)
+        adjustedTs = lastTs.forgetSecond.min(beforeOrAt)
         periods = _outstanding.get().map { case (period, _participants) =>
-          period.fromExclusive.toTs -> period.toInclusive.toTs
+          period.fromExclusive.forgetSecond -> period.toInclusive.forgetSecond
         }
         safe = AcsCommitmentStore.latestCleanPeriod(
           beforeOrAt = adjustedTs,

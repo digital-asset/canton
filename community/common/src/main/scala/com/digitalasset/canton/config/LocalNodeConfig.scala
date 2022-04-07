@@ -36,7 +36,7 @@ trait LocalNodeParameters {
   def tracing: TracingConfig
   def delayLoggingThreshold: NonNegativeFiniteDuration
   def logQueryCost: Option[QueryCostMonitoringConfig]
-  def logMessagePayloads: Boolean
+  def loggingConfig: LoggingConfig
   def enableAdditionalConsistencyChecks: Boolean
   def enablePreviewFeatures: Boolean
   def processingTimeouts: ProcessingTimeout

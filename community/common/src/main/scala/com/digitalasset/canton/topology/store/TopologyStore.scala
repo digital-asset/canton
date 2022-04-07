@@ -377,6 +377,13 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]]
 
+  def inspectKnownParties(
+      timestamp: CantonTimestamp,
+      filterParty: String,
+      filterParticipant: String,
+      limit: Int,
+  )(implicit traceContext: TraceContext): Future[Set[PartyId]]
+
   /** find active topology transactions
     *
     * active / state means that for the key authorizing the transaction, there is a connected path to reach the root certificate

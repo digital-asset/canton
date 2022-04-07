@@ -115,6 +115,26 @@ class TransferCoordination(
         .leftMap[TransferProcessorError](_ => NoTimeProofFromDomain(domain))
     } yield timeProof
 
+  def getTimeProofAndSnapshot(targetDomain: DomainId)(implicit
+      traceContext: TraceContext
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransferProcessorError,
+    (TimeProof, DomainSnapshotSyncCryptoApi),
+  ] =
+    for {
+      timeProof <- recentTimeProof(targetDomain)
+      timestamp = timeProof.timestamp
+
+      // Since events are stored before they are processed, we wait just to be sure.
+      waitFuture <- EitherT.fromEither[FutureUnlessShutdown](
+        awaitTimestamp(targetDomain, timestamp, waitForEffectiveTime = true)
+      )
+      _ <- EitherT.right(FutureUnlessShutdown.outcomeF(waitFuture.getOrElse(Future.unit)))
+      targetCrypto <- cryptoSnapshot(targetDomain, timestamp)
+        .mapK(FutureUnlessShutdown.outcomeK)
+    } yield (timeProof, targetCrypto)
+
   /** Stores the given transfer data on the target domain. */
   def addTransferOutRequest(
       transferData: TransferData

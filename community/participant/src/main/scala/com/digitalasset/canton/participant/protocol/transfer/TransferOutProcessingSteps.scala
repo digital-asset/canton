@@ -16,23 +16,15 @@ import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewT
 import com.digitalasset.canton.error.BaseCantonError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
-  Confirmation,
-  Disabled,
-  Observation,
-  Submission,
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
 }
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
-import com.digitalasset.canton.participant.protocol.{
-  ProtocolProcessor,
-  SingleDomainCausalTracker,
-  TransferOutUpdate,
-}
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
   ActivenessResult,
@@ -46,6 +38,11 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.NoTransferData
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps._
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps._
+import com.digitalasset.canton.participant.protocol.{
+  ProtocolProcessor,
+  SingleDomainCausalTracker,
+  TransferOutUpdate,
+}
 import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.util.DAMLe
@@ -56,6 +53,14 @@ import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.time.TimeProof
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
+  Confirmation,
+  Disabled,
+  Observation,
+  Submission,
+}
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
@@ -63,6 +68,7 @@ import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
+import org.slf4j.event.Level
 
 import scala.collection.{concurrent, mutable}
 import scala.concurrent.{ExecutionContext, Future}
@@ -129,7 +135,7 @@ class TransferOutProcessingSteps(
         FutureUnlessShutdown.outcomeK
       )
 
-      timeProofAndSnapshot <- getTimeProofAndSnapshot(targetDomain)
+      timeProofAndSnapshot <- transferCoordination.getTimeProofAndSnapshot(targetDomain)
       (timeProof, targetCrypto) = timeProofAndSnapshot
       _ = logger.debug(withDetails(s"Picked time proof ${timeProof.timestamp}"))
 
@@ -229,27 +235,6 @@ class TransferOutProcessingSteps(
       .lookup(contractId)
       .toRight[TransferProcessorError](TransferOutProcessingSteps.UnknownContract(contractId))
       .map(storedContract => storedContract.contract.metadata.stakeholders)
-
-  private[this] def getTimeProofAndSnapshot(targetDomain: DomainId)(implicit
-      traceContext: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    TransferProcessorError,
-    (TimeProof, DomainSnapshotSyncCryptoApi),
-  ] =
-    for {
-      timeProof <- transferCoordination.recentTimeProof(targetDomain)
-      timestamp = timeProof.timestamp
-
-      // Since events are stored before they are processed, we wait just to be sure.
-      waitFuture <- EitherT.fromEither[FutureUnlessShutdown](
-        transferCoordination.awaitTimestamp(targetDomain, timestamp, waitForEffectiveTime = true)
-      )
-      _ <- EitherT.right(FutureUnlessShutdown.outcomeF(waitFuture.getOrElse(Future.unit)))
-      targetCrypto <- transferCoordination
-        .cryptoSnapshot(targetDomain, timestamp)
-        .mapK(FutureUnlessShutdown.outcomeK)
-    } yield (timeProof, targetCrypto)
 
   override protected def decryptTree(originSnapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
@@ -543,115 +528,18 @@ class TransferOutProcessingSteps(
   private[this] def triggerTransferInWhenExclusivityTimeoutExceeded(
       pendingRequestData: PendingRequestData
   )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Unit] = {
+
     val targetDomain = pendingRequestData.targetDomain
     val t0 = pendingRequestData.targetTimeProof.timestamp
 
-    def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
-      pendingRequestData.stakeholders.toList
-        .traverseFilter { partyId =>
-          snapshot
-            .hostedOn(partyId, participantId)
-            .map(x => x.filter(_.permission == ParticipantPermission.Submission).map(_ => partyId))
-        }
-        .map(_.toSet)
-    }
-
-    def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] = {
-      for {
-        targetIps <- getTimeProofAndSnapshot(targetDomain)
-          .map(_._2)
-          .onShutdown(Left(DomainNotReady(targetDomain, "Shutdown of time tracker")))
-        possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.ipsSnapshot))
-        inParty <- EitherT.fromOption[Future](
-          possibleSubmittingParties.headOption,
-          AutomaticTransferInError("No possible submitting party for automatic transfer-in"),
-        )
-        submissionResult <- transferCoordination
-          .transferIn(targetDomain, inParty, pendingRequestData.transferId)(TraceContext.empty)
-        TransferInProcessingSteps.SubmissionResult(completionF) = submissionResult
-        status <- EitherT.liftF(completionF)
-      } yield status
-    }
-
-    def performAutoInRepeatedly: EitherT[Future, TransferProcessorError, Unit] = {
-      case class StopRetry(result: Either[TransferProcessorError, com.google.rpc.status.Status])
-      val retryCount = 5
-
-      def tryAgain(
-          previous: com.google.rpc.status.Status
-      ): EitherT[Future, StopRetry, com.google.rpc.status.Status] = {
-        if (BaseCantonError.isStatusErrorCode(MediatorReject.Timeout, previous))
-          performAutoInOnce.leftMap(error => StopRetry(Left(error)))
-        else EitherT.leftT[Future, com.google.rpc.status.Status](StopRetry(Right(previous)))
-      }
-
-      val initial = performAutoInOnce.leftMap(error => StopRetry(Left(error)))
-      val result = MonadUtil.repeatFlatmap(initial, tryAgain, retryCount)
-
-      result.transform {
-        case Left(StopRetry(Left(error))) => Left(error)
-        case Left(StopRetry(Right(verdict))) => Right(())
-        case Right(verdict) => Right(())
-      }
-    }
-
-    def triggerAutoIn(
-        targetSnapshot: TopologySnapshot,
-        targetDomainParameters: DynamicDomainParameters,
-    )(implicit traceContext: TraceContext): Unit = {
-      val timeoutTimestamp = targetDomainParameters.transferExclusivityLimitFor(t0)
-
-      val autoIn = for {
-        targetHostedStakeholders <- EitherT.right(hostedStakeholders(targetSnapshot))
-        _unit <-
-          if (targetHostedStakeholders.nonEmpty) {
-            logger.info(
-              s"Registering automatic submission of transfer-in with ID ${pendingRequestData.transferId} at time $timeoutTimestamp, where base timestamp is $t0"
-            )
-            for {
-              timeoutFuture <- EitherT.fromEither[Future](
-                transferCoordination.awaitTimestamp(
-                  targetDomain,
-                  timeoutTimestamp,
-                  waitForEffectiveTime = false,
-                )
-              )
-              _ <- EitherT.liftF[Future, TransferProcessorError, Unit](timeoutFuture.getOrElse {
-                logger.debug(s"Automatic transfer-in triggered immediately")
-                Future.unit
-              })
-              _unit <- EitherTUtil.leftSubflatMap(performAutoInRepeatedly) {
-                // Filter out submission errors occurring because the transfer is already completed
-                case NoTransferData(id, TransferCompleted(transferId, timeOfCompletion)) =>
-                  Right(())
-                // Filter out the case that the participant has disconnected from the target domain in the meantime.
-                case UnknownDomain(domain, _reason) if domain == pendingRequestData.targetDomain =>
-                  Right(())
-                case DomainNotReady(domain, _reason) if domain == pendingRequestData.targetDomain =>
-                  Right(())
-                // Filter out the case that the target domain is closing right now
-                case other => Left(other)
-              }
-            } yield ()
-          } else EitherT.pure[Future, TransferProcessorError](())
-      } yield ()
-
-      EitherTUtil.doNotAwait(autoIn, "Automatic transfer-in failed")
-    }
-
-    for {
-      targetIps <- transferCoordination.cryptoSnapshot(targetDomain, t0)
-      targetSnapshot = targetIps.ipsSnapshot
-      targetDomainParameters <- EitherTUtil
-        .fromFuture(
-          targetSnapshot.findDynamicDomainParametersOrDefault(),
-          _ => UnknownDomain(targetDomain, "When fetching domain parameters"),
-        )
-        .leftWiden[TransferProcessorError]
-    } yield
-      if (targetDomainParameters.automaticTransferInEnabled)
-        triggerAutoIn(targetSnapshot, targetDomainParameters)
-      else ()
+    TransferOutProcessingSteps.autoTransferIn(
+      pendingRequestData.transferId,
+      targetDomain,
+      transferCoordination,
+      pendingRequestData.stakeholders,
+      participantId,
+      t0,
+    )
   }
 
   private[this] def deleteTransfer(targetDomain: DomainId, transferOutRequestId: RequestId)(implicit
@@ -1094,6 +982,131 @@ object TransferOutProcessingSteps {
       )
     }
 
+  }
+
+  def autoTransferIn(
+      id: TransferId,
+      targetDomain: DomainId,
+      transferCoordination: TransferCoordination,
+      stks: Set[LfPartyId],
+      participantId: ParticipantId,
+      t0: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      elc: ErrorLoggingContext,
+  ): EitherT[Future, TransferProcessorError, Unit] = {
+    val logger = elc.logger
+    implicit val tc = elc.traceContext
+
+    def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
+      stks.toList
+        .traverseFilter { partyId =>
+          snapshot
+            .hostedOn(partyId, participantId)
+            .map(x => x.filter(_.permission == ParticipantPermission.Submission).map(_ => partyId))
+        }
+        .map(_.toSet)
+    }
+
+    def performAutoInOnce: EitherT[Future, TransferProcessorError, com.google.rpc.status.Status] = {
+      for {
+        targetIps <- transferCoordination
+          .getTimeProofAndSnapshot(targetDomain)
+          .map(_._2)
+          .onShutdown(Left(DomainNotReady(targetDomain, "Shutdown of time tracker")))
+        possibleSubmittingParties <- EitherT.right(hostedStakeholders(targetIps.ipsSnapshot))
+        inParty <- EitherT.fromOption[Future](
+          possibleSubmittingParties.headOption,
+          AutomaticTransferInError("No possible submitting party for automatic transfer-in"),
+        )
+        submissionResult <- transferCoordination
+          .transferIn(targetDomain, inParty, id)(TraceContext.empty)
+        TransferInProcessingSteps.SubmissionResult(completionF) = submissionResult
+        status <- EitherT.liftF(completionF)
+      } yield status
+    }
+
+    def performAutoInRepeatedly: EitherT[Future, TransferProcessorError, Unit] = {
+      case class StopRetry(result: Either[TransferProcessorError, com.google.rpc.status.Status])
+      val retryCount = 5
+
+      def tryAgain(
+          previous: com.google.rpc.status.Status
+      ): EitherT[Future, StopRetry, com.google.rpc.status.Status] = {
+        if (BaseCantonError.isStatusErrorCode(MediatorReject.Timeout, previous))
+          performAutoInOnce.leftMap(error => StopRetry(Left(error)))
+        else EitherT.leftT[Future, com.google.rpc.status.Status](StopRetry(Right(previous)))
+      }
+
+      val initial = performAutoInOnce.leftMap(error => StopRetry(Left(error)))
+      val result = MonadUtil.repeatFlatmap(initial, tryAgain, retryCount)
+
+      result.transform {
+        case Left(StopRetry(Left(error))) => Left(error)
+        case Left(StopRetry(Right(verdict))) => Right(())
+        case Right(verdict) => Right(())
+      }
+    }
+
+    def triggerAutoIn(
+        targetSnapshot: TopologySnapshot,
+        targetDomainParameters: DynamicDomainParameters,
+    ): Unit = {
+      val timeoutTimestamp = targetDomainParameters.transferExclusivityLimitFor(t0)
+
+      val autoIn = for {
+        targetHostedStakeholders <- EitherT.right(hostedStakeholders(targetSnapshot))
+        _unit <-
+          if (targetHostedStakeholders.nonEmpty) {
+            logger.info(
+              s"Registering automatic submission of transfer-in with ID ${id} at time $timeoutTimestamp, where base timestamp is $t0"
+            )
+            for {
+              timeoutFuture <- EitherT.fromEither[Future](
+                transferCoordination.awaitTimestamp(
+                  targetDomain,
+                  timeoutTimestamp,
+                  waitForEffectiveTime = false,
+                )
+              )
+              _ <- EitherT.liftF[Future, TransferProcessorError, Unit](timeoutFuture.getOrElse {
+                logger.debug(s"Automatic transfer-in triggered immediately")
+                Future.unit
+              })
+              _unit <- EitherTUtil.leftSubflatMap(performAutoInRepeatedly) {
+                // Filter out submission errors occurring because the transfer is already completed
+                case NoTransferData(id, TransferCompleted(transferId, timeOfCompletion)) =>
+                  Right(())
+                // Filter out the case that the participant has disconnected from the target domain in the meantime.
+                case UnknownDomain(domain, _reason) if domain == targetDomain =>
+                  Right(())
+                case DomainNotReady(domain, _reason) if domain == targetDomain =>
+                  Right(())
+                // Filter out the case that the target domain is closing right now
+                case other => Left(other)
+              }
+            } yield ()
+          } else EitherT.pure[Future, TransferProcessorError](())
+      } yield ()
+
+      EitherTUtil.doNotAwait(autoIn, "Automatic transfer-in failed", Level.INFO)
+    }
+
+    for {
+      targetIps <- transferCoordination.cryptoSnapshot(targetDomain, t0)
+      targetSnapshot = targetIps.ipsSnapshot
+      targetDomainParameters <- EitherTUtil
+        .fromFuture(
+          targetSnapshot.findDynamicDomainParametersOrDefault(),
+          _ => UnknownDomain(targetDomain, "When fetching domain parameters"),
+        )
+        .leftWiden[TransferProcessorError]
+    } yield {
+
+      if (targetDomainParameters.automaticTransferInEnabled)
+        triggerAutoIn(targetSnapshot, targetDomainParameters)
+      else ()
+    }
   }
 
   private def stringOfNec[A](chain: NonEmptyChain[String]): String = chain.toList.mkString(", ")

@@ -35,7 +35,7 @@ import com.digitalasset.canton.protocol.{LfContractId, LfHash, WithContractHash}
 import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveSeconds}
+import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
@@ -130,7 +130,7 @@ class AcsCommitmentProcessor(
     domainCrypto: SyncCryptoClient,
     reconciliationInterval: PositiveSeconds,
     store: AcsCommitmentStore,
-    commitmentPeriodObserver: (ExecutionContext, ErrorLoggingContext) => Future[Unit],
+    commitmentPeriodObserver: (ExecutionContext, TraceContext) => Future[Unit],
     killSwitch: => Unit,
     metrics: PruningMetrics,
     override protected val timeouts: ProcessingTimeout,
@@ -309,7 +309,7 @@ class AcsCommitmentProcessor(
         // as otherwise we can get a race where an incoming commitment doesn't "clear" the outstanding period
         _ = indicateReadyForRemote(completedPeriod.toInclusive)
         _ <- processBuffered(completedPeriod.toInclusive)
-        _ <- commitmentPeriodObserver(ec, loggingContext)
+        _ <- commitmentPeriodObserver(ec, traceContext)
         _ <- indicateLocallyProcessed(completedPeriod)
       } yield ()
     }
@@ -410,11 +410,11 @@ class AcsCommitmentProcessor(
             ),
             (
               tickBeforeOrAt(
-                payload.period.toInclusive.toTs,
+                payload.period.toInclusive.forgetSecond,
                 reconciliationInterval,
               ) != payload.period.toInclusive
                 || tickBeforeOrAt(
-                  payload.period.fromExclusive.toTs,
+                  payload.period.fromExclusive.forgetSecond,
                   reconciliationInterval,
                 ) != payload.period.fromExclusive,
               s"Received commitment period doesn't align with the domain reconciliation interval: ${payload.period}",
@@ -468,7 +468,7 @@ class AcsCommitmentProcessor(
     endOfLastProcessedPeriod = Some(period.toInclusive)
     for {
       // delete the processed buffered commitments (safe to do at any point after `processBuffered` completes)
-      _ <- store.queue.deleteThrough(period.toInclusive.toTs)
+      _ <- store.queue.deleteThrough(period.toInclusive.forgetSecond)
       // mark that we're done with processing this period; safe to do at any point after the commitment has been sent
       // and the outstanding commitments stored
       _ <- store.markComputedAndSent(period)
@@ -491,7 +491,7 @@ class AcsCommitmentProcessor(
 
       // TODO(#8207) Properly check that bounds of commitment.period fall on commitment ticks
       correctInterval = Seq(commitment.period.fromExclusive, commitment.period.toInclusive).forall {
-        ts => tickBeforeOrAt(ts.toTs, reconciliationInterval) == ts
+        ts => tickBeforeOrAt(ts.forgetSecond, reconciliationInterval) == ts
       }
 
       _ <- if (validSig && correctInterval) checkCommitment(commitment) else Future.unit
@@ -514,7 +514,7 @@ class AcsCommitmentProcessor(
       message: SignedProtocolMessage[AcsCommitment]
   )(implicit traceContext: TraceContext): Future[Boolean] =
     for {
-      cryptoSnapshot <- domainCrypto.awaitSnapshot(message.message.period.toInclusive.toTs)
+      cryptoSnapshot <- domainCrypto.awaitSnapshot(message.message.period.toInclusive.forgetSecond)
       pureCrypto = domainCrypto.pureCrypto
       msgHash = pureCrypto.digest(
         HashPurpose.AcsCommitment,
@@ -529,16 +529,24 @@ class AcsCommitmentProcessor(
 
   private def checkCommitment(
       commitment: AcsCommitment
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val readyToCheck = readyForRemote.exists(_ >= commitment.period.toInclusive)
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    queue
+      .executeUnlessFailed(
+        // Make sure that the ready-for-remote check is atomic with buffering the commitment
+        {
+          val readyToCheck = readyForRemote.exists(_ >= commitment.period.toInclusive)
 
-    if (readyToCheck) {
-      checkMatchAndMarkSafe(List(commitment))
-    } else {
-      logger.debug(s"Buffering $commitment for later processing")
-      store.queue.enqueue(commitment)
-    }
-  }
+          if (readyToCheck) {
+            // Do not sequentialize the checking
+            Future.successful(checkMatchAndMarkSafe(List(commitment)))
+          } else {
+            logger.debug(s"Buffering $commitment for later processing")
+            store.queue.enqueue(commitment).map((_: Unit) => Future.successful(()))
+          }
+        },
+        s"check commitment readiness at ${commitment.period} by ${commitment.sender}",
+      )
+      .flatten
 
   private def indicateReadyForRemote(timestamp: CantonTimestampSecond): Unit = {
     readyForRemote.foreach(oldTs =>
@@ -554,7 +562,7 @@ class AcsCommitmentProcessor(
       timestamp: CantonTimestampSecond
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
-      toProcess <- store.queue.peekThrough(timestamp.toTs)
+      toProcess <- store.queue.peekThrough(timestamp.forgetSecond)
       _ <- checkMatchAndMarkSafe(toProcess)
     } yield {
       logger.debug(
@@ -570,7 +578,7 @@ class AcsCommitmentProcessor(
       lastPruningTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Boolean = {
     if (local.isEmpty) {
-      if (lastPruningTime.forall(_ < remote.period.toInclusive.toTs)) {
+      if (lastPruningTime.forall(_ < remote.period.toInclusive.forgetSecond)) {
         // TODO(M40): This signifies a Byzantine sender (the signature passes). Alarms should be raised.
         Errors.MismatchError.NoSharedContracts.Mismatch(domainId, remote)
       } else
@@ -632,7 +640,7 @@ class AcsCommitmentProcessor(
       s"Computing commitments for $period, number of stakeholder sets: ${commitmentSnapshot.keySet.size}"
     )
     for {
-      crypto <- domainCrypto.awaitSnapshot(period.toInclusive.toTs)
+      crypto <- domainCrypto.awaitSnapshot(period.toInclusive.forgetSecond)
       cmts <- commitments(
         participantId,
         commitmentSnapshot,
@@ -827,7 +835,7 @@ object AcsCommitmentProcessor {
     val periodEnd = tickBefore(timestamp, interval)
     val periodStart = endOfPreviousPeriod.getOrElse(CantonTimestampSecond.MinValue)
 
-    CommitmentPeriod(periodStart.toTs, periodEnd.toTs, interval).toOption
+    CommitmentPeriod(periodStart.forgetSecond, periodEnd.forgetSecond, interval).toOption
   }
 
   /** Compute the ACS commitments at the given timestamp.
@@ -849,7 +857,7 @@ object AcsCommitmentProcessor {
     val commitmentTimer = pruningMetrics.map(_.commitments.compute.metric.time())
 
     for {
-      ipsSnapshot <- domainCrypto.ipsSnapshot(timestamp.toTs)
+      ipsSnapshot <- domainCrypto.ipsSnapshot(timestamp.forgetSecond)
       // Important: use the keys of the timestamp
       isActiveParticipant <- ipsSnapshot.isParticipantActive(participantId)
 
@@ -893,11 +901,10 @@ object AcsCommitmentProcessor {
       commitmentsPruningBound: CommitmentsPruningBound,
       earliestInFlightSubmissionF: Future[Option[CantonTimestamp]],
       reconciliationInterval: PositiveSeconds,
-      beforeOrAt: CantonTimestamp,
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
-  ): Future[Option[CantonTimestamp]] =
+  ): Future[Option[CantonTimestampSecond]] =
     for {
       // This logic progressively lowers the timestamp based on the following constraints:
       // 1. Pruning must not delete data needed for recovery (after the clean replay timestamp)
@@ -917,20 +924,20 @@ object AcsCommitmentProcessor {
       // Latest potential pruning point is the ACS commitment tick before or at the "clean replay" timestamp
       // and strictly before the earliest timestamp associated with an in-flight submission.
       latestTickBeforeOrAt = getTickBeforeOrAt(
-        beforeOrAt
-          .min(cleanReplayTs)
-          .min(inFlightSubmissionTs.fold(CantonTimestamp.MaxValue)(_.immediatePredecessor))
+        cleanReplayTs.min(
+          inFlightSubmissionTs.fold(CantonTimestamp.MaxValue)(_.immediatePredecessor)
+        )
       )
 
       // Only acs commitment ticks whose ACS commitment fully matches all counter participant ACS commitments are safe,
       // so look for the most recent such tick before latestTickBeforeOrAt if any.
       tsSafeToPruneUpTo <- commitmentsPruningBound match {
         case CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF) =>
-          noOutstandingCommitmentsF(latestTickBeforeOrAt.toTs)
+          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetSecond).map(_.map(getTickBeforeOrAt))
         case CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF) =>
           lastComputedAndSentF.map(
             _.map(lastComputedAndSent =>
-              getTickBeforeOrAt(lastComputedAndSent).min(latestTickBeforeOrAt).toTs
+              getTickBeforeOrAt(lastComputedAndSent).min(latestTickBeforeOrAt)
             )
           )
       }
@@ -969,11 +976,10 @@ object AcsCommitmentProcessor {
       inFlightSubmissionStore: InFlightSubmissionStore,
       domainId: DomainId,
       checkForOutstandingCommitments: Boolean,
-      beforeOrAt: CantonTimestamp,
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
-  ): Future[Option[CantonTimestamp]] = {
+  ): Future[Option[CantonTimestampSecond]] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val cleanReplayF = SyncDomainEphemeralStateFactory
       .crashRecoveryPruningBoundInclusive(requestJournalStore, sequencerCounterTrackerStore)
@@ -983,7 +989,7 @@ object AcsCommitmentProcessor {
         CommitmentsPruningBound.Outstanding(acsCommitmentStore.noOutstandingCommitments(_))
       else
         CommitmentsPruningBound.LastComputedAndSent(
-          acsCommitmentStore.lastComputedAndSent.map(_.map(_.toTs))
+          acsCommitmentStore.lastComputedAndSent.map(_.map(_.forgetSecond))
         )
 
     val earliestInFlightF = inFlightSubmissionStore.lookupEarliest(domainId)
@@ -992,67 +998,7 @@ object AcsCommitmentProcessor {
       commitmentsPruningBound = commitmentsPruningBound,
       earliestInFlightF,
       reconciliationInterval,
-      beforeOrAt,
     )
-  }
-
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  def pruneObserver(
-      requestJournalStore: RequestJournalStore,
-      sequencerCounterTrackerStore: SequencerCounterTrackerStore,
-      reconciliationInterval: PositiveSeconds,
-      acsCommitmentStore: AcsCommitmentStore,
-      acs: ActiveContractStore,
-      keyJournal: ContractKeyJournal,
-      inFlightSubmissionStore: InFlightSubmissionStore,
-      domainId: DomainId,
-      acsPruningInterval: NonNegativeFiniteDuration,
-      clock: Clock,
-  ): (ExecutionContext, ErrorLoggingContext) => Future[Unit] = {
-
-    var lastPrune: Option[CantonTimestamp] = None
-    (executionContext, errorLoggingContext) => {
-      implicit val loggingContext: ErrorLoggingContext = errorLoggingContext
-      implicit val tc: TraceContext = errorLoggingContext.traceContext
-      implicit val ec: ExecutionContext = executionContext
-
-      val now = clock.now
-      if (lastPrune.forall(_ < now.minus(acsPruningInterval.unwrap))) {
-        safeToPrune(
-          requestJournalStore,
-          sequencerCounterTrackerStore,
-          reconciliationInterval,
-          acsCommitmentStore,
-          inFlightSubmissionStore,
-          domainId,
-          checkForOutstandingCommitments = false,
-          now, // TODO(Rafael) figure out whether we want to use CantonTimestamp.MaxValue here
-        ).flatMap { tsO =>
-          tsO.fold(Future.unit) { ts =>
-            lastPrune = Some(ts)
-
-            // Clean unused entries from the ACS
-            val acsF = EitherTUtil
-              .logOnError(acs.prune(ts), s"Periodic ACS prune at $ts:")
-              .value
-              // Discard the result of this prune, as it's not needed
-              .void
-            // clean unused contract key journal entries
-            val journalF =
-              EitherTUtil
-                .logOnError(
-                  keyJournal.prune(ts),
-                  s"Periodic contract key journal prune at $ts: ",
-                )
-                .value
-                // discard the result of this prune
-                .void
-            acsF.flatMap(_ => journalF)
-          }
-        }
-      } else Future.unit
-    }
-
   }
 
   object Errors extends AcsCommitmentErrorGroup {

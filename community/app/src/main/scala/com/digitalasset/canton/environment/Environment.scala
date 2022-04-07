@@ -318,7 +318,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   protected def createParticipant(
       name: String,
       participantConfig: config.ParticipantConfigType,
-  ): ParticipantNodeBootstrap =
+  ): ParticipantNodeBootstrap = {
     participantNodeFactory
       .create(
         name,
@@ -332,6 +332,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         loggerFactory,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create participant bootstrap: $err"))
+  }
 
   @VisibleForTesting
   protected def createDomain(

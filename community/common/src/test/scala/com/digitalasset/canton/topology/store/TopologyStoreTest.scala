@@ -995,6 +995,21 @@ trait TopologyStoreTest
           } yield res
         }
 
+        "inspection for parties" in {
+          val store = mk()
+          val ts = CantonTimestamp.Epoch
+          for {
+            _ <- store.updateState(ts, deactivate = Seq(), positive = List(ps1, p2p1, p2p2))
+            res <- store.inspectKnownParties(ts.immediateSuccessor, "one", "", 100)
+            res2 <- store.inspectKnownParties(ts.immediateSuccessor, "", "", 1)
+            empty1 <- store.inspectKnownParties(ts.immediateSuccessor, "three", "", 100)
+          } yield {
+            empty1 shouldBe empty
+            res.toSeq should have length (1)
+            res2.toSeq should have length (1)
+          }
+        }
+
       }
 
       "using watermarks" when {

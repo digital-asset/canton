@@ -484,6 +484,22 @@ class TestingOwnerWithKeys(
         TrustLevel.Ordinary,
       )
     )
+    val p2p1 = mkAdd(
+      PartyToParticipant(
+        RequestSide.Both,
+        PartyId(UniqueIdentifier(Identifier.tryCreate("one"), Namespace(key1.id))),
+        participant1,
+        ParticipantPermission.Submission,
+      )
+    )
+    val p2p2 = mkAdd(
+      PartyToParticipant(
+        RequestSide.Both,
+        PartyId(UniqueIdentifier(Identifier.tryCreate("two"), Namespace(key1.id))),
+        participant1,
+        ParticipantPermission.Submission,
+      )
+    )
 
     private val defaultDomainParameters = TestDomainParameters.defaultDynamic
 
