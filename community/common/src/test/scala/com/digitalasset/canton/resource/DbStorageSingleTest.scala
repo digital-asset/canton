@@ -40,7 +40,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
           DefaultProcessingTimeouts.testing,
           loggerFactory,
         )
-        .value shouldBe a[DbStorageSingle]
+        .valueOrFailShutdown("storage create") shouldBe a[DbStorageSingle]
     }
 
     "fail on invalid credentials" in {
@@ -55,8 +55,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             DefaultProcessingTimeouts.testing,
             loggerFactory,
           )
-          .left
-          .value shouldBe a[String]
+          .leftOrFailShutdown("storage create") shouldBe a[String]
       }
     }
 
@@ -72,8 +71,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             DefaultProcessingTimeouts.testing,
             loggerFactory,
           )
-          .left
-          .value shouldBe a[String]
+          .leftOrFailShutdown("storage create") shouldBe a[String]
       }
     }
 
@@ -89,8 +87,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             DefaultProcessingTimeouts.testing,
             loggerFactory,
           )
-          .left
-          .value shouldBe a[String]
+          .leftOrFailShutdown("storage create") shouldBe a[String]
       }
     }
   }

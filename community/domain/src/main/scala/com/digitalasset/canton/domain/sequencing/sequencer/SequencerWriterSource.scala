@@ -8,9 +8,10 @@ import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Merge, Source}
 import cats.data.{EitherT, NonEmptyList, OptionT, Validated, ValidatedNel}
 import cats.syntax.either._
-import cats.syntax.list._
+import cats.syntax.foldable._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,7 +20,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, Traced
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.BatchTracing.withNelTracedBatch
+import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -59,10 +60,10 @@ case class BatchWritten(notifies: WriteNotification, latestTimestamp: CantonTime
 object BatchWritten {
 
   /** Assumes events are ordered by timestamp */
-  def apply(events: NonEmptyList[Sequenced[_]]): BatchWritten =
+  def apply(events: NonEmpty[Seq[Sequenced[_]]]): BatchWritten =
     BatchWritten(
       notifies = WriteNotification(events),
-      latestTimestamp = events.last.timestamp,
+      latestTimestamp = events.last1.timestamp,
     )
 }
 
@@ -302,18 +303,20 @@ object SequenceWritesFlow {
       writes
         .traverse(sequenceWrite)
         .flatMap {
-          _.toList.toNel // due to the groupedWithin we should likely always have items
+          NonEmpty
+            .from(_) // due to the groupedWithin we should likely always have items
             .fold(Future.successful[Traced[Option[BatchWritten]]](Traced.empty(None))) { writes =>
-              withNelTracedBatch(logger, writes) { implicit traceContext => writes =>
-                {
-                  val events = writes.collect { case SequencedWrite.Event(event) => event }.toNel
-                  val notifies =
-                    events.fold[WriteNotification](WriteNotification.None)(WriteNotification(_))
-                  for {
-                    // if this write batch had any events then save them
-                    _ <- events.fold(Future.unit)(store.saveEvents)
-                  } yield Traced(BatchWritten(notifies, writes.last.timestamp).some)
-                }
+              withTracedBatch(logger, writes) { implicit traceContext => writes =>
+                val events: Option[NonEmpty[Seq[Sequenced[PayloadId]]]] =
+                  NonEmpty.from(writes.collect { case SequencedWrite.Event(event) =>
+                    event
+                  })
+                val notifies =
+                  events.fold[WriteNotification](WriteNotification.None)(WriteNotification(_))
+                for {
+                  // if this write batch had any events then save them
+                  _ <- events.fold(Future.unit)(store.saveEvents)
+                } yield Traced(BatchWritten(notifies, writes.last1.timestamp).some)
               }
             }
         }
@@ -456,31 +459,31 @@ object WritePayloadsFlow {
 
     def writePayloads(
         events: Seq[Presequenced[StoreEvent[Payload]]]
-    ): Future[List[Presequenced[StoreEvent[PayloadId]]]] =
-      NonEmptyList
-        .fromList(events.toList)
-        .fold(Future.successful(List.empty[Presequenced[StoreEvent[PayloadId]]])) { events =>
-          withNelTracedBatch(logger, events) { implicit traceContext => events =>
-            // extract the payloads themselves for storing
-            val payloads = events.toList.map(_.event).flatMap(extractPayload(_).toList)
+    ): Future[Seq[Presequenced[StoreEvent[PayloadId]]]] = {
+      if (events.isEmpty) Future.successful(Seq.empty[Presequenced[StoreEvent[PayloadId]]])
+      else {
+        implicit val traceContext: TraceContext = TraceContext.ofBatch(events)(logger)
+        // extract the payloads themselves for storing
+        val payloads = events.map(_.event).flatMap(extractPayload(_).toList)
 
-            // strip out the payloads and replace with their id as the content itself is not needed downstream
-            val eventsWithPayloadId = events.map(_.map(e => dropPayloadContent(e))).toList
-            logger.debug(s"Writing ${payloads.size} payloads from batch of ${events.size}")
+        // strip out the payloads and replace with their id as the content itself is not needed downstream
+        val eventsWithPayloadId = events.map(_.map(e => dropPayloadContent(e)))
+        logger.debug(s"Writing ${payloads.size} payloads from batch of ${events.size}")
 
-            // save the payloads if there are any
-            EitherTUtil.toFuture {
-              payloads.toNel
-                .traverse(store.savePayloads(_, instanceDiscriminator))
-                .leftMap {
-                  case SavePayloadsError.ConflictingPayloadId(id, conflictingInstance) =>
-                    new ConflictingPayloadIdException(id, conflictingInstance)
-                  case SavePayloadsError.PayloadMissing(id) => new PayloadMissingException(id)
-                }
-                .map(_ => eventsWithPayloadId)
+        // save the payloads if there are any
+        EitherTUtil.toFuture {
+          NonEmpty
+            .from(payloads)
+            .traverse_(store.savePayloads(_, instanceDiscriminator))
+            .leftMap {
+              case SavePayloadsError.ConflictingPayloadId(id, conflictingInstance) =>
+                new ConflictingPayloadIdException(id, conflictingInstance)
+              case SavePayloadsError.PayloadMissing(id) => new PayloadMissingException(id)
             }
-          }
+            .map((_: Unit) => eventsWithPayloadId)
         }
+      }
+    }
 
     def extractPayload(event: StoreEvent[Payload]): Option[Payload] = event match {
       case DeliverStoreEvent(_, _, _, payload, _, _) => payload.some

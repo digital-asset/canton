@@ -128,7 +128,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
         .to(Seq)
     )
 
-  override def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(
+  override def anyPackagePreventsDarRemoval(packages: Seq[PackageId], removeDar: DarDescriptor)(
       implicit tc: TraceContext
   ): OptionT[Future, PackageId] = {
     val known = packages.toSet.intersect(Monoid.combineAll(darPackages.toMap.values))

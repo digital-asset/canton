@@ -89,7 +89,6 @@ object ActionDescription {
             _signatories,
             _stakeholders,
             _key,
-            _byInterface,
             version,
           ) =>
         for {
@@ -110,7 +109,6 @@ object ActionDescription {
             exerciseResult,
             _key,
             byKey,
-            _byInterface,
             version,
           ) =>
         for {
@@ -135,7 +133,6 @@ object ActionDescription {
             _stakeholders,
             _key,
             byKey,
-            _byInterface,
             version,
           ) =>
         for {

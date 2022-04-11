@@ -43,7 +43,7 @@ import com.digitalasset.canton.util.AkkaUtil
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
-import io.opentelemetry.instrumentation.grpc.v1_5.GrpcTracing
+import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import org.slf4j.event.Level
 import scalaz.syntax.tag._
 
@@ -145,7 +145,7 @@ object LedgerConnection {
       .builderFor(config.address, config.port.unwrap)
       .executor(ec)
       .intercept(
-        GrpcTracing.newBuilder(tracerProvider.openTelemetry).build().newClientInterceptor()
+        GrpcTracing.builder(tracerProvider.openTelemetry).build().newClientInterceptor()
       )
     LedgerClient.fromBuilder(builder, clientConfig)
   }

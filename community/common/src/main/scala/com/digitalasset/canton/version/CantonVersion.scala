@@ -101,9 +101,11 @@ object CantonVersion {
   private val releaseVersionToProtocolVersions: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
     ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0_snapshot),
     ReleaseVersion.v2_0_0 -> List(v2_0_0),
-    ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0, v2_1_0_snapshot),
-    // next (most likely):
-    //     ReleaseVersion.v2_1_0 -> List(v2_0_0, v2_1_0),
+    ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_1_0 -> List(v2_0_0),
+    ReleaseVersion.v2_1_0_rc1 -> List(v2_0_0),
+    ReleaseVersion.v2_1_1_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
   )
 
   private[version] def getSupportedProtocolsParticipantForRelease(
@@ -184,6 +186,9 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_0_0: ReleaseVersion = ReleaseVersion(2, 0, 0)
   lazy val v2_1_0_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("SNAPSHOT"))
   lazy val v2_1_0: ReleaseVersion = ReleaseVersion(2, 1, 0)
+  lazy val v2_1_0_rc1: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("rc1"))
+  lazy val v2_1_1_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 1, Some("SNAPSHOT"))
+  lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time
@@ -293,8 +298,6 @@ object ProtocolVersion extends CompanionTrait {
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
   // passed in via propagating the protocol version set in the domain parameters
   lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
-  lazy val v2_1_0_snapshot: ProtocolVersion = ProtocolVersion(2, 1, 0, Some("SNAPSHOT"))
-  lazy val v2_1_0: ProtocolVersion = ProtocolVersion(2, 1, 0)
 }
 
 sealed trait HandshakeError {

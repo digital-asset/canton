@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.tracing
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.TracedLogger
 
 /** Utility mixin for creating a single trace context from a batch of traced items */
 object BatchTracing {
-  def withNelTracedBatch[A <: HasTraceContext, B](logger: TracedLogger, items: NonEmptyList[A])(
-      fn: TraceContext => NonEmptyList[A] => B
+  def withTracedBatch[A <: HasTraceContext, B](logger: TracedLogger, items: NonEmpty[Seq[A]])(
+      fn: TraceContext => NonEmpty[Seq[A]] => B
   ): B =
-    fn(TraceContext.ofBatch(items.toList)(logger))(items)
+    fn(TraceContext.ofBatch(items)(logger))(items)
 }

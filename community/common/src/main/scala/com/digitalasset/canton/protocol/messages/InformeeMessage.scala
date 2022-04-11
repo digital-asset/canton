@@ -4,7 +4,6 @@
 package com.digitalasset.canton.protocol.messages
 
 import java.util.UUID
-import cats.syntax.either._
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
@@ -14,7 +13,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
+import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
 /** The informee message to be sent to the mediator.
@@ -100,9 +99,7 @@ object InformeeMessage {
         "InformeeMessage.informeeTree",
         maybeFullInformeeTreeP,
       )
-      fullInformeeTree <- FullInformeeTree
-        .fromProtoV0(hashOps)(fullInformeeTreeP)
-        .leftMap(err => ProtoDeserializationError.TransactionDeserialization(err))
+      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps)(fullInformeeTreeP)
     } yield new InformeeMessage(fullInformeeTree)
   }
 

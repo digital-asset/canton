@@ -193,7 +193,6 @@ class DAMLe(
               signatories,
               stakeholders,
               key,
-              _byInterface,
               version,
             ) =>
           ContractWithMetadata(

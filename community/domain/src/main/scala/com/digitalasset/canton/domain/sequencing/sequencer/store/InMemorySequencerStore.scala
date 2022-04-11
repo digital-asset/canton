@@ -8,6 +8,8 @@ import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer._
@@ -76,10 +78,10 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
       members.get(member)
     )
 
-  override def savePayloads(payloadsToInsert: NonEmptyList[Payload], instanceDiscriminator: UUID)(
+  override def savePayloads(payloadsToInsert: NonEmpty[Seq[Payload]], instanceDiscriminator: UUID)(
       implicit traceContext: TraceContext
   ): EitherT[Future, SavePayloadsError, Unit] =
-    payloadsToInsert.toList.traverse { case Payload(id, content) =>
+    payloadsToInsert.toNEF.traverse { case Payload(id, content) =>
       Option(payloads.putIfAbsent(id.unwrap, StoredPayload(instanceDiscriminator, content)))
         .flatMap { existingPayload =>
           // if we found an existing payload it must have a matching instance discriminator
@@ -92,11 +94,11 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
         .toEitherT[Future]
     }.void
 
-  override def saveEvents(instanceIndex: Int, eventsToInsert: NonEmptyList[Sequenced[PayloadId]])(
+  override def saveEvents(instanceIndex: Int, eventsToInsert: NonEmpty[Seq[Sequenced[PayloadId]]])(
       implicit traceContext: TraceContext
   ): Future[Unit] =
     Future.successful(
-      eventsToInsert.toList.foreach { event =>
+      eventsToInsert.foreach { event =>
         Option(events.putIfAbsent(event.timestamp, event.event))
           .foreach(_ =>
             throw new UniqueKeyViolationException(

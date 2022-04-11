@@ -102,7 +102,7 @@ object RequireTypes {
 
   object NonNegativeNumeric {
     def tryCreate[T](t: T)(implicit num: Numeric[T]): NonNegativeNumeric[T] =
-      create(t).valueOr(err => throw new IllegalArgumentException(err.error))
+      create(t).valueOr(err => throw new IllegalArgumentException(err.message))
 
     def create[T](
         t: T
@@ -179,7 +179,7 @@ object RequireTypes {
 
   object PositiveNumeric {
     def tryCreate[T](t: T)(implicit num: Numeric[T]): PositiveNumeric[T] =
-      create(t).valueOr(err => throw new IllegalArgumentException(err.error))
+      create(t).valueOr(err => throw new IllegalArgumentException(err.message))
 
     def create[T](
         t: T

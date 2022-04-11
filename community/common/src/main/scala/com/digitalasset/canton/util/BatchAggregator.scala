@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
@@ -81,7 +81,7 @@ object BatchAggregator {
     def executeSingle(
         item: A
     )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[B] =
-      executeBatch(NonEmptyList.one(Traced(item))).flatMap(_.headOption match {
+      executeBatch(NonEmpty(Seq, Traced(item))).flatMap(_.headOption match {
         case Some(value) => Future.successful(value)
         case None =>
           val error = s"executeBatch returned an empty sequence of results"
@@ -94,8 +94,7 @@ object BatchAggregator {
       * @return The responses for the items in the correct order.
       *         Must have the same length
       */
-    // TODO(#8271) Generalize to NonEmpty[Seq[Traced[A]]]
-    def executeBatch(items: NonEmptyList[Traced[A]])(implicit
+    def executeBatch(items: NonEmpty[Seq[Traced[A]]])(implicit
         traceContext: TraceContext
     ): Future[Iterable[B]]
 
@@ -173,16 +172,15 @@ class BatchAggregatorImpl[A, B](
     if (oldInFlight < maximumInFlight) {
       val queueItems = pollItemsFromQueue()
 
-      // TODO(#8271) No need for a list here
-      NonEmptyList.fromList(queueItems.toList) match {
-        case Some(queueItemsNel) =>
-          if (queueItemsNel.toList.lengthCompare(1) == 0) {
-            val (tracedItem, promise) = queueItemsNel.head
+      NonEmpty.from(queueItems) match {
+        case Some(queueItemsNE) =>
+          if (queueItemsNE.lengthCompare(1) == 0) {
+            val (tracedItem, promise) = queueItemsNE.head1
             tracedItem.withTraceContext { implicit traceContext => item =>
               promise.completeWith(runSingleWithoutIncrement(item)).discard[Promise[B]]
             }
           } else {
-            val items = queueItemsNel.map(_._1)
+            val items = queueItemsNE.map(_._1)
             val batchTraceContext = TraceContext.ofBatch(items.toList)(processor.logger)
 
             Future

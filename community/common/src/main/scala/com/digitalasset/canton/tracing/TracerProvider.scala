@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.tracing
 
-import io.grpc.{ManagedChannel, ManagedChannelBuilder}
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
@@ -12,8 +11,8 @@ import io.opentelemetry.context.propagation.ContextPropagators
 import io.opentelemetry.exporter.jaeger.JaegerGrpcSpanExporter
 import io.opentelemetry.exporter.zipkin.ZipkinSpanExporter
 import io.opentelemetry.sdk.OpenTelemetrySdk
-import io.opentelemetry.sdk.autoconfigure.OpenTelemetrySdkAutoConfiguration
-import io.opentelemetry.sdk.autoconfigure.spi.SdkTracerProviderConfigurer
+import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
+import io.opentelemetry.sdk.autoconfigure.spi.ConfigProperties
 import io.opentelemetry.sdk.common.CompletableResultCode
 import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.sdk.trace.`export`.SpanExporter
@@ -89,28 +88,19 @@ private object NoopSpanExporter extends SpanExporter {
   override def shutdown(): CompletableResultCode = CompletableResultCode.ofSuccess()
 }
 
-/** This implements a service provider interface (SPI) such that the configure method gets called
-  * by OpenTelemetrySdkAutoConfiguration.initialize() and passes the tracer provider builder that contains all the
-  * system properties as described under at https://github.com/open-telemetry/opentelemetry-java/tree/main/sdk-extensions/autoconfigure
-  * We capture this builder so that we can reuse it multiple times with different service names instead of only using the
-  * global one (GlobalOpenTelemetry.get()).
-  * Notice that for this to be picked up, there is a file that contains this class's fully qualified name under
-  * resources/META-INF/services.
-  */
-private class TracerProviderConfigurer() extends SdkTracerProviderConfigurer {
-  override def configure(tracerProvider: SdkTracerProviderBuilder): Unit = {
-    Autoconfigure.autoconfigureBuilder.set(Some(tracerProvider))
-  }
-}
-
 private object Autoconfigure {
-  // the TracerProviderConfigurer above is responsible for making sure this gets set once OpenTelemetrySdkAutoConfiguration.initialize() gets run
   val autoconfigureBuilder = new AtomicReference[Option[SdkTracerProviderBuilder]](None)
   val isEnabled: Boolean = sys.props.contains("otel.traces.exporter")
   if (isEnabled) {
     // set default propagator, otherwise the ledger-api-client interceptor won't propagate any information
     sys.props.getOrElseUpdate("otel.propagators", "tracecontext")
-    OpenTelemetrySdkAutoConfiguration.initialize()
+    AutoConfiguredOpenTelemetrySdk
+      .builder()
+      .addTracerProviderCustomizer { (t: SdkTracerProviderBuilder, u: ConfigProperties) =>
+        autoconfigureBuilder.set(Some(t))
+        t
+      }
+      .build()
   } else
     GlobalOpenTelemetry.set(
       OpenTelemetrySdk.builder
@@ -148,10 +138,8 @@ object TracerProvider {
 
     private def createExporter(config: TracingConfig.Exporter): SpanExporter = config match {
       case TracingConfig.Exporter.Jaeger(address, port) =>
-        val jaegerChannel: ManagedChannel =
-          ManagedChannelBuilder.forAddress(address, port).usePlaintext().build();
         JaegerGrpcSpanExporter.builder
-          .setChannel(jaegerChannel)
+          .setEndpoint(s"http://$address:$port")
           .setTimeout(30, TimeUnit.SECONDS)
           .build
       case TracingConfig.Exporter.Zipkin(address, port) =>

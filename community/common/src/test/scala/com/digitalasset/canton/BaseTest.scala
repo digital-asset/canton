@@ -7,7 +7,7 @@ import cats.Functor
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
@@ -278,6 +278,16 @@ trait BaseTest
       self.valueOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
 
     def leftOrFailShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[E] =
+      self.leftOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
+  }
+
+  implicit class EitherTUnlessShutdownSyntax[E, A](
+      eitherT: EitherT[UnlessShutdown, E, A]
+  ) {
+    def valueOrFailShutdown(clue: String)(implicit pos: Position): A =
+      self.valueOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
+
+    def leftOrFailShutdown(clue: String)(implicit pos: Position): E =
       self.leftOrFail(eitherT)(clue).onShutdown(fail(s"Shutdown during $clue"))
   }
 

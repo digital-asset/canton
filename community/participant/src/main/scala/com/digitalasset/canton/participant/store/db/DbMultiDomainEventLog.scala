@@ -6,13 +6,14 @@ package com.digitalasset.canton.participant.store.db
 import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl.{Keep, Sink, Source}
-import cats.data.{NonEmptyList, OptionT}
+import cats.data.OptionT
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.option._
 import cats.syntax.traverseFilter._
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -470,44 +471,41 @@ class DbMultiDomainEventLog private[db] (
       eventIds: Seq[TimestampedEvent.EventId]
   )(implicit traceContext: TraceContext): Future[
     Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
-  ] = {
-    NonEmptyList.fromList(eventIds.toList) match {
-      case None => Future.successful(Map.empty)
-      case Some(nonEmptyEventIds) =>
-        val inClauses =
-          DbStorage.toInClauses_(
-            "el.event_id",
-            nonEmptyEventIds,
-            PositiveNumeric.tryCreate(maxBatchSize),
-          )
-        val queries = inClauses.map { inClause =>
-          import DbStorage.Implicits.BuilderChain._
-          (sql"""
+  ] = eventIds match {
+    case NonEmpty(nonEmptyEventIds) =>
+      val inClauses = DbStorage.toInClauses_(
+        "el.event_id",
+        nonEmptyEventIds,
+        PositiveNumeric.tryCreate(maxBatchSize),
+      )
+      val queries = inClauses.map { inClause =>
+        import DbStorage.Implicits.BuilderChain._
+        (sql"""
             select global_offset,
               el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update,
               publication_time
             from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset
             where 
             """ ++ inClause).as[(GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
-        }
-        storage.sequentialQueryAndCombine(queries, functionFullName).map { events =>
-          events.map {
-            case data @ (
-                  globalOffset,
-                  TimestampedEventAndCausalChange(event, _causalChange),
-                  _publicationTime,
-                ) =>
-              val eventId = event.eventId.getOrElse(
-                ErrorUtil.internalError(
-                  new DbDeserializationException(
-                    s"Event $event at global offset $globalOffset does not have an event ID."
-                  )
+      }
+      storage.sequentialQueryAndCombine(queries, functionFullName).map { events =>
+        events.map {
+          case data @ (
+                globalOffset,
+                TimestampedEventAndCausalChange(event, _causalChange),
+                _publicationTime,
+              ) =>
+            val eventId = event.eventId.getOrElse(
+              ErrorUtil.internalError(
+                new DbDeserializationException(
+                  s"Event $event at global offset $globalOffset does not have an event ID."
                 )
               )
-              eventId -> data
-          }.toMap
-        }
-    }
+            )
+            eventId -> data
+        }.toMap
+      }
+    case _ => Future.successful(Map.empty)
   }
 
   override def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit

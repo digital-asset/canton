@@ -17,8 +17,10 @@ import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
+  FutureUnlessShutdown,
   SyncCloseable,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
@@ -83,7 +85,7 @@ private[sequencer] class RunningSequencerWriterFlow(
 trait SequencerWriterStoreFactory extends AutoCloseable {
   def create(storage: Storage, generalStore: SequencerStore)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, WriterStartupError, SequencerWriterStore]
+  ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore]
 
   /** When the sequencer goes offline Exceptions may be thrown by the [[sequencer.store.SequencerStore]] and [[sequencer.SequencerWriterSource]].
     * This allows callers to check whether the captured exception is expected when offline and indicates that the
@@ -97,7 +99,7 @@ object SequencerWriterStoreFactory {
     new SequencerWriterStoreFactory {
       override def create(storage: Storage, generalStore: SequencerStore)(implicit
           traceContext: TraceContext
-      ): EitherT[Future, WriterStartupError, SequencerWriterStore] =
+      ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] =
         EitherT.pure(SequencerWriterStore.singleInstance(generalStore))
       override def close(): Unit = ()
     }
@@ -184,39 +186,46 @@ class SequencerWriter(
   def start()(implicit traceContext: TraceContext): EitherT[Future, WriterStartupError, Unit] =
     performUnlessClosingEitherT[WriterStartupError, Unit](WriterStartupError.WriterShuttingDown) {
       def createStoreAndRunCrashRecovery()
-          : Future[Either[WriterStartupError, SequencerWriterStore]] = {
+          : EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] = {
         // only retry errors that are flagged as retryable
-        implicit val success: Success[Either[WriterStartupError, SequencerWriterStore]] = Success {
-          case Left(error) => !error.retryable
-          case Right(_) => true
-        }
+        implicit val success: Success[Either[WriterStartupError, SequencerWriterStore]] =
+          Success {
+            case Left(error) => !error.retryable
+            case Right(_) => true
+          }
 
         // continuously attempt to start the writer as we can't meaningfully proactively shutdown or crash
         // when this fails
-        Pause(logger, this, retry.Forever, 100.millis, "start-sequencer-writer").apply(
-          {
-            logger.debug("Starting sequencer writer")
-            for {
-              writerStore <- writerStoreFactory.create(storage, generalStore)
-              _ <- EitherTUtil.onErrorOrFailure(() => writerStore.close()) {
-                for {
-                  // validate that the datastore has an appropriate commit mode set in order to run the writer
-                  _ <- expectedCommitMode
-                    .fold(EitherTUtil.unit[String])(writerStore.validateCommitMode)
-                    .leftMap(WriterStartupError.BadCommitMode)
-                  onlineTimestamp <- EitherT.right[WriterStartupError](runRecovery(writerStore))
-                  _ <- EitherT.right[WriterStartupError](waitForOnline(onlineTimestamp))
-                } yield ()
-              }
-            } yield writerStore
-          }.value,
-          AllExnRetryable,
-        )
+        EitherT {
+          Pause(logger, this, retry.Forever, 100.millis, "start-sequencer-writer").unlessShutdown(
+            {
+              logger.debug("Starting sequencer writer")
+              for {
+                writerStore <- writerStoreFactory.create(storage, generalStore)
+                _ <- EitherTUtil
+                  .onErrorOrFailure(() => writerStore.close()) {
+                    for {
+                      // validate that the datastore has an appropriate commit mode set in order to run the writer
+                      _ <- expectedCommitMode
+                        .fold(EitherTUtil.unit[String])(writerStore.validateCommitMode)
+                        .leftMap(WriterStartupError.BadCommitMode)
+                      onlineTimestamp <- EitherT.right[WriterStartupError](
+                        runRecovery(writerStore)
+                      )
+                      _ <- EitherT.right[WriterStartupError](waitForOnline(onlineTimestamp))
+                    } yield ()
+                  }
+                  .mapK(FutureUnlessShutdown.outcomeK)
+              } yield writerStore
+            }.value,
+            AllExnRetryable,
+          )
+        }
       }
 
-      EitherT(createStoreAndRunCrashRecovery()) map { store =>
-        startWriter(store)
-      }
+      createStoreAndRunCrashRecovery()
+        .map(startWriter)
+        .onShutdown(Left(WriterStartupError.WriterShuttingDown))
     }
 
   def send(

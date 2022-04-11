@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.{EitherT, NonEmptySet}
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.data.CantonTimestamp
@@ -146,7 +148,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       }
 
       /** Save payloads using the default `instanceDiscriminator1` and expecting it to succeed */
-      def savePayloads(payloads: NonEmptyList[Payload]): Future[Unit] =
+      def savePayloads(payloads: NonEmpty[Seq[Payload]]): Future[Unit] =
         valueOrFail(store.savePayloads(payloads, instanceDiscriminator1))("savePayloads")
 
       def saveWatermark(ts: CantonTimestamp): EitherT[Future, SaveWatermarkError, Unit] =
@@ -188,10 +190,10 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmptyList.of(payload1, payload2))
+          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2))
           deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
           deliverEvent2 <- env.deliverEvent(ts2, alice, messageId2, payload2.id)
-          _ <- env.store.saveEvents(instanceIndex, NonEmptyList.of(deliverEvent1, deliverEvent2))
+          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
           _ <- env.saveWatermark(deliverEvent2.timestamp).valueOrFail("saveWatermark")
           events <- env.readEvents(alice)
           _ = events should have size 2
@@ -205,11 +207,11 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmptyList.of(payload1, payload2))
+          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2))
           // the first event is for alice, and the second for bob
           deliverEvent1 <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
           deliverEvent2 <- env.deliverEvent(ts2, bob, messageId2, payload2.id)
-          _ <- env.store.saveEvents(instanceIndex, NonEmptyList.of(deliverEvent1, deliverEvent2))
+          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, deliverEvent1, deliverEvent2))
           _ <- env.saveWatermark(deliverEvent2.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)
           bobEvents <- env.readEvents(bob)
@@ -238,7 +240,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         val env = Env()
 
         for {
-          _ <- env.savePayloads(NonEmptyList.of(payload1, payload2, payload3))
+          _ <- env.savePayloads(NonEmpty(Seq, payload1, payload2, payload3))
           // the first event is for alice, and the second for bob
           deliverEventAlice <- env.deliverEvent(ts1, alice, messageId1, payload1.id)
           deliverEventAll <- env.deliverEvent(
@@ -251,7 +253,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           deliverEventBob <- env.deliverEvent(ts3, bob, messageId3, payload3.id)
           _ <- env.store.saveEvents(
             instanceIndex,
-            NonEmptyList.of(deliverEventAlice, deliverEventAll, deliverEventBob),
+            NonEmpty(Seq, deliverEventAlice, deliverEventAll, deliverEventBob),
           )
           _ <- env.saveWatermark(deliverEventBob.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)
@@ -292,7 +294,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
             traceContext,
           )
           timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
-          _ <- env.store.saveEvents(instanceIndex, NonEmptyList.of(timestampedError))
+          _ <- env.store.saveEvents(instanceIndex, NonEmpty(Seq, timestampedError))
           _ <- env.saveWatermark(timestampedError.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)
           bobEvents <- env.readEvents(bob)
@@ -308,19 +310,19 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           // lets write 20 deliver events - offsetting the second timestamp that is at epoch second 1
-          events = NonEmptyList.fromListUnsafe(
+          events = NonEmptyUtil.fromUnsafe(
             (0L until 20L)
               .map(n => {
                 env.deliverEventWithDefaults(ts1.plusSeconds(n), sender = aliceId)()
               })
-              .toList
+              .toSeq
           )
-          payloads = DomainSequencingTestUtils.payloadsForEvents(events.toList)
+          payloads = DomainSequencingTestUtils.payloadsForEvents(events)
           _ <- env.store
-            .savePayloads(NonEmptyList.fromListUnsafe(payloads), instanceDiscriminator1)
+            .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator1)
             .valueOrFail(s"Save payloads")
           _ <- env.store.saveEvents(instanceIndex, events)
-          _ <- env.saveWatermark(events.last.timestamp).valueOrFail("saveWatermark")
+          _ <- env.saveWatermark(events.last1.timestamp).valueOrFail("saveWatermark")
           // read from the beginning (None)
           firstPage <- env.readEvents(alice, None, 10)
           // read from the ts of the last event of the prior page (read should be non-inclusive)
@@ -347,9 +349,9 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           })
           payloads = DomainSequencingTestUtils.payloadsForEvents(events)
           _ <- env.store
-            .savePayloads(NonEmptyList.fromListUnsafe(payloads), instanceDiscriminator1)
+            .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator1)
             .valueOrFail(s"Save payloads")
-          _ <- env.store.saveEvents(instanceIndex, NonEmptyList.fromListUnsafe(events.toList))
+          _ <- env.store.saveEvents(instanceIndex, NonEmptyUtil.fromUnsafe(events))
           // put a watermark only a bit into our events
           _ <- env.saveWatermark(ts2.plusSeconds(5)).valueOrFail("saveWatermark")
           firstPage <- env.readEvents(alice, None, 10)
@@ -381,11 +383,11 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         // we'll first write p1 and p2 that should work
         // then write p2 and p3 with a separate instance discriminator which should fail due to a conflicting id
         for {
-          _ <- valueOrFail(env.store.savePayloads(NonEmptyList.of(p1, p2), instanceDiscriminator1))(
+          _ <- valueOrFail(env.store.savePayloads(NonEmpty(Seq, p1, p2), instanceDiscriminator1))(
             "savePayloads1"
           )
           error <- leftOrFail(
-            env.store.savePayloads(NonEmptyList.of(p2, p3), instanceDiscriminator2)
+            env.store.savePayloads(NonEmpty(Seq, p2, p3), instanceDiscriminator2)
           )("savePayloads2")
         } yield error shouldBe SavePayloadsError.ConflictingPayloadId(p2.id, instanceDiscriminator1)
       }
@@ -564,14 +566,15 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
         for {
           aliceId <- store.registerMember(alice, ts1)
-          _ <- store.saveEvents(0, NonEmptyList.of(deliverEventWithDefaults(ts2)()))
+          _ <- store.saveEvents(0, NonEmpty(Seq, deliverEventWithDefaults(ts2)()))
           bobId <- store.registerMember(bob, ts3)
-          _ <- env.savePayloads(NonEmptyList.of(payload1))
+          _ <- env.savePayloads(NonEmpty(Seq, payload1))
           // store a deliver events at ts4, ts5 & ts6
           // (hopefully resulting in the earlier two deliver events being pruned)
           _ <- store.saveEvents(
             instanceIndex,
-            NonEmptyList.of(
+            NonEmpty(
+              Seq,
               Sequenced(
                 ts(4),
                 DeliverStoreEvent(

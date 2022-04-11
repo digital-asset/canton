@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.lifecycle
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.util.ShowUtil._
 
-class ShutdownFailedException(instances: NonEmptyList[String])
-    extends RuntimeException(
-      s"Unable to close ${instances.map(_.singleQuoted).toList.mkString(", ")}."
-    ) {}
+class ShutdownFailedException(instances: NonEmpty[Seq[String]])
+    extends RuntimeException(show"Unable to close ${instances.map(_.singleQuoted)}.")

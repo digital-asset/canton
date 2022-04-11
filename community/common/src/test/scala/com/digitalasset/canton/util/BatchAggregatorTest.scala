@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.NonEmptyList
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
@@ -24,11 +24,11 @@ import scala.util.Random
 class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   type K = Int
   type V = String
-  type BatchGetterType = NonEmptyList[Traced[K]] => Future[Iterable[V]]
+  type BatchGetterType = NonEmpty[Seq[Traced[K]]] => Future[Iterable[V]]
 
   private val defaultKeyToValue: K => V = _.toString
-  private val defaultBatchGetter: NonEmptyList[Traced[K]] => Future[Iterable[V]] = keys =>
-    Future(keys.toList.map(item => defaultKeyToValue(item.value)))
+  private val defaultBatchGetter: NonEmpty[Seq[Traced[K]]] => Future[Iterable[V]] = keys =>
+    Future(keys.map(item => defaultKeyToValue(item.value)))
 
   private val defaultMaximumInFlight: Int = 5
   private val defaultMaximumBatchSize: Int = 5
@@ -40,7 +40,7 @@ class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionCon
     val processor = new BatchAggregator.Processor[K, V] {
       override def kind: String = "item"
       override def logger: TracedLogger = BatchAggregatorTest.this.logger
-      override def executeBatch(items: NonEmptyList[Traced[K]])(implicit
+      override def executeBatch(items: NonEmpty[Seq[Traced[K]]])(implicit
           traceContext: TraceContext
       ): Future[Iterable[V]] = batchGetter(items)
       override def prettyItem: Pretty[K] = implicitly

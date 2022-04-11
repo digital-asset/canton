@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.domain.topology
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.foldable._
 import cats.syntax.traverseFilter._
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
@@ -247,28 +248,28 @@ class DomainTopologyDispatcher(
     * We send the entire queue up and including of the first `ParticipantState` update at once for efficiency reasons.
     */
   private def determineBatchFromQueue()
-      : List[Traced[StoredTopologyTransaction[TopologyChangeOp]]] = {
+      : Seq[Traced[StoredTopologyTransaction[TopologyChangeOp]]] = {
     val items = queue.dequeueWhile(_.value.transaction.transaction.element.mapping match {
       case _: ParticipantState | _: DomainParametersChange => false
       case _ => true
     })
     (if (queue.nonEmpty)
        items :+ queue.dequeue()
-     else items).toList
+     else items).toSeq
   }
 
   /** wait an epsilon if the effective time is reduced with this change */
   private def waitIfEffectiveTimeIsReduced(
-      transactions: Traced[NonEmptyList[StoredTopologyTransaction[TopologyChangeOp]]]
+      transactions: Traced[NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]]]
   ): EitherT[FutureUnlessShutdown, String, Unit] = transactions.withTraceContext {
     implicit traceContext => txs =>
       val empty = EitherT.rightT[FutureUnlessShutdown, String](())
-      txs.last.transaction.transaction.element.mapping match {
+      txs.last1.transaction.transaction.element.mapping match {
         case mapping: DomainParametersChange =>
           EitherT
             .right(
               performUnlessClosingF(
-                authorizedStoreSnapshot(txs.last.validFrom).findDynamicDomainParameters
+                authorizedStoreSnapshot(txs.last1.validFrom).findDynamicDomainParameters
               )
             )
             .flatMap(_.fold(empty) { param =>
@@ -299,8 +300,8 @@ class DomainTopologyDispatcher(
             }
           }
         }))
-        tracedTxO = NonEmptyList.fromList(pending).map { tracedNel =>
-          BatchTracing.withNelTracedBatch(logger, tracedNel)(implicit traceContext =>
+        tracedTxO = NonEmpty.from(pending).map { tracedNE =>
+          BatchTracing.withTracedBatch(logger, tracedNE)(implicit traceContext =>
             txs => Traced(txs.map(_.value))
           )
         }
@@ -353,20 +354,20 @@ class DomainTopologyDispatcher(
 
   private def bootstrapAndDispatch(
       tracedTransaction: Traced[
-        NonEmptyList[StoredTopologyTransaction[TopologyChangeOp]]
+        NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]]
       ]
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     tracedTransaction withTraceContext { implicit traceContext => transactions =>
       val flushToParticipantET: EitherT[FutureUnlessShutdown, String, Option[ParticipantId]] =
-        transactions.last.transaction.transaction.element.mapping match {
+        transactions.last1.transaction.transaction.element.mapping match {
           case ParticipantState(_, _, participant, _, _) =>
             for {
               catchupForParticipant <- EitherT.right(
                 performUnlessClosingF(
                   catchup
                     .determineCatchupForParticipant(
-                      transactions.head.validFrom,
-                      transactions.last.validFrom,
+                      transactions.head1.validFrom,
+                      transactions.last1.validFrom,
                       participant,
                     )
                 )
@@ -379,7 +380,7 @@ class DomainTopologyDispatcher(
               _ <- catchupForParticipant.fold(EitherT.rightT[FutureUnlessShutdown, String](())) {
                 txs =>
                   sender.sendTransactions(
-                    authorizedCryptoSnapshot(transactions.head.validFrom),
+                    authorizedCryptoSnapshot(transactions.head1.validFrom),
                     txs.toDomainTopologyTransactions,
                     Set(participant),
                   )
@@ -394,17 +395,19 @@ class DomainTopologyDispatcher(
         // update watermark, which we can as we successfully registered all transactions with the domain
         // we don't need to wait until they are processed
         _ <- EitherT.right(
-          performUnlessClosingF(targetStore.updateDispatchingWatermark(transactions.last.validFrom))
+          performUnlessClosingF(
+            targetStore.updateDispatchingWatermark(transactions.last1.validFrom)
+          )
         )
       } yield ()
     }
   }
 
   private def sendTransactions(
-      transactions: NonEmptyList[StoredTopologyTransaction[TopologyChangeOp]],
+      transactions: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]],
       add: Option[ParticipantId],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val headSnapshot = authorizedStoreSnapshot(transactions.head.validFrom)
+    val headSnapshot = authorizedStoreSnapshot(transactions.head1.validFrom)
     val receivingParticipantsF = performUnlessClosingF(
       headSnapshot
         .participants()
@@ -417,7 +420,7 @@ class DomainTopologyDispatcher(
       receivingParticipants <- EitherT.right(receivingParticipantsF)
       mediators <- EitherT.right(mediatorsF)
       _ <- sender.sendTransactions(
-        authorizedCryptoSnapshot(transactions.head.validFrom),
+        authorizedCryptoSnapshot(transactions.head1.validFrom),
         transactions.map(_.transaction).toList,
         (receivingParticipants ++ staticDomainMembers ++ mediators ++ add.toList).toSet,
       )

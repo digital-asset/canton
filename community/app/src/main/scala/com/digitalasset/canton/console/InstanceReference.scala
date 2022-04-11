@@ -261,7 +261,8 @@ trait DomainReference
   // above command needs to be def such that `Help` works.
   lazy private val partiesGroup = new PartiesAdministrationGroup(this, consoleEnvironment)
 
-  private lazy val sequencer_ = new SequencerAdministrationGroup(this, consoleEnvironment)
+  private lazy val sequencer_ =
+    new SequencerAdministrationGroup(this, consoleEnvironment, loggerFactory)
   @Help.Summary("Manage the sequencer")
   @Help.Group("Sequencer")
   override def sequencer: SequencerAdministrationGroup = sequencer_

@@ -12,6 +12,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.{
   SequencerStore,
   SequencerWriterStore,
 }
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.{MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
 import com.digitalasset.canton.time.SimClock
@@ -41,7 +42,7 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
 
     override def create(storage: Storage, generalStore: SequencerStore)(implicit
         traceContext: TraceContext
-    ): EitherT[Future, WriterStartupError, SequencerWriterStore] =
+    ): EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] =
       EitherT.pure(
         SequencerWriterStore.singleInstance(generalStore)
       )

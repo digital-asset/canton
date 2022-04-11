@@ -4,11 +4,12 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import java.time.Duration
-
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.implicits._
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionViewTree}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
@@ -60,8 +61,8 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   def viewsWithNoInputKeys(
       rootViews: Seq[TransactionViewTree]
-  ): NonEmptyList[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])] =
-    NonEmptyList.fromListUnsafe(
+  ): NonEmpty[Seq[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])]] =
+    NonEmptyUtil.fromUnsafe(
       rootViews.map(_ -> Map.empty[LfGlobalKey, Option[LfContractId]]).toList
     )
 
@@ -77,7 +78,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   def check(
       mcc: ModelConformanceChecker,
-      views: NonEmptyList[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])],
+      views: NonEmpty[Seq[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])]],
       ips: TopologySnapshot = factory.topologySnapshot,
   ): EitherT[Future, Error, Result] = {
     val rootViewTrees = views.map(_._1)

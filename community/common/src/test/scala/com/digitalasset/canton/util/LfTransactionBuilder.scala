@@ -81,7 +81,6 @@ object LfTransactionBuilder {
         signatories = signatories,
         stakeholders = signatories ++ observers,
         key,
-        byInterface = None,
         ExampleTransactionFactory.transactionVersion,
       )
     } yield ((nodeId, Map(nodeId -> node)), cid)
@@ -128,7 +127,6 @@ object LfTransactionBuilder {
         exerciseResult = exerciseResult,
         key = key,
         byKey = key.nonEmpty, // Not true in general, but okay for tests
-        byInterface = None,
         ExampleTransactionFactory.transactionVersion,
       ),
       children,
@@ -151,7 +149,6 @@ object LfTransactionBuilder {
         signatories = signatories,
         stakeholders = signatories ++ observers,
         key,
-        byInterface = None,
         ExampleTransactionFactory.transactionVersion,
       )
     )
@@ -174,7 +171,6 @@ object LfTransactionBuilder {
         stakeholders = signatories ++ observers,
         key = key,
         byKey = key.nonEmpty, // Not true in general, but okay for tests
-        byInterface = None,
         ExampleTransactionFactory.transactionVersion,
       )
     )

@@ -3,13 +3,19 @@
 
 package com.digitalasset.canton.resource
 
-import cats.data.{Chain, EitherT, NonEmptyList, OptionT}
+import cats.data.{Chain, EitherT, OptionT}
 import cats.syntax.either._
 import cats.syntax.functor._
 import cats.{Functor, Monad}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String255}
 import com.digitalasset.canton.config._
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  HasCloseContext,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -71,6 +77,7 @@ sealed trait Storage extends AutoCloseable {
 trait StorageFactory {
   def config: StorageConfig
 
+  /** Throws an exception in case of errors or shutdown during storage creation. */
   def tryCreate(
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
@@ -81,10 +88,10 @@ trait StorageFactory {
       ec: ExecutionContext,
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): Future[Storage] =
-    create(connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory).valueOr(
-      err => throw new StorageCreationException(err)
-    )
+  ): Storage =
+    create(connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory)
+      .valueOr(err => throw new StorageCreationException(err))
+      .onShutdown(throw new StorageCreationException("Shutdown during storage creation"))
 
   def create(
       connectionPoolForParticipant: Boolean,
@@ -96,7 +103,7 @@ trait StorageFactory {
       ec: ExecutionContext,
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): EitherT[Future, String, Storage]
+  ): EitherT[UnlessShutdown, String, Storage]
 }
 
 object StorageFactory {
@@ -114,14 +121,13 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       ec: ExecutionContext,
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): EitherT[Future, String, Storage] =
+  ): EitherT[UnlessShutdown, String, Storage] =
     config match {
       case CommunityStorageConfig.Memory(_) => EitherT.rightT(new MemoryStorage)
       case db: DbConfig =>
         DbStorageSingle
           .create(db, connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory)
           .widen[Storage]
-          .toEitherT
     }
 }
 
@@ -506,7 +512,7 @@ object DbStorage {
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
   )(
       loggerFactory: NamedLoggerFactory
-  )(implicit closeContext: CloseContext): Either[String, Database] = {
+  )(implicit closeContext: CloseContext): EitherT[UnlessShutdown, String, Database] = {
     val baseLogger = loggerFactory.getLogger(classOf[DbStorage])
     val logger = TracedLogger(baseLogger)
 
@@ -547,7 +553,7 @@ object DbStorage {
         s"Initializing database storage with config: ${DbConfig.hideConfidential(configWithMigrationFallbacks)}"
       )
 
-      RetryEither[String, Database](
+      RetryEither.retry[String, Database](
         maxRetries = retryConfig.maxRetries,
         waitInMs = retryConfig.retryWaitingTime.toMillis,
         operationName = functionFullName,
@@ -765,12 +771,12 @@ object DbStorage {
   @nowarn("cat=unused") // somehow, f is wrongly reported as unused by the compiler
   def toInClauses[T](
       field: String,
-      values: NonEmptyList[T],
+      values: NonEmpty[Seq[T]],
       maxValuesInSqlList: PositiveNumeric[Int],
-  )(implicit f: SetParameter[T]): Iterable[(List[T], SQLActionBuilder)] = {
+  )(implicit f: SetParameter[T]): Iterable[(Seq[T], SQLActionBuilder)] = {
     import DbStorage.Implicits.BuilderChain._
 
-    values.toList
+    values
       .grouped(maxValuesInSqlList.unwrap)
       .map { groupedValues =>
         val inClause = sql"#$field in (" ++
@@ -785,7 +791,7 @@ object DbStorage {
 
   def toInClauses_[T](
       field: String,
-      values: NonEmptyList[T],
+      values: NonEmpty[Seq[T]],
       maxValuesSqlInListSize: PositiveNumeric[Int],
   )(implicit f: SetParameter[T]): Iterable[SQLActionBuilder] =
     toInClauses(field, values, maxValuesSqlInListSize).map { case (_, builder) => builder }

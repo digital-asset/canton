@@ -5,7 +5,7 @@ package com.digitalasset.canton.lifecycle
 
 import akka.actor.ActorSystem
 import akka.stream.Materializer
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -62,7 +62,7 @@ object Lifecycle extends NoTracing {
       acc ++ stopSingle(instance).toList
     }
 
-    NonEmptyList.fromFoldable(failedInstances).foreach(i => throw new ShutdownFailedException(i))
+    NonEmpty.from(failedInstances).foreach { i => throw new ShutdownFailedException(i) }
   }
 
   def toCloseableOption[A <: AutoCloseable](maybeClosable: Option[A]): AutoCloseable =

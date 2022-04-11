@@ -3,7 +3,6 @@
 
 package com.daml.lf
 
-import cats.data.NonEmptyList
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine.{Engine, EngineConfig}
 import com.daml.lf.language.LanguageVersion
@@ -16,6 +15,7 @@ import com.daml.lf.transaction.{
 }
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.VersionedValue
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.protocol.{LfNode, LfNodeId, LfTransactionVersion}
 
 import java.nio.file.Path
@@ -99,7 +99,7 @@ object CantonOnly {
   ): VersionedValue =
     asVersionedValue(value, transactionVersion)
 
-  def maxTransactionVersion(versions: NonEmptyList[LfTransactionVersion]): LfTransactionVersion =
+  def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
     versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
 
 }

@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -96,11 +97,11 @@ class DbRequestJournalStore(
       override def kind: String = "request"
       override def logger: TracedLogger = DbRequestJournalStore.this.logger
 
-      override def executeBatch(items: NonEmptyList[Traced[RequestData]])(implicit
+      override def executeBatch(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
           traceContext: TraceContext
       ): Future[Iterable[Try[Unit]]] = bulkUpdateWithCheck(items, "DbRequestJournalStore.insert")
 
-      override protected def bulkUpdateAction(items: NonEmptyList[Traced[RequestData]])(implicit
+      override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
           batchTraceContext: TraceContext
       ): DBIOAction[Array[Int], NoStream, Effect.All] = {
         def setData(pp: PositionedParameters)(item: RequestData): Unit = {
@@ -146,7 +147,7 @@ class DbRequestJournalStore(
       override protected def itemIdentifier(item: RequestData): ItemIdentifier = item.rc
       override protected def dataIdentifier(state: CheckData): ItemIdentifier = state.rc
 
-      override protected def checkQuery(itemsToCheck: NonEmptyList[ItemIdentifier])(implicit
+      override protected def checkQuery(itemsToCheck: NonEmpty[Seq[ItemIdentifier]])(implicit
           batchTraceContext: TraceContext
       ): Iterable[ReadOnly[Iterable[CheckData]]] =
         bulkQueryDbio(itemsToCheck)
@@ -187,7 +188,7 @@ class DbRequestJournalStore(
     }
 
   private def bulkQueryDbio(
-      rcs: NonEmptyList[RequestCounter]
+      rcs: NonEmpty[Seq[RequestCounter]]
   ): Iterable[DbAction.ReadOnly[Iterable[RequestData]]] =
     DbStorage.toInClauses_("request_counter", rcs, maxItemsInSqlInClause).map { inClause =>
       import DbStorage.Implicits.BuilderChain._
@@ -242,11 +243,11 @@ class DbRequestJournalStore(
       override def kind: String = "request"
       override def logger: TracedLogger = DbRequestJournalStore.this.logger
 
-      override def executeBatch(items: NonEmptyList[Traced[DbRequestJournalStore.ReplaceRequest]])(
+      override def executeBatch(items: NonEmpty[Seq[Traced[DbRequestJournalStore.ReplaceRequest]]])(
           implicit traceContext: TraceContext
       ): Future[Iterable[Try[Result]]] = bulkUpdateWithCheck(items, "DbRequestJournalStore.replace")
 
-      override protected def bulkUpdateAction(items: NonEmptyList[Traced[ReplaceRequest]])(implicit
+      override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[ReplaceRequest]]])(implicit
           batchTraceContext: TraceContext
       ): DBIOAction[Array[Int], NoStream, Effect.All] = {
         val updateQuery =
@@ -274,7 +275,7 @@ class DbRequestJournalStore(
       override protected def itemIdentifier(item: ReplaceRequest): RequestCounter = item.rc
       override protected def dataIdentifier(state: RequestData): RequestCounter = state.rc
 
-      override protected def checkQuery(itemsToCheck: NonEmptyList[RequestCounter])(implicit
+      override protected def checkQuery(itemsToCheck: NonEmpty[Seq[RequestCounter]])(implicit
           batchTraceContext: TraceContext
       ): Iterable[ReadOnly[Iterable[RequestData]]] = bulkQueryDbio(itemsToCheck)
 

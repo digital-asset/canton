@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.resource
 
-import cats.syntax.either._
+import cats.data.EitherT
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMonitoringConfig}
-import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
+import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationException}
@@ -68,6 +68,7 @@ object DbStorageSingle {
       retryConfig,
     )
       .valueOr(err => throw new DbStorageCreationException(err))
+      .onShutdown(throw new DbStorageCreationException("Shutdown during creation"))
 
   def create(
       config: DbConfig,
@@ -77,7 +78,10 @@ object DbStorageSingle {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast,
-  )(implicit ec: ExecutionContext, closeContext: CloseContext): Either[String, DbStorageSingle] =
+  )(implicit
+      ec: ExecutionContext,
+      closeContext: CloseContext,
+  ): EitherT[UnlessShutdown, String, DbStorageSingle] =
     for {
       db <- DbStorage.createDatabase(
         config,

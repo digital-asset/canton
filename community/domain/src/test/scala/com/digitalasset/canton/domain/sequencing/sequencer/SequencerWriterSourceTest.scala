@@ -9,6 +9,7 @@ import akka.stream.QueueOfferResult
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.functor._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.{
@@ -88,7 +89,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         timeAdvancement.set(duration)
 
       override def savePayloads(
-          payloadsToInsert: NonEmptyList[Payload],
+          payloadsToInsert: NonEmpty[Seq[Payload]],
           instanceDiscriminator: UUID,
       )(implicit traceContext: TraceContext): EitherT[Future, SavePayloadsError, Unit] = {
         clock.advance(timeAdvancement.get())

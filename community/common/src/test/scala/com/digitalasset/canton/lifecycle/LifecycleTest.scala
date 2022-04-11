@@ -60,7 +60,7 @@ class LifecycleTest extends AnyWordSpec with BaseTest {
             }
           ): _*
         )
-        thrown.getMessage shouldBe "Unable to close 'component-1', 'component-2', 'component-3'."
+        thrown.getMessage shouldBe "Unable to close Seq('component-1', 'component-2', 'component-3')."
       }
     }
   }

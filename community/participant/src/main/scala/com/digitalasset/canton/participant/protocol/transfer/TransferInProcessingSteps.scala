@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.alternative._
 import cats.syntax.either._
 import cats.syntax.functor._
@@ -14,6 +14,8 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine.{Error => LfError}
 import com.daml.lf.interpretation.{Error => LfInterpretationError}
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DecryptionError => _, EncryptionError => _, _}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data._
@@ -183,9 +185,9 @@ class TransferInProcessingSteps(
       mediatorMessage = fullTree.mediatorMessage
       recipientsSet <- {
         import cats.syntax.traverse._
-        stakeholders.toList
+        stakeholders.toSeq
           .traverse(activeParticipantsOfParty)
-          .map(_.foldLeft[Set[Member]](Set.empty[Member])(_ ++ _))
+          .map(_.foldLeft(Set.empty[Member])(_ ++ _))
       }
       recipients <- EitherT.fromEither[Future](
         Recipients
@@ -208,8 +210,8 @@ class TransferInProcessingSteps(
       val rootHashRecipients =
         Recipients.groups(
           checked(
-            NonEmptyList.fromListUnsafe(
-              recipientsSet.toList.map(participant => NonEmptySet.of(mediatorId, participant))
+            NonEmptyUtil.fromUnsafe(
+              recipientsSet.toSeq.map(participant => NonEmpty(Set, mediatorId, participant))
             )
           )
         )
@@ -772,7 +774,6 @@ object TransferInProcessingSteps {
         contract.metadata.signatories,
         contract.metadata.stakeholders,
         key = None,
-        byInterface = None,
         contract.contractInstance.version,
       )
     val committedTransaction = LfCommittedTransaction(

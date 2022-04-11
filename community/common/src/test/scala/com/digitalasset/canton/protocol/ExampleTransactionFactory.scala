@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.data.NonEmptyList
 import cats.syntax.option._
 
 import java.util.UUID
@@ -22,6 +21,7 @@ import com.daml.lf.value.Value.{
   ValueUnit,
   VersionedValue,
 }
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -118,7 +118,6 @@ object ExampleTransactionFactory {
       stakeholders = signatories ++ observers,
       key = key,
       byKey = byKey,
-      byInterface = None,
       version = version,
     )
 
@@ -138,7 +137,6 @@ object ExampleTransactionFactory {
       signatories = signatories,
       stakeholders = signatories ++ observers,
       key,
-      byInterface = None,
       version = transactionVersion,
     )
   }
@@ -170,7 +168,6 @@ object ExampleTransactionFactory {
       exerciseResult = exerciseResult,
       key = key,
       byKey = byKey,
-      byInterface = None,
       version = transactionVersion,
     )
 
@@ -227,9 +224,9 @@ object ExampleTransactionFactory {
     }: _*)
 
     val version = CantonOnly.maxTransactionVersion(
-      NonEmptyList
-        .fromList(nodesMap.values.toList.mapFilter(_.optVersion))
-        .getOrElse(NonEmptyList.one(transactionVersion))
+      NonEmpty
+        .from(nodesMap.values.toSeq.mapFilter(_.optVersion))
+        .getOrElse(NonEmpty(Seq, transactionVersion))
     )
 
     CantonOnly.lfVersionedTransaction(version, nodesMap, roots)

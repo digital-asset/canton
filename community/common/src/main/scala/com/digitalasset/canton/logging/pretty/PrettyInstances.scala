@@ -19,6 +19,8 @@ import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReas
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
 import com.daml.lf.value.Value
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.protocol.{
   ContractId,
@@ -62,6 +64,9 @@ trait PrettyInstances {
   implicit def prettyBoolean: Pretty[Boolean] = prettyOfString(_.toString)
 
   implicit def prettySeq[T: Pretty]: Pretty[Seq[T]] = treeOfIterable("Seq", _)
+
+  implicit def prettyNonempty[T: Pretty]: Pretty[NonEmpty[T]] =
+    NonEmptyUtil.instances.prettyNonEmpty
 
   implicit def prettyArray[T: Pretty]: Pretty[Array[T]] = treeOfIterable("Array", _)
 

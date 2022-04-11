@@ -5,9 +5,10 @@ package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.Order._
 import cats.Show
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.{EitherT, NonEmptySet}
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
@@ -330,7 +331,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
     * @param instanceDiscriminator a unique ephemeral value to ensure that no other sequencer instances are writing
     *                              conflicting payloads without having to check the payload body
     */
-  def savePayloads(payloads: NonEmptyList[Payload], instanceDiscriminator: UUID)(implicit
+  def savePayloads(payloads: NonEmpty[Seq[Payload]], instanceDiscriminator: UUID)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SavePayloadsError, Unit]
 
@@ -339,7 +340,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
     * Callers MUST ensure that event-ids are unique as no errors will be returned if a duplicate is present (for
     * the sequencer writer see [[sequencer.PartitionedTimestampGenerator]] for use with their instance index).
     */
-  def saveEvents(instanceIndex: Int, events: NonEmptyList[Sequenced[PayloadId]])(implicit
+  def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
   ): Future[Unit]
 

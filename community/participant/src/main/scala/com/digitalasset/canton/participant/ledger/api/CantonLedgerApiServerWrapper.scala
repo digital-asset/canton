@@ -58,7 +58,7 @@ import com.digitalasset.canton.participant.util.LoggingContextUtil
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
-import io.opentelemetry.instrumentation.grpc.v1_5.GrpcTracing
+import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 
 import java.time.{Duration => JDuration}
 import java.util.UUID.randomUUID
@@ -338,7 +338,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                     config.cantonParameterConfig.loggingConfig.api,
                   ),
                   GrpcTracing
-                    .newBuilder(config.tracerProvider.openTelemetry)
+                    .builder(config.tracerProvider.openTelemetry)
                     .build()
                     .newServerInterceptor(),
                 ),

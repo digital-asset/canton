@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{NonEmptyList, OptionT}
+import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
@@ -191,7 +192,7 @@ class DbDamlPackageStore(
     )
   }
 
-  override def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(
+  override def anyPackagePreventsDarRemoval(packages: Seq[PackageId], removeDar: DarDescriptor)(
       implicit tc: TraceContext
   ): OptionT[Future, PackageId] = {
 
@@ -201,7 +202,7 @@ class DbDamlPackageStore(
     val darHex = removeDar.hash.toLengthLimitedHexString
 
     def packagesWithoutDar(
-        nonEmptyPackages: NonEmptyList[PackageId]
+        nonEmptyPackages: NonEmpty[Seq[PackageId]]
     ) = {
       val queryActions = DbStorage
         .toInClauses(
@@ -235,8 +236,8 @@ class DbDamlPackageStore(
       OptionT(resultF)
     }
 
-    NonEmptyList
-      .fromList(packages)
+    NonEmpty
+      .from(packages)
       .fold(OptionT.none[Future, PackageId])(packagesWithoutDar)
   }
 

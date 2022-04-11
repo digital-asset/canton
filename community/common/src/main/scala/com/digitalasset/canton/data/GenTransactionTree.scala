@@ -4,13 +4,15 @@
 package com.digitalasset.canton.data
 
 import java.util.UUID
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.SubmitterInfo
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton._
 import com.digitalasset.canton.crypto._
@@ -47,13 +49,13 @@ import com.digitalasset.canton.protocol.{
   v0,
 }
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec
-import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -260,7 +262,7 @@ object GenTransactionTree {
   def fromProtoV0(
       hashOps: HashOps,
       protoTransactionTree: v0.GenTransactionTree,
-  ): Either[String, GenTransactionTree] =
+  ): ParsingResult[GenTransactionTree] =
     for {
       submitterMetadata <- MerkleTree
         .fromProtoOption(
@@ -279,23 +281,25 @@ object GenTransactionTree {
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
-        .leftMap(_.toString)
       rootViews <- MerkleSeq.fromProtoV0(hashOps, TransactionView.fromByteString(hashOps))(
         rootViewsP
       )
-      genTransactionTree <- GenTransactionTree.create(hashOps)(
-        submitterMetadata,
-        commonMetadata,
-        participantMetadata,
-        rootViews,
-      )
+      genTransactionTree <- GenTransactionTree
+        .create(hashOps)(
+          submitterMetadata,
+          commonMetadata,
+          participantMetadata,
+          rootViews,
+        )
+        .leftMap(e =>
+          ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
+        )
     } yield genTransactionTree
 
-  def fromByteString(hashOps: HashOps, bytes: ByteString): Either[String, GenTransactionTree] =
+  def fromByteString(hashOps: HashOps, bytes: ByteString): ParsingResult[GenTransactionTree] =
     for {
       protoTransactionTree <- ProtoConverter
         .protoParser(v0.GenTransactionTree.parseFrom)(bytes)
-        .leftMap(_.error.toString)
       transactionTree <- fromProtoV0(hashOps, protoTransactionTree)
     } yield transactionTree
 }
@@ -537,28 +541,28 @@ object InformeeTree {
   def fromProtoVersioned(
       hashOps: HashOps,
       protoInformeeTree: VersionedInformeeTree,
-  ): Either[String, InformeeTree] =
+  ): ParsingResult[InformeeTree] =
     protoInformeeTree.version match {
       case VersionedInformeeTree.Version.Empty =>
-        Left(FieldNotSet("VersionedInformeeTree.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedInformeeTree.version"))
       case VersionedInformeeTree.Version.V0(tree) => fromProtoV0(hashOps, tree)
     }
 
   def fromProtoV0(
       hashOps: HashOps,
       protoInformeeTree: v0.InformeeTree,
-  ): Either[String, InformeeTree] =
+  ): ParsingResult[InformeeTree] =
     for {
-      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree).leftMap(_.toString)
+      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
-      informeeTree <- InformeeTree.create(tree)
+      informeeTree <- InformeeTree
+        .create(tree)
+        .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
     } yield informeeTree
 
-  def fromByteString(hashOps: HashOps, bytes: ByteString): Either[String, InformeeTree] =
+  def fromByteString(hashOps: HashOps, bytes: ByteString): ParsingResult[InformeeTree] =
     for {
-      protoInformeeTree <- ProtoConverter
-        .protoParser(VersionedInformeeTree.parseFrom)(bytes)
-        .leftMap(_.error.toString)
+      protoInformeeTree <- ProtoConverter.protoParser(VersionedInformeeTree.parseFrom)(bytes)
       informeeTree <- fromProtoVersioned(hashOps, protoInformeeTree)
     } yield informeeTree
 }
@@ -638,27 +642,30 @@ object FullInformeeTree {
 
   def fromProtoVersioned(
       hashOps: HashOps
-  )(protoInformeeTree: VersionedFullInformeeTree): Either[String, FullInformeeTree] =
+  )(protoInformeeTree: VersionedFullInformeeTree): ParsingResult[FullInformeeTree] =
     protoInformeeTree.version match {
       case VersionedFullInformeeTree.Version.Empty =>
-        Left(FieldNotSet("VersionedFullInformeeTree.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedFullInformeeTree.version"))
       case VersionedFullInformeeTree.Version.V0(tree) => fromProtoV0(hashOps)(tree)
     }
 
   def fromProtoV0(
       hashOps: HashOps
-  )(protoInformeeTree: v0.FullInformeeTree): Either[String, FullInformeeTree] =
+  )(protoInformeeTree: v0.FullInformeeTree): ParsingResult[FullInformeeTree] =
     for {
-      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree).leftMap(_.toString)
+      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
-      fullInformeeTree <- FullInformeeTree.create(tree)
+      fullInformeeTree <- FullInformeeTree
+        .create(tree)
+        .leftMap(e =>
+          ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
+        )
     } yield fullInformeeTree
 
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): Either[String, FullInformeeTree] =
+  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[FullInformeeTree] =
     for {
       protoInformeeTree <- ProtoConverter
         .protoParser(VersionedFullInformeeTree.parseFrom)(bytes)
-        .leftMap(_.error.toString)
       informeeTree <- fromProtoVersioned(hashOps)(protoInformeeTree)
     } yield informeeTree
 }
@@ -762,7 +769,7 @@ object SubmitterMetadata {
 
   def fromByteString(
       hashOps: HashOps
-  )(bytes: ByteString): Either[String, MerkleTree[SubmitterMetadata]] =
+  )(bytes: ByteString): ParsingResult[MerkleTree[SubmitterMetadata]] =
     for {
       protoSubmitterMetadata <- TreeSerialization.deserializeProtoNode(
         bytes,
@@ -773,16 +780,16 @@ object SubmitterMetadata {
 
   private def fromProtoVersioned(hashOps: HashOps, metaDataP: VersionedSubmitterMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[SubmitterMetadata]] =
+  ): ParsingResult[MerkleTree[SubmitterMetadata]] =
     metaDataP.version match {
       case VersionedSubmitterMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedSubmitterMetadata.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedSubmitterMetadata.version"))
       case VersionedSubmitterMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
     }
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.SubmitterMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[SubmitterMetadata]] = {
+  ): ParsingResult[MerkleTree[SubmitterMetadata]] = {
     val v0.SubmitterMetadata(
       saltOP,
       actAsP,
@@ -795,24 +802,25 @@ object SubmitterMetadata {
     for {
       submitterParticipant <- ParticipantId
         .fromProtoPrimitive(submitterParticipantP, "SubmitterMetadata.submitter_participant")
-        .leftMap(_.toString)
       actAs <- actAsP.traverse(
-        ProtoConverter.parseLfPartyId(_).leftMap(s => s"Unable to parse actAs: $s")
+        ProtoConverter
+          .parseLfPartyId(_)
+          .leftMap(e => ProtoDeserializationError.ValueConversionError("actAs", e.message))
       )
       applicationId <- ApplicationId
         .fromProtoPrimitive(applicationIdP)
-        .leftMap(s => s"Unable to parse application id: $s")
+        .leftMap(ProtoDeserializationError.ValueConversionError("applicationId", _))
       commandId <- CommandId
         .fromProtoPrimitive(commandIdP)
-        .leftMap(s => s"Unable to parse command id: $s")
+        .leftMap(ProtoDeserializationError.ValueConversionError("commandId", _))
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltOP)
-        .leftMap(err => s"Unable to parse salt: $err")
+        .leftMap(e => ProtoDeserializationError.ValueConversionError("salt", e.message))
       submissionId <-
         if (submissionIdP.nonEmpty)
           LedgerSubmissionId
             .fromString(submissionIdP)
-            .bimap(s => s"Unable to parse submission id: $s", Some(_))
+            .bimap(ProtoDeserializationError.ValueConversionError("submissionId", _), Some(_))
         else Right(None)
       dedupPeriod <- ProtoConverter
         .parseRequired(
@@ -820,7 +828,9 @@ object SubmitterMetadata {
           "SubmitterMetadata.deduplication_period",
           dedupPeriodOP,
         )
-        .leftMap(s => s"Unable to parse deduplication period: $s")
+        .leftMap(e =>
+          ProtoDeserializationError.ValueConversionError("deduplicationPeriod", e.message)
+        )
       submitterMetadata <- returnLeftWhenInitializationFails(
         new SubmitterMetadata(
           actAs.toSet,
@@ -831,7 +841,7 @@ object SubmitterMetadata {
           submissionId,
           dedupPeriod,
         )(hashOps, Some(bytes))
-      )
+      ).leftMap(ProtoDeserializationError.OtherError(_))
     } yield submitterMetadata
   }
 
@@ -906,7 +916,7 @@ object CommonMetadata {
 
   def fromByteString(
       hashOps: HashOps
-  )(bytes: ByteString): Either[String, MerkleTree[CommonMetadata]] =
+  )(bytes: ByteString): ParsingResult[MerkleTree[CommonMetadata]] =
     for {
       protoCommonMetadata <- TreeSerialization.deserializeProtoNode(bytes, VersionedCommonMetadata)
       commonMetadata <- fromProtoVersioned(hashOps, protoCommonMetadata)(bytes)
@@ -914,31 +924,32 @@ object CommonMetadata {
 
   private def fromProtoVersioned(hashOps: HashOps, metaDataP: VersionedCommonMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[CommonMetadata]] =
+  ): ParsingResult[MerkleTree[CommonMetadata]] =
     metaDataP.version match {
       case VersionedCommonMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedCommonMetadata.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedCommonMetadata.version"))
       case VersionedCommonMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
     }
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.CommonMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[CommonMetadata]] =
+  ): ParsingResult[MerkleTree[CommonMetadata]] =
     for {
       confirmationPolicy <- ConfirmationPolicy
         .fromProtoPrimitive(metaDataP.confirmationPolicy)
-        .leftMap(_.toString)
-      v0.CommonMetadata(saltP, confirmationPolicyP, domainIdP, uuidP, mediatorIdP) = metaDataP
-      domainUid <- UniqueIdentifier.fromProtoPrimitive_(domainIdP)
+        .leftMap(e =>
+          ProtoDeserializationError.ValueDeserializationError("confirmationPolicy", e.show)
+        )
+      v0.CommonMetadata(saltP, _confirmationPolicyP, domainIdP, uuidP, mediatorIdP) = metaDataP
+      domainUid <- UniqueIdentifier
+        .fromProtoPrimitive_(domainIdP)
+        .leftMap(ProtoDeserializationError.ValueDeserializationError("domainId", _))
       mediatorId <- MediatorId
         .fromProtoPrimitive(mediatorIdP, "CommonMetadata.mediator_id")
-        .leftMap(_.toString)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
-        .leftMap(err => s"Could not parse salt: $err")
-      uuid <- ProtoConverter.UuidConverter
-        .fromProtoPrimitive(uuidP)
-        .leftMap(e => s"Could not parse UUID ${e.error}")
+        .leftMap(_.inField("salt"))
+      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
     } yield new CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
       hashOps,
       Some(bytes),
@@ -1005,7 +1016,7 @@ object ParticipantMetadata {
 
   def fromByteString(
       hashOps: HashOps
-  )(bytes: ByteString): Either[String, MerkleTree[ParticipantMetadata]] =
+  )(bytes: ByteString): ParsingResult[MerkleTree[ParticipantMetadata]] =
     for {
       protoParticipantMetadata <- TreeSerialization.deserializeProtoNode(
         bytes,
@@ -1016,31 +1027,33 @@ object ParticipantMetadata {
 
   private def fromProtoVersioned(hashOps: HashOps, metadataP: VersionedParticipantMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[ParticipantMetadata]] =
+  ): ParsingResult[MerkleTree[ParticipantMetadata]] =
     metadataP.version match {
       case VersionedParticipantMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedParticipantMetadata.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedParticipantMetadata.version"))
       case VersionedParticipantMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
     }
 
   private def fromProtoV0(hashOps: HashOps, metadataP: v0.ParticipantMetadata)(
       bytes: ByteString
-  ): Either[String, MerkleTree[ParticipantMetadata]] =
+  ): ParsingResult[MerkleTree[ParticipantMetadata]] =
     for {
       let <- ProtoConverter
         .parseRequired(CantonTimestamp.fromProtoPrimitive, "ledgerTime", metadataP.ledgerTime)
-        .leftMap(_.toString)
-      v0.ParticipantMetadata(saltP, ledgerTimeP, submissionTimeP, workflowIdP) = metadataP
+      v0.ParticipantMetadata(saltP, _ledgerTimeP, submissionTimeP, workflowIdP) = metadataP
       submissionTime <- ProtoConverter
         .parseRequired(CantonTimestamp.fromProtoPrimitive, "submissionTime", submissionTimeP)
-        .leftMap(_.toString)
       workflowId <- workflowIdP match {
         case "" => Right(None)
-        case wf => WorkflowId.fromProtoPrimitive(wf).map(Some(_))
+        case wf =>
+          WorkflowId
+            .fromProtoPrimitive(wf)
+            .map(Some(_))
+            .leftMap(ProtoDeserializationError.ValueDeserializationError("workflowId", _))
       }
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
-        .leftMap(err => s"Could not parse salt: $err")
+        .leftMap(_.inField("salt"))
     } yield new ParticipantMetadata(let, submissionTime, workflowId, salt)(hashOps, Some(bytes))
 }
 
@@ -1155,29 +1168,32 @@ object LightTransactionViewTree {
 
   def fromProtoVersioned(
       hashOps: HashOps
-  )(protoT: VersionedLightTransactionViewTree): Either[String, LightTransactionViewTree] =
+  )(protoT: VersionedLightTransactionViewTree): ParsingResult[LightTransactionViewTree] =
     protoT.version match {
       case VersionedLightTransactionViewTree.Version.Empty =>
-        Left(FieldNotSet("VersionedLightTransactionViewTree.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedLightTransactionViewTree.version"))
       case VersionedLightTransactionViewTree.Version.V0(tree) => fromProtoV0(hashOps)(tree)
     }
 
   def fromProtoV0(
       hashOps: HashOps
-  )(protoT: v0.LightTransactionViewTree): Either[String, LightTransactionViewTree] =
+  )(protoT: v0.LightTransactionViewTree): ParsingResult[LightTransactionViewTree] =
     for {
-      protoTree <- ProtoConverter.required("tree", protoT.tree).leftMap(_.toString)
+      protoTree <- ProtoConverter.required("tree", protoT.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
-      result <- LightTransactionViewTree.create(tree)
+      result <- LightTransactionViewTree
+        .create(tree)
+        .leftMap(e =>
+          ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
+        )
     } yield result
 
   def fromByteString(
       hashOps: HashOps
-  )(bytes: ByteString): Either[String, LightTransactionViewTree] =
+  )(bytes: ByteString): ParsingResult[LightTransactionViewTree] =
     for {
       protoTransactionViewTree <- ProtoConverter
         .protoParser(VersionedLightTransactionViewTree.parseFrom)(bytes)
-        .leftMap(_.error.toString)
       lightTransactionViewTree <- fromProtoVersioned(hashOps)(protoTransactionViewTree)
     } yield lightTransactionViewTree
 
@@ -1301,17 +1317,17 @@ object LightTransactionViewTree {
   * By convention, the order is: the view's informees are at the head of the list, then the parent's views informees,
   * then the grandparent's, etc.
   */
-case class Witnesses(unwrap: List[Set[Informee]]) {
+case class Witnesses(unwrap: Seq[Set[Informee]]) {
   import Witnesses._
 
-  def prepend(informees: Set[Informee]) = Witnesses(informees :: unwrap)
+  def prepend(informees: Set[Informee]) = Witnesses(informees +: unwrap)
 
   /** Derive a recipient tree that mirrors the given hierarchy of witnesses. */
   def toRecipients(
       topology: PartyTopologySnapshotClient
   )(implicit ec: ExecutionContext): EitherT[Future, InvalidWitnesses, Recipients] =
     for {
-      recipientsList <- unwrap.foldLeftM(List.empty[RecipientsTree]) { (children, informees) =>
+      recipientsList <- unwrap.foldLeftM(Seq.empty[RecipientsTree]) { (children, informees) =>
         for {
           informeeParticipants <- topology
             .activeParticipantsOfAll(informees.map(_.party).toList)
@@ -1319,12 +1335,14 @@ case class Witnesses(unwrap: List[Set[Informee]]) {
               InvalidWitnesses(s"Found no active participants for informees: $missing")
             )
           informeeParticipantSet <- EitherT.fromOption[Future](
-            NonEmptySet.fromSet[Member](SortedSet(informeeParticipants.toList: _*)),
+            NonEmpty.from(informeeParticipants.toSet[Member]),
             InvalidWitnesses(s"Empty set of witnesses given"),
           )
-        } yield List(RecipientsTree(informeeParticipantSet, children))
+        } yield Seq(RecipientsTree(informeeParticipantSet, children))
       }
-      recipients = Recipients(NonEmptyList.fromListUnsafe(recipientsList))
+      // TODO(error handling) Why is it safe to assume that the recipient list is non-empty?
+      //  It will be empty if `unwrap` is empty.
+      recipients = Recipients(NonEmptyUtil.fromUnsafe(recipientsList))
     } yield recipients
 
   def flatten: Set[Informee] = unwrap.foldLeft(Set.empty[Informee])(_ union _)
@@ -1332,7 +1350,7 @@ case class Witnesses(unwrap: List[Set[Informee]]) {
 }
 
 case object Witnesses {
-  lazy val empty: Witnesses = Witnesses(List.empty)
+  lazy val empty: Witnesses = Witnesses(Seq.empty)
 
   case class InvalidWitnesses(message: String) extends PrettyPrinting {
     override def pretty: Pretty[InvalidWitnesses] = prettyOfClass(unnamedParam(_.message.unquoted))

@@ -1,4 +1,4 @@
-sdk-version: 2.1.0-snapshot.20220328.9630.0.66c37bad
+sdk-version: 2.1.0-snapshot.20220407.9685.0.7ed507cf
 name: bank
 parties: 
 - Alice
@@ -7,7 +7,7 @@ exposed-modules:
 - Bank
 source: Bank.daml
 init-script: Bank:setup
-version: 2.1.0
+version: 2.2.0
 dependencies: 
 - daml-prim
 - daml-stdlib

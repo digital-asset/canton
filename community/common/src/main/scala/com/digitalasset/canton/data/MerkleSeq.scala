@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
 import com.digitalasset.canton.data.MerkleTree.{
@@ -17,7 +18,8 @@ import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIn
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.util.{HasVersionedToByteString, HasProtoV0}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.{HasProtoV0, HasVersionedToByteString}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -223,36 +225,31 @@ object MerkleSeq {
 
     private[MerkleSeq] def fromByteString[M <: MerkleTree[_] with HasVersionedToByteString](
         hashOps: HashOps,
-        dataFromByteString: ByteString => Either[String, MerkleTree[
-          M with HasVersionedToByteString
-        ]],
-    )(bytes: ByteString): Either[String, MerkleSeqElement[M]] = {
+        dataFromByteString: ByteString => ParsingResult[MerkleTree[M with HasVersionedToByteString]],
+    )(bytes: ByteString): ParsingResult[MerkleSeqElement[M]] = {
       for {
         merkleSeqElementP <- ProtoConverter
           .protoParser(v0.MerkleSeqElement.parseFrom)(bytes)
-          .leftMap(_.toString)
         merkleSeqElement <- fromProtoV0(hashOps, dataFromByteString)(merkleSeqElementP)
       } yield merkleSeqElement
     }
 
     private[MerkleSeq] def fromProtoV0[M <: MerkleTree[_] with HasVersionedToByteString](
         hashOps: HashOps,
-        dataFromByteString: ByteString => Either[String, MerkleTree[
-          M with HasVersionedToByteString
-        ]],
-    )(merkleSeqElementP: v0.MerkleSeqElement): Either[String, MerkleSeqElement[M]] = {
+        dataFromByteString: ByteString => ParsingResult[MerkleTree[M with HasVersionedToByteString]],
+    )(merkleSeqElementP: v0.MerkleSeqElement): ParsingResult[MerkleSeqElement[M]] = {
       val v0.MerkleSeqElement(maybeFirstP, maybeSecondP, maybeDataP) = merkleSeqElementP
 
       def branchChildFromMaybeProtoBlindableNode(
           maybeNodeP: Option[v0.BlindableNode]
-      ): Either[String, Option[MerkleTree[MerkleSeqElement[M]]]] =
+      ): ParsingResult[Option[MerkleTree[MerkleSeqElement[M]]]] =
         maybeNodeP.traverse(nodeP =>
           MerkleTree.fromProtoOption(Some(nodeP), fromByteString(hashOps, dataFromByteString))
         )
 
       def singletonDataFromMaybeProtoBlindableNode(
           maybeDataP: Option[v0.BlindableNode]
-      ): Either[String, Option[MerkleTree[M with HasVersionedToByteString]]] =
+      ): ParsingResult[Option[MerkleTree[M with HasVersionedToByteString]]] =
         maybeDataP.traverse(dataP => MerkleTree.fromProtoOption(Some(dataP), dataFromByteString))
 
       for {
@@ -264,18 +261,24 @@ object MerkleSeq {
           case (Some(first), Some(second), None) => Right(Branch(first, second)(hashOps))
           case (None, None, Some(data)) => Right(Singleton[M](data)(hashOps))
           case (None, None, None) =>
-            Left(s"Unable to create MerkleSeqElement, as all fields are undefined.")
+            ProtoDeserializationError
+              .OtherError(s"Unable to create MerkleSeqElement, as all fields are undefined.")
+              .asLeft
           case (Some(_), Some(_), Some(_)) =>
-            Left(
-              s"Unable to create MerkleSeqElement, as both the fields for a Branch and a Singleton are defined."
-            )
+            ProtoDeserializationError
+              .OtherError(
+                s"Unable to create MerkleSeqElement, as both the fields for a Branch and a Singleton are defined."
+              )
+              .asLeft
           case (_, _, _) =>
             // maybeFirst.isDefined != maybeSecond.isDefined
             def mkState: Option[_] => String = _.fold("undefined")(_ => "defined")
 
-            Left(
-              s"Unable to create MerkleSeqElement, as first is ${mkState(maybeFirst)} and second is ${mkState(maybeSecond)}."
-            )
+            ProtoDeserializationError
+              .OtherError(
+                s"Unable to create MerkleSeqElement, as first is ${mkState(maybeFirst)} and second is ${mkState(maybeSecond)}."
+              )
+              .asLeft
         }
 
       } yield merkleSeqElement
@@ -284,8 +287,8 @@ object MerkleSeq {
 
   def fromProtoV0[M <: MerkleTree[_] with HasVersionedToByteString](
       hashOps: HashOps,
-      dataFromByteString: ByteString => Either[String, MerkleTree[M with HasVersionedToByteString]],
-  )(merkleSeqP: v0.MerkleSeq): Either[String, MerkleSeq[M]] = {
+      dataFromByteString: ByteString => ParsingResult[MerkleTree[M with HasVersionedToByteString]],
+  )(merkleSeqP: v0.MerkleSeq): ParsingResult[MerkleSeq[M]] = {
     val v0.MerkleSeq(maybeRootP) = merkleSeqP
     for {
       rootOrEmpty <- maybeRootP.traverse(_ =>

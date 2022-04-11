@@ -323,8 +323,8 @@ object BuildCommon {
             "Log4j2Plugins.dat",
           ) =>
         MergeStrategy.first
-      case "module-info.class" => MergeStrategy.discard
       case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
+      case path if path.contains("module-info.class") => MergeStrategy.discard
       case PathList("org", "jline", _ @_*) => MergeStrategy.first
       case x => oldStrategy(x)
     }
@@ -346,9 +346,17 @@ object BuildCommon {
 
   // applies to all Canton-based sub-projects (descendants of community-common)
   lazy val sharedCantonSettings = sharedSettings ++ cantonWarts ++ Seq(
-    //
     // Enable logging of begin and end of test cases, test suites, and test runs.
-    Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
+    Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
+    // Ignore daml codegen generated files from code coverage
+    coverageExcludedFiles := formatCoverageExcludes(
+      """
+        |<empty>
+        |.*sbt-buildinfo.BuildInfo        
+        |.*daml-codegen.*
+      """
+    ),
+    scalacOptions += "-Wconf:src=src_managed/.*:silent",
   )
 
   // applies to all app sub-projects
@@ -459,6 +467,7 @@ object BuildCommon {
           daml_participant_state, //needed for ReadService/Update classes by PrettyInstances
           daml_ledger_api_common,
           daml_ledger_api_client,
+          daml_nonempty_cats,
           logback_classic,
           logback_core,
           scala_logging,
@@ -518,6 +527,7 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
+        Compile / PB.protoSources ++= (Test / PB.protoSources).value,
         buildInfoKeys := Seq[BuildInfoKey](
           version,
           scalaVersion,
@@ -525,7 +535,7 @@ object BuildCommon {
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
           BuildInfoKey("vmbc" -> Dependencies.daml_libraries_version),
           // For now, the release version is the same as the protocol version
-          BuildInfoKey("protocolVersion" -> version.value),
+          BuildInfoKey("protocolVersion" -> "2.0.0"),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
         buildInfoObject := "BuildInfo",
@@ -539,13 +549,7 @@ object BuildCommon {
             |com\.digitalasset\.canton\.identity\.admin\.v0\..*
             |com\.digitalasset\.canton\.domain\.api\.v0\..*
             |com\.digitalasset\.canton\.v0\..*
-      """
-        ),
-        coverageExcludedFiles := formatCoverageExcludes(
-          """
-            |<empty>
-            |.*sbt-buildinfo.BuildInfo
-            |.*daml-codegen.*
+            |com\.digitalasset\.canton\.protobuf\..*
       """
         ),
         Compile / damlCodeGeneration := Seq(
@@ -555,7 +559,6 @@ object BuildCommon {
             "com.digitalasset.canton.examples",
           )
         ),
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
@@ -624,13 +627,6 @@ object BuildCommon {
             |com\.digitalasset\.canton\.participant\.protocol\.v0\..*
       """
         ),
-        // Ignore daml codegen generated files from code coverage
-        coverageExcludedFiles := formatCoverageExcludes(
-          """
-            |<empty>
-            |.*daml-codegen.*
-      """
-        ),
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml",
@@ -639,7 +635,6 @@ object BuildCommon {
           )
         ),
         damlFixedDars := Seq("AdminWorkflows.dar"),
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
         JvmRulesPlugin.damlRepoHeaderSettings,
@@ -767,14 +762,6 @@ object BuildCommon {
           "doctor",
           "ai-analysis",
         ),
-        // Ignore daml codegen generated files from code coverage
-        coverageExcludedFiles := formatCoverageExcludes(
-          """
-            |<empty>
-            |.*daml-codegen.*
-      """
-        ),
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.sh", "../pack", Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),

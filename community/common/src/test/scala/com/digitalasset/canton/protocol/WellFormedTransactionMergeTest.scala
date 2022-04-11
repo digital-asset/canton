@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.data.NonEmptyList
 import com.daml.ledger.client.binding
 import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ComparesLfTransactions.TxTree
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.Iou
@@ -292,8 +292,9 @@ class WellFormedTransactionMergeTest
       transactions: WithRollbackScope[WellFormedTransaction[WithSuffixes]]*
   ) = {
     valueOrFail(
-      WellFormedTransaction
-        .merge(NonEmptyList.of(transactions.head, transactions.tail: _*))
+      WellFormedTransaction.merge(
+        NonEmpty.from(transactions).valueOrFail("Cannot merge empty list of transactions")
+      )
     )("unexpectedly failed to merge").unwrap
   }
 

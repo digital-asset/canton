@@ -236,7 +236,6 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
             exerciseResult = None,
             key = None,
             byKey = false,
-            byInterface = None,
             version = ExampleTransactionFactory.transactionVersion,
           ),
         ),

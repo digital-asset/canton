@@ -53,6 +53,8 @@ object FutureUnlessShutdown {
       override def apply[A](future: Future[A]): FutureUnlessShutdown[A] = outcomeF(future)
     }
 
+  def liftK: UnlessShutdown ~> FutureUnlessShutdown = FunctionK.lift(lift)
+
   /** Analog to [[scala.concurrent.Future]]`.failed` */
   def failed[A](ex: Throwable): FutureUnlessShutdown[A] = FutureUnlessShutdown(Future.failed(ex))
 

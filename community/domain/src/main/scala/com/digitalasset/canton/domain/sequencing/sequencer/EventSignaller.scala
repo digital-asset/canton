@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
 import akka.stream.scaladsl.Source
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{Sequenced, SequencerMemberId}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +37,7 @@ object WriteNotification {
     override def toString: String = s"Members(${memberIds.map(_.unwrap).mkString(",")})"
   }
 
-  def apply(events: NonEmptyList[Sequenced[_]]): WriteNotification =
+  def apply(events: NonEmpty[Seq[Sequenced[_]]]): WriteNotification =
     events
       .map(_.event.notifies)
       .reduceLeft(_ union _)

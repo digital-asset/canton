@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.crypto._
@@ -451,7 +452,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
         override def rootHash: Option[RootHash] = correctRootHash.some
       }
-      val allParticipants = NonEmptyList.of(participant1, participant2, participant3)
+      val allParticipants = NonEmpty(Seq, participant1, participant2, participant3)
 
       val correctViewType = informeeMessage.viewType
       val rootHashMessage =
@@ -462,16 +463,17 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           SerializedRootHashMessagePayload.empty,
         )
 
-      val tests = List(
-        "individual messages" -> allParticipants.toList.map(p => Recipients.cc(mediatorId, p)),
-        "just one message" -> List(
-          Recipients.groups(allParticipants.map(p => NonEmptySet.of(p, mediatorId)))
+      val tests = List[(String, Seq[Recipients])](
+        "individual messages" -> allParticipants.map(p => Recipients.cc(mediatorId, p)),
+        "just one message" -> Seq(
+          Recipients.groups(allParticipants.map(p => NonEmpty.mk(Set, p, mediatorId)))
         ),
-        "mixed" -> List(
+        "mixed" -> Seq(
           Recipients.groups(
-            NonEmptyList.of(
-              NonEmptySet.of(participant1, mediatorId),
-              NonEmptySet.of(participant2, mediatorId),
+            NonEmpty.mk(
+              Seq,
+              NonEmpty.mk(Set, participant1, mediatorId),
+              NonEmpty.mk(Set, participant2, mediatorId),
             )
           ),
           Recipients.cc(participant3, mediatorId),
@@ -575,10 +577,10 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           List(Set[Member](participant) -> correctViewType, Set[Member](otherMember) -> wrongViewType),
 
         (batchWithRootHashMessageWithTooManyRecipients ->
-          show"Root hash messages with wrong recipients tree: RecipientsTree(value = Seq($otherMember, $mediatorId, $participant), children = Seq())") ->
+          show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = Seq($mediatorId, $participant, $otherMember), children = Seq())") ->
           List(Set[Member](participant, otherMember) -> correctViewType),
 
-        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(value = $mediatorId, children = Seq())") -> List.empty,
+        (batchWithRootHashMessageWithTooFewRecipients -> show"Root hash messages with wrong recipients tree: RecipientsTree(recipient group = $mediatorId, children = Seq())") -> List.empty,
 
         (batchWithRepeatedRootHashMessage             -> show"Several root hash messages for members: $participant") ->
           List(Set[Member](participant) -> correctViewType),
@@ -648,7 +650,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             val expectedResults = expectedRecipientsAndViewTypes._2.toSet
             val expected = expectedResults.flatMap { case (recipients, viewType) =>
               recipients.map { member: Member =>
-                RecipientsTree(NonEmptySet.one(member), Nil) -> Some(viewType)
+                RecipientsTree.leaf(NonEmpty(Set, member)) -> Some(viewType)
               }
             }
             withClue(s"Test case: ${expectedRecipientsAndViewTypes._1}") {

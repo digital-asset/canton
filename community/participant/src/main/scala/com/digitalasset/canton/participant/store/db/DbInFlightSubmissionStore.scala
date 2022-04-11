@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative._
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -285,7 +286,7 @@ object DbInFlightSubmissionStore {
     override def kind: String = "in-flight submission"
 
     override def executeBatch(
-        submissions: NonEmptyList[Traced[InFlightSubmission[UnsequencedSubmission]]]
+        submissions: NonEmpty[Seq[Traced[InFlightSubmission[UnsequencedSubmission]]]]
     )(implicit traceContext: TraceContext): Future[Iterable[Try[Result]]] = {
 
       type SubmissionAndCell =
@@ -354,7 +355,7 @@ object DbInFlightSubmissionStore {
     }
 
     override protected def bulkUpdateAction(
-        submissions: NonEmptyList[Traced[InFlightSubmission[UnsequencedSubmission]]]
+        submissions: NonEmpty[Seq[Traced[InFlightSubmission[UnsequencedSubmission]]]]
     )(implicit
         batchTraceContext: TraceContext
     ): DBIOAction[Array[Int], NoStream, Effect.All] = {
@@ -399,7 +400,7 @@ object DbInFlightSubmissionStore {
         ErrorLoggingContext.fromTracedLogger(logger)
       DbStorage.bulkOperation(
         insertQuery,
-        submissions.map(_.value).toList,
+        submissions.map(_.value),
         storage.profile,
         useTransactionForOracle = true,
       ) { pp => submission =>
@@ -428,7 +429,7 @@ object DbInFlightSubmissionStore {
       submission.changeIdHash
 
     /** A list of queries for the items that we want to check for */
-    override protected def checkQuery(submissionsToCheck: NonEmptyList[ChangeIdHash])(implicit
+    override protected def checkQuery(submissionsToCheck: NonEmpty[Seq[ChangeIdHash]])(implicit
         batchTraceContext: TraceContext
     ): Iterable[ReadOnly[Iterable[CheckData]]] = {
       DbStorage.toInClauses_("change_id_hash", submissionsToCheck, maxItemsInSqlInClause).map {

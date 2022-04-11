@@ -4,10 +4,11 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
-import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.digitalasset.canton.data.Informee.InvalidInformee
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.HasProtoV0
 
 /** A party that must be informed about the view.
@@ -45,11 +46,17 @@ object Informee {
   def create(party: LfPartyId, weight: Int): Either[String, Informee] =
     Either.catchOnly[InvalidInformee](tryCreate(party, weight)).leftMap(_.message)
 
-  def fromProtoV0(informeeP: v0.Informee): Either[String, Informee] = {
+  def fromProtoV0(informeeP: v0.Informee): ParsingResult[Informee] = {
     val v0.Informee(partyString, weight) = informeeP
     for {
-      party <- LfPartyId.fromString(partyString)
-      informee <- Informee.create(party, weight)
+      party <- LfPartyId
+        .fromString(partyString)
+        .leftMap(ProtoDeserializationError.ValueDeserializationError("party", _))
+      informee <- Informee
+        .create(party, weight)
+        .leftMap(err =>
+          ProtoDeserializationError.OtherError(s"Unable to deserialize informee data: $err")
+        )
     } yield informee
   }
 
@@ -61,13 +68,13 @@ object Informee {
   * @param weight determines the impact of the party on whether the view is approved.
   * @throws com.digitalasset.canton.data.Informee$.InvalidInformee if `weight` is not positive
   */
-case class ConfirmingParty(party: LfPartyId, weight: Int) extends Informee {
+final case class ConfirmingParty(party: LfPartyId, weight: Int) extends Informee {
   if (weight <= 0)
     throw InvalidInformee(s"Unable to create a confirming party with non-positive weight $weight.")
 }
 
 /** An informee that is not a confirming party
   */
-case class PlainInformee(party: LfPartyId) extends Informee {
+final case class PlainInformee(party: LfPartyId) extends Informee {
   override val weight = 0
 }

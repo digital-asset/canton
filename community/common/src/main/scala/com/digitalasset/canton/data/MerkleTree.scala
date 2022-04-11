@@ -4,12 +4,14 @@
 package com.digitalasset.canton.data
 
 import cats.implicits._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
 import com.digitalasset.canton.data.MerkleTree._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.HasVersionedToByteString
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
@@ -233,19 +235,20 @@ object MerkleTree {
   /** Deserialize a bindable protobuf node to a blinded or an unblinded tree node depending on the contents of protoNode */
   def fromProtoOption[NodeType](
       protoNode: Option[v0.BlindableNode],
-      f: ByteString => Either[String, MerkleTree[NodeType]],
-  ): Either[String, MerkleTree[NodeType]] = {
+      f: ByteString => ParsingResult[MerkleTree[NodeType]],
+  ): ParsingResult[MerkleTree[NodeType]] = {
     import v0.BlindableNode.{BlindedOrNot => BON}
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash
           .fromProtoPrimitive(hashBytes)
           .bimap(
-            e => s"Failed to deserialize root hash: $e",
+            e => ProtoDeserializationError.OtherError(s"Failed to deserialize root hash: $e"),
             hash => BlindedNode.apply[NodeType](hash),
           )
       case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode)
-      case Some(BON.Empty) | None => Left(s"Missing blindedOrNot specification")
+      case Some(BON.Empty) | None =>
+        Left(ProtoDeserializationError.OtherError(s"Missing blindedOrNot specification"))
     }
   }
 }
