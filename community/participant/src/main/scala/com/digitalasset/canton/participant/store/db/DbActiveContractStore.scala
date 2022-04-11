@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{Chain, EitherT, NonEmptyList}
+import cats.data.{Chain, EitherT}
 import cats.syntax.foldable._
-import cats.syntax.list._
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String100}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -212,7 +212,7 @@ class DbActiveContractStore(
           }
           .map(_.toMap)
       case _: DbStorage.Profile.Postgres =>
-        contractIds.toList.toNel match {
+        NonEmpty.from(contractIds.toSeq) match {
           case None => Future.successful(Map.empty)
           case Some(contractIdsNel) =>
             import DbStorage.Implicits.BuilderChain._
@@ -666,7 +666,7 @@ class DbActiveContractStore(
     }
 
     def checkIdempotence(
-        idsToCheck: NonEmptyList[LfContractId]
+        idsToCheck: NonEmpty[Seq[LfContractId]]
     ): CheckedT[Future, AcsError, AcsWarning, Unit] = {
       import DbStorage.Implicits.BuilderChain._
       val contractIdsNotInsertedInClauses =
@@ -731,7 +731,7 @@ class DbActiveContractStore(
         // Check all contracts whether they have been inserted or are already there
         // We don't analyze the update counts
         // so that we can use the fast IGNORE_ROW_ON_DUPKEY_INDEX directive in Oracle
-        contractIds.toList.toNel.map(checkIdempotence).getOrElse(CheckedT.pure(()))
+        NonEmpty.from(contractIds).map(checkIdempotence).getOrElse(CheckedT.pure(()))
       } else CheckedT.pure(())
     }
   }

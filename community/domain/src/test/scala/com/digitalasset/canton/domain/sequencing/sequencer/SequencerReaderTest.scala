@@ -7,7 +7,7 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Sink, SinkQueueWithCancel, Source}
 import akka.stream.{Materializer, OverflowStrategy, QueueOfferResult}
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils._
@@ -141,16 +141,16 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     def storeAndWatermark(events: Seq[Sequenced[PayloadId]]): Future[Unit] = {
-      val eventsNel = NonEmptyList.fromListUnsafe(events.toList)
+      val eventsNE = NonEmptyUtil.fromUnsafe(events)
       val payloads = DomainSequencingTestUtils.payloadsForEvents(events)
 
       for {
         _ <- store
-          .savePayloads(NonEmptyList.fromListUnsafe(payloads), instanceDiscriminator)
+          .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator)
           .valueOrFail(s"Save payloads")
-        _ <- store.saveEvents(instanceIndex, eventsNel)
+        _ <- store.saveEvents(instanceIndex, eventsNE)
         _ <- store
-          .saveWatermark(instanceIndex, eventsNel.last.timestamp)
+          .saveWatermark(instanceIndex, eventsNE.last1.timestamp)
           .valueOrFail("saveWatermark")
       } yield {
         // update the event signaller if auto signalling is enabled

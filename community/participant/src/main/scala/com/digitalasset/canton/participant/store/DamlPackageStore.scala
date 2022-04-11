@@ -76,7 +76,7 @@ trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
     * This checks whether a DAR containing `packages` can be safely removed -- if there's any package that would be
     * left without a DAR then we won't remove the DAR.
     */
-  def anyPackagePreventsDarRemoval(packages: List[PackageId], removeDar: DarDescriptor)(implicit
+  def anyPackagePreventsDarRemoval(packages: Seq[PackageId], removeDar: DarDescriptor)(implicit
       tc: TraceContext
   ): OptionT[Future, PackageId]
 }

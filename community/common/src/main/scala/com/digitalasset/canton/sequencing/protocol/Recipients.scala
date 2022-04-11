@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.data.{NonEmptyList, NonEmptySet}
-import cats.implicits._
+import cats.syntax.reducible._
+import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -15,18 +17,17 @@ import com.digitalasset.canton.util.HasProtoV0
 /** Recipients of a batch. Uses a list of [[com.digitalasset.canton.sequencing.protocol.RecipientsTree]]s
   * that define the members receiving a batch, and which members see which other recipients.
   */
-case class Recipients private (trees: NonEmptyList[RecipientsTree])
+case class Recipients private (trees: NonEmpty[Seq[RecipientsTree]])
     extends PrettyPrinting
     with HasProtoV0[v0.Recipients] {
 
   lazy val allRecipients: Set[Member] = {
-    trees.toList.flatMap(t => t.allRecipients).toSet
+    trees.flatMap(t => t.allRecipients).toSet
   }
 
   def forMember(member: Member): Option[Recipients] = {
-
-    val ts = trees.toList.flatMap(t => t.forMember(member))
-    val optTs = NonEmptyList.fromList(ts)
+    val ts = trees.forgetNE.flatMap(t => t.forMember(member))
+    val optTs = NonEmpty.from(ts)
     optTs.map(Recipients(_))
   }
 
@@ -38,9 +39,9 @@ case class Recipients private (trees: NonEmptyList[RecipientsTree])
   override def pretty: Pretty[Recipients.this.type] =
     prettyOfClass(param("Recipient trees", _.trees.toList))
 
-  def asSingleGroup: Option[NonEmptySet[Member]] = {
+  def asSingleGroup: Option[NonEmpty[Set[Member]]] = {
     trees match {
-      case NonEmptyList(RecipientsTree(group, Nil), Nil) => Some(group)
+      case Seq(RecipientsTree(group, Seq())) => Some(group)
       case _ => None
     }
   }
@@ -48,8 +49,8 @@ case class Recipients private (trees: NonEmptyList[RecipientsTree])
   /** Members that appear at the leaf of the BCC tree. For example, the informees of a view are leaf members of the
     * view message.
     */
-  lazy val leafMembers: NonEmptySet[Member] =
-    trees.tail.foldLeft(trees.head.leafMembers)(_ |+| _.leafMembers)
+  lazy val leafMembers: NonEmpty[Set[Member]] =
+    trees.toNEF.reduceLeftTo(_.leafMembers)(_ ++ _.leafMembers)
 
 }
 
@@ -57,35 +58,33 @@ object Recipients {
 
   def fromProtoV0(proto: v0.Recipients): ParsingResult[Recipients] = {
     for {
-      trees <- proto.recipientsTree.toList.traverse(t => RecipientsTree.fromProtoV0(t))
-      recipients <- NonEmptyList
-        .fromList(trees)
-        .fold[ParsingResult[Recipients]](
-          Left(
-            ProtoDeserializationError.ValueConversionError(
-              "RecipientsTree.recipients",
-              s"RecipientsTree.recipients must be non-empty",
-            )
+      trees <- proto.recipientsTree.traverse(t => RecipientsTree.fromProtoV0(t))
+      recipients <- NonEmpty
+        .from(trees)
+        .toRight(
+          ProtoDeserializationError.ValueConversionError(
+            "RecipientsTree.recipients",
+            s"RecipientsTree.recipients must be non-empty",
           )
-        )(ts => Right(Recipients(ts)))
-    } yield recipients
+        )
+    } yield Recipients(recipients)
   }
 
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing a group of
     * members that "see" each other.
     */
   def cc(first: Member, others: Member*): Recipients =
-    Recipients(NonEmptyList.of(RecipientsTree(NonEmptySet.of(first, others: _*), List.empty)))
+    Recipients(NonEmpty(Seq, RecipientsTree.leaf(NonEmpty(Set, first, others: _*))))
 
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing independent groups of members
     * that do not "see" each other.
     */
-  def groups(groups: NonEmptyList[NonEmptySet[Member]]): Recipients =
-    Recipients(groups.map(group => RecipientsTree(group, Nil)))
+  def groups(groups: NonEmpty[Seq[NonEmpty[Set[Member]]]]): Recipients =
+    Recipients(groups.map(group => RecipientsTree.leaf(group)))
 
   def ofSet[T <: Member](set: Set[T]): Option[Recipients] = {
     val members = set.toList
-    NonEmptyList.fromList(members).map(list => Recipients.cc(list.head, list.tail: _*))
+    NonEmpty.from(members).map(list => Recipients.cc(list.head1, list.tail1: _*))
   }
 
 }

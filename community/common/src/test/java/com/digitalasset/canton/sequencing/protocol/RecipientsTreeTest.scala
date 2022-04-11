@@ -3,26 +3,26 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.data.NonEmptySet
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import org.scalatest.wordspec.AnyWordSpec
 
 class RecipientsTreeTest extends AnyWordSpec with BaseTest {
-  lazy val p1 = ParticipantId("participant1")
-  lazy val p2 = ParticipantId("participant2")
-  lazy val p3 = ParticipantId("participant3")
-  lazy val p4 = ParticipantId("participant4")
-  lazy val p5 = ParticipantId("participant5")
-  lazy val p6 = ParticipantId("participant6")
+  lazy val p1: Member = ParticipantId("participant1")
+  lazy val p2: Member = ParticipantId("participant2")
+  lazy val p3: Member = ParticipantId("participant3")
+  lazy val p4: Member = ParticipantId("participant4")
+  lazy val p5: Member = ParticipantId("participant5")
+  lazy val p6: Member = ParticipantId("participant6")
 
-  lazy val t1 = new RecipientsTree(NonEmptySet.of(p1, p5), List.empty)
-  lazy val t2 = new RecipientsTree(NonEmptySet.of(p3), List.empty)
-  lazy val t3 = new RecipientsTree(NonEmptySet.of(p4, p2), List(t1, t2))
+  lazy val t1 = RecipientsTree.leaf(NonEmpty(Set, p1, p5))
+  lazy val t2 = RecipientsTree.leaf(NonEmpty(Set, p3))
+  lazy val t3 = RecipientsTree(NonEmpty(Set, p4, p2), Seq(t1, t2))
 
-  lazy val t4 = new RecipientsTree(NonEmptySet.of(p2, p6), List.empty)
+  lazy val t4 = RecipientsTree.leaf(NonEmpty(Set, p2, p6))
 
-  lazy val t5 = new RecipientsTree(NonEmptySet.of(p1), List(t3, t4))
+  lazy val t5 = RecipientsTree(NonEmpty(Set, p1), Seq(t3, t4))
 
   "RecipientsTree" when {
     "allRecipients" should {

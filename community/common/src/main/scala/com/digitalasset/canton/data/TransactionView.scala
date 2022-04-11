@@ -31,6 +31,7 @@ import com.digitalasset.canton.serialization.{
   SerializationCheckFailed,
 }
 import com.digitalasset.canton.protocol.RollbackContext
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.{
   HasProtoV0,
   HasVersionedToByteString,
@@ -47,6 +48,7 @@ import com.digitalasset.canton.{
   LfFetchCommand,
   LfLookupByKeyCommand,
   LfPartyId,
+  ProtoDeserializationError,
   checked,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -184,7 +186,7 @@ object TransactionView {
       )
       .leftMap(_.message)
 
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): Either[String, TransactionView] =
+  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[TransactionView] =
     for {
       protoView <- TreeSerialization.deserializeProtoNode(bytes, v0.ViewNode)
       view <- fromProtoV0(hashOps, protoView)
@@ -193,7 +195,7 @@ object TransactionView {
   private def fromProtoV0(
       hashOps: HashOps,
       protoView: v0.ViewNode,
-  ): Either[String, TransactionView] = {
+  ): ParsingResult[TransactionView] = {
     for {
       commonData <- MerkleTree.fromProtoOption(
         protoView.viewCommonData,
@@ -204,13 +206,15 @@ object TransactionView {
         ViewParticipantData.fromByteString(hashOps),
       )
       subViews <- deserializeViews(hashOps)(protoView.subviews)
-      view <- create(hashOps)(commonData, participantData, subViews)
+      view <- create(hashOps)(commonData, participantData, subViews).leftMap(e =>
+        ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
+      )
     } yield view
   }
 
   private[data] def deserializeViews(
       hashOps: HashOps
-  )(protoViews: Seq[v0.BlindableNode]): Either[String, Seq[MerkleTree[TransactionView]]] =
+  )(protoViews: Seq[v0.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
     protoViews.traverse(protoView =>
       MerkleTree.fromProtoOption(Some(protoView), fromByteString(hashOps))
     )
@@ -384,22 +388,22 @@ object ViewCommonData {
   // valid serialization of "viewCommonDataP".
   private def fromProtoVersioned(
       hashOps: HashOps
-  )(bytes: ByteString, viewCommonDataP: VersionedViewCommonData): Either[String, ViewCommonData] =
+  )(bytes: ByteString, viewCommonDataP: VersionedViewCommonData): ParsingResult[ViewCommonData] =
     viewCommonDataP.version match {
       case VersionedViewCommonData.Version.Empty =>
-        Left(FieldNotSet("VersionedViewCommonData.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedViewCommonData.version"))
       case VersionedViewCommonData.Version.V0(data) => fromProtoV0(hashOps)(bytes, data)
     }
 
   private def fromProtoV0(
       hashOps: HashOps
-  )(bytes: ByteString, viewCommonDataP: v0.ViewCommonData): Either[String, ViewCommonData] =
+  )(bytes: ByteString, viewCommonDataP: v0.ViewCommonData): ParsingResult[ViewCommonData] =
     for {
       informees <- viewCommonDataP.informees.traverse(Informee.fromProtoV0)
 
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", viewCommonDataP.salt)
-        .leftMap(err => s"Could not parse salt: $err")
+        .leftMap(_.inField("salt"))
 
       // The constructor of ViewCommandData throws an exception if an object invariant would be violated,
       // which must not escape this method. Therefore we translate the exception to Left(...).
@@ -407,12 +411,12 @@ object ViewCommonData {
       // indicate a bug in the code and can therefore not be recovered from.
       viewCommonData <- returnLeftWhenInitializationFails(
         new ViewCommonData(informees.toSet, viewCommonDataP.threshold, salt)(hashOps, Some(bytes))
-      )
+      ).leftMap(ProtoDeserializationError.OtherError(_))
     } yield viewCommonData
 
   // Unlike "create" and "tryCreate", this method initializes the "deserializedFrom" field with the given byte string.
   // This is to ensure that subsequent calls of "toByteString" yield the same byte string.
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): Either[String, ViewCommonData] =
+  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[ViewCommonData] =
     for {
       viewCommonDataP <- TreeSerialization.deserializeProtoNode(bytes, VersionedViewCommonData)
       viewCommonData <- ViewCommonData.fromProtoVersioned(hashOps)(bytes, viewCommonDataP)
@@ -743,9 +747,9 @@ object ViewParticipantData {
 
   private def fromProtoV0(hashOps: HashOps, dataP: v0.ViewParticipantData)(
       bytes: ByteString
-  ): Either[String, MerkleTree[ViewParticipantData]] =
+  ): ParsingResult[MerkleTree[ViewParticipantData]] =
     for {
-      coreInputsSeq <- dataP.coreInputs.traverse(InputContract.fromProtoV0).leftMap(_.toString)
+      coreInputsSeq <- dataP.coreInputs.traverse(InputContract.fromProtoV0)
       v0.ViewParticipantData(
         saltP,
         _,
@@ -756,24 +760,24 @@ object ViewParticipantData {
         rbContextP,
       ) = dataP
       coreInputs = coreInputsSeq.map(x => x.contractId -> x).toMap
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV0).leftMap(_.toString)
+      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV0)
       archivedFromSubviews <- archivedFromSubviewsP
         .traverse(LfContractId.fromProtoPrimitive)
-        .leftMap(_.toString)
       resolvedKeys <- resolvedKeysP.traverse(
-        ResolvedKey.fromProtoV0(_).bimap(_.toString, rk => rk.key -> rk.resolution)
+        ResolvedKey.fromProtoV0(_).map(rk => rk.key -> rk.resolution)
       )
       resolvedKeysMap = resolvedKeys.toMap
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV0)
-        .leftMap(_.toString)
+
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
-        .leftMap(err => s"Could not parse salt: $err")
+        .leftMap(_.inField("salt"))
+
       rollbackContext <- RollbackContext
         .fromProtoV0(rbContextP)
-        .leftMap(err => s"Could not parse rollback context: $err")
+        .leftMap(_.inField("rollbackContext"))
 
       viewParticipantData <- returnLeftWhenInitializationFails(
         new ViewParticipantData(
@@ -785,21 +789,21 @@ object ViewParticipantData {
           rollbackContext = rollbackContext,
           salt = salt,
         )(hashOps, Some(bytes))
-      )
+      ).leftMap(ProtoDeserializationError.OtherError(_))
     } yield viewParticipantData
 
   private def fromProtoVersioned(hashOps: HashOps, dataP: VersionedViewParticipantData)(
       bytes: ByteString
-  ): Either[String, MerkleTree[ViewParticipantData]] =
+  ): ParsingResult[MerkleTree[ViewParticipantData]] =
     dataP.version match {
       case VersionedViewParticipantData.Version.Empty =>
-        Left(FieldNotSet("VersionedViewParticipantData.version")).leftMap(_.toString)
+        Left(FieldNotSet("VersionedViewParticipantData.version"))
       case VersionedViewParticipantData.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
     }
 
   def fromByteString(
       hashOps: HashOps
-  )(bytes: ByteString): Either[String, MerkleTree[ViewParticipantData]] =
+  )(bytes: ByteString): ParsingResult[MerkleTree[ViewParticipantData]] =
     for {
       protoViewParticipantData <- TreeSerialization.deserializeProtoNode(
         bytes,

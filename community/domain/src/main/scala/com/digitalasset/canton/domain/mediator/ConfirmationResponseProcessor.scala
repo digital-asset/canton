@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.alternative._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
@@ -128,7 +129,7 @@ class ConfirmationResponseProcessor(
       requestId: RequestId,
       counter: SequencerCounter,
       request: MediatorRequest,
-      rootHashMessages: List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
   )(implicit traceContext: TraceContext): Future[Unit] = {
     withSpan("ConfirmationResponseProcessor.processRequest") { implicit traceContext => span =>
       span.setAttribute("request_id", requestId.toString)
@@ -196,20 +197,20 @@ class ConfirmationResponseProcessor(
 
   private def checkRootHashMessages(
       request: MediatorRequest,
-      rootHashMessages: List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       topologySnapshot: TopologySnapshot,
   ): EitherT[Future, String, Unit] = {
     val (wrongRecipients, oneMemberRecipients) = rootHashMessages.flatMap { rhm =>
       rhm.recipients.trees.toList.map {
-        case tree @ RecipientsTree(group, Nil) =>
-          Either.cond(group.toSortedSet.size == 2 && group.contains(mediatorId), group, tree)
+        case tree @ RecipientsTree(group, Seq()) =>
+          Either.cond(group.size == 2 && group.contains(mediatorId), group, tree)
         case badTree => Left(badTree)
       }
     }.separate
     val members = oneMemberRecipients.mapFilter(recipients => (recipients - mediatorId).headOption)
 
-    def repeatedMembers(members: List[Member]): List[Member] = {
-      val repeatedMembersB = List.newBuilder[Member]
+    def repeatedMembers(members: Seq[Member]): Seq[Member] = {
+      val repeatedMembersB = Seq.newBuilder[Member]
       val seen = new mutable.HashSet[Member]()
       members.foreach { member =>
         val fresh = seen.add(member)
@@ -218,7 +219,7 @@ class ConfirmationResponseProcessor(
       repeatedMembersB.result()
     }
 
-    def wrongRootHashes(expectedRootHash: RootHash): List[RootHash] =
+    def wrongRootHashes(expectedRootHash: RootHash): Seq[RootHash] =
       rootHashMessages.mapFilter { envelope =>
         val rootHash = envelope.protocolMessage.rootHash
         if (rootHash == expectedRootHash) None else Some(rootHash)
@@ -242,10 +243,10 @@ class ConfirmationResponseProcessor(
       }
     }
 
-    def distinctPayloads: List[SerializedRootHashMessagePayload] =
+    def distinctPayloads: Seq[SerializedRootHashMessagePayload] =
       rootHashMessages.map(_.protocolMessage.payload).distinct
 
-    def wrongViewType(expectedViewType: ViewType): List[ViewType] =
+    def wrongViewType(expectedViewType: ViewType): Seq[ViewType] =
       rootHashMessages.map(_.protocolMessage.viewType).filterNot(_ == expectedViewType).distinct
 
     for {
@@ -296,7 +297,7 @@ class ConfirmationResponseProcessor(
 
   private def sendMalformedRejection(
       requestId: RequestId,
-      rootHashMessages: List[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       rejectionReason: MediatorReject,
       domainParameters: DynamicDomainParameters,
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -307,19 +308,19 @@ class ConfirmationResponseProcessor(
     val recipientsByViewType =
       rootHashMessages.groupBy(_.protocolMessage.viewType).mapFilter { rhms =>
         val recipients = rhms.flatMap(_.recipients.allRecipients).toSet - mediatorId
-        NonEmptyList.fromList(recipients.toList)
+        NonEmpty.from(recipients.toSeq)
       }
     if (recipientsByViewType.nonEmpty) {
       for {
         snapshot <- crypto.awaitSnapshot(requestId.unwrap)
-        envs <- recipientsByViewType.toList
+        envs <- recipientsByViewType.toSeq
           .traverse { case (viewType, recipients) =>
             val rejection =
               MalformedMediatorRequestResult(requestId, domain, viewType, rejectionReason)
             SignedProtocolMessage
               .tryCreate(rejection, snapshot, crypto.pureCrypto)
               .map { signedRejection =>
-                signedRejection -> Recipients.groups(recipients.map(r => NonEmptySet.one(r)))
+                signedRejection -> Recipients.groups(recipients.map(r => NonEmpty(Set, r)))
               }
           }
         batch = Batch.of(envs: _*)

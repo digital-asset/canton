@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable._
 import cats.syntax.list._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
@@ -77,7 +78,7 @@ class DbContractStore(
         override val kind: String = "request"
         override def logger: TracedLogger = DbContractStore.this.logger
 
-        override def executeBatch(ids: NonEmptyList[Traced[LfContractId]])(implicit
+        override def executeBatch(ids: NonEmpty[Seq[Traced[LfContractId]]])(implicit
             traceContext: TraceContext
         ): Future[Iterable[Option[StoredContract]]] = {
           processingTime.metric.event {
@@ -98,7 +99,7 @@ class DbContractStore(
   }
 
   private def lookupQueries(
-      ids: NonEmptyList[LfContractId]
+      ids: NonEmpty[Seq[LfContractId]]
   ): Iterable[DbAction.ReadOnly[Seq[Option[StoredContract]]]] = {
     import DbStorage.Implicits.BuilderChain._
 
@@ -300,7 +301,8 @@ class DbContractStore(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     import DbStorage.Implicits.BuilderChain._
 
-    contractIds.toList.toNel
+    NonEmpty
+      .from(contractIds.toSeq)
       .map { contractIds =>
         val inClauses =
           DbStorage.toInClauses_("contract_id", contractIds, maxContractIdSqlInListSize)

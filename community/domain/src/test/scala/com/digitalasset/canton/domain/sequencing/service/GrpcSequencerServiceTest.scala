@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.foldable._
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
@@ -403,14 +404,15 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         ClosedEnvelope(
           ByteString.copyFromUtf8("message to two mediators and the participant"),
           Recipients(
-            NonEmptyList.of(
+            NonEmpty(
+              Seq,
               RecipientsTree(
-                NonEmptySet.of(participant),
-                List(
-                  RecipientsTree(NonEmptySet.of(mediator1), List.empty),
-                  RecipientsTree(NonEmptySet.of(mediator2), List.empty),
+                NonEmpty.mk(Set, participant),
+                Seq(
+                  RecipientsTree.leaf(NonEmpty.mk(Set, mediator1)),
+                  RecipientsTree.leaf(NonEmpty.mk(Set, mediator2)),
                 ),
-              )
+              ),
             )
           ),
         )

@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.store
 import cats.syntax.traverse._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
-import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String256M, String255}
+import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String256M}
 import com.digitalasset.canton.crypto.{PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -19,7 +19,7 @@ import com.digitalasset.canton.topology.store.db.DbTopologyStoreFactory
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactory
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.google.common.annotations.VisibleForTesting
 
@@ -289,11 +289,13 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
   def bootstrap(
       collection: StoredTopologyTransactions[TopologyChangeOp.Positive]
   )(implicit traceContext: TraceContext): Future[Unit] =
-    collection.result
-      .groupBy(_.validFrom)
-      .toList
-      .sortBy { case (validFrom, _) => validFrom }
-      .traverse { case (validFrom, transactions) =>
+    MonadUtil
+      .sequentialTraverse(
+        collection.result
+          .groupBy(_.validFrom)
+          .toList
+          .sortBy { case (validFrom, _) => validFrom }
+      ) { case (validFrom, transactions) =>
         val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
         for {
           _ <- append(validFrom, txs)

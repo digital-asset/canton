@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.data.{NonEmptyList, NonEmptySet}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -30,12 +30,12 @@ case class ConfirmationRequest(
     )
     val participants = viewEnvelopes.flatMap(_.protocolMessage.randomSeed.keySet).distinct
 
-    val rootHashMessages = NonEmptyList
-      .fromList(participants.toList)
-      .map { participantsNel =>
+    val rootHashMessages = NonEmpty
+      .from(participants)
+      .map { participantsNE =>
         OpenEnvelope(
           rootHashMessage,
-          Recipients.groups(participantsNel.map(NonEmptySet.of(_, mediator))),
+          Recipients.groups(participantsNE.map(NonEmpty.mk(Set, _, mediator))),
         )
       }
       .toList

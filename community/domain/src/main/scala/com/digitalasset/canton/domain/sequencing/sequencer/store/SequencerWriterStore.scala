@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.CommitMode
 import com.digitalasset.canton.topology.Member
@@ -39,7 +40,7 @@ trait SequencerWriterStore extends AutoCloseable {
   /** Save a series of payloads to the store.
     * Is up to the caller to determine a reasonable batch size and no batching is done within the store.
     */
-  def savePayloads(payloads: NonEmptyList[Payload], instanceDiscriminator: UUID)(implicit
+  def savePayloads(payloads: NonEmpty[Seq[Payload]], instanceDiscriminator: UUID)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SavePayloadsError, Unit] =
     store.savePayloads(payloads, instanceDiscriminator)
@@ -48,7 +49,7 @@ trait SequencerWriterStore extends AutoCloseable {
     * Callers should determine batch size. No batching is done within the store.
     * Callers MUST ensure that event-ids are unique otherwise stores will throw (likely a constraint violation).
     */
-  def saveEvents(events: NonEmptyList[Sequenced[PayloadId]])(implicit
+  def saveEvents(events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     store.saveEvents(instanceIndex, events)

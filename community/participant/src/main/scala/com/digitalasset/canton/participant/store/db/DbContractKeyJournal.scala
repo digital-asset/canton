@@ -7,8 +7,8 @@ import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.functorFilter._
-import cats.syntax.list._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
@@ -57,7 +57,7 @@ class DbContractKeyJournal(
     else {
       processingTime.metric.event {
         import DbStorage.Implicits.BuilderChain._
-        keys.toList.toNel match {
+        NonEmpty.from(keys.toSeq) match {
           case None => Future.successful(Map.empty)
           case Some(keysNel) =>
             val inClauses = DbStorage.toInClauses_(

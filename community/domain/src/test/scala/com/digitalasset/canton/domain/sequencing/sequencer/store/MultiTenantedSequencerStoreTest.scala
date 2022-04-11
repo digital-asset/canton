@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.NonEmptyList
 import cats.syntax.option._
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils
@@ -46,9 +46,9 @@ trait MultiTenantedSequencerStoreTest {
       val payloads = DomainSequencingTestUtils.payloadsForEvents(delivers)
       for {
         _unit <- store
-          .savePayloads(NonEmptyList.fromListUnsafe(payloads), instanceDiscriminator)
+          .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator)
           .valueOrFail(s"Save payloads")
-        _unit <- store.saveEvents(NonEmptyList.fromListUnsafe(delivers))
+        _unit <- store.saveEvents(NonEmptyUtil.fromUnsafe(delivers))
       } yield { () }
 
     }

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.data
 
-import cats.implicits._
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
 import scalapb.GeneratedMessageCompanion
 
@@ -16,6 +16,5 @@ object TreeSerialization {
   def deserializeProtoNode[ProtoType <: scalapb.GeneratedMessage](
       bytes: ByteString,
       protoBuilder: GeneratedMessageCompanion[ProtoType],
-  ): Either[String, ProtoType] =
-    ProtoConverter.protoParser(protoBuilder.parseFrom)(bytes).leftMap(_.error.getMessage)
+  ): ParsingResult[ProtoType] = ProtoConverter.protoParser(protoBuilder.parseFrom)(bytes)
 }

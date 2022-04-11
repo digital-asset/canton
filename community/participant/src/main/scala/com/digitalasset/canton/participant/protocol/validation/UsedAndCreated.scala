@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.TransactionViewTree
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -24,9 +24,9 @@ case class UsedAndCreated(
     consumedInputsOfHostedStakeholders: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     maybeCreated: Map[LfContractId, Option[SerializableContract]],
     transient: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
-    rootViewsWithContractKeys: NonEmptyList[
+    rootViewsWithContractKeys: NonEmpty[Seq[
       (TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])
-    ],
+    ]],
     uckFreeKeysOfHostedMaintainers: Set[LfGlobalKey],
     uckUpdatedKeysOfHostedMaintainers: Map[LfGlobalKey, ContractKeyJournal.Status],
     hostedInformeeStakeholders: Set[LfPartyId],

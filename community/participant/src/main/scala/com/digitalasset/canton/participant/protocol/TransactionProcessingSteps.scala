@@ -24,6 +24,8 @@ import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.error.TransactionError
 import com.daml.error.ErrorCode
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -483,7 +485,7 @@ class TransactionProcessingSteps(
       ): Either[DeserializationError, LightTransactionViewTree] =
         LightTransactionViewTree
           .fromByteString(pureCrypto)(bytes)
-          .leftMap(DeserializationError(_, bytes))
+          .leftMap(err => DeserializationError(err.message, bytes))
 
       type DecryptionError = EncryptedViewMessageDecryptionError[TransactionViewType]
 
@@ -749,8 +751,8 @@ class TransactionProcessingSteps(
     ): TransactionValidationResult = {
       val viewResults = SortedMap.newBuilder[ViewHash, ViewValidationResult]
 
-      enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithContractKeys.toList
-        .flatMap(_._1.flatten.toList)
+      enrichedTransaction.rootViewsWithUsedAndCreated.rootViewsWithContractKeys.forgetNE
+        .flatMap(_._1.flatten)
         .foreach { view =>
           val viewParticipantData = view.viewParticipantData
           val createdCore = viewParticipantData.createdCore.map(_.contract.contractId).toSet
@@ -1475,7 +1477,7 @@ class TransactionProcessingSteps(
           consumedInputsOfHostedStakeholders -- maybeCreatedResult.keySet,
         maybeCreated = maybeCreatedResult,
         transient = transientResult,
-        rootViewsWithContractKeys = NonEmptyList.fromListUnsafe(perRootViewInputKeysB.result()),
+        rootViewsWithContractKeys = NonEmptyUtil.fromUnsafe(perRootViewInputKeysB.result()),
         uckFreeKeysOfHostedMaintainers = freeKeys,
         uckUpdatedKeysOfHostedMaintainers = updatedKeys,
         //TODO(i5352): Unit test this
@@ -1512,9 +1514,9 @@ object TransactionProcessingSteps {
   ) {
 
     def transactionId: TransactionId =
-      rootViewsWithUsedAndCreated.rootViewsWithContractKeys.head._1.transactionId
+      rootViewsWithUsedAndCreated.rootViewsWithContractKeys.head1._1.transactionId
     def ledgerTime: CantonTimestamp =
-      rootViewsWithUsedAndCreated.rootViewsWithContractKeys.head._1.ledgerTime
+      rootViewsWithUsedAndCreated.rootViewsWithContractKeys.head1._1.ledgerTime
   }
 
   case class ParallelChecksResult(
@@ -1536,17 +1538,16 @@ object TransactionProcessingSteps {
 
   /** @throws java.lang.IllegalArgumentException if `receivedViewTrees` contains views with different transaction root hashes
     */
-  def tryCommonData(receivedViewTrees: NonEmptyList[TransactionViewTree]): CommonData =
-    receivedViewTrees.toList
+  def tryCommonData(receivedViewTrees: NonEmpty[Seq[TransactionViewTree]]): CommonData = {
+    val distinctCommonData = receivedViewTrees
       .map(v => CommonData(v.transactionId, v.ledgerTime, v.submissionTime, v.confirmationPolicy))
-      .distinct match {
-      case List() => throw new IllegalStateException("Found non-empty list with no element.")
-      case List(commonData) => commonData
-      case ress =>
-        throw new IllegalArgumentException(
-          s"Found several different transaction IDs, LETs or confirmation policies: $ress"
-        )
-    }
+      .distinct
+    if (distinctCommonData.lengthCompare(1) == 0) distinctCommonData.head1
+    else
+      throw new IllegalArgumentException(
+        s"Found several different transaction IDs, LETs or confirmation policies: $distinctCommonData"
+      )
+  }
 
   case class CommonData(
       transactionId: TransactionId,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton
+
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.error.CantonErrorGroups.ProtoDeserializationErrorGroup
 import com.digitalasset.canton.error.CantonError
@@ -13,28 +14,52 @@ import com.google.protobuf.InvalidProtocolBufferException
 sealed trait ProtoDeserializationError extends Product with Serializable {
   def toAdminError(implicit loggingContext: ErrorLoggingContext): CantonError =
     ProtoDeserializationFailure.Wrap(this)
+
+  def inField(field: String): ProtoDeserializationError.ValueDeserializationError =
+    ProtoDeserializationError.ValueDeserializationError(field, message)
+
+  def message: String
 }
+
 object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
   final case class BufferException(error: InvalidProtocolBufferException)
-      extends ProtoDeserializationError
+      extends ProtoDeserializationError {
+    override val message = error.getMessage
+  }
   final case class CryptoDeserializationError(error: DeserializationError)
-      extends ProtoDeserializationError
+      extends ProtoDeserializationError {
+    override val message = error.message
+  }
   final case class TransactionDeserialization(message: String) extends ProtoDeserializationError
   final case class ValueDeserializationError(field: String, message: String)
       extends ProtoDeserializationError
-  final case class StringConversionError(error: String) extends ProtoDeserializationError
-  final case class UnrecognizedField(error: String) extends ProtoDeserializationError
-  final case class UnrecognizedEnum(field: String, value: Int) extends ProtoDeserializationError
-  final case class FieldNotSet(field: String) extends ProtoDeserializationError
-  final case class NotImplementedYet(className: String) extends ProtoDeserializationError
+  final case class StringConversionError(message: String) extends ProtoDeserializationError
+  final case class UnrecognizedField(message: String) extends ProtoDeserializationError
+  final case class UnrecognizedEnum(field: String, value: Int) extends ProtoDeserializationError {
+    override val message = s"Unrecognized value `$value` in enum field `$field`"
+  }
+  final case class FieldNotSet(field: String) extends ProtoDeserializationError {
+    override val message = s"Field `$field` is not set"
+  }
+  final case class NotImplementedYet(className: String) extends ProtoDeserializationError {
+    override val message = className
+  }
   final case class TimestampConversionError(message: String) extends ProtoDeserializationError
   final case class TimeModelConversionError(message: String) extends ProtoDeserializationError
   final case class ValueConversionError(field: String, error: String)
-      extends ProtoDeserializationError
+      extends ProtoDeserializationError {
+    override val message = s"Unable to convert field `$field`: $error"
+  }
   final case class SubmissionIdConversionError(message: String) extends ProtoDeserializationError
-  final case class InvariantViolation(error: String) extends ProtoDeserializationError
-  final case class UnknownGrpcCodeError(error: String) extends ProtoDeserializationError
-  final case class OtherError(error: String) extends ProtoDeserializationError
+  final case class InvariantViolation(error: String) extends ProtoDeserializationError {
+    override def message = error
+  }
+  final case class UnknownGrpcCodeError(error: String) extends ProtoDeserializationError {
+    override def message = error
+  }
+  final case class OtherError(error: String) extends ProtoDeserializationError {
+    override def message = error
+  }
 
   /** Common Deserialization error code
     *

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.store.db
 
-import cats.data.NonEmptyList
 import cats.syntax.either._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -33,7 +33,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
     *
     * @return An [[scala.collection.Iterable]] of the same size as `items` that contains the response for `items(i)` is at index `i`.
     */
-  protected def bulkUpdateWithCheck(items: NonEmptyList[Traced[A]], queryBaseName: String)(implicit
+  protected def bulkUpdateWithCheck(items: NonEmpty[Seq[Traced[A]]], queryBaseName: String)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Future[Iterable[Try[B]]] = {
@@ -56,17 +56,17 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
     }
   }
 
-  protected def bulkUpdateWithCheck(items: List[Traced[A]], queryBaseName: String)(implicit
+  protected def bulkUpdateWithCheck(items: Seq[Traced[A]], queryBaseName: String)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Future[Iterable[Try[B]]] =
-    NonEmptyList.fromList(items) match {
-      case None => Future.successful(Iterable.empty[Try[B]])
+    NonEmpty.from(items) match {
       case Some(itemsNel) => bulkUpdateWithCheck(itemsNel, queryBaseName)
+      case None => Future.successful(Iterable.empty[Try[B]])
     }
 
   /** Idempotent bulk DB operation for the given items. */
-  protected def bulkUpdateAction(items: NonEmptyList[Traced[A]])(implicit
+  protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[A]]])(implicit
       batchTraceContext: TraceContext
   ): DBIOAction[Array[Int], NoStream, Effect.All]
 
@@ -119,11 +119,10 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
       toCheck: Seq[BulkUpdatePendingCheck[A, B]],
       queryBaseName: String,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] = {
-    // TODO(#8271) No need for a list conversion here
-    NonEmptyList.fromList(toCheck.toList) match {
+    NonEmpty.from(toCheck) match {
       case None => Future.unit
-      case Some(toCheckNel) =>
-        val ids = toCheckNel.map(x => itemIdentifier(x.target.value))
+      case Some(toCheckNE) =>
+        val ids = toCheckNE.map(x => itemIdentifier(x.target.value))
         val lookupQueries = checkQuery(ids)
         storage.sequentialQueryAndCombine(lookupQueries, s"$queryBaseName lookup").map {
           foundDatas =>
@@ -152,7 +151,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
   protected def dataIdentifier(state: CheckData): ItemIdentifier
 
   /** A list of queries for the items that we want to check for */
-  protected def checkQuery(itemsToCheck: NonEmptyList[ItemIdentifier])(implicit
+  protected def checkQuery(itemsToCheck: NonEmpty[Seq[ItemIdentifier]])(implicit
       batchTraceContext: TraceContext
   ): Iterable[DbAction.ReadOnly[Iterable[CheckData]]]
 

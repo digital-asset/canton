@@ -4,7 +4,7 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import com.digitalasset.canton.crypto.{Hash, HashOps, TestHash}
 import com.digitalasset.canton.data.MerkleSeq.{Branch, MerkleSeqElement, Singleton}
 import com.digitalasset.canton.data.MerkleTree.{
@@ -110,9 +110,12 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
         val merkleSeqP = merkleSeq.toProtoV0
         val merkleSeqDeserialized =
           MerkleSeq
-            .fromProtoV0(hashOps, MerkleTreeTest.leafFromByteString(Leaf1)(_).leftMap(_.toString))(
-              merkleSeqP
-            )
+            .fromProtoV0(
+              hashOps,
+              MerkleTreeTest
+                .leafFromByteString(Leaf1)(_)
+                .leftMap(ProtoDeserializationError.CryptoDeserializationError(_)),
+            )(merkleSeqP)
             .value
 
         merkleSeqDeserialized shouldEqual merkleSeq

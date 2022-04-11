@@ -139,7 +139,7 @@ abstract class CantonNodeBootstrapBase[
   val timeouts: ProcessingTimeout = parameterConfig.processingTimeouts
 
   // TODO(soren): Move to a error-safe node initialization approach
-  protected val storage = timeouts.unbounded.await("create storage factory")(
+  protected val storage =
     storageFactory
       .tryCreate(
         connectionPoolForParticipant,
@@ -148,7 +148,6 @@ abstract class CantonNodeBootstrapBase[
         parameterConfig.processingTimeouts,
         loggerFactory,
       )
-  )
   protected val initializationStore = InitializationStore(storage, timeouts, loggerFactory)
   protected val indexedStringStore =
     IndexedStringStore.create(

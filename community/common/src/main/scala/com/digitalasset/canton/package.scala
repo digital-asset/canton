@@ -65,23 +65,23 @@ package object canton {
   type LfCommand = ReplayCommand
   val LfCommand: ReplayCommand.type = ReplayCommand
 
-  type LfCreateCommand = LfCommand.CreateByTemplate
-  val LfCreateCommand: LfCommand.CreateByTemplate.type = LfCommand.CreateByTemplate
+  type LfCreateCommand = LfCommand.Create
+  val LfCreateCommand: LfCommand.Create.type = LfCommand.Create
 
-  type LfExerciseCommand = LfCommand.LenientExercise
-  val LfExerciseCommand: LfCommand.LenientExercise.type = LfCommand.LenientExercise
+  type LfExerciseCommand = LfCommand.Exercise
+  val LfExerciseCommand: LfCommand.Exercise.type = LfCommand.Exercise
 
-  type LfExerciseByKeyCommand = LfCommand.ExerciseTemplateByKey
-  val LfExerciseByKeyCommand: LfCommand.ExerciseTemplateByKey.type = LfCommand.ExerciseTemplateByKey
+  type LfExerciseByKeyCommand = LfCommand.ExerciseByKey
+  val LfExerciseByKeyCommand: LfCommand.ExerciseByKey.type = LfCommand.ExerciseByKey
 
-  type LfFetchCommand = LfCommand.FetchTemplate
-  val LfFetchCommand: LfCommand.FetchTemplate.type = LfCommand.FetchTemplate
+  type LfFetchCommand = LfCommand.Fetch
+  val LfFetchCommand: LfCommand.Fetch.type = LfCommand.Fetch
 
-  type LfFetchByKeyCommand = LfCommand.FetchTemplateByKey
-  val LfFetchByKeyCommand: LfCommand.FetchTemplateByKey.type = LfCommand.FetchTemplateByKey
+  type LfFetchByKeyCommand = LfCommand.FetchByKey
+  val LfFetchByKeyCommand: LfCommand.FetchByKey.type = LfCommand.FetchByKey
 
-  type LfLookupByKeyCommand = LfCommand.LookupTemplateByKey
-  val LfLookupByKeyCommand: LfCommand.LookupTemplateByKey.type = LfCommand.LookupTemplateByKey
+  type LfLookupByKeyCommand = LfCommand.LookupByKey
+  val LfLookupByKeyCommand: LfCommand.LookupByKey.type = LfCommand.LookupByKey
 
   /** The counter assigned by the sequencer to messages sent to the participant.
     * The counter is specific to every participant.

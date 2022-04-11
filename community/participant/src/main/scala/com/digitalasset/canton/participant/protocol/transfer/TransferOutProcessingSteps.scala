@@ -10,6 +10,8 @@ import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import cats.{Applicative, MonoidK}
+import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewType}
@@ -190,8 +192,8 @@ class TransferOutProcessingSteps(
       val rootHashRecipients =
         Recipients.groups(
           checked(
-            NonEmptyList.fromListUnsafe(
-              recipients.toList.map(participant => NonEmptySet.of(mediatorId, participant))
+            NonEmptyUtil.fromUnsafe(
+              recipients.toSeq.map(participant => NonEmpty(Set, mediatorId, participant))
             )
           )
         )

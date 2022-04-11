@@ -73,6 +73,7 @@ object Dependencies {
   lazy val daml_lf_transaction_test_lib =
     "com.daml" %% "daml-lf-transaction-test-lib" % daml_libraries_version
 
+  lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
   lazy val daml_ledger_api_common = "com.daml" %% "ledger-api-common" % daml_libraries_version
   lazy val daml_ledger_api_client = "com.daml" %% "ledger-api-client" % daml_libraries_version
   lazy val daml_participant_integration_api =
@@ -172,7 +173,7 @@ object Dependencies {
   lazy val prometheus_httpserver = "io.prometheus" % "simpleclient_httpserver" % "0.12.0"
   lazy val prometheus_hotspot = "io.prometheus" % "simpleclient_hotspot" % "0.12.0"
 
-  lazy val opentelemetry_version = "1.1.0"
+  lazy val opentelemetry_version = "1.12.0"
   lazy val opentelemetry_api = "io.opentelemetry" % "opentelemetry-api" % opentelemetry_version
   lazy val opentelemetry_sdk = "io.opentelemetry" % "opentelemetry-sdk" % opentelemetry_version
   lazy val opentelemetry_sdk_autoconfigure =
@@ -182,7 +183,7 @@ object Dependencies {
   lazy val opentelemetry_jaeger =
     "io.opentelemetry" % "opentelemetry-exporter-jaeger" % opentelemetry_version
   lazy val opentelemetry_instrumentation_grpc =
-    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.5" % s"$opentelemetry_version-alpha"
+    "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % s"$opentelemetry_version-alpha"
 
   lazy val better_files = "com.github.pathikrit" %% "better-files" % "3.8.0"
 
@@ -199,10 +200,6 @@ object Dependencies {
   lazy val sttp_circe = "com.softwaremill.sttp.client3" %% "circe" % sttp_version
   lazy val sttp_slf4j = "com.softwaremill.sttp.client3" %% "slf4j-backend" % sttp_version
 
-  /*lazy val scalafx = "org.scalafx" %% "scalafx" % "16.0.0-R25"
-  lazy val javafx_all = Seq("controls", "base", "fxml", "media", "web", "graphics").map { x =>
-    "org.openjfx" % s"javafx-$x" % "16"
-  }*/
   // demo dependencies (you also need to update demo.sc)
   lazy val scalafx = "org.scalafx" %% "scalafx" % "17.0.1-R26"
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
@@ -212,7 +209,7 @@ object Dependencies {
 
   lazy val toxiproxy_java = "eu.rekawek.toxiproxy" % "toxiproxy-java" % "2.1.4"
 
-  lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.4"
+  lazy val fabric_sdk = "org.hyperledger.fabric-sdk-java" % "fabric-sdk-java" % "2.2.13"
 
   lazy val web3j = "org.web3j" % "core" % "4.8.9"
 
@@ -229,4 +226,6 @@ object Dependencies {
 
   lazy val wartremover_dep =
     "org.wartremover" % "wartremover" % wartremover.Wart.PluginVersion cross CrossVersion.full
+
+  lazy val scala_csv = "com.github.tototoshi" %% "scala-csv" % "1.3.10"
 }

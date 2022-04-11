@@ -27,9 +27,10 @@ template OfferAnalysis
         do 
           registerData <- fetch registerId 
           assert (registerData.owner == owner)
+          newRegisterId <- exercise registerId AddObserver with party = registry
           tm <- getTime
           let clientId = sha256 ((show tm) <> (show owner))
-          pa <- create PendingAnalysis with registry, owner, analyser, clientId, registerId 
+          pa <- create PendingAnalysis with registry, owner, analyser, clientId, registerId = newRegisterId
           an <- create AnonymizedRecords with registry, analyser, clientId, records = registerData.records
           return (an, pa)
 

@@ -7,7 +7,14 @@ import com.digitalasset.canton.admin.api.client.commands.{
   EnterpriseSequencerAdminCommands,
   SequencerAdminCommands,
 }
-import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
+import com.digitalasset.canton.console.{
+  AdminCommandRunner,
+  ConsoleEnvironment,
+  FeatureFlag,
+  FeatureFlagFilter,
+  Help,
+  Helpful,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.{
   LedgerIdentity,
@@ -15,6 +22,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerPruningStatus,
   SequencerSnapshot,
 }
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ShowUtil._
 
@@ -23,8 +31,11 @@ import scala.jdk.DurationConverters._
 
 class SequencerAdministrationGroup(
     runner: AdminCommandRunner,
-    consoleEnvironment: ConsoleEnvironment,
-) extends Helpful {
+    val consoleEnvironment: ConsoleEnvironment,
+    val loggerFactory: NamedLoggerFactory,
+) extends Helpful
+    with FeatureFlagFilter
+    with NamedLogging {
   @Help.Summary("Pruning of the sequencer")
   object pruning {
     @Help.Summary("Status of the sequencer and its connected clients")
@@ -208,15 +219,18 @@ class SequencerAdministrationGroup(
     }
 
   @Help.Summary(
-    "Authorize a ledger identity (e.g. an EthereumAccount) on the underlying ledger. "
+    "Authorize a ledger identity (e.g. an EthereumAccount) on the underlying ledger. ",
+    FeatureFlag.Preview,
   )
   @Help.Description("""Authorize a ledger identity (e.g. an EthereumAccount) on the underlying ledger. 
                       |Currently only implemented for the Ethereum sequencer and has no effect for other sequencer
                       |integrations.
                       | See the authorization documentation of the Ethereum sequencer integrations for more detail. 
                     """")
-  def authorize_ledger_identity(ledgerIdentity: LedgerIdentity): Unit = consoleEnvironment.run {
-    runner.adminCommand(EnterpriseSequencerAdminCommands.AuthorizeLedgerIdentity(ledgerIdentity))
+  def authorize_ledger_identity(ledgerIdentity: LedgerIdentity): Unit = check(FeatureFlag.Preview) {
+    consoleEnvironment.run {
+      runner.adminCommand(EnterpriseSequencerAdminCommands.AuthorizeLedgerIdentity(ledgerIdentity))
+    }
   }
 
 }

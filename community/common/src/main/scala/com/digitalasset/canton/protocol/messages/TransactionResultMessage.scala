@@ -4,8 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.bifunctor._
-import cats.syntax.either._
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, TransactionDeserialization}
+import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
@@ -120,9 +119,7 @@ object TransactionResultMessage {
       protoNotificationTree <- ProtoConverter
         .required("notification_tree", protoResultMessage.notificationTree)
         .leftWiden[ProtoDeserializationError]
-      notificationTree <- InformeeTree
-        .fromProtoV0(hashOps, protoNotificationTree)
-        .leftMap(err => TransactionDeserialization(err))
+      notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
     } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
       Some(bytes)
     )

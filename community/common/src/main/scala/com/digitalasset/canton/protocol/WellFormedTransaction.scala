@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.data.{NonEmptyChain, NonEmptyList, Validated}
+import cats.data.{NonEmptyChain, Validated}
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functor._
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.ActionDescription
 import com.digitalasset.canton.topology.PartyId
@@ -283,11 +284,11 @@ object WellFormedTransaction {
           addReferencesByLfValue(nodeId, argRefs.to(LazyList))
         )
       } {
-        case (nodeId: LfNodeId, LfNodeFetch(coid, _, _, _, _, _, _, _, _), _) =>
+        case (nodeId: LfNodeId, LfNodeFetch(coid, _, _, _, _, _, _, _), _) =>
           addReference(nodeId)(coid)
         case (nodeId, LfNodeLookupByKey(_, _, result, _), _) =>
           result.traverse_(addReference(nodeId))
-        case (nodeId, LfNodeCreate(cid, _, arg, _, _, _, _, _, _), _) =>
+        case (nodeId, LfNodeCreate(cid, _, arg, _, _, _, _, _), _) =>
           val argRefs = LfTransactionUtil.referencedContractIds(arg)
           for {
             _ <- addReferencesByLfValue(nodeId, argRefs.to(LazyList))
@@ -551,8 +552,8 @@ object WellFormedTransaction {
     *    any normalization as the daml indexer/ReadService-consumer does not require rollback-normalized lf-transactions.
     */
   def merge(
-      transactionsWithRollbackScope: NonEmptyList[
-        WithRollbackScope[WellFormedTransaction[WithSuffixes]]
+      transactionsWithRollbackScope: NonEmpty[
+        Seq[WithRollbackScope[WellFormedTransaction[WithSuffixes]]]
       ]
   ): Either[String, WellFormedTransaction[WithSuffixesAndMerged]] = {
     val mergedNodes = HashMap.newBuilder[LfNodeId, LfNode]
@@ -565,17 +566,16 @@ object WellFormedTransaction {
     val transactions = transactionsWithRollbackScope.map(_.unwrap)
     val ledgerTimes = transactions.map(_.metadata.ledgerTime).distinct
     val submissionTimes = transactions.map(_.metadata.submissionTime).distinct
-    val versions =
-      transactions.map(_.tx.version).distinct(LfTransactionUtil.orderTransactionVersion)
+    val versions = transactions.map(_.tx.version).distinct
     for {
       ledgerTime <- Either.cond(
         ledgerTimes.size == 1,
-        ledgerTimes.head,
+        ledgerTimes.head1,
         s"Different ledger times: ${ledgerTimes.toList.mkString(", ")}",
       )
       submissionTime <- Either.cond(
         submissionTimes.size == 1,
-        submissionTimes.head,
+        submissionTimes.head1,
         s"Different submission times: ${submissionTimes.toList.mkString(", ")}",
       )
       version = CantonOnly.maxTransactionVersion(versions)

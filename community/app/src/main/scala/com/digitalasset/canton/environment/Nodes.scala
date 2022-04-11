@@ -223,7 +223,7 @@ class ManagedNodes[
         }
       }
 
-      for {
+      val result = for {
         _ <- migrations
           .connectionCheck(failFastIfDbOut, params.processingTimeouts)
           .leftMap(
@@ -240,6 +240,10 @@ class ManagedNodes[
             .roundDurationForHumans(Duration.fromNanos(elapsed))}"
         )
       }
+
+      result.value.onShutdown(
+        Left(ShutdownDuringStartup(name, "DB migration check interrupted due to shutdown"))
+      )
     }
 
   private def checkNotRunning(name: String): Either[StartupError, Unit] =
@@ -252,6 +256,8 @@ class ManagedNodes[
         .create(dbConfig, name)
         .migrateDatabase()
         .leftMap(FailedDatabaseMigration(name, _))
+        .value
+        .onShutdown(Left(ShutdownDuringStartup(name, "DB migration interrupted due to shutdown")))
     }
 
   private def runRepairMigration(
@@ -263,6 +269,10 @@ class ManagedNodes[
         .create(dbConfig, name)
         .repairFlywayMigration()
         .leftMap(FailedDatabaseRepairMigration(name, _))
+        .value
+        .onShutdown(
+          Left(ShutdownDuringStartup(name, "DB repair migration interrupted due to shutdown"))
+        )
     }
 }
 

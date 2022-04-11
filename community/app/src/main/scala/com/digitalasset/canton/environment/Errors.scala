@@ -49,6 +49,8 @@ final case class DidntUseForceOnRepairMigration(name: String) extends StartupErr
 
 final case class StartFailed(name: String, message: String) extends StartupError
 
+final case class ShutdownDuringStartup(name: String, message: String) extends StartupError
+
 /** Trying to start the node when the database has pending migrations
   */
 final case class PendingDatabaseMigration(name: String, pendingMigrationMessage: String)

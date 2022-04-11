@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.bifunctor._
+import cats.syntax.traverse._
 import com.daml.lf.engine
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -67,9 +70,9 @@ class ModelConformanceChecker(
     * @return the resulting LfTransaction with [[com.digitalasset.canton.protocol.LfContractId]]s only
     */
   def check(
-      rootViewsWithInputKeys: NonEmptyList[
+      rootViewsWithInputKeys: NonEmpty[Seq[
         (TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])
-      ],
+      ]],
       requestCounter: RequestCounter,
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
@@ -77,7 +80,7 @@ class ModelConformanceChecker(
     val CommonData(transactionId, ledgerTime, submissionTime, confirmationPolicy) = commonData
 
     for {
-      suffixedTxs <- rootViewsWithInputKeys.traverse { case (v, keys) =>
+      suffixedTxs <- rootViewsWithInputKeys.toNEF.traverse { case (v, keys) =>
         checkView(
           v,
           keys,

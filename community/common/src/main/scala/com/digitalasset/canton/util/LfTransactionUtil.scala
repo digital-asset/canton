@@ -274,21 +274,21 @@ object LfTransactionUtil {
     ) {
       case (
             _,
-            LfNodeExercises(_, templateId, _, true, _, _, _, _, _, _, _, Some(key), _, _, _),
+            LfNodeExercises(_, templateId, _, true, _, _, _, _, _, _, _, Some(key), _, _),
             state,
           ) =>
         state.consumed(LfGlobalKey.assertBuild(templateId, key.key))
       case (
             _,
-            LfNodeExercises(_, templateId, _, false, _, _, _, _, _, _, _, Some(key), _, _, _),
+            LfNodeExercises(_, templateId, _, false, _, _, _, _, _, _, _, Some(key), _, _),
             state,
           ) =>
         state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
       case (_, _, state) => state // non-key exercise
     } {
-      case (_, LfNodeCreate(_, templateId, _, _, _, _, Some(key), _, _), state) =>
+      case (_, LfNodeCreate(_, templateId, _, _, _, _, Some(key), _), state) =>
         state.created(LfGlobalKey.assertBuild(templateId, key.key))
-      case (_, LfNodeFetch(_, templateId, _, _, _, Some(key), _, _, _), state) =>
+      case (_, LfNodeFetch(_, templateId, _, _, _, Some(key), _, _), state) =>
         state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
       case (_, Node.NodeLookupByKey(templateId, key, Some(_), _), state) =>
         state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
@@ -363,9 +363,9 @@ object LfTransactionUtil {
   val actingParties: LfActionNode => Set[LfPartyId] = {
     case _: LfNodeCreate => Set.empty
 
-    case node @ LfNodeFetch(_, _, noActors, _, _, _, _, _, _) if noActors.isEmpty =>
+    case node @ LfNodeFetch(_, _, noActors, _, _, _, _, _) if noActors.isEmpty =>
       throw new IllegalArgumentException(s"Fetch node $node without acting parties.")
-    case LfNodeFetch(_, _, actors, _, _, _, _, _, _) => actors
+    case LfNodeFetch(_, _, actors, _, _, _, _, _) => actors
 
     case n: LfNodeExercises => n.actingParties
 

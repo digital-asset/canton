@@ -46,6 +46,6 @@ object ServiceAgreement {
       id <- ServiceAgreementId.fromProtoPrimitive(agreement.id)
       legalText <- String256M
         .create(agreement.legalText)
-        .leftMap(err => ProtoDeserializationError.ValueDeserializationError("legal_text", err))
+        .leftMap(ProtoDeserializationError.ValueDeserializationError("legal_text", _))
     } yield ServiceAgreement(id, legalText)
 }

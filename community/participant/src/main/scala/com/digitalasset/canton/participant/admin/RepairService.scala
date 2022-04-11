@@ -187,7 +187,6 @@ class RepairService(
                   signatories = contractWithMetadata.signatories,
                   stakeholders = contractWithMetadata.stakeholders,
                   key = contractWithMetadata.keyWithMaintainers,
-                  byInterface = None,
                   version = contractWithMetadata.instance.version,
                 )
             }
@@ -245,7 +244,6 @@ class RepairService(
                   // If the contract keys were needed, we'd have to reinterpret the contract to look up the key.
                   key = None,
                   byKey = false,
-                  byInterface = None,
                   version = contract.rawContractInstance.contractInstance.version,
                 )
             )

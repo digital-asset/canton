@@ -9,6 +9,7 @@ import com.daml.ledger.client.binding.{Contract, TemplateCompanion, Primitive =>
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.console.commands.DomainChoice
 import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
 import com.digitalasset.canton.demo.Step.{Action, Noop}
 import com.digitalasset.canton.demo.model.{ai => ME, doctor => M}
@@ -461,12 +462,6 @@ class ReferenceDemoScript(
         "admin-api",
         "participant parties.enable | domains.connect | upload_dar ai-analysis.dar",
         () => {
-          val registerPartyF = Future {
-            blocking {
-              val processorId = participant6.parties.enable("Processor")
-              partyIdCache.put("Processor", (processorId, participant6))
-            }
-          }
           val registerDomainF = Future {
             blocking {
               registerDomain(participant6, "medical", medicalConnection)
@@ -480,13 +475,20 @@ class ReferenceDemoScript(
               }
             }
           }) :+ Future {
-            blocking {
-              ConsoleMacros.utils.retry_until_true(lookupTimeout) {
-                participant6.parties.list(filterParty = "Processor").nonEmpty
+            blocking {}
+          } :+ registerDomainF
+          // once all dars are uploaded and we've connected the domain, register the party (as we can flush everything there ...)
+          val sf = Future
+            .sequence(allF)
+            .flatMap(_ =>
+              Future {
+                blocking {
+                  val processorId =
+                    participant6.parties.enable("Processor", waitForDomain = DomainChoice.All)
+                  partyIdCache.put("Processor", (processorId, participant6))
+                }
               }
-            }
-          } :+ registerPartyF :+ registerDomainF
-          val sf = Future.sequence(allF)
+            )
           sf.foreach(_ => {
             val offer = ME.AIAnalysis
               .OfferAnalysis(registry = registry, owner = alice, analyser = processor)

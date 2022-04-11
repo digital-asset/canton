@@ -88,10 +88,10 @@ object GenTransferViewTree {
     val v0.TransferViewTree(commonDataP, viewP) = treeP
     for {
       commonData <- MerkleTree
-        .fromProtoOption(commonDataP, deserializeCommonData(_).leftMap(_.toString))
+        .fromProtoOption(commonDataP, deserializeCommonData(_))
         .leftMap(error => OtherError(s"transferCommonData: $error"))
       view <- MerkleTree
-        .fromProtoOption(viewP, deserializeView(_).leftMap(_.toString))
+        .fromProtoOption(viewP, deserializeView(_))
         .leftMap(error => OtherError(s"transferView: $error"))
     } yield createTree(commonData, view)
   }

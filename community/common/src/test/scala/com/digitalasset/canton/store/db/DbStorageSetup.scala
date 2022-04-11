@@ -57,9 +57,9 @@ abstract class PostgresDbStorageSetup(
       val migrationResult =
         new CommunityDbMigrationsFactory(loggerFactory).create(config).migrateDatabase()
       // throw so the first part of the test that attempts to use storage will fail with an exception
-      migrationResult.left.foreach(err =>
-        throw new RuntimeException(show"Failed to migrate database: $err")
-      )
+      migrationResult
+        .valueOr(err => throw new RuntimeException(show"Failed to migrate database: $err"))
+        .onShutdown(throw new RuntimeException("Migration interrupted due to shutdown"))
     }
     s
   }
@@ -180,8 +180,8 @@ class H2DbStorageSetup(override protected val loggerFactory: NamedLoggerFactory)
 
   migrations
     .migrateIfFresh()
-    .left
-    .foreach(err => throw new RuntimeException(show"Failed to migrate database: $err"))
+    .valueOr(err => throw new RuntimeException(show"Failed to migrate database: $err"))
+    .onShutdown(throw new RuntimeException("Shutdown during migration"))
 }
 
 object DbStorageSetup {

@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{NonEmptyList, NonEmptySet}
 import cats.syntax.flatMap._
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, HashPurposeTest, TestHash}
@@ -834,9 +834,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           Batch.of[ProtocolMessage](
             view -> Recipients.cc(participantId),
             rootHashMessage -> Recipients.groups(
-              NonEmptyList.of(
-                NonEmptySet.of(participantId, mediatorId),
-                NonEmptySet.of(participantId, mediatorId2),
+              NonEmpty.mk(
+                Seq,
+                NonEmpty.mk(Set, participantId, mediatorId),
+                NonEmpty.mk(Set, participantId, mediatorId2),
               )
             ),
           ),

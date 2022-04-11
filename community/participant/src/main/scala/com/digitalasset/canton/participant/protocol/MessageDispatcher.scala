@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{Chain, NonEmptyList, NonEmptySet}
+import cats.data.{Chain, NonEmptyList}
 import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.{Foldable, Monoid}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType.{
   TransactionViewType,
   TransferInViewType,
@@ -450,7 +451,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
           if (furtherRHMs.isEmpty) {
             val validRecipients = rootHashMessage.recipients.asSingleGroup.contains(
-              NonEmptySet.of[Member](participantId, mediatorId)
+              NonEmpty.mk(Set, participantId, mediatorId)
             )
             if (validRecipients) {
               goodRootHashMessage(rootHashMessage.protocolMessage, mediatorId)

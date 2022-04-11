@@ -267,6 +267,24 @@ trait TopologyStoreTest
           }
         }
 
+        "bootstrap correctly updates timestamp" in {
+          val store = mk()
+          for {
+            _ <- store.bootstrap(
+              StoredTopologyTransactions(
+                Seq(
+                  StoredTopologyTransaction(ts.plusSeconds(1), None, okm1),
+                  StoredTopologyTransaction(ts.plusSeconds(2), None, ps1),
+                  StoredTopologyTransaction(ts.plusSeconds(3), None, ps2),
+                  StoredTopologyTransaction(ts.plusSeconds(4), None, ps3),
+                  StoredTopologyTransaction(ts.plusSeconds(5), None, p2p1),
+                )
+              )
+            )
+            currentTs <- store.timestamp
+          } yield currentTs shouldBe Some(ts.plusSeconds(5))
+        }
+
         "successfully append new items" in {
           val store = mk()
           for {

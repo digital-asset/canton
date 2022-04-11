@@ -16,6 +16,7 @@ val version = ReleaseVersion.current.fullVersion
 val (testScript, loadJar, adjustPath) = sys.props.getOrElseUpdate("demo-test", "0") match {
   case "1" => (true, false, true)
   case "2" => (true, true, false)
+  case "3" => (false, false, true)
   case _ => (false, true, false)
 }
 

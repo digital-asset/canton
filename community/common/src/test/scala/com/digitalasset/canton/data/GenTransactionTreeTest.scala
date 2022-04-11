@@ -3,14 +3,15 @@
 
 package com.digitalasset.canton.data
 
-import cats.data.{NonEmptyList, NonEmptySet}
+import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.SecureRandomness
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
 import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission,
   ParticipantAttributes,
+  ParticipantPermission,
   TrustLevel,
 }
 import com.digitalasset.canton.protocol._
@@ -446,7 +447,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
     import GenTransactionTreeTest._
 
     "correctly compute recipients from witnesses" in {
-      def mkWitnesses(setup: List[Set[Int]]): Witnesses = Witnesses(setup.map(_.map(informee)))
+      def mkWitnesses(setup: Seq[Set[Int]]): Witnesses = Witnesses(setup.map(_.map(informee)))
       // Maps parties to participants; parties have IDs that start at 1, participants have IDs that start at 11
       def topology =
         TestingIdentityFactory(
@@ -470,7 +471,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           },
         ).topologySnapshot()
       val witnesses = mkWitnesses(
-        List(
+        Seq(
           Set(1, 2),
           Set(1, 3),
           Set(2, 4),
@@ -483,20 +484,21 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
         .toRecipients(topology)
         .valueOr(err => fail(err.message))
         .futureValue shouldBe Recipients(
-        NonEmptyList.of(
+        NonEmpty(
+          Seq,
           RecipientsTree(
-            NonEmptySet.of(participant(16)),
-            List(
+            NonEmpty.mk(Set, participant(16)),
+            Seq(
               RecipientsTree(
-                NonEmptySet.of(participant(11), Set(12, 13, 15).map(participant).toSeq: _*),
-                List(
+                NonEmpty(Set, 11, 12, 13, 15).map(participant),
+                Seq(
                   RecipientsTree(
-                    NonEmptySet.of(participant(12), participant(14)),
-                    List(
+                    NonEmpty.mk(Set, participant(12), participant(14)),
+                    Seq(
                       RecipientsTree(
-                        NonEmptySet.of(participant(11), participant(13)),
-                        List(
-                          RecipientsTree(NonEmptySet.of(participant(11), participant(12)), List())
+                        NonEmpty.mk(Set, participant(11), participant(13)),
+                        Seq(
+                          RecipientsTree.leaf(NonEmpty.mk(Set, participant(11), participant(12)))
                         ),
                       )
                     ),
@@ -504,7 +506,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
                 ),
               )
             ),
-          )
+          ),
         )
       )
     }
@@ -515,5 +517,4 @@ object GenTransactionTreeTest {
   def party(i: Int): LfPartyId = LfPartyId.assertFromString(s"party$i::1")
   def informee(i: Int): Informee = PlainInformee(party(i))
   def participant(i: Int): ParticipantId = ParticipantId(s"participant$i")
-
 }

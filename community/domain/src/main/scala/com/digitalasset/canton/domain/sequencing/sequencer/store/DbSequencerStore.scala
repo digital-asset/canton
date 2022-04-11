@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet}
+import cats.data.{EitherT, NonEmptySet}
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.list._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -384,13 +386,13 @@ class DbSequencerStore(
     *  - Finally we filter to payloads that haven't yet been successfully inserted and go back to the first step attempting
     *    to reinsert just this subset.
     */
-  override def savePayloads(payloads: NonEmptyList[Payload], instanceDiscriminator: UUID)(implicit
+  override def savePayloads(payloads: NonEmpty[Seq[Payload]], instanceDiscriminator: UUID)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SavePayloadsError, Unit] = {
 
     // insert the provided payloads with the associated discriminator to the payload table.
     // we're intentionally using a insert that will fail with a primary key constraint violation if rows exist
-    def insert(payloadsToInsert: NonEmptyList[Payload]): Future[Boolean] = {
+    def insert(payloadsToInsert: NonEmpty[Seq[Payload]]): Future[Boolean] = {
       def isConstraintViolation(batchUpdateException: SQLException): Boolean = profile match {
         case Postgres(_) => batchUpdateException.getSQLState == PSQLState.UNIQUE_VIOLATION.getState
         case Oracle(_) =>
@@ -418,11 +420,10 @@ class DbSequencerStore(
 
       storage
         .queryAndUpdate(
-          DbStorage.bulkOperation(insertSql, payloadsToInsert.toList, storage.profile) {
-            pp => payload =>
-              pp >> payload.id.unwrap
-              pp >> instanceDiscriminator
-              pp >> payload.content
+          DbStorage.bulkOperation(insertSql, payloadsToInsert, storage.profile) { pp => payload =>
+            pp >> payload.id.unwrap
+            pp >> instanceDiscriminator
+            pp >> payload.content
           },
           functionFullName,
         )
@@ -446,7 +447,7 @@ class DbSequencerStore(
     // and which are still missing.
     // will return an error if the payload exists but with a different uniquifier as this suggests another process
     // has inserted a conflicting value.
-    def listMissing(): EitherT[Future, SavePayloadsError, List[Payload]] = {
+    def listMissing(): EitherT[Future, SavePayloadsError, Seq[Payload]] = {
       val payloadIds = payloads.map(_.id)
       // the max default config for number of payloads is around 50 and the max number of clauses that oracle supports is around 1000
       // so we're really unlikely to need to this IN clause splitting, but lets support it just in case as Matthias has
@@ -464,11 +465,11 @@ class DbSequencerStore(
         } map (_.toMap)
         // take all payloads we were expecting and then look up from inserted whether they are present and if they have
         // a matching instance discriminator (meaning we put them there)
-        missing <- payloads.toList
-          .foldM(List.empty[Payload]) { (missing, payload) =>
+        missing <- payloads.toNEF
+          .foldM(Seq.empty[Payload]) { (missing, payload) =>
             inserted
               .get(payload.id)
-              .fold[Either[SavePayloadsError, List[Payload]]](Right(missing :+ payload)) {
+              .fold[Either[SavePayloadsError, Seq[Payload]]](Right(missing :+ payload)) {
                 storedDiscriminator =>
                   // we expect the local and stored instance discriminators should match otherwise it suggests the payload
                   // was inserted by another `savePayloads` call
@@ -484,17 +485,17 @@ class DbSequencerStore(
     }
 
     def go(
-        remainingPayloadsToInsert: NonEmptyList[Payload]
+        remainingPayloadsToInsert: NonEmpty[Seq[Payload]]
     ): EitherT[Future, SavePayloadsError, Unit] =
       EitherT
         .right(insert(remainingPayloadsToInsert))
         .flatMap { successful =>
           if (!successful) listMissing()
-          else EitherT.pure[Future, SavePayloadsError](List.empty[Payload])
+          else EitherT.pure[Future, SavePayloadsError](Seq.empty[Payload])
         }
         .flatMap { missing =>
           // do we have any remaining to insert
-          NonEmptyList.fromList(missing).fold(EitherTUtil.unit[SavePayloadsError]) { missing =>
+          NonEmpty.from(missing).fold(EitherTUtil.unit[SavePayloadsError]) { missing =>
             logger.debug(
               s"Retrying to insert ${missing.size} missing of ${remainingPayloadsToInsert.size} payloads"
             )
@@ -505,7 +506,7 @@ class DbSequencerStore(
     go(payloads)
   }
 
-  override def saveEvents(instanceIndex: Int, events: NonEmptyList[Sequenced[PayloadId]])(implicit
+  override def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
   ): Future[Unit] = {
     // support dropping in the correct syntax to make this insert idempotent regardless of db
@@ -523,7 +524,7 @@ class DbSequencerStore(
                      |""".stripMargin
 
     storage.queryAndUpdate(
-      DbStorage.bulkOperation_(saveSql, events.toList, storage.profile) { pp => event =>
+      DbStorage.bulkOperation_(saveSql, events, storage.profile) { pp => event =>
         val DeliverStoreEventRow(
           timestamp,
           sequencerInstanceIndex,
