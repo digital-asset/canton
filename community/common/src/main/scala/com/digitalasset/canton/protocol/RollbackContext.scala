@@ -7,9 +7,10 @@ import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
-import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
+import com.digitalasset.canton.util.NoCopy
 import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.HasProtoV0
 
 /** RollbackContext tracks the location of lf transaction nodes or canton participant views within a hierarchy of
   * LfNodeRollback suitable for maintaining the local position within the hierarchy of rollback nodes when iterating

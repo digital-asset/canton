@@ -31,6 +31,7 @@ object SequencerInitialization {
   def attemptInitialization(
       domainName: InstanceName,
       config: SequencerClientConfig,
+      devVersionSupport: Boolean,
       sequencerAdminClient: SequencerAdminClient,
       topologyManager: DomainTopologyManager,
       cryptoPublicStore: CryptoPublicStore,
@@ -44,7 +45,7 @@ object SequencerInitialization {
     for {
       // verify the server version first
       _ <- SequencerHandshake.handshake(
-        ProtocolVersion.supportedProtocolsDomain,
+        ProtocolVersion.supportedProtocolsDomain(devVersionSupport),
         minimumProtocolVersion = None,
         sequencerAdminClient,
         config,

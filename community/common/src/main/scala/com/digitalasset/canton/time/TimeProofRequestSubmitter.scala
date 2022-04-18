@@ -15,7 +15,8 @@ import com.digitalasset.canton.time.admin.v0
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Backoff, Success}
-import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, HasProtoV0, retry}
+import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, retry}
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference

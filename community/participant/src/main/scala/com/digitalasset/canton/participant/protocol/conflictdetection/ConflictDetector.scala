@@ -541,7 +541,9 @@ class ConflictDetector(
     *
     * @return The future completes after `x` has been executed and with `x`'s result.
     */
-  private[this] def runSequentially[A](description: String)(x: => A): Future[A] = {
+  private[this] def runSequentially[A](
+      description: String
+  )(x: => A)(implicit traceContext: TraceContext): Future[A] = {
     implicit val ec = executionContext
     executionQueue.execute(Future { x }, description)
   }

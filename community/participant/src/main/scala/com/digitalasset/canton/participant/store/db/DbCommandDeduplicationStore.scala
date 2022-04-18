@@ -187,7 +187,6 @@ class DbCommandDeduplicationStore(
           update,
           answers,
           storage.profile,
-          useTransactionForOracle = true,
         ) { pp => update =>
           val (changeId, definiteAnswerEvent, accepted) = update
           val acceptance = if (accepted) definiteAnswerEvent.some else None

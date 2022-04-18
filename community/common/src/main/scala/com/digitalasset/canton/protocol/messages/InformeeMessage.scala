@@ -11,9 +11,9 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.google.protobuf.ByteString
 
 /** The informee message to be sent to the mediator.
@@ -35,7 +35,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
 
   override def mediatorId: MediatorId = fullInformeeTree.mediatorId
 
-  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] =
+  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     fullInformeeTree.informeesAndThresholdByView
 
   override def createMediatorResult(
@@ -61,7 +61,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
     // To go a step further, we could even give the proto class a different name (e.g. InformeeMessageP),
     // but we have not yet agreed on a naming convention.
     //
-    // Unless in special cases, you shouldn't embed a `Versioned...` wrapper inside a Protobuf message but should explicitly
+    // Unless in special cases, you shouldn't embed an `UntypedVersionedMessage` wrapper inside a Protobuf message but should explicitly
     // indicate the version of the nested Protobuf message via calling `toProto<version>
     v0.InformeeMessage(fullInformeeTree = Some(fullInformeeTree.toProtoV0))
 
@@ -99,7 +99,7 @@ object InformeeMessage {
         "InformeeMessage.informeeTree",
         maybeFullInformeeTreeP,
       )
-      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps)(fullInformeeTreeP)
+      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
     } yield new InformeeMessage(fullInformeeTree)
   }
 

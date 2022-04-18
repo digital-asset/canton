@@ -82,6 +82,11 @@ object PartyNotificationConfig {
   case object ViaDomain extends PartyNotificationConfig
 }
 
+case class ParticipantProtocolConfig(
+    minimumProtocolVersion: Option[ProtocolVersion],
+    devVersionSupport: Boolean,
+)
+
 case class ParticipantNodeParameters(
     override val tracing: TracingConfig,
     override val delayLoggingThreshold: NonNegativeFiniteDuration,
@@ -100,11 +105,13 @@ case class ParticipantNodeParameters(
     override val sequencerClient: SequencerClientConfig,
     indexer: IndexerConfig,
     transferTimeProofFreshnessProportion: NonNegativeInt,
-    minimumProtocolVersion: Option[ProtocolVersion],
+    protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
     enableCausalityTracking: Boolean,
     unsafeEnableDamlLfDevVersion: Boolean,
-) extends LocalNodeParameters
+) extends LocalNodeParameters {
+  override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
+}
 
 /** Configuration parameters for a single participant
   *
@@ -633,6 +640,7 @@ object TestingTimeServiceConfig {
   * @param minimumProtocolVersion The minimum protocol version that this participant will speak when connecting to a domain
   * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
+  * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
   */
 case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -646,6 +654,7 @@ case class ParticipantNodeParameterConfig(
     uniqueContractKeys: Boolean = true,
     enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,
+    willCorruptYourSystemDevVersionSupport: Boolean = false,
 )
 
 /** Parameters for the participant node's stores

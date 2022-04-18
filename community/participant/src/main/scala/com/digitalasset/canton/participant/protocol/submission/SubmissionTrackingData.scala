@@ -13,7 +13,6 @@ import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.LedgerSyncEvent
-import com.digitalasset.canton.participant.protocol.version.VersionedSubmissionTrackingData
 import com.digitalasset.canton.participant.protocol.{TransactionProcessor, v0}
 import com.digitalasset.canton.participant.store.{
   SerializableCompletionInfo,
@@ -22,8 +21,13 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.empty.Empty
 
 /** The data of an in-flight unsequenced submission that suffices to produce a rejection reason.
@@ -36,7 +40,7 @@ trait SubmissionTrackingData
     extends Product
     with Serializable
     with HasProtoV0[v0.SubmissionTrackingData]
-    with HasVersionedWrapper[VersionedSubmissionTrackingData]
+    with HasVersionedWrapper[VersionedMessage[SubmissionTrackingData]]
     with PrettyPrinting {
 
   /** Produce a rejection event for the unsequenced submission using the given record time. */
@@ -55,24 +59,12 @@ trait SubmissionTrackingData
   ): Option[UnsequencedSubmission]
 }
 
-object SubmissionTrackingData
-    extends HasVersionedWrapperCompanion[VersionedSubmissionTrackingData, SubmissionTrackingData] {
-  override protected def ProtoClassCompanion: VersionedSubmissionTrackingData.type =
-    VersionedSubmissionTrackingData
-  override protected def name: String = "submission tracking data"
+object SubmissionTrackingData extends HasVersionedMessageCompanion[SubmissionTrackingData] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SubmissionTrackingData)(fromProtoV0)
+  )
 
-  override def fromProtoVersioned(
-      versionedSubmissionTracking: VersionedSubmissionTrackingData
-  ): ParsingResult[SubmissionTrackingData] = {
-    versionedSubmissionTracking match {
-      case VersionedSubmissionTrackingData(
-            VersionedSubmissionTrackingData.Version.V0(submissionTrackingV0)
-          ) =>
-        fromProtoV0(submissionTrackingV0)
-      case VersionedSubmissionTrackingData(VersionedSubmissionTrackingData.Version.Empty) =>
-        Left(FieldNotSet("version"))
-    }
-  }
+  override protected def name: String = "submission tracking data"
 
   def fromProtoV0(
       submissionTrackingP: v0.SubmissionTrackingData
@@ -113,8 +105,7 @@ case class TransactionSubmissionTrackingData(
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedSubmissionTrackingData =
-    VersionedSubmissionTrackingData(version = VersionedSubmissionTrackingData.Version.V0(toProtoV0))
+  ): VersionedMessage[SubmissionTrackingData] = VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.SubmissionTrackingData = {
     val completionInfoP = SerializableCompletionInfo(completionInfo).toProtoV0

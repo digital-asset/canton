@@ -17,8 +17,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

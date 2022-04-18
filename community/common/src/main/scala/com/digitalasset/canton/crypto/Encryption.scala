@@ -5,18 +5,11 @@ package com.digitalasset.canton.crypto
 
 import cats.Order
 import cats.data.EitherT
-import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
   CryptoPublicStoreError,
-}
-import com.digitalasset.canton.crypto.version.{
-  VersionedEncryptionPrivateKey,
-  VersionedEncryptionPublicKey,
-  VersionedSymmetricKey,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -27,7 +20,15 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedToByteString,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
@@ -234,11 +235,11 @@ final case class SymmetricKey private (
 )(override val deserializedFrom: Option[ByteString])
     extends CryptoKey
     with MemoizedEvidence
-    with HasVersionedWrapper[VersionedSymmetricKey]
+    with HasVersionedWrapper[VersionedMessage[SymmetricKey]]
     with NoCopy {
 
-  protected def toProtoVersioned(version: ProtocolVersion): VersionedSymmetricKey =
-    VersionedSymmetricKey(VersionedSymmetricKey.Version.V0(toProtoV0))
+  protected def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SymmetricKey] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.SymmetricKey =
     v0.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
@@ -247,7 +248,12 @@ final case class SymmetricKey private (
     super[HasVersionedWrapper].toByteString(version)
 }
 
-object SymmetricKey {
+object SymmetricKey extends HasMemoizedVersionedMessageCompanion[SymmetricKey] {
+  override val name: String = "SymmetricKey"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.SymmetricKey)(fromProtoV0)
+  )
 
   private[this] def apply(
       format: CryptoKeyFormat,
@@ -264,33 +270,11 @@ object SymmetricKey {
     new SymmetricKey(format, key, scheme)(None)
   }
 
-  private def fromProtoV0(
-      keyP: v0.SymmetricKey,
-      bytes: ByteString,
-  ): ParsingResult[SymmetricKey] =
+  private def fromProtoV0(keyP: v0.SymmetricKey)(bytes: ByteString): ParsingResult[SymmetricKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum("format", keyP.format)
       scheme <- SymmetricKeyScheme.fromProtoEnum("scheme", keyP.scheme)
     } yield new SymmetricKey(format, keyP.key, scheme)(Some(bytes))
-
-  private def fromProtoVersioned(
-      symmetricKeyP: VersionedSymmetricKey,
-      bytes: ByteString,
-  ): ParsingResult[SymmetricKey] =
-    symmetricKeyP.version match {
-      case VersionedSymmetricKey.Version.Empty => Left(FieldNotSet("VersionedSymmetricKey.version"))
-      case VersionedSymmetricKey.Version.V0(key) => fromProtoV0(key, bytes)
-    }
-
-  def fromByteString(bytes: ByteString): Either[DeserializationError, SymmetricKey] = {
-    val result = for {
-      keyP <- ProtoConverter.protoParser(VersionedSymmetricKey.parseFrom)(bytes)
-      key <- fromProtoVersioned(keyP, bytes)
-    } yield key
-
-    result.leftMap(err => DeserializationError(err.toString, bytes))
-  }
-
 }
 
 final case class EncryptionKeyPair(publicKey: EncryptionPublicKey, privateKey: EncryptionPrivateKey)
@@ -347,14 +331,14 @@ case class EncryptionPublicKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: EncryptionKeyScheme,
 ) extends PublicKey
-    with HasVersionedWrapper[VersionedEncryptionPublicKey]
+    with HasVersionedWrapper[VersionedMessage[EncryptionPublicKey]]
     with PrettyPrinting
     with HasProtoV0[v0.EncryptionPublicKey]
     with NoCopy {
   val purpose: KeyPurpose = KeyPurpose.Encryption
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedEncryptionPublicKey =
-    VersionedEncryptionPublicKey(VersionedEncryptionPublicKey.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPublicKey] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.EncryptionPublicKey =
     v0.EncryptionPublicKey(
@@ -371,10 +355,11 @@ case class EncryptionPublicKey private[crypto] (
     prettyOfClass(param("id", _.id), param("format", _.format), param("scheme", _.scheme))
 }
 
-object EncryptionPublicKey
-    extends HasVersionedWrapperCompanion[VersionedEncryptionPublicKey, EncryptionPublicKey] {
-  override protected def ProtoClassCompanion: VersionedEncryptionPublicKey.type =
-    VersionedEncryptionPublicKey
+object EncryptionPublicKey extends HasVersionedMessageCompanion[EncryptionPublicKey] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0)
+  )
+
   override protected def name: String = "encryption public key"
 
   private[this] def apply(
@@ -384,15 +369,6 @@ object EncryptionPublicKey
       scheme: EncryptionKeyScheme,
   ): EncryptionPrivateKey =
     throw new UnsupportedOperationException("Use generate or deserialization methods")
-
-  override def fromProtoVersioned(
-      publicKeyP: VersionedEncryptionPublicKey
-  ): ParsingResult[EncryptionPublicKey] =
-    publicKeyP.version match {
-      case VersionedEncryptionPublicKey.Version.Empty =>
-        Left(FieldNotSet("VersionedEncryptionPublicKey.version"))
-      case VersionedEncryptionPublicKey.Version.V0(key) => fromProtoV0(key)
-    }
 
   def fromProtoV0(
       publicKeyP: v0.EncryptionPublicKey
@@ -426,14 +402,14 @@ final case class EncryptionPrivateKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: EncryptionKeyScheme,
 ) extends PrivateKey
-    with HasVersionedWrapper[VersionedEncryptionPrivateKey]
+    with HasVersionedWrapper[VersionedMessage[EncryptionPrivateKey]]
     with HasProtoV0[v0.EncryptionPrivateKey]
     with NoCopy {
 
   override def purpose: KeyPurpose = KeyPurpose.Encryption
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedEncryptionPrivateKey =
-    VersionedEncryptionPrivateKey(VersionedEncryptionPrivateKey.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPrivateKey] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.EncryptionPrivateKey =
     v0.EncryptionPrivateKey(
@@ -447,10 +423,11 @@ final case class EncryptionPrivateKey private[crypto] (
     v0.PrivateKey.Key.EncryptionPrivateKey(toProtoV0)
 }
 
-object EncryptionPrivateKey
-    extends HasVersionedWrapperCompanion[VersionedEncryptionPrivateKey, EncryptionPrivateKey] {
-  override protected def ProtoClassCompanion: VersionedEncryptionPrivateKey.type =
-    VersionedEncryptionPrivateKey
+object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0)
+  )
+
   override protected def name: String = "encryption private key"
 
   private[this] def apply(
@@ -460,15 +437,6 @@ object EncryptionPrivateKey
       scheme: EncryptionKeyScheme,
   ): EncryptionPrivateKey =
     throw new UnsupportedOperationException("Use generate or deserialization methods")
-
-  override def fromProtoVersioned(
-      privateKeyP: VersionedEncryptionPrivateKey
-  ): ParsingResult[EncryptionPrivateKey] =
-    privateKeyP.version match {
-      case VersionedEncryptionPrivateKey.Version.Empty =>
-        Left(FieldNotSet("VersionedEncryptionPrivateKey.version"))
-      case VersionedEncryptionPrivateKey.Version.V0(key) => fromProtoV0(key)
-    }
 
   def fromProtoV0(
       privateKeyP: v0.EncryptionPrivateKey

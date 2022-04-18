@@ -4,19 +4,23 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.bifunctor._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{RequestId, v0}
-import com.digitalasset.canton.protocol.version.VersionedTransactionResultMessage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageWithContextCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -34,7 +38,7 @@ case class TransactionResultMessage private (
 )(val deserializedFrom: Option[ByteString])
     extends RegularMediatorResult
     with NoCopy
-    with HasVersionedWrapper[VersionedTransactionResultMessage]
+    with HasVersionedWrapper[VersionedMessage[TransactionResultMessage]]
     with HasProtoV0[v0.TransactionResultMessage]
     with PrettyPrinting {
 
@@ -54,8 +58,8 @@ case class TransactionResultMessage private (
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedTransactionResultMessage =
-    VersionedTransactionResultMessage(VersionedTransactionResultMessage.Version.V0(toProtoV0))
+  ): VersionedMessage[TransactionResultMessage] = VersionedMessage(toProtoV0.toByteString, 0)
+
   override protected def toProtoV0: v0.TransactionResultMessage =
     v0.TransactionResultMessage(
       requestId = Some(requestId.unwrap.toProtoPrimitive),
@@ -78,7 +82,19 @@ case class TransactionResultMessage private (
     )
 }
 
-object TransactionResultMessage {
+object TransactionResultMessage
+    extends HasMemoizedVersionedMessageWithContextCompanion[
+      TransactionResultMessage,
+      HashOps,
+    ] {
+  override val name: String = "TransactionResultMessage"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransactionResultMessage) { case (hashOps, proto) =>
+      fromProtoV0(proto, hashOps)
+    }
+  )
+
   private[this] def apply(requestId: RequestId, verdict: Verdict, notificationTree: InformeeTree)(
       deseializedFrom: Option[ByteString]
   ): TransactionResultMessage =
@@ -90,20 +106,6 @@ object TransactionResultMessage {
       notificationTree: InformeeTree,
   ): TransactionResultMessage =
     new TransactionResultMessage(requestId, verdict, notificationTree)(None)
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[TransactionResultMessage] =
-    for {
-      protoResultMessage <- ProtoConverter.protoParser(VersionedTransactionResultMessage.parseFrom)(
-        bytes
-      )
-      resultMsg <- protoResultMessage.version match {
-        case VersionedTransactionResultMessage.Version.Empty =>
-          Left(FieldNotSet("VersionedTransactionResultMessage.version"))
-        case VersionedTransactionResultMessage.Version.V0(msg) => fromProtoV0(msg, hashOps)(bytes)
-      }
-    } yield resultMsg
 
   private def fromProtoV0(protoResultMessage: v0.TransactionResultMessage, hashOps: HashOps)(
       bytes: ByteString

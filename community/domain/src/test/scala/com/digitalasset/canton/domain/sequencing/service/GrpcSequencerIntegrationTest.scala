@@ -169,7 +169,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         FutureSupervisor.Noop,
         LoggingConfig(),
         loggerFactory,
-        ProtocolVersion.supportedProtocolsParticipant,
+        ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions = false),
         Some(ProtocolVersion.latestForTest),
       )(
         participant,

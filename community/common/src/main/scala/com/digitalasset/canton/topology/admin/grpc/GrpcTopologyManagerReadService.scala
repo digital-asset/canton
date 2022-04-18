@@ -24,7 +24,8 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
-import com.digitalasset.canton.util.{EitherTUtil, HasProtoV0}
+import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

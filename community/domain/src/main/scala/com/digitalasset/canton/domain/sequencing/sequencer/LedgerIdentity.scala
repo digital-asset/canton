@@ -5,9 +5,9 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
-import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.HasProtoV0
 
 /** Trait for identities on ledgers that Canton integrates with.
   * For example, a ledger identity can be an Ethereum account or a Fabric identity.

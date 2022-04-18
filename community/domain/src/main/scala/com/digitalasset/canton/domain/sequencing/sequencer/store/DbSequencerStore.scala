@@ -509,19 +509,23 @@ class DbSequencerStore(
   override def saveEvents(instanceIndex: Int, events: NonEmpty[Seq[Sequenced[PayloadId]]])(implicit
       traceContext: TraceContext
   ): Future[Unit] = {
-    // support dropping in the correct syntax to make this insert idempotent regardless of db
-    // the interpolation is not escaped so must only be safe constant values not input
-    val (prefix, postfix) = storage.profile match {
-      case _: H2 | _: Postgres => ("", "on conflict do nothing")
-      case _: Oracle => ("/*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_events ( ts ) ) */", "")
+    val saveSql = storage.profile match {
+      case _: H2 | _: Postgres => """insert into sequencer_events (
+                                    |  ts, node_index, event_type, message_id, sender, recipients,
+                                    |  payload_id, signing_timestamp, error_message, trace_context
+                                    |)
+                                    |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    |  on conflict do nothing""".stripMargin
+      case _: Oracle =>
+        """merge /*+ INDEX ( sequencer_events ( ts ) ) */  
+          |into sequencer_events
+          |using (select ? ts from dual) input
+          |on (sequencer_events.ts = input.ts)
+          |when not matched then
+          |  insert (ts, node_index, event_type, message_id, sender, recipients, payload_id, signing_timestamp, 
+          |          error_message, trace_context)
+          |  values (input.ts, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
     }
-    val saveSql = s"""|insert $prefix into sequencer_events (
-                     |    ts, node_index, event_type, message_id, sender, recipients,
-                     |    payload_id, signing_timestamp, error_message, trace_context
-                     |)
-                     |  values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                     |  $postfix
-                     |""".stripMargin
 
     storage.queryAndUpdate(
       DbStorage.bulkOperation_(saveSql, events, storage.profile) { pp => event =>

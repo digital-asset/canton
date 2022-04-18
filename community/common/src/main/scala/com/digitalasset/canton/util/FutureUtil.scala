@@ -10,6 +10,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 
+import java.util.regex.Pattern
 import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
@@ -95,7 +96,7 @@ object FutureUtil {
       timeoutMessage: => String,
       timeout: Duration,
       level: Level = Level.WARN,
-      stackTraceFilter: Thread => Boolean = _ => false,
+      stackTraceFilter: Thread => Boolean = defaultStackTraceFilter,
   )(implicit loggingContext: ErrorLoggingContext): Option[T] = {
     // Use Await.ready instead of Await.result to be able to tell the difference between the awaitable throwing a
     // TimeoutException and a TimeoutException being thrown because the awaitable is not ready.
@@ -143,7 +144,7 @@ object FutureUtil {
       timeout: Duration = Duration.Inf,
       warnAfter: Duration = 1.minute,
       killAwait: Unit => Boolean = _ => false,
-      stackTraceFilter: Thread => Boolean = _.getName.contains("-env-execution-context"),
+      stackTraceFilter: Thread => Boolean = defaultStackTraceFilter,
       onTimeout: TimeoutException => Unit = _ => (),
   )(implicit loggingContext: ErrorLoggingContext): T = {
     val warnAfterAdjusted = {
@@ -177,6 +178,30 @@ object FutureUtil {
     }
 
     res.get
+  }
+
+  lazy val defaultStackTraceFilter: Thread => Boolean = {
+    // Include threads directly used by Canton (incl. tests).
+    // Excludes threads used by the ledger api server, grpc, ...
+    val patterns = Seq(
+      ".*-env-execution-context.*",
+      ".*-test-execution-context.*",
+      ".*-env-scheduler.*",
+      ".*-test-execution-context-monitor.*",
+      ".*-wallclock.*",
+      ".*-remoteclock.*",
+      ".*delay-util.*",
+      ".*-ccf-execution-context.*",
+      ".*-fabric-sequencer-execution-context.*",
+      ".*-db-execution-context.*",
+      "ScalaTest-run.*",
+    )
+
+    // Take the disjunction of patterns.
+    val isRelevant = Pattern
+      .compile(patterns.map(p => s"($p)").mkString("|"))
+      .asMatchPredicate()
+    thread => isRelevant.test(thread.getName)
   }
 
   @VisibleForTesting

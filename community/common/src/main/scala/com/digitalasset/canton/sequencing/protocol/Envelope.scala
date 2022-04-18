@@ -6,8 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.util.HasProtoV0WithVersion
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0WithVersion, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 /** An [[Envelope]] wraps an envelope content such as a [[com.digitalasset.canton.protocol.messages.ProtocolMessage]]

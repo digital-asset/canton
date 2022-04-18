@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.data
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
@@ -47,13 +48,21 @@ class TransactionViewDecompositionTest extends AnyWordSpec with BaseTest with Ha
         val informees = Set[Informee](ConfirmingParty(signatory, 1))
         val rootSeed = ExampleTransactionFactory.lfHash(-1)
         val child =
-          NewView(node, informees, 1, Some(rootSeed), LfNodeId(0), Seq.empty, RollbackContext.empty)
+          NewView(
+            node,
+            informees,
+            NonNegativeInt.one,
+            Some(rootSeed),
+            LfNodeId(0),
+            Seq.empty,
+            RollbackContext.empty,
+          )
 
         an[IllegalArgumentException] should be thrownBy
           NewView(
             node,
             informees,
-            1,
+            NonNegativeInt.one,
             Some(rootSeed),
             LfNodeId(0),
             Seq(child),

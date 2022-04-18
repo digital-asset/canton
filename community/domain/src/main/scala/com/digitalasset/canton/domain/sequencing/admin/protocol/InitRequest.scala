@@ -10,9 +10,9 @@ import com.digitalasset.canton.domain.sequencing.sequencer.SequencerSnapshot
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.HasProtoV0
 
 case class InitRequest private (
     domainId: DomainId,
@@ -23,7 +23,7 @@ case class InitRequest private (
 
   /* We allow serializing this message to a ByteArray despite it implementing ProtoNonSerializable because the serialization
  is (and should) only used in the HttpSequencerClient.
-If you need to save this message in a database, please add a Versioned... message as documented in contributing.md  */
+If you need to save this message in a database, please add an UntypedVersionedMessage message as documented in contributing.md  */
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteArray
 
   override def toProtoV0: v0.InitRequest = v0.InitRequest(

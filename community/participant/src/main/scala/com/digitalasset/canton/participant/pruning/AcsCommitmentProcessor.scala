@@ -183,7 +183,7 @@ class AcsCommitmentProcessor(
   private val timestampsWithPotentialTopologyChanges =
     new AtomicReference[List[CantonTimestamp]](List())
 
-  private[pruning] val queue: SimpleExecutionQueue = new SimpleExecutionQueue()
+  private[pruning] val queue: SimpleExecutionQueue = new SimpleExecutionQueue(logTaskTiming = true)
 
   // Ensure we queue the initialization as the first task in the queue. We don't care about initialization having
   // completed by the time we return - only that no other task is queued before initialization.
@@ -438,7 +438,12 @@ class AcsCommitmentProcessor(
     FutureUtil.logOnFailureUnlessShutdown(
       future,
       failureMessage = s"Failed to process incoming commitment. Halting SyncDomain $domainId",
-      onFailure = _ => killSwitch,
+      onFailure = _ => {
+        // First close ourselves such that we don't process any more messages
+        close()
+        // Then close the sync domain, do not wait for the killswitch, otherwise we block the sequencer client shutdown
+        FutureUtil.doNotAwait(Future.successful(killSwitch), s"failed to kill SyncDomain $domainId")
+      },
     )
   }
 
@@ -870,8 +875,7 @@ object AcsCommitmentProcessor {
                 ParticipantId,
                 Set[AcsCommitment.CommitmentType],
               ]](parallelism, runningCommitments.toSeq) { case (parties, commitment) =>
-                val participants =
-                  parties.toSet[LfPartyId].flatMap(participantsOf.getOrElse(_, Set.empty))
+                val participants = parties.flatMap(participantsOf.getOrElse(_, Set.empty))
                 // Check that we're hosting at least one stakeholder; it can happen that the stakeholder used to be
                 // hosted on this participant, but is now disabled
                 val pSet =

@@ -11,8 +11,7 @@ import com.digitalasset.canton.protocol.v0.EnvelopeContent
 import com.digitalasset.canton.protocol.{TransferId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
 

@@ -32,7 +32,8 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.{HasProtoV0, LfTransactionUtil, NoCopy}
+import com.digitalasset.canton.util.{LfTransactionUtil, NoCopy}
+import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.{LfChoiceName, LfPartyId}
 import com.google.protobuf.ByteString
 

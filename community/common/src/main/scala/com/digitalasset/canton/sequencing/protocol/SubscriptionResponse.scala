@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 case class SubscriptionResponse(
     signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]]

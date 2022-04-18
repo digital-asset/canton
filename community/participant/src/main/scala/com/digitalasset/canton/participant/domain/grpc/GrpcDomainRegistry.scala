@@ -124,7 +124,7 @@ class GrpcDomainRegistry(
 
       domainHandle <- getDomainHandle(
         config,
-        participantNodeParameters.minimumProtocolVersion,
+        participantNodeParameters.protocolConfig,
         sequencerConnection,
         syncDomainPersistentStateFactory,
       )(

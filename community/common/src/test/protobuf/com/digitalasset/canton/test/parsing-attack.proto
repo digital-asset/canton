@@ -47,3 +47,8 @@ message AttackAddVariant {
   bytes two = 2;
 }
 
+message VersionedDummyMessage {
+  oneof version {
+    DummyMessage v0 = 1;
+  }
+}

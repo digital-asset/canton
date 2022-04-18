@@ -92,7 +92,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   /** The [[scala.concurrent.Future]] of the latest task that was executed.
     * The next task's [[TaskScheduler.TimedTask.perform()]] will run after this future completes.
     */
-  private[this] val queue: SimpleExecutionQueue = new SimpleExecutionQueue()(ecForTaskChaining)
+  private[this] val queue: SimpleExecutionQueue =
+    new SimpleExecutionQueue(logTaskTiming = true)(ecForTaskChaining)
 
   private[this] val lock: Object = new Object
 

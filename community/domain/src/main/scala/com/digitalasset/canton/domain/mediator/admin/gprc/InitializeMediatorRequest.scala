@@ -11,9 +11,9 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
+import com.digitalasset.canton.version.HasProtoV0
 
 case class InitializeMediatorRequest(
     domainId: DomainId,

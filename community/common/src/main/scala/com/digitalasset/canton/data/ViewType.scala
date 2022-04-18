@@ -7,7 +7,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConv
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RequestProcessor, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasVersionedToByteString
+import com.digitalasset.canton.version.HasVersionedToByteString
 
 /** Reifies the subclasses of [[ViewTree]] as values */
 // This trait is not sealed so that we can extend it for unit testing

@@ -9,7 +9,7 @@ import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 import scala.Ordering.Implicits._
 

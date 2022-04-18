@@ -27,7 +27,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
@@ -134,7 +134,7 @@ object SendType {
 
 /** settings to control the behaviour of the sequenced event validation factory */
 case class EventValidatorFactoryArgs(
-    initialLastEventProcessedMetadataO: Option[SequencedEventMetadata],
+    initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
     unauthenticated: Boolean,
 )
 
@@ -227,7 +227,7 @@ class SequencerClient(
     *  monitor the sequenced events when read, so actions can be taken even if in-memory state is lost.
     */
   def sendAsync(
-      batch: Batch[OpenEnvelope[ProtocolMessage]],
+      batch: Batch[DefaultOpenEnvelope],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
@@ -258,7 +258,7 @@ class SequencerClient(
     * such as requesting that a participant's topology data gets accepted by the topology manager
     */
   def sendAsyncUnauthenticated(
-      batch: Batch[OpenEnvelope[ProtocolMessage]],
+      batch: Batch[DefaultOpenEnvelope],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
       maxSequencingTime: CantonTimestamp = generateMaxSequencingTime,
@@ -285,7 +285,7 @@ class SequencerClient(
     }
 
   private def sendAsyncInternal(
-      batch: Batch[OpenEnvelope[ProtocolMessage]],
+      batch: Batch[DefaultOpenEnvelope],
       requiresAuthentication: Boolean,
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
@@ -533,18 +533,14 @@ class SequencerClient(
           .valueOr(err => throw SequencerClientSubscriptionException(err))
       } yield {
         val lastEvent = replayEvents.lastOption
-        val preSubscriptionEventMetadata = lastEvent
-          .orElse(initialPriorEventO)
-          .map(SequencedEventMetadata.fromPossiblyIgnoredSequencedEvent(cryptoPureApi, _))
+        val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
 
         val nextCounter =
-          initialCounter.getOrElse(
-            preSubscriptionEventMetadata.fold(GenesisSequencerCounter)(_.counter)
-          )
+          initialCounter.getOrElse(preSubscriptionEvent.fold(GenesisSequencerCounter)(_.counter))
 
         val eventValidator = eventValidatorFactory(
           EventValidatorFactoryArgs(
-            preSubscriptionEventMetadata,
+            preSubscriptionEvent,
             // we need to inform the validator if this connection is unauthenticated, as unauthenticated connections
             // do not have the topology data to verify signatures
             unauthenticated = !requiresAuthentication,
@@ -552,7 +548,7 @@ class SequencerClient(
         )
 
         logger.info(
-          s"Starting subscription at timestamp ${preSubscriptionEventMetadata.map(_.timestamp)}; next counter $nextCounter"
+          s"Starting subscription at timestamp ${preSubscriptionEvent.map(_.timestamp)}; next counter $nextCounter"
         )
 
         val eventDelay: DelaySequencedEvent = {
@@ -580,7 +576,7 @@ class SequencerClient(
           timeoutHandler,
           eventValidator,
           eventDelay,
-          preSubscriptionEventMetadata.map(_.counter),
+          preSubscriptionEvent.map(_.counter),
         )
 
         val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
@@ -1054,7 +1050,7 @@ object SequencerClient {
           // pluggable send approach to support transitioning to the new async sends
           validatorFactory = (args: EventValidatorFactoryArgs) =>
             new SequencedEventValidator(
-              args.initialLastEventProcessedMetadataO,
+              args.initialLastEventProcessedO,
               args.unauthenticated,
               config.optimisticSequencedEventValidation,
               config.skipSequencedEventValidation,

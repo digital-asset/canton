@@ -13,14 +13,13 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.nonempty.NonEmptyUtil
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton._
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.GenTransactionTree.InvalidGenTransactionTree
 import com.digitalasset.canton.data.InformeeTree.InvalidInformeeTree
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
 import com.digitalasset.canton.data.MerkleTree._
-import com.digitalasset.canton.data.SubmitterMetadata.InvalidSubmitterMetadata
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
@@ -32,14 +31,6 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.version.{
-  VersionedCommonMetadata,
-  VersionedFullInformeeTree,
-  VersionedInformeeTree,
-  VersionedLightTransactionViewTree,
-  VersionedParticipantMetadata,
-  VersionedSubmitterMetadata,
-}
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
   RootHash,
@@ -51,8 +42,15 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageWithContextCompanion,
+  HasProtoV0,
+  HasVersionedMessageWithContextCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec
@@ -64,7 +62,6 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * @throws GenTransactionTree$.InvalidGenTransactionTree if two subtrees have the same root hash
   */
-@SuppressWarnings(Array("org.wartremover.warts.Any"))
 case class GenTransactionTree(
     submitterMetadata: MerkleTree[SubmitterMetadata],
     commonMetadata: MerkleTree[CommonMetadata],
@@ -441,7 +438,7 @@ object TransactionViewTree {
   * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
 case class InformeeTree(tree: GenTransactionTree)
-    extends HasVersionedWrapper[VersionedInformeeTree]
+    extends HasVersionedWrapper[VersionedMessage[InformeeTree]]
     with HasProtoV0[v0.InformeeTree] {
 
   InformeeTree.checkGlobalMetadata(tree)
@@ -465,14 +462,19 @@ case class InformeeTree(tree: GenTransactionTree)
     */
   lazy val tryToFullInformeeTree: FullInformeeTree = FullInformeeTree(tree)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedInformeeTree =
-    VersionedInformeeTree(VersionedInformeeTree.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[InformeeTree] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.InformeeTree =
     v0.InformeeTree(tree = Some(tree.toProtoV0))
 }
 
-object InformeeTree {
+object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree, HashOps] {
+  override val name: String = "InformeeTree"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.InformeeTree)(fromProtoV0)
+  )
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
     * Yields `Left(...)` if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
@@ -538,16 +540,6 @@ object InformeeTree {
   /** Indicates an attempt to create an invalid [[InformeeTree]] or [[FullInformeeTree]]. */
   case class InvalidInformeeTree(message: String) extends RuntimeException(message) {}
 
-  def fromProtoVersioned(
-      hashOps: HashOps,
-      protoInformeeTree: VersionedInformeeTree,
-  ): ParsingResult[InformeeTree] =
-    protoInformeeTree.version match {
-      case VersionedInformeeTree.Version.Empty =>
-        Left(FieldNotSet("VersionedInformeeTree.version"))
-      case VersionedInformeeTree.Version.V0(tree) => fromProtoV0(hashOps, tree)
-    }
-
   def fromProtoV0(
       hashOps: HashOps,
       protoInformeeTree: v0.InformeeTree,
@@ -559,12 +551,6 @@ object InformeeTree {
         .create(tree)
         .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
     } yield informeeTree
-
-  def fromByteString(hashOps: HashOps, bytes: ByteString): ParsingResult[InformeeTree] =
-    for {
-      protoInformeeTree <- ProtoConverter.protoParser(VersionedInformeeTree.parseFrom)(bytes)
-      informeeTree <- fromProtoVersioned(hashOps, protoInformeeTree)
-    } yield informeeTree
 }
 
 /** Wraps a [[GenTransactionTree]] that is also a full informee tree.
@@ -572,7 +558,7 @@ object InformeeTree {
   * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
 case class FullInformeeTree(tree: GenTransactionTree)
-    extends HasVersionedWrapper[VersionedFullInformeeTree]
+    extends HasVersionedWrapper[VersionedMessage[FullInformeeTree]]
     with HasProtoV0[v0.FullInformeeTree]
     with PrettyPrinting {
 
@@ -610,7 +596,7 @@ case class FullInformeeTree(tree: GenTransactionTree)
 
   lazy val toInformeeTree: InformeeTree = InformeeTree(tree)
 
-  lazy val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] =
+  lazy val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     InformeeTree.viewCommonDataByView(tree).map { case (hash, viewCommonData) =>
       hash -> ((viewCommonData.informees, viewCommonData.threshold))
     }
@@ -627,8 +613,8 @@ case class FullInformeeTree(tree: GenTransactionTree)
     tree.commonMetadata.tryUnwrap
   ).confirmationPolicy
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedFullInformeeTree =
-    VersionedFullInformeeTree(VersionedFullInformeeTree.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[FullInformeeTree] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.FullInformeeTree =
     v0.FullInformeeTree(tree = Some(tree.toProtoV0))
@@ -636,22 +622,20 @@ case class FullInformeeTree(tree: GenTransactionTree)
   override def pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 }
 
-object FullInformeeTree {
+object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInformeeTree, HashOps] {
+  override val name: String = "FullInformeeTree"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.FullInformeeTree)(fromProtoV0)
+  )
+
   def create(tree: GenTransactionTree): Either[String, FullInformeeTree] =
     Either.catchOnly[InvalidInformeeTree](FullInformeeTree(tree)).leftMap(_.message)
 
-  def fromProtoVersioned(
-      hashOps: HashOps
-  )(protoInformeeTree: VersionedFullInformeeTree): ParsingResult[FullInformeeTree] =
-    protoInformeeTree.version match {
-      case VersionedFullInformeeTree.Version.Empty =>
-        Left(FieldNotSet("VersionedFullInformeeTree.version"))
-      case VersionedFullInformeeTree.Version.V0(tree) => fromProtoV0(hashOps)(tree)
-    }
-
   def fromProtoV0(
-      hashOps: HashOps
-  )(protoInformeeTree: v0.FullInformeeTree): ParsingResult[FullInformeeTree] =
+      hashOps: HashOps,
+      protoInformeeTree: v0.FullInformeeTree,
+  ): ParsingResult[FullInformeeTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
@@ -661,19 +645,12 @@ object FullInformeeTree {
           ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
         )
     } yield fullInformeeTree
-
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[FullInformeeTree] =
-    for {
-      protoInformeeTree <- ProtoConverter
-        .protoParser(VersionedFullInformeeTree.parseFrom)(bytes)
-      informeeTree <- fromProtoVersioned(hashOps)(protoInformeeTree)
-    } yield informeeTree
 }
 
 /** Information about the submitters of the transaction
   */
 case class SubmitterMetadata private (
-    actAs: Set[LfPartyId],
+    actAs: NonEmpty[Set[LfPartyId]],
     applicationId: ApplicationId,
     commandId: CommandId,
     submitterParticipant: ParticipantId,
@@ -682,11 +659,9 @@ case class SubmitterMetadata private (
     dedupPeriod: DeduplicationPeriod,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[SubmitterMetadata](hashOps)
-    with HasVersionedWrapper[VersionedSubmitterMetadata]
+    with HasVersionedWrapper[VersionedMessage[SubmitterMetadata]]
     with MemoizedEvidence
     with NoCopy {
-
-  if (actAs.isEmpty) throw InvalidSubmitterMetadata("The actAs set must not be empty.")
 
   override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
     super[HasVersionedWrapper].toByteString(version)
@@ -703,8 +678,10 @@ case class SubmitterMetadata private (
     param("deduplication period", _.dedupPeriod),
   )
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedSubmitterMetadata =
-    VersionedSubmitterMetadata(VersionedSubmitterMetadata.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[SubmitterMetadata] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.SubmitterMetadata = v0.SubmitterMetadata(
     actAs = actAs.toSeq,
@@ -718,74 +695,35 @@ case class SubmitterMetadata private (
 
 }
 
-object SubmitterMetadata {
+object SubmitterMetadata
+    extends HasMemoizedVersionedMessageWithContextCompanion[
+      MerkleTree[SubmitterMetadata],
+      HashOps,
+    ] {
+  override val name: String = "SubmitterMetadata"
 
-  private[this] def apply(
-      actAs: Set[LfPartyId],
-      applicationId: ApplicationId,
-      commandId: CommandId,
-      submitterParticipant: ParticipantId,
-      salt: Salt,
-      submissionId: Option[LedgerSubmissionId],
-      dedupPeriod: DeduplicationPeriod,
-  )(hashOps: HashOps, deserializedFrom: Option[ByteString]): SubmitterMetadata =
-    throw new UnsupportedOperationException("Use the create method instead")
-
-  def create(hashOps: HashOps)(
-      actAs: Set[LfPartyId],
-      applicationId: ApplicationId,
-      commandId: CommandId,
-      submitterParticipant: ParticipantId,
-      salt: Salt,
-      submissionId: Option[LedgerSubmissionId],
-      dedupPeriod: DeduplicationPeriod,
-  ): Either[String, SubmitterMetadata] =
-    returnLeftWhenInitializationFails(
-      new SubmitterMetadata(
-        actAs,
-        applicationId,
-        commandId,
-        submitterParticipant,
-        salt,
-        submissionId,
-        dedupPeriod,
-      )(hashOps, None)
-    )
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.SubmitterMetadata)(fromProtoV0)
+  )
 
   def fromSubmitterInfo(hashOps: HashOps)(
       submitterInfo: SubmitterInfo,
       submitterParticipant: ParticipantId,
       salt: Salt,
-  ): Either[String, SubmitterMetadata] =
-    create(hashOps)(
-      submitterInfo.actAs.toSet, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
-      ApplicationId(submitterInfo.applicationId),
-      CommandId(submitterInfo.commandId),
-      submitterParticipant,
-      salt,
-      submitterInfo.submissionId,
-      submitterInfo.deduplicationPeriod,
-    )
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[MerkleTree[SubmitterMetadata]] =
-    for {
-      protoSubmitterMetadata <- TreeSerialization.deserializeProtoNode(
-        bytes,
-        VersionedSubmitterMetadata,
-      )
-      submitterMetadata <- fromProtoVersioned(hashOps, protoSubmitterMetadata)(bytes)
-    } yield submitterMetadata
-
-  private def fromProtoVersioned(hashOps: HashOps, metaDataP: VersionedSubmitterMetadata)(
-      bytes: ByteString
-  ): ParsingResult[MerkleTree[SubmitterMetadata]] =
-    metaDataP.version match {
-      case VersionedSubmitterMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedSubmitterMetadata.version"))
-      case VersionedSubmitterMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
+  ): Either[String, SubmitterMetadata] = {
+    NonEmpty.from(submitterInfo.actAs.toSet).toRight("The actAs set must not be empty.").map {
+      actAsNes =>
+        SubmitterMetadata(
+          actAsNes, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
+          ApplicationId(submitterInfo.applicationId),
+          CommandId(submitterInfo.commandId),
+          submitterParticipant,
+          salt,
+          submitterInfo.submissionId,
+          submitterInfo.deduplicationPeriod,
+        )(hashOps, None)
     }
+  }
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.SubmitterMetadata)(
       bytes: ByteString
@@ -831,32 +769,29 @@ object SubmitterMetadata {
         .leftMap(e =>
           ProtoDeserializationError.ValueConversionError("deduplicationPeriod", e.message)
         )
-      submitterMetadata <- returnLeftWhenInitializationFails(
-        new SubmitterMetadata(
-          actAs.toSet,
-          applicationId,
-          commandId,
-          submitterParticipant,
-          salt,
-          submissionId,
-          dedupPeriod,
-        )(hashOps, Some(bytes))
-      ).leftMap(ProtoDeserializationError.OtherError(_))
-    } yield submitterMetadata
+
+      actAsNes <- NonEmpty
+        .from(actAs.toSet)
+        .toRight(
+          ProtoDeserializationError.ValueConversionError("acsAs", "actAs set must not be empty.")
+        )
+    } yield SubmitterMetadata(
+      actAsNes,
+      applicationId,
+      commandId,
+      submitterParticipant,
+      salt,
+      submissionId,
+      dedupPeriod,
+    )(hashOps, Some(bytes))
   }
-
-  private def returnLeftWhenInitializationFails[A](initialization: => A): Either[String, A] =
-    Either.catchOnly[InvalidSubmitterMetadata](initialization).leftMap(_.message)
-
-  /** Indicates an attempt to create an invalid [[SubmitterMetadata]] */
-  case class InvalidSubmitterMetadata(message: String) extends RuntimeException(message)
 }
 
 /** Information concerning every '''member''' involved in the underlying transaction.
   *
   * @param confirmationPolicy determines who must confirm the request
   */
-case class CommonMetadata private (
+final case class CommonMetadata private (
     confirmationPolicy: ConfirmationPolicy,
     domainId: DomainId,
     mediatorId: MediatorId,
@@ -864,7 +799,7 @@ case class CommonMetadata private (
     uuid: UUID,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[CommonMetadata](hashOps)
-    with HasVersionedWrapper[VersionedCommonMetadata]
+    with HasVersionedWrapper[VersionedMessage[CommonMetadata]]
     with MemoizedEvidence
     with NoCopy {
 
@@ -881,8 +816,10 @@ case class CommonMetadata private (
     param("salt", _.salt),
   )
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedCommonMetadata =
-    VersionedCommonMetadata(VersionedCommonMetadata.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[CommonMetadata] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.CommonMetadata = v0.CommonMetadata(
     confirmationPolicy = confirmationPolicy.toProtoPrimitive,
@@ -893,7 +830,17 @@ case class CommonMetadata private (
   )
 }
 
-object CommonMetadata {
+object CommonMetadata
+    extends HasMemoizedVersionedMessageWithContextCompanion[
+      MerkleTree[CommonMetadata],
+      HashOps,
+    ] {
+  override val name: String = "CommonMetadata"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.CommonMetadata)(fromProtoV0)
+  )
+
   private[this] def apply(
       confirmationPolicy: ConfirmationPolicy,
       domain: DomainId,
@@ -913,23 +860,6 @@ object CommonMetadata {
       uuid: UUID,
   ) =
     new CommonMetadata(confirmationPolicy, domain, mediatorId, salt, uuid)(hashOps, None)
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[MerkleTree[CommonMetadata]] =
-    for {
-      protoCommonMetadata <- TreeSerialization.deserializeProtoNode(bytes, VersionedCommonMetadata)
-      commonMetadata <- fromProtoVersioned(hashOps, protoCommonMetadata)(bytes)
-    } yield commonMetadata
-
-  private def fromProtoVersioned(hashOps: HashOps, metaDataP: VersionedCommonMetadata)(
-      bytes: ByteString
-  ): ParsingResult[MerkleTree[CommonMetadata]] =
-    metaDataP.version match {
-      case VersionedCommonMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedCommonMetadata.version"))
-      case VersionedCommonMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
-    }
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.CommonMetadata)(
       bytes: ByteString
@@ -969,7 +899,7 @@ case class ParticipantMetadata private (
     salt: Salt,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[ParticipantMetadata](hashOps)
-    with HasVersionedWrapper[VersionedParticipantMetadata]
+    with HasVersionedWrapper[VersionedMessage[ParticipantMetadata]]
     with MemoizedEvidence
     with NoCopy {
 
@@ -985,8 +915,9 @@ case class ParticipantMetadata private (
     param("salt", _.salt),
   )
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedParticipantMetadata =
-    VersionedParticipantMetadata(VersionedParticipantMetadata.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[ParticipantMetadata] = VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.ParticipantMetadata = v0.ParticipantMetadata(
     ledgerTime = Some(ledgerTime.toProtoPrimitive),
@@ -996,7 +927,15 @@ case class ParticipantMetadata private (
   )
 }
 
-object ParticipantMetadata {
+object ParticipantMetadata
+    extends HasMemoizedVersionedMessageWithContextCompanion[MerkleTree[
+      ParticipantMetadata
+    ], HashOps] {
+  override val name: String = "ParticipantMetadata"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.ParticipantMetadata)(fromProtoV0)
+  )
 
   private[this] def apply(
       ledgerTime: CantonTimestamp,
@@ -1013,26 +952,6 @@ object ParticipantMetadata {
       salt: Salt,
   ): ParticipantMetadata =
     new ParticipantMetadata(ledgerTime, submissionTime, workflowId, salt)(hashOps, None)
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[MerkleTree[ParticipantMetadata]] =
-    for {
-      protoParticipantMetadata <- TreeSerialization.deserializeProtoNode(
-        bytes,
-        VersionedParticipantMetadata,
-      )
-      metadata <- fromProtoVersioned(hashOps, protoParticipantMetadata)(bytes)
-    } yield metadata
-
-  private def fromProtoVersioned(hashOps: HashOps, metadataP: VersionedParticipantMetadata)(
-      bytes: ByteString
-  ): ParsingResult[MerkleTree[ParticipantMetadata]] =
-    metadataP.version match {
-      case VersionedParticipantMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedParticipantMetadata.version"))
-      case VersionedParticipantMetadata.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
-    }
 
   private def fromProtoV0(hashOps: HashOps, metadataP: v0.ParticipantMetadata)(
       bytes: ByteString
@@ -1067,7 +986,7 @@ object ParticipantMetadata {
 case class LightTransactionViewTree(tree: GenTransactionTree)
     extends ViewTree
     with HasProtoV0[v0.LightTransactionViewTree]
-    with HasVersionedWrapper[VersionedLightTransactionViewTree]
+    with HasVersionedWrapper[VersionedMessage[LightTransactionViewTree]]
     with PrettyPrinting {
 
   private def findTheView(views: Seq[MerkleTree[TransactionView]]): TransactionView = {
@@ -1132,8 +1051,9 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
 
   lazy val viewParticipantData: ViewParticipantData = view.viewParticipantData.tryUnwrap
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedLightTransactionViewTree =
-    VersionedLightTransactionViewTree(VersionedLightTransactionViewTree.Version.V0(toProtoV0))
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[LightTransactionViewTree] = VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.LightTransactionViewTree =
     v0.LightTransactionViewTree(tree = Some(tree.toProtoV0))
@@ -1148,7 +1068,14 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
   override lazy val pretty: Pretty[LightTransactionViewTree] = prettyOfClass(unnamedParam(_.tree))
 }
 
-object LightTransactionViewTree {
+object LightTransactionViewTree
+    extends HasVersionedMessageWithContextCompanion[LightTransactionViewTree, HashOps] {
+  override val name: String = "LightTransactionViewTree"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.LightTransactionViewTree)(fromProtoV0)
+  )
+
   case class InvalidLightTransactionViewTree(message: String) extends RuntimeException(message)
   case class InvalidLightTransactionViewTreeSequence(message: String)
       extends RuntimeException(message)
@@ -1160,24 +1087,14 @@ object LightTransactionViewTree {
 
   def create(tree: GenTransactionTree): Either[String, LightTransactionViewTree] = {
     Either
-      .catchOnly[InvalidLightTransactionViewTree](
-        new LightTransactionViewTree(tree)
-      )
+      .catchOnly[InvalidLightTransactionViewTree](new LightTransactionViewTree(tree))
       .leftMap(_.message)
   }
 
-  def fromProtoVersioned(
-      hashOps: HashOps
-  )(protoT: VersionedLightTransactionViewTree): ParsingResult[LightTransactionViewTree] =
-    protoT.version match {
-      case VersionedLightTransactionViewTree.Version.Empty =>
-        Left(FieldNotSet("VersionedLightTransactionViewTree.version"))
-      case VersionedLightTransactionViewTree.Version.V0(tree) => fromProtoV0(hashOps)(tree)
-    }
-
   def fromProtoV0(
-      hashOps: HashOps
-  )(protoT: v0.LightTransactionViewTree): ParsingResult[LightTransactionViewTree] =
+      hashOps: HashOps,
+      protoT: v0.LightTransactionViewTree,
+  ): ParsingResult[LightTransactionViewTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
@@ -1187,15 +1104,6 @@ object LightTransactionViewTree {
           ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
         )
     } yield result
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[LightTransactionViewTree] =
-    for {
-      protoTransactionViewTree <- ProtoConverter
-        .protoParser(VersionedLightTransactionViewTree.parseFrom)(bytes)
-      lightTransactionViewTree <- fromProtoVersioned(hashOps)(protoTransactionViewTree)
-    } yield lightTransactionViewTree
 
   /** Converts the prefix of a sequence of lightweight transaction view trees into a full tree, returning the unused suffix.
     *

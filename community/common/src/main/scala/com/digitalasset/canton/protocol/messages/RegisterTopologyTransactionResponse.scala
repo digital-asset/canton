@@ -8,8 +8,8 @@ import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 
 case class RegisterTopologyTransactionResponse(
     requestedBy: Member,

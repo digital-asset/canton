@@ -5,11 +5,9 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
-import com.digitalasset.canton.protocol.version.VersionedTopologyTransactions
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction
@@ -20,13 +18,18 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Replace,
 }
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[StoredTopologyTransaction[Op]]
 ) extends HasProtoV0[v0.TopologyTransactions]
-    with HasVersionedWrapper[VersionedTopologyTransactions]
+    with HasVersionedWrapper[VersionedMessage[StoredTopologyTransactions[Op]]]
     with PrettyPrinting {
 
   override def pretty: Pretty[StoredTopologyTransactions.this.type] = prettyOfParam(
@@ -138,15 +141,18 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedTopologyTransactions =
-    VersionedTopologyTransactions(VersionedTopologyTransactions.Version.V0(toProtoV0))
+  ): VersionedMessage[StoredTopologyTransactions[Op]] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 }
 
 object StoredTopologyTransactions
-    extends HasVersionedWrapperCompanion[
-      VersionedTopologyTransactions,
+    extends HasVersionedMessageCompanion[
       StoredTopologyTransactions[TopologyChangeOp],
     ] {
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0)
+  )
 
   case class CertsAndRest[+Op <: TopologyChangeOp](
       certs: Seq[StoredTopologyTransaction[Op]],
@@ -174,21 +180,7 @@ object StoredTopologyTransactions
   def empty[Op <: TopologyChangeOp]: StoredTopologyTransactions[Op] =
     StoredTopologyTransactions(Seq())
 
-  override protected def ProtoClassCompanion: VersionedTopologyTransactions.type =
-    VersionedTopologyTransactions
-
   override protected def name: String = "topology transactions"
-
-  override protected def fromProtoVersioned(
-      proto: VersionedTopologyTransactions
-  ): ParsingResult[StoredTopologyTransactions[TopologyChangeOp]] = {
-    val VersionedTopologyTransactions(version) = proto
-    version match {
-      case VersionedTopologyTransactions.Version.V0(proto0) => fromProtoV0(proto0)
-      case VersionedTopologyTransactions.Version.Empty =>
-        Left(FieldNotSet("VersionedTopologyTransactions.version"))
-    }
-  }
 }
 
 final case class PositiveStoredTopologyTransactions(

@@ -109,25 +109,32 @@ object CantonVersion {
   )
 
   private[version] def getSupportedProtocolsParticipantForRelease(
-      release: ReleaseVersion
+      release: ReleaseVersion,
+      includeDevelopmentVersions: Boolean,
   ): List[ProtocolVersion] = {
     releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
         s"Please add the supported protocol versions of a participant of release version $release to `supportedProtocolsParticipant` in `CantonVersion.scala`."
       ),
-    )
+    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
   }
 
+  private def getDevelopmentVersions(includeDevelopmentVersions: Boolean): List[ProtocolVersion] =
+    if (includeDevelopmentVersions)
+      List(ProtocolVersion.unstable_development)
+    else List.empty
+
   private[version] def getSupportedProtocolsDomainForRelease(
-      release: ReleaseVersion
+      release: ReleaseVersion,
+      includeDevelopmentVersions: Boolean,
   ): List[ProtocolVersion] = {
     releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
         s"Please add the supported protocol versions of domain nodes of release version $release to `supportedProtocolsDomain` in `CantonVersion.scala`."
       ),
-    )
+    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
   }
 
 }
@@ -247,13 +254,19 @@ object ProtocolVersion extends CompanionTrait {
 
   /** Returns the protocol versions supported by the participant of the current release.
     */
-  def supportedProtocolsParticipant: Seq[ProtocolVersion] =
-    CantonVersion.getSupportedProtocolsParticipantForRelease(ReleaseVersion.current)
+  def supportedProtocolsParticipant(includeDevelopmentVersions: Boolean): Seq[ProtocolVersion] =
+    CantonVersion.getSupportedProtocolsParticipantForRelease(
+      ReleaseVersion.current,
+      includeDevelopmentVersions,
+    )
 
   /** Returns the protocol versions supported by domain nodes of the current release.
     */
-  def supportedProtocolsDomain: Seq[ProtocolVersion] =
-    CantonVersion.getSupportedProtocolsDomainForRelease(ReleaseVersion.current)
+  def supportedProtocolsDomain(includeDevelopmentVersions: Boolean): Seq[ProtocolVersion] =
+    CantonVersion.getSupportedProtocolsDomainForRelease(
+      ReleaseVersion.current,
+      includeDevelopmentVersions,
+    )
 
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
   final case class UnsupportedVersion(version: ProtocolVersion, supported: Seq[ProtocolVersion])
@@ -293,6 +306,7 @@ object ProtocolVersion extends CompanionTrait {
     else Right(())
   }
 
+  lazy val unstable_development: ProtocolVersion = ProtocolVersion(0, 0, 0, Some("DEV"))
   lazy val v2_0_0_snapshot: ProtocolVersion = ProtocolVersion(2, 0, 0, Some("SNAPSHOT"))
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
@@ -337,9 +351,11 @@ object DomainProtocolVersion {
       for {
         version <- ProtocolVersion.create(str).leftMap[FailureReason](InvalidProtocolVersion)
         _ <- Either.cond(
-          supportedProtocolsDomain.contains(version),
+          // we support development versions when parsing, but catch dev versions without
+          // the safety flag during config validation
+          supportedProtocolsDomain(includeDevelopmentVersions = true).contains(version),
           (),
-          UnsupportedVersion(version, supportedProtocolsDomain),
+          UnsupportedVersion(version, supportedProtocolsDomain(includeDevelopmentVersions = false)),
         )
       } yield DomainProtocolVersion(version)
     }
@@ -361,9 +377,13 @@ object ParticipantProtocolVersion {
       for {
         version <- ProtocolVersion.create(str).leftMap[FailureReason](InvalidProtocolVersion)
         _ <- Either.cond(
-          supportedProtocolsParticipant.contains(version),
+          // same as domain: support parsing of dev
+          supportedProtocolsParticipant(includeDevelopmentVersions = true).contains(version),
           (),
-          UnsupportedVersion(version, supportedProtocolsParticipant),
+          UnsupportedVersion(
+            version,
+            supportedProtocolsParticipant(includeDevelopmentVersions = false),
+          ),
         )
       } yield ParticipantProtocolVersion(version)
     }

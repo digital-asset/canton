@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.implicits._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
+import cats.syntax.traverse._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.RequestCounter
@@ -16,19 +15,23 @@ import com.digitalasset.canton.protocol.v0.{
   TransferInUpdate => TransferInUpdateProto,
   TransferOutUpdate => TransferOutUpdateProto,
 }
-import com.digitalasset.canton.protocol.version.VersionedCausalityUpdate
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** Represents the causal dependencies of a given request.
   */
 sealed trait CausalityUpdate
     extends HasProtoV0[CausalityUpdateProto]
-    with HasVersionedWrapper[VersionedCausalityUpdate]
+    with HasVersionedWrapper[VersionedMessage[CausalityUpdate]]
     with PrettyPrinting {
 
   val ts: CantonTimestamp
@@ -38,9 +41,10 @@ sealed trait CausalityUpdate
 
   def toProtoV0: CausalityUpdateProto
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedCausalityUpdate = {
-    VersionedCausalityUpdate(VersionedCausalityUpdate.Version.V0(toProtoV0))
-  }
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[CausalityUpdate] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 }
 
 /** A transaction is causally dependant on all earlier events in the same domain.
@@ -130,22 +134,12 @@ case class TransferInUpdate(
     )
 }
 
-object CausalityUpdate
-    extends HasVersionedWrapperCompanion[VersionedCausalityUpdate, CausalityUpdate] {
-
-  override protected def ProtoClassCompanion: VersionedCausalityUpdate.type =
-    VersionedCausalityUpdate
+object CausalityUpdate extends HasVersionedMessageCompanion[CausalityUpdate] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(CausalityUpdateProto)(fromProtoV0)
+  )
 
   override protected def name: String = "causality update"
-
-  override protected def fromProtoVersioned(
-      proto: VersionedCausalityUpdate
-  ): ParsingResult[CausalityUpdate] =
-    proto.version match {
-      case VersionedCausalityUpdate.Version.Empty =>
-        Left(FieldNotSet("VersionedCausalityUpdate.version"))
-      case VersionedCausalityUpdate.Version.V0(parameters) => fromProtoV0(parameters)
-    }
 
   def fromProtoV0(p: CausalityUpdateProto): ParsingResult[CausalityUpdate] = {
     for {

@@ -14,7 +14,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, HasProtoV0}
+import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.empty.Empty
 import io.grpc.Status
 

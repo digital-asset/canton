@@ -273,8 +273,7 @@ class ParticipantNodeBootstrap(
       } yield ()
     }
 
-  override def initialize(id: NodeId): EitherT[Future, String, Unit] = {
-    ErrorUtil.requireState(!isInitialized, "Participant already initialized.")
+  override def initialize(id: NodeId): EitherT[Future, String, Unit] = startInstanceUnlessClosing {
 
     val participantId = ParticipantId(id.identity)
     topologyManager.setParticipantId(participantId)
@@ -585,7 +584,7 @@ class ParticipantNodeBootstrap(
         )
       )
 
-      val participantNode = new ParticipantNode(
+      new ParticipantNode(
         participantId,
         metrics,
         config,
@@ -606,7 +605,7 @@ class ParticipantNodeBootstrap(
         replaySequencerConfig,
         loggerFactory,
       )
-      setInstance(participantNode)
+
     }
   }
 

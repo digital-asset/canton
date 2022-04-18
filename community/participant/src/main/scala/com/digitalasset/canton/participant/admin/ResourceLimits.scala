@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 /** Encapsulated resource limits for a participant.
   *

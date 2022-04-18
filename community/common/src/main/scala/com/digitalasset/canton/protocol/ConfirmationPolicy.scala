@@ -7,6 +7,7 @@ import cats.Order
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{ConfirmingParty, Informee, PlainInformee}
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -25,18 +26,15 @@ sealed trait ConfirmationPolicy extends Product with Serializable with PrettyPri
 
   def informeesAndThreshold(actionNode: LfActionNode, topologySnapshot: TopologySnapshot)(implicit
       ec: ExecutionContext
-  ): Future[(Set[Informee], Int)]
+  ): Future[(Set[Informee], NonNegativeInt)]
 
   /** The minimal acceptable trust level of the sender of mediator response */
   def requiredTrustLevel: TrustLevel
 
   /** The minimum threshold for views of requests with this policy.
     * The mediator checks that all views have at least the given threshold.
-    * Must be non-negative.
     */
-  def minimumThreshold: Int
-
-  require(minimumThreshold >= 0, "Minimum threshold must be non-negative")
+  def minimumThreshold: NonNegativeInt
 
   override def pretty: Pretty[ConfirmationPolicy] = prettyOfObject[ConfirmationPolicy]
 }
@@ -49,9 +47,9 @@ object ConfirmationPolicy {
   private def toInformeesAndThreshold(
       confirmingParties: Set[LfPartyId],
       plainInformees: Set[LfPartyId],
-  ): (Set[Informee], Int) = {
+  ): (Set[Informee], NonNegativeInt) = {
     // We make sure that the threshold is at least 1 so that a transaction is not vacuously approved if the confirming parties are empty.
-    val threshold = Math.max(confirmingParties.size, 1)
+    val threshold = NonNegativeInt.tryCreate(Math.max(confirmingParties.size, 1))
     val informees =
       confirmingParties.map(ConfirmingParty(_, 1): Informee) ++ plainInformees.map(PlainInformee)
     (informees, threshold)
@@ -63,7 +61,7 @@ object ConfirmationPolicy {
 
     override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
-    ): Future[(Set[Informee], Int)] = {
+    ): Future[(Set[Informee], NonNegativeInt)] = {
       val stateVerifiers = LfTransactionUtil.stateKnownTo(node)
       val confirmingPartiesF = stateVerifiers.toList
         .traverseFilter { partyId =>
@@ -77,13 +75,13 @@ object ConfirmationPolicy {
         val informees =
           confirmingParties.map(ConfirmingParty(_, 1)) ++ plainInformees.map(PlainInformee)
         // As all VIP participants are trusted, it suffices that one of them confirms.
-        (informees, 1)
+        (informees, NonNegativeInt.one)
       }
     }
 
     override def requiredTrustLevel: TrustLevel = TrustLevel.Vip
 
-    override def minimumThreshold: Int = 1
+    override def minimumThreshold: NonNegativeInt = NonNegativeInt.one
   }
 
   case object Signatory extends ConfirmationPolicy {
@@ -92,7 +90,7 @@ object ConfirmationPolicy {
 
     override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
-    ): Future[(Set[Informee], Int)] = {
+    ): Future[(Set[Informee], NonNegativeInt)] = {
       val confirmingParties =
         LfTransactionUtil.signatoriesOrMaintainers(node) | LfTransactionUtil.actingParties(node)
       require(
@@ -105,7 +103,7 @@ object ConfirmationPolicy {
 
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
 
-    override def minimumThreshold: Int = 1
+    override def minimumThreshold: NonNegativeInt = NonNegativeInt.one
   }
 
   case object Full extends ConfirmationPolicy {
@@ -114,7 +112,7 @@ object ConfirmationPolicy {
 
     override def informeesAndThreshold(node: LfActionNode, topologySnapshot: TopologySnapshot)(
         implicit ec: ExecutionContext
-    ): Future[(Set[Informee], Int)] = {
+    ): Future[(Set[Informee], NonNegativeInt)] = {
       val informees = LfTransactionUtil.informees(node)
       require(
         informees.nonEmpty,
@@ -125,7 +123,7 @@ object ConfirmationPolicy {
 
     override def requiredTrustLevel: TrustLevel = TrustLevel.Ordinary
 
-    override def minimumThreshold: Int = 1
+    override def minimumThreshold: NonNegativeInt = NonNegativeInt.one
   }
 
   val values: Seq[ConfirmationPolicy] = Seq[ConfirmationPolicy](Vip, Signatory, Full)

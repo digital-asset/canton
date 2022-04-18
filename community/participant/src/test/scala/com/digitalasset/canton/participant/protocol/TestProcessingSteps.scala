@@ -50,8 +50,7 @@ import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 

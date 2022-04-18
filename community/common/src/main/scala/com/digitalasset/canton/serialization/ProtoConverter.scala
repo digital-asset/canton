@@ -38,7 +38,7 @@ trait ProtoConverter[A, Proto, Err] {
 }
 
 object ProtoConverter {
-  type ParsingResult[T] = Either[ProtoDeserializationError, T]
+  type ParsingResult[+T] = Either[ProtoDeserializationError, T]
 
   /** Helper to convert protobuf exceptions into ProtoDeserializationErrors
     *

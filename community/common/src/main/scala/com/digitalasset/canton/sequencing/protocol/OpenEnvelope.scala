@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Functor
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -37,7 +37,7 @@ case class OpenEnvelope[+M <: ProtocolMessage](
       else this.copy(protocolMessage = newProtocolMessage)
     }
 
-  override def pretty: Pretty[OpenEnvelope[ProtocolMessage]] =
+  override def pretty: Pretty[DefaultOpenEnvelope] =
     prettyOfClass(unnamedParam(_.protocolMessage), param("recipients", _.recipients))
 
   override def forRecipient(member: Member): Option[OpenEnvelope[M]] = {

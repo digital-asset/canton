@@ -27,15 +27,26 @@ import scala.concurrent.blocking
 
 trait DbMigrationsFactory {
 
-  def create(dbConfig: DbConfig)(implicit closeContext: CloseContext): DbMigrations
+  def create(dbConfig: DbConfig, devVersionSupport: Boolean)(implicit
+      closeContext: CloseContext
+  ): DbMigrations
 
-  def create(dbConfig: DbConfig, name: String)(implicit closeContext: CloseContext): DbMigrations
+  def create(dbConfig: DbConfig, name: String, devVersionSupport: Boolean)(implicit
+      closeContext: CloseContext
+  ): DbMigrations
 
 }
 
 trait DbMigrations { this: NamedLogging =>
 
   implicit protected def closeContext: CloseContext
+
+  /** Whether we want to add the schema files found in the dev folder to the migration
+    *
+    * A user that does that, won't be able to upgrade to new Canton versions, as we reserve our right to just
+    * modify the dev version files in any way we like.
+    */
+  protected def devVersionSupport: Boolean
 
   protected def createDataSource(jdbcDataSource: JdbcDataSource): DataSource =
     jdbcDataSource match {
@@ -51,7 +62,7 @@ trait DbMigrations { this: NamedLogging =>
     */
   protected def createFlyway(dataSource: DataSource): Flyway = {
     Flyway.configure
-      .locations(dbConfig.migrationsPaths: _*)
+      .locations(dbConfig.buildMigrationsPaths(devVersionSupport): _*)
       .dataSource(dataSource)
       .cleanOnValidationError(dbConfig.cleanOnValidationError)
       .baselineOnMigrate(dbConfig.baselineOnMigrate)
@@ -258,17 +269,24 @@ trait DbMigrations { this: NamedLogging =>
 }
 
 class CommunityDbMigrationsFactory(loggerFactory: NamedLoggerFactory) extends DbMigrationsFactory {
-  override def create(dbConfig: DbConfig, name: String)(implicit
+  override def create(dbConfig: DbConfig, name: String, devVersionSupport: Boolean)(implicit
       closeContext: CloseContext
   ): DbMigrations =
-    new CommunityDbMigrations(dbConfig, loggerFactory.appendUnnamedKey("node", name))
+    new CommunityDbMigrations(
+      dbConfig,
+      devVersionSupport,
+      loggerFactory.appendUnnamedKey("node", name),
+    )
 
-  override def create(dbConfig: DbConfig)(implicit closeContext: CloseContext): DbMigrations =
-    new CommunityDbMigrations(dbConfig, loggerFactory)
+  override def create(dbConfig: DbConfig, devVersionSupport: Boolean)(implicit
+      closeContext: CloseContext
+  ): DbMigrations =
+    new CommunityDbMigrations(dbConfig, devVersionSupport, loggerFactory)
 }
 
 class CommunityDbMigrations(
     protected val dbConfig: DbConfig,
+    protected val devVersionSupport: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit override protected val closeContext: CloseContext)
     extends DbMigrations

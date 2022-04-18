@@ -125,7 +125,8 @@ class SequencerAdministrationGroup(
 
     @Help.Summary("Remove data that has been read up until the specified time")
     @Help.Description(
-      "Similar to the above `prune` command but allows specifying the exact time at which to prune"
+      """Similar to the above `prune` command but allows specifying the exact time at which to prune. 
+        |The command will fail if a client has not yet read and acknowledged some data up to the specified time."""
     )
     def prune_at(timestamp: CantonTimestamp): String = {
       val status = this.status()

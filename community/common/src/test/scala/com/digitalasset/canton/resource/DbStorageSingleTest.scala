@@ -6,7 +6,7 @@ package com.digitalasset.canton.resource
 import com.digitalasset.canton.config.CommunityDbConfig.Postgres
 import com.digitalasset.canton.config.{DbConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.store.db.DbStorageSetup
+import com.digitalasset.canton.store.db.{DbStorageSetup, MigrationMode}
 import com.digitalasset.canton.store.db.DbStorageSetup.Config.PostgresBasicConfig
 import com.digitalasset.canton.{BaseTest, CloseableTest}
 import com.typesafe.config.ConfigFactory
@@ -96,7 +96,11 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
 
 class DbStorageSingleTestPostgres extends DbStorageSingleTest {
 
-  private lazy val setup = DbStorageSetup.postgresFunctionalTestSetup(loggerFactory)
+  private lazy val setup =
+    DbStorageSetup.postgresFunctionalTestSetup(
+      loggerFactory,
+      migrationMode = MigrationMode.Standard,
+    )
 
   private def modifyConfig(config: PostgresBasicConfig): Postgres = {
     val defaultConfig = DbStorageSetup.Config.pgConfig(config)

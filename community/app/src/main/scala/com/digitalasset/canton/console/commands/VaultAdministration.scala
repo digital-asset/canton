@@ -198,7 +198,12 @@ class LocalSecretKeyAdministration(
       val file = new File(filename)
       file.createNewFile()
       // only current user has permissions with the file
-      Files.setPosixFilePermissions(file.toPath, Set(OWNER_READ, OWNER_WRITE).asJava)
+      try {
+        Files.setPosixFilePermissions(file.toPath, Set(OWNER_READ, OWNER_WRITE).asJava)
+      } catch {
+        // the above will throw on non-posix systems such as windows
+        case _: UnsupportedOperationException =>
+      }
       // todo: version
       BinaryFileUtil.writeByteStringToFile(filename, bytes) // TODO(#8825)
     }

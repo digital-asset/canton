@@ -6,29 +6,24 @@ package com.digitalasset.canton.crypto
 import cats.Order
 import cats.data.{EitherT, NonEmptySet}
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
   CryptoPublicStoreError,
-}
-import com.digitalasset.canton.crypto.version.{
-  VersionedSignature,
-  VersionedSigningPrivateKey,
-  VersionedSigningPublicKey,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasVersionedMessageCompanion,
   HasVersionedWrapper,
-  HasVersionedWrapperCompanion,
-  NoCopy,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
@@ -128,13 +123,13 @@ case class Signature private[crypto] (
     format: SignatureFormat,
     private val signature: ByteString,
     signedBy: Fingerprint,
-) extends HasVersionedWrapper[VersionedSignature]
+) extends HasVersionedWrapper[VersionedMessage[Signature]]
     with HasProtoV0[v0.Signature]
     with PrettyPrinting
     with NoCopy {
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSignature =
-    VersionedSignature(VersionedSignature.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Signature] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.Signature =
     v0.Signature(
@@ -150,8 +145,11 @@ case class Signature private[crypto] (
   private[crypto] def unwrap: ByteString = signature
 }
 
-object Signature extends HasVersionedWrapperCompanion[VersionedSignature, Signature] {
-  override protected def ProtoClassCompanion: VersionedSignature.type = VersionedSignature
+object Signature extends HasVersionedMessageCompanion[Signature] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.Signature)(fromProtoV0)
+  )
+
   override protected def name: String = "signature"
 
   private[this] def apply(
@@ -160,14 +158,6 @@ object Signature extends HasVersionedWrapperCompanion[VersionedSignature, Signat
       signedBy: Fingerprint,
   ): Signature =
     throw new UnsupportedOperationException("Use deserialization method instead")
-
-  override def fromProtoVersioned(
-      signatureP: VersionedSignature
-  ): ParsingResult[Signature] =
-    signatureP.version match {
-      case VersionedSignature.Version.Empty => Left(FieldNotSet("VersionedSignature.version"))
-      case VersionedSignature.Version.V0(signature) => fromProtoV0(signature)
-    }
 
   def fromProtoV0(signatureP: v0.Signature): ParsingResult[Signature] =
     for {
@@ -309,14 +299,14 @@ case class SigningPublicKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: SigningKeyScheme,
 ) extends PublicKey
-    with HasVersionedWrapper[VersionedSigningPublicKey]
+    with HasVersionedWrapper[VersionedMessage[SigningPublicKey]]
     with PrettyPrinting
     with HasProtoV0[v0.SigningPublicKey]
     with NoCopy {
   override val purpose: KeyPurpose = KeyPurpose.Signing
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSigningPublicKey =
-    VersionedSigningPublicKey(VersionedSigningPublicKey.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPublicKey] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SigningPublicKey =
     v0.SigningPublicKey(
@@ -333,10 +323,11 @@ case class SigningPublicKey private[crypto] (
     prettyOfClass(param("id", _.id), param("format", _.format), param("scheme", _.scheme))
 }
 
-object SigningPublicKey
-    extends HasVersionedWrapperCompanion[VersionedSigningPublicKey, SigningPublicKey] {
-  override protected def ProtoClassCompanion: VersionedSigningPublicKey.type =
-    VersionedSigningPublicKey
+object SigningPublicKey extends HasVersionedMessageCompanion[SigningPublicKey] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SigningPublicKey)(fromProtoV0)
+  )
+
   override protected def name: String = "signing public key"
 
   private[this] def apply(
@@ -346,15 +337,6 @@ object SigningPublicKey
       scheme: SigningKeyScheme,
   ): SigningPrivateKey =
     throw new UnsupportedOperationException("Use keypair generate or deserialization methods")
-
-  override def fromProtoVersioned(
-      publicKeyP: VersionedSigningPublicKey
-  ): ParsingResult[SigningPublicKey] =
-    publicKeyP.version match {
-      case VersionedSigningPublicKey.Version.Empty =>
-        Left(FieldNotSet("VersionedSigningPublicKey.version"))
-      case VersionedSigningPublicKey.Version.V0(key) => fromProtoV0(key)
-    }
 
   def fromProtoV0(
       publicKeyP: v0.SigningPublicKey
@@ -394,10 +376,10 @@ final case class SigningPrivateKey private[crypto] (
     scheme: SigningKeyScheme,
 ) extends PrivateKey
     with HasProtoV0[v0.SigningPrivateKey]
-    with HasVersionedWrapper[VersionedSigningPrivateKey]
+    with HasVersionedWrapper[VersionedMessage[SigningPrivateKey]]
     with NoCopy {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSigningPrivateKey =
-    VersionedSigningPrivateKey(VersionedSigningPrivateKey.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPrivateKey] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SigningPrivateKey =
     v0.SigningPrivateKey(
@@ -413,10 +395,11 @@ final case class SigningPrivateKey private[crypto] (
     v0.PrivateKey.Key.SigningPrivateKey(toProtoV0)
 }
 
-object SigningPrivateKey
-    extends HasVersionedWrapperCompanion[VersionedSigningPrivateKey, SigningPrivateKey] {
-  override protected def ProtoClassCompanion: VersionedSigningPrivateKey.type =
-    VersionedSigningPrivateKey
+object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SigningPrivateKey)(fromProtoV0)
+  )
+
   override protected def name: String = "signing private key"
 
   private[this] def apply(
@@ -426,15 +409,6 @@ object SigningPrivateKey
       scheme: SigningKeyScheme,
   ): SigningPrivateKey =
     throw new UnsupportedOperationException("Use keypair generate or deserialization methods")
-
-  override def fromProtoVersioned(
-      privateKeyP: VersionedSigningPrivateKey
-  ): ParsingResult[SigningPrivateKey] =
-    privateKeyP.version match {
-      case VersionedSigningPrivateKey.Version.Empty =>
-        Left(FieldNotSet("VersionedSigningPrivateKey.version"))
-      case VersionedSigningPrivateKey.Version.V0(key) => fromProtoV0(key)
-    }
 
   def fromProtoV0(
       privateKeyP: v0.SigningPrivateKey

@@ -4,12 +4,10 @@
 package com.digitalasset.canton.crypto.provider.tink
 
 import java.security.GeneralSecurityException
-
 import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink._
 import com.google.crypto.tink.aead.AeadKeyTemplates
 import com.google.crypto.tink.config.TinkConfig

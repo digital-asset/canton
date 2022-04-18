@@ -7,8 +7,7 @@ import cats.data.NonEmptySet
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 

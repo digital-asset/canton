@@ -330,6 +330,7 @@ trait CantonConfig {
         domainConfig.sequencerClient,
         domainConfig.caching,
         parameters.nonStandardConfig,
+        domainConfig.domainParameters.willCorruptYourSystemDevVersionSupport,
       )
   }
 
@@ -362,7 +363,10 @@ trait CantonConfig {
         participantConfig.sequencerClient,
         participantParameters.indexer,
         participantParameters.transferTimeProofFreshnessProportion,
-        participantParameters.minimumProtocolVersion.map(_.unwrap),
+        ParticipantProtocolConfig(
+          minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
+          devVersionSupport = participantParameters.willCorruptYourSystemDevVersionSupport,
+        ),
         participantParameters.uniqueContractKeys,
         participantParameters.enableCausalityTracking,
         participantParameters.unsafeEnableDamlLfDevVersion,

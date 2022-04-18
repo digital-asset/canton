@@ -19,6 +19,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util._
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.PriorityBlockingQueue

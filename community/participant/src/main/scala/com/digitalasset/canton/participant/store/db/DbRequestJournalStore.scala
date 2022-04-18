@@ -124,18 +124,15 @@ class DbRequestJournalStore(
 
           case _: Profile.Oracle =>
             val query =
-              """insert /*+ IGNORE_ROW_ON_DUPKEY_INDEX ( journal_requests (request_counter, domain_id) ) */ into
-                   journal_requests(domain_id, request_counter, request_state_index, request_timestamp, commit_time, repair_context)
-                 values (?, ?, ?, ?, ?, ?)"""
-            DbStorage
-              .bulkOperation_(query, items.map(_.value).toList, storage.profile)(setData)
-              .map { (_: Unit) =>
-                // IGNORE_ROW_ON_DUPKEY_INDEX doesn't give meaningful update counts for Oracle in batch queries
-                // We therefore mock the update counts here:
-                // Report all success or all failure depending on whether we want to explicitly check consistency.
-                if (enableAdditionalConsistencyChecksInOracle) Array.fill(items.size)(0)
-                else Array.fill(items.size)(1)
-              }(executionContext)
+              """merge /*+ INDEX (journal_requests pk_journal_requests) */
+                |into journal_requests
+                |using (select ? domain_id, ? request_counter from dual) input
+                |on (journal_requests.request_counter = input.request_counter and 
+                |    journal_requests.domain_id = input.domain_id)
+                |when not matched then 
+                |  insert (domain_id, request_counter, request_state_index, request_timestamp, commit_time, repair_context)
+                |  values (input.domain_id, input.request_counter, ?, ?, ?, ?)""".stripMargin
+            DbStorage.bulkOperation(query, items.map(_.value).toList, storage.profile)(setData)
         }
       }
 

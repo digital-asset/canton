@@ -8,14 +8,9 @@ import cats.data.{NonEmptyList, NonEmptySet}
 import cats.instances.either._
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.version.{
-  VersionedDynamicDomainParameters,
-  VersionedStaticDomainParameters,
-}
 import com.digitalasset.canton.protocol.{v0 => protoV0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -26,8 +21,13 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 
 import scala.Ordered.orderingToOrdered
 
@@ -42,7 +42,7 @@ final case class StaticDomainParameters(
     requiredHashAlgorithms: NonEmptySet[HashAlgorithm],
     requiredCryptoKeyFormats: NonEmptySet[CryptoKeyFormat],
     protocolVersion: ProtocolVersion,
-) extends HasVersionedWrapper[VersionedStaticDomainParameters]
+) extends HasVersionedWrapper[VersionedMessage[StaticDomainParameters]]
     with HasProtoV0[protoV0.StaticDomainParameters] {
 
   /** Compute the max size limit for the sum of the envelope payloads of a batch
@@ -53,8 +53,9 @@ final case class StaticDomainParameters(
   def maxBatchMessageSize: NonNegativeInt =
     NonNegativeInt.tryCreate((0.9 * maxInboundMessageSize.unwrap).toInt)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedStaticDomainParameters =
-    VersionedStaticDomainParameters(VersionedStaticDomainParameters.Version.V0(toProtoV0))
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[StaticDomainParameters] = VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: protoV0.StaticDomainParameters =
     protoV0.StaticDomainParameters(
@@ -73,10 +74,11 @@ final case class StaticDomainParameters(
     )
 }
 
-object StaticDomainParameters
-    extends HasVersionedWrapperCompanion[VersionedStaticDomainParameters, StaticDomainParameters] {
-  override protected def ProtoClassCompanion: VersionedStaticDomainParameters.type =
-    VersionedStaticDomainParameters
+object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainParameters] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0)
+  )
+
   override protected def name: String = "static domain parameters"
 
   /*
@@ -88,15 +90,6 @@ object StaticDomainParameters
     NonNegativeInt.tryCreate(1000000) // yeah, sure.
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
   val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.ofSeconds(60)
-
-  override def fromProtoVersioned(
-      domainParametersP: VersionedStaticDomainParameters
-  ): ParsingResult[StaticDomainParameters] =
-    domainParametersP.version match {
-      case VersionedStaticDomainParameters.Version.Empty =>
-        Left(FieldNotSet("VersionedStaticDomainParameters.version"))
-      case VersionedStaticDomainParameters.Version.V0(parameters) => fromProtoV0(parameters)
-    }
 
   def fromProtoV0(
       domainParametersP: protoV0.StaticDomainParameters
@@ -216,7 +209,7 @@ final case class DynamicDomainParameters(
     transferExclusivityTimeout: NonNegativeFiniteDuration,
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-) extends HasVersionedWrapper[VersionedDynamicDomainParameters]
+) extends HasVersionedWrapper[VersionedMessage[DynamicDomainParameters]]
     with HasProtoV0[protoV0.DynamicDomainParameters] {
 
   /** Computes the decision time for the given activeness time.
@@ -260,8 +253,10 @@ final case class DynamicDomainParameters(
   def automaticTransferInEnabled: Boolean =
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedDynamicDomainParameters =
-    VersionedDynamicDomainParameters(VersionedDynamicDomainParameters.Version.V0(toProtoV0))
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[DynamicDomainParameters] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: protoV0.DynamicDomainParameters =
     protoV0.DynamicDomainParameters(
@@ -273,13 +268,11 @@ final case class DynamicDomainParameters(
     )
 }
 
-object DynamicDomainParameters
-    extends HasVersionedWrapperCompanion[
-      VersionedDynamicDomainParameters,
-      DynamicDomainParameters,
-    ] {
-  override protected def ProtoClassCompanion: VersionedDynamicDomainParameters.type =
-    VersionedDynamicDomainParameters
+object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomainParameters] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0)
+  )
+
   override protected def name: String = "dynamic domain parameters"
 
   final case class WithValidity(
@@ -330,15 +323,6 @@ object DynamicDomainParameters
 
   // if there is no topology change delay defined (or not yet propagated), we'll use this one
   val topologyChangeDelayIfAbsent: NonNegativeFiniteDuration = NonNegativeFiniteDuration.Zero
-
-  override def fromProtoVersioned(
-      domainParametersP: VersionedDynamicDomainParameters
-  ): ParsingResult[DynamicDomainParameters] =
-    domainParametersP.version match {
-      case VersionedDynamicDomainParameters.Version.Empty =>
-        Left(FieldNotSet("VersionedDynamicDomainParameters.version"))
-      case VersionedDynamicDomainParameters.Version.V0(parameters) => fromProtoV0(parameters)
-    }
 
   def fromProtoV0(
       domainParametersP: protoV0.DynamicDomainParameters

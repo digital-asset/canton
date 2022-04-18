@@ -8,12 +8,12 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
-  String256M,
   String255,
+  String256M,
 }
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 import slick.jdbc.GetResult
 
 final case class ServiceAgreementId(override protected val str: String255)

@@ -111,9 +111,8 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 
         val (_, informeeTree) = example.informeeTreeBlindedFor
         InformeeTree
-          .fromByteString(
-            factory.cryptoOps,
-            informeeTree.toByteString(ProtocolVersion.latestForTest),
+          .fromByteString(factory.cryptoOps)(
+            informeeTree.toByteString(ProtocolVersion.latestForTest)
           ) shouldEqual Right(informeeTree)
 
         forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>

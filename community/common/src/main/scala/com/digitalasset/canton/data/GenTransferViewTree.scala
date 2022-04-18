@@ -4,16 +4,22 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
 import com.digitalasset.canton.protocol.ViewHash
-import com.digitalasset.canton.protocol.version.VersionedTransferViewTree
-import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.protocol.v0.TransferViewTree
+import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  UntypedVersionedMessage,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 /** A transfer request tree has two children:
@@ -28,15 +34,15 @@ abstract class GenTransferViewTree[
 ] protected (commonData: MerkleTree[CommonData], participantData: MerkleTree[View])(
     hashOps: HashOps
 ) extends MerkleTreeInnerNode[Tree](hashOps)
-    with HasVersionedWrapper[VersionedTransferViewTree]
+    with HasVersionedWrapper[VersionedMessage[TransferViewTree]]
     with HasProtoV0[v0.TransferViewTree] { this: Tree =>
 
   override def subtrees: Seq[MerkleTree[_]] = Seq(commonData, participantData)
 
   // This method is visible because we need the non-deterministic serialization only when we encrypt the tree,
   // but the message to the mediator is sent unencrypted.
-  override def toProtoVersioned(version: ProtocolVersion): VersionedTransferViewTree =
-    VersionedTransferViewTree(VersionedTransferViewTree.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TransferViewTree] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.TransferViewTree =
     v0.TransferViewTree(
@@ -69,13 +75,14 @@ object GenTransferViewTree {
       deserializeView: ByteString => ParsingResult[MerkleTree[View]],
   )(
       createTree: (MerkleTree[CommonData], MerkleTree[View]) => Tree
-  )(treeP: VersionedTransferViewTree): ParsingResult[Tree] =
-    treeP.version match {
-      case VersionedTransferViewTree.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferViewTree.version"))
-      case VersionedTransferViewTree.Version.V0(tree) =>
-        fromProtoV0(deserializeCommonData, deserializeView)(createTree)(tree)
-    }
+  )(treeP: UntypedVersionedMessage): ParsingResult[Tree] =
+    if (treeP.version == 0)
+      treeP.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet("data")).flatMap { data =>
+        ProtoConverter
+          .protoParser(v0.TransferViewTree.parseFrom)(data)
+          .flatMap(fromProtoV0(deserializeCommonData, deserializeView)(createTree))
+      }
+    else Left(ProtoDeserializationError.VersionError("TransferViewTree", treeP.version))
 
   private[data] def fromProtoV0[CommonData, View, Tree](
       deserializeCommonData: ByteString => ParsingResult[MerkleTree[

@@ -18,7 +18,6 @@ import com.daml.lf.data.{ImmArray, Ref, StringModule, Bytes => LfBytes}
 import com.daml.lf.transaction.BlindingInfo
 import com.digitalasset.canton
 import com.digitalasset.canton.ProtoDeserializationError.{
-  FieldNotSet,
   SubmissionIdConversionError,
   TimeModelConversionError,
   ValueConversionError,
@@ -27,7 +26,6 @@ import com.digitalasset.canton.config.RequireTypes.String255
 import com.google.rpc.status.{Status => RpcStatus}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.v0
-import com.digitalasset.canton.participant.protocol.version.VersionedLedgerSyncEvent
 import com.digitalasset.canton.participant.store.DamlLfSerializers._
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.{
@@ -45,8 +43,13 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
   required,
 }
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageWithContextCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.{
   LedgerParticipantId,
   LedgerSubmissionId,
@@ -64,13 +67,13 @@ import slick.jdbc.{GetResult, SetParameter}
   * @throws canton.store.db.DbSerializationException if transactions or contracts fail to serialize
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
-case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
-    extends HasVersionedWrapper[VersionedLedgerSyncEvent]
+final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
+    extends HasVersionedWrapper[VersionedMessage[LedgerSyncEvent]]
     with HasProtoV0[v0.LedgerSyncEvent] {
   private val SyncEventP = v0.LedgerSyncEvent.Value
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedLedgerSyncEvent =
-    VersionedLedgerSyncEvent(VersionedLedgerSyncEvent.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[LedgerSyncEvent] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.LedgerSyncEvent =
     v0.LedgerSyncEvent(
@@ -110,14 +113,19 @@ case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
 }
 
 object SerializableLedgerSyncEvent {
+  private[this] object VersionedProtoConverter
+      extends HasVersionedMessageWithContextCompanion[LedgerSyncEvent, Unit] {
+    override val name: String = "SerializableLedgerSyncEvent"
+
+    val supportedProtoVersions: Map[Int, Parser] = Map(
+      0 -> supportedProtoVersion(v0.LedgerSyncEvent) { case (_, proto) => fromProtoV0(proto) }
+    )
+  }
+
   def fromProtoVersioned(
-      ledgerSyncEventP: VersionedLedgerSyncEvent
+      ledgerSyncEventP: VersionedMessage[LedgerSyncEvent]
   ): ParsingResult[LedgerSyncEvent] =
-    ledgerSyncEventP.version match {
-      case VersionedLedgerSyncEvent.Version.Empty =>
-        Left(FieldNotSet("VersionedLedgerSyncEvent.version"))
-      case VersionedLedgerSyncEvent.Version.V0(event) => fromProtoV0(event)
-    }
+    VersionedProtoConverter.fromProtoVersioned(())(ledgerSyncEventP)
 
   def fromProtoV0(
       ledgerSyncEventP: v0.LedgerSyncEvent
@@ -426,7 +434,6 @@ object SerializablePublicPackageUploadRejected {
 
 case class SerializableTransactionAccepted(transactionAccepted: LedgerSyncEvent.TransactionAccepted)
     extends HasProtoV0[v0.TransactionAccepted] {
-  import cats.syntax.either._
   override def toProtoV0: v0.TransactionAccepted = {
     val LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
@@ -587,7 +594,6 @@ case class SerializableSubmissionId(submissionId: LedgerSubmissionId) {
 }
 
 object SerializableSubmissionId {
-  import cats.syntax.either._
   def fromProtoPrimitive(
       submissionIdP: String
   ): ParsingResult[LedgerSubmissionId] =
@@ -623,7 +629,6 @@ object SerializableSubmissionId {
   * a `toProto` equivalent is currently unnecessary.
   */
 private[store] class SerializableStringModule[V, M <: StringModule[V]](module: M) {
-  import cats.syntax.either._
   def fromProtoPrimitive(valueP: String): ParsingResult[V] =
     // see note about unknown field naming in SerializableLfTimestamp
     module.fromString(valueP).leftMap(ValueConversionError("<unknown>", _))
@@ -765,8 +770,6 @@ case class SerializableNodeSeed(nodeId: LfNodeId, seedHash: LfHash)
 }
 
 object SerializableNodeSeed {
-  import cats.syntax.either._
-
   def fromProtoV0(nodeSeed: v0.NodeSeed): ParsingResult[(LfNodeId, LfHash)] = {
     val v0.NodeSeed(nodeIndex, seedHashP) = nodeSeed
     for {

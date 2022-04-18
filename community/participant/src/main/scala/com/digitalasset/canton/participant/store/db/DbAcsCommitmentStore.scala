@@ -377,10 +377,14 @@ class DbAcsCommitmentStore(
         .distinct
 
       insertQuery =
-        """insert
-           /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */
-           into outstanding_acs_commitments (domain_id, from_exclusive, to_inclusive, counter_participant)
-               values (?, ?, ?, ?)"""
+        """merge /*+ INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */  
+          |into outstanding_acs_commitments t
+          |using (select ? domain_id, ? from_exclusive, ? to_inclusive, ? counter_participant from dual) input
+          |on (t.counter_participant = input.counter_participant and t.domain_id = input.domain_id and
+          |    t.from_exclusive = input.from_exclusive and t.to_inclusive = input.to_inclusive)
+          |when not matched then
+          |  insert (domain_id, from_exclusive, to_inclusive, counter_participant)
+          |  values (input.domain_id, input.from_exclusive, input.to_inclusive, input.counter_participant)""".stripMargin
 
       _ <- DbStorage.bulkOperation_(insertQuery, newPeriods, storage.profile) { pp => newPeriod =>
         pp >> domainId
@@ -639,7 +643,6 @@ class DbIncrementalCommitmentStore(
         statement,
         updates,
         storage.profile,
-        useTransactionForOracle = true,
       )(setParams)
     }
 

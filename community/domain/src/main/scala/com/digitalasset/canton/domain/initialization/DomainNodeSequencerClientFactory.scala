@@ -102,7 +102,8 @@ class DomainNodeSequencerClientFactory(
       futureSupervisor,
       cantonParameterConfig.loggingConfig,
       clientLoggerFactory,
-      supportedProtocolVersions = ProtocolVersion.supportedProtocolsDomain,
+      supportedProtocolVersions =
+        ProtocolVersion.supportedProtocolsDomain(cantonParameterConfig.devVersionSupport),
       minimumProtocolVersion = None,
     )(member, sequencedEventStore, sendTrackerStore)
   }

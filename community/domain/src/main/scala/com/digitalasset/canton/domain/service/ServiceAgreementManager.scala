@@ -23,7 +23,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 import slick.jdbc.GetResult
 
 import scala.concurrent.{ExecutionContext, Future}

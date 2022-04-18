@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.LocalReject.Code
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.empty
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level

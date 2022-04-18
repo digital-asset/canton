@@ -7,6 +7,9 @@ import cats.data.{Validated, ValidatedNel}
 import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
+import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.domain.config.DomainParametersConfig
+import com.digitalasset.canton.version.ProtocolVersion
 
 private[config] trait ConfigValidations[C <: CantonConfig] {
   final def validate(config: C): ValidatedNel[String, Unit] = validations.traverse_(_(config))
@@ -26,7 +29,7 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
     ]
 
   private[config] def genericValidations[C <: CantonConfig]: List[C => ValidatedNel[String, Unit]] =
-    List(backwardsCompatibleLoggingConfig)
+    List(backwardsCompatibleLoggingConfig, developmentProtocolSafetyCheckDomains)
 
   /** Group node configs by db access to find matching db storage configs.
     * Overcomplicated types used are to work around that at this point nodes could have conflicting names so we can't just
@@ -133,5 +136,38 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
 
   private[config] val backwardsCompatibleLoggingConfigErr =
     "Inconsistent configuration of canton.monitoring.log-message-payloads and canton.monitoring.logging.api.message-payloads. Please use the latter in your configuration"
+
+  private def developmentProtocolSafetyCheckDomains(
+      config: CantonConfig
+  ): ValidatedNel[String, Unit] = {
+    developmentProtocolSafetyCheck(config.domains.toSeq.map { case (k, v) =>
+      (k, v.domainParameters)
+    })
+  }
+
+  private[config] def developmentProtocolSafetyCheck(
+      namesAndConfig: Seq[(InstanceName, DomainParametersConfig)]
+  ): ValidatedNel[String, Unit] = {
+    def toNel(
+        name: String,
+        protocolVersion: ProtocolVersion,
+        flag: Boolean,
+    ): ValidatedNel[String, Unit] = {
+      Validated.condNel(
+        protocolVersion != ProtocolVersion.unstable_development || flag,
+        (),
+        s"Protocol ${protocolVersion} for node ${name} requires you to explicitly set ...parameters.will-corrupt-your-system-dev-version-support = yes",
+      )
+    }
+
+    namesAndConfig.toList.traverse_ { case (name, parameters) =>
+      toNel(
+        name.unwrap,
+        parameters.protocolVersion.version,
+        parameters.willCorruptYourSystemDevVersionSupport,
+      )
+    }
+
+  }
 
 }

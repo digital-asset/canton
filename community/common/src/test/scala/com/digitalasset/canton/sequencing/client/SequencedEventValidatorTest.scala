@@ -11,8 +11,15 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError._
 import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
-import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.sequencing.{
+  OrdinarySerializedEvent,
+  PossiblyIgnoredSerializedEvent,
+  SequencerTestUtils,
+}
+import com.digitalasset.canton.store.SequencedEventStore.{
+  IgnoredSequencedEvent,
+  OrdinarySequencedEvent,
+}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
@@ -34,8 +41,8 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
   private lazy val dummyHash: Hash = TestHash.digest(0)
 
   private def mkValidator(
-      initialEventMetadata: SequencedEventMetadata =
-        SequencedEventMetadata(updatedCounter - 1, CantonTimestamp.MinValue, dummyHash),
+      initialEventMetadata: PossiblyIgnoredSerializedEvent =
+        IgnoredSequencedEvent(CantonTimestamp.MinValue, updatedCounter - 1, None)(traceContext),
       syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi,
   ): SequencedEventValidator = {
     new SequencedEventValidator(
@@ -91,6 +98,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
       customSerialization: Option[ByteString] = None,
+      messageIdO: Option[MessageId] = None,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
   ): Future[OrdinarySerializedEvent] = {
     val event =
@@ -98,6 +106,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         counter = counter,
         timestamp = timestamp,
         deserializedFrom = customSerialization,
+        messageId = messageIdO,
       )
     for {
       signature <- sign(
@@ -155,8 +164,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         subscriberCryptoApi.snapshot(tm)
       )
       when(syncCrypto.topologyKnownUntilTimestamp).thenReturn(CantonTimestamp.MaxValue)
-      val validator =
-        mkValidator(SequencedEventMetadata(41L, ts(0), dummyHash), syncCryptoApi = syncCrypto)
+      val validator = mkValidator(
+        IgnoredSequencedEvent(ts(0), 41L, None)(traceContext),
+        syncCryptoApi = syncCrypto,
+      )
       for {
         deliver <- createEventWithCounterAndTs(42, ts(2), timestampOfSigningKey = Some(ts(1)))
         _ <- valueOrFail(validator.validate(deliver))("validate")
@@ -165,7 +176,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
 
     "allow the same counter-timestamp several times" in {
       val validator =
-        mkValidator(SequencedEventMetadata(41L, CantonTimestamp.MinValue, dummyHash))
+        mkValidator(IgnoredSequencedEvent(CantonTimestamp.MinValue, 41L, None)(traceContext))
 
       for {
         deliver <- createEventWithCounterAndTs(42, CantonTimestamp.Epoch)
@@ -176,7 +187,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
 
     "fail if the counter or timestamp do not increase" in {
       val validator =
-        mkValidator(SequencedEventMetadata(41L, CantonTimestamp.Epoch, dummyHash))
+        mkValidator(IgnoredSequencedEvent(CantonTimestamp.Epoch, 41L, None)(traceContext))
 
       for {
         deliver1 <- createEventWithCounterAndTs(42, CantonTimestamp.MinValue)
@@ -203,7 +214,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
 
     "fail if there is a counter cap" in {
       val validator =
-        mkValidator(SequencedEventMetadata(41L, CantonTimestamp.Epoch, dummyHash))
+        mkValidator(IgnoredSequencedEvent(CantonTimestamp.Epoch, 41L, None)(traceContext))
 
       for {
         deliver1 <- createEventWithCounterAndTs(43L, CantonTimestamp.ofEpochSecond(1))
@@ -219,17 +230,17 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       }
     }
 
-    "fail if an event with the same counter has differing timestamp or signature" in {
+    "fail if an event with the same counter has differing content" in {
       val validator =
-        mkValidator(SequencedEventMetadata(0L, CantonTimestamp.MinValue, dummyHash))
+        mkValidator(IgnoredSequencedEvent(CantonTimestamp.MinValue, 0L, None)(traceContext))
       for {
         deliver1 <- createEventWithCounterAndTs(1L, CantonTimestamp.Epoch)
         deliver2 <- createEventWithCounterAndTs(1L, CantonTimestamp.MaxValue)
         deliver3 <- createEventWithCounterAndTs(
           1L,
           CantonTimestamp.Epoch,
-          customSerialization = Some(ByteString.copyFromUtf8("foo")),
-        ) // changing serialization to modify the hash while keeping same timestamp
+          messageIdO = Some(MessageId.tryCreate("foo")),
+        ) // changing the content
 
         _ <- validator.validate(deliver1).value
         error1 <- validator.validate(deliver2).value
@@ -237,19 +248,31 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       } yield {
         error1.left.value shouldBe ForkHappened(
           1L,
-          CantonTimestamp.MaxValue,
-          CantonTimestamp.Epoch,
-          hash(deliver2),
-          hash(deliver1),
+          deliver2.signedEvent.content,
+          deliver1.signedEvent.content,
         )
         error2.left.value shouldBe ForkHappened(
           1L,
-          CantonTimestamp.Epoch,
-          CantonTimestamp.Epoch,
-          hash(deliver3),
-          hash(deliver1),
+          deliver3.signedEvent.content,
+          deliver1.signedEvent.content,
         )
       }
+    }
+
+    "succeed if an event with the same counter has a different serialization of the same content" in {
+      val validator =
+        mkValidator(IgnoredSequencedEvent(CantonTimestamp.MinValue, 0L, None)(traceContext))
+      for {
+        deliver1 <- createEventWithCounterAndTs(1L, CantonTimestamp.Epoch)
+        deliver2 <- createEventWithCounterAndTs(
+          1L,
+          CantonTimestamp.Epoch,
+          customSerialization = Some(ByteString.copyFromUtf8("Different serialization")),
+        ) // changing serialization, but not the contents
+
+        _ <- validator.validate(deliver1).value
+        _ <- validator.validate(deliver2).valueOrFail("Different serialization should be accepted")
+      } yield succeed
     }
   }
 }

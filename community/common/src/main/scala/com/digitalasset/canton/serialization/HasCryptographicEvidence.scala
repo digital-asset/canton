@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.serialization
 
-import com.digitalasset.canton.util.{HasVersionedToByteString, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 /** Trait for deterministically serializing an object to a [[com.google.protobuf.ByteString]].

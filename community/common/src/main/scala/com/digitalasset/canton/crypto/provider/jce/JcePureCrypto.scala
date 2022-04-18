@@ -13,12 +13,11 @@ import java.security.{
   PublicKey => JPublicKey,
   Signature => JSignature,
 }
-
 import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.util.{HasVersionedToByteString, ShowUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.ShowUtil
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink.subtle.EllipticCurves.EcdsaEncoding
 import com.google.crypto.tink.subtle.Enums.HashType
 import com.google.crypto.tink.subtle._

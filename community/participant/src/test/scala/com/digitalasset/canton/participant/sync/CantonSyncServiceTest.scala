@@ -29,6 +29,7 @@ import com.digitalasset.canton.participant.admin.{
 import com.digitalasset.canton.participant.config.{
   IndexerConfig,
   ParticipantNodeParameters,
+  ParticipantProtocolConfig,
   ParticipantStoreConfig,
   PartyNotificationConfig,
 }
@@ -102,7 +103,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     sequencerClient = SequencerClientConfig(),
     indexer = IndexerConfig(),
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
-    minimumProtocolVersion = None,
+    protocolConfig = ParticipantProtocolConfig(None, false),
     uniqueContractKeys = false,
     enableCausalityTracking = true,
     unsafeEnableDamlLfDevVersion = false,

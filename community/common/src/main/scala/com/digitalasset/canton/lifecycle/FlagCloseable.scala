@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.lifecycle
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import cats.data.EitherT
 import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.Threading
@@ -14,6 +13,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.google.common.annotations.VisibleForTesting
 
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
@@ -55,7 +55,7 @@ trait FlagCloseable extends AutoCloseable {
   protected def logger: TracedLogger
 
   // How often to poll to check that all tasks have completed.
-  protected def sleepMillis: Long = 500
+  protected def maxSleepMillis: Long = 500
 
   @VisibleForTesting
   protected def runStateChanged(waitingState: Boolean = false): Unit = {} // used for unit testing
@@ -84,6 +84,8 @@ trait FlagCloseable extends AutoCloseable {
     * function, or one of the other variants ([[performUnlessClosingF]] and [[performUnlessClosingEitherT]]).
     * The tasks are assumed to take less than [[closingTimeout]] to complete.
     *
+    * DO NOT CALL `this.close` as part of `f`, because it will result in a deadlock.
+    *
     * @param f The task to perform
     * @return [[scala.None$]] if a shutdown has been initiated. Otherwise the result of the task.
     */
@@ -103,6 +105,8 @@ trait FlagCloseable extends AutoCloseable {
     * The shutdown will only begin after `f` completes, but other tasks may execute concurrently with `f`, if started using this
     * function, or one of the other variants ([[performUnlessClosing]] and [[performUnlessClosingEitherT]]).
     * The tasks are assumed to take less than [[closingTimeout]] to complete.
+    *
+    * DO NOT CALL `this.close` as part of `f`, because it will result in a deadlock.
     *
     * @param f The task to perform
     * @return The future completes with [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] if
@@ -134,6 +138,8 @@ trait FlagCloseable extends AutoCloseable {
     * The shutdown will only begin after `etf` completes, but other tasks may execute concurrently with `etf`, if started using this
     * function, or one of the other variants ([[performUnlessClosing]] and [[performUnlessClosingF]]).
     * The tasks are assumed to take less than [[closingTimeout]] to complete.
+    *
+    * DO NOT CALL `this.close` as part of `etf`, because it will result in a deadlock.
     *
     * @param etf The task to perform
     */
@@ -192,7 +198,7 @@ trait FlagCloseable extends AutoCloseable {
 
   /** Blocks until all earlier tasks have completed and then prevents further tasks from being run.
     */
-  @SuppressWarnings(Array("org.wartremover.warts.While"))
+  @SuppressWarnings(Array("org.wartremover.warts.While", "org.wartremover.warts.Var"))
   final override def close(): Unit = {
     import TraceContext.Implicits.Empty._
 
@@ -203,13 +209,26 @@ trait FlagCloseable extends AutoCloseable {
     val firstCallToClose = closingFlag.compareAndSet(false, true)
     runStateChanged()
     if (firstCallToClose) {
+      // First run onShutdown tasks.
+      // Important to run them in the beginning as they may be used to cancel long-running tasks.
+      val tasks = runOnShutdownTasks.getAndSet(List())
+      tasks.foreach { task =>
+        if (!task.done) {
+          Try { task.run() }.recover { t =>
+            logger.warn(s"Task ${task.name} failed on shutdown!", t)
+          }
+        }
+      }
+
       // Poll for tasks to finish. Inefficient, but we're only doing this during shutdown.
       val deadline = closingTimeout.fromNow
+      var sleepMillis = 1L
       while (!readerCount.compareAndSet(0, -1) && deadline.hasTimeLeft()) {
         val nrActive = readerCount.get()
         logger.debug(s"$nrActive active tasks preventing closing; sleeping for ${sleepMillis}ms")
         runStateChanged(true)
         Threading.sleep(sleepMillis)
+        sleepMillis = (sleepMillis * 2) min maxSleepMillis min deadline.timeLeft.toMillis
       }
       if (readerCount.get >= 0) {
         logger.warn(
@@ -219,14 +238,6 @@ trait FlagCloseable extends AutoCloseable {
       }
       if (keepTrackOfOpenFutures) {
         logger.warn("Tracking of open futures is enabled, but this is only meant for debugging!")
-      }
-      val tasks = runOnShutdownTasks.getAndSet(List())
-      tasks.foreach { task =>
-        if (!task.done) {
-          Try { task.run() }.recover { exp =>
-            logger.warn(s"Task ${task.name} failed on shutdown!", exp)
-          }
-        }
       }
       onClosed()
     } else {

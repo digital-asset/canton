@@ -8,7 +8,8 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.HasProtoV0
 
 case class CreatedContract private (
     contract: SerializableContract,

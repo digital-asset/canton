@@ -7,11 +7,10 @@ import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.version.VersionedSequencedEvent
 import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainId
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage}
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
@@ -79,7 +78,7 @@ class SequencedEventTest extends BaseTestWordSpec {
     }
 
     def deserializeVersioned(
-        eventP: VersionedSequencedEvent
+        eventP: UntypedVersionedMessage
     ): ParsingResult[SequencedEvent[DefaultOpenEnvelope]] = {
       val cryptoPureApi = mock[CryptoPureApi]
       val bytes = eventP.toByteString

@@ -5,15 +5,18 @@ package com.digitalasset.canton.topology.transaction
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.ProtoDeserializationError._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version._
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.store.db.DbSerializationException
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
@@ -34,7 +37,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     key: SigningPublicKey,
     signature: Signature,
 )(val deserializedFrom: Option[ByteString] = None)
-    extends HasVersionedWrapper[VersionedSignedTopologyTransaction]
+    extends HasVersionedWrapper[VersionedMessage[SignedTopologyTransaction[Op]]]
     with HasProtoV0[v0.SignedTopologyTransaction]
     with MemoizedEvidence
     with Product
@@ -45,8 +48,8 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     super[HasVersionedWrapper].toByteString(version)
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedSignedTopologyTransaction =
-    VersionedSignedTopologyTransaction(VersionedSignedTopologyTransaction.Version.V0(toProtoV0))
+  ): VersionedMessage[SignedTopologyTransaction[Op]] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(
@@ -73,7 +76,16 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     this.copy(transaction = transaction.reverse)(None)
 }
 
-object SignedTopologyTransaction {
+object SignedTopologyTransaction
+    extends HasMemoizedVersionedMessageCompanion[SignedTopologyTransaction[
+      TopologyChangeOp
+    ]] {
+  override val name: String = "SignedTopologyTransaction"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.SignedTopologyTransaction)(fromProtoV0)
+  )
+
   import com.digitalasset.canton.resource.DbStorage.Implicits._
 
   /** Sign the given topology transaction. */
@@ -87,9 +99,8 @@ object SignedTopologyTransaction {
       signature <- crypto.sign(transaction.hashToSign(hashOps), signingKey.id)
     } yield SignedTopologyTransaction(transaction, signingKey, signature)(None)
 
-  private def fromProtoV0(
-      transactionP: v0.SignedTopologyTransaction,
-      bytes: ByteString,
+  private def fromProtoV0(transactionP: v0.SignedTopologyTransaction)(
+      bytes: ByteString
   ): ParsingResult[SignedTopologyTransaction[TopologyChangeOp]] =
     for {
       transaction <- TopologyTransaction.fromByteString(transactionP.transaction)
@@ -104,24 +115,6 @@ object SignedTopologyTransaction {
         transactionP.signature,
       )
     } yield SignedTopologyTransaction(transaction, publicKey, signature)(Some(bytes))
-
-  private def fromProtoVersioned(
-      transactionP: VersionedSignedTopologyTransaction,
-      bytes: ByteString,
-  ): ParsingResult[SignedTopologyTransaction[TopologyChangeOp]] =
-    transactionP.version match {
-      case VersionedSignedTopologyTransaction.Version.Empty =>
-        Left(FieldNotSet("VersionedSignedTopologyTransaction.version"))
-      case VersionedSignedTopologyTransaction.Version.V0(transaction) =>
-        fromProtoV0(transaction, bytes)
-    }
-
-  def fromByteString(
-      bytes: ByteString
-  ): ParsingResult[SignedTopologyTransaction[TopologyChangeOp]] =
-    ProtoConverter
-      .protoParser(VersionedSignedTopologyTransaction.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(_, bytes))
 
   /** returns true if two transactions are equivalent */
   def equivalent(

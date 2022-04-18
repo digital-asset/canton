@@ -84,7 +84,7 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       loggerFactory,
     ) {
       // reduce the close timeout
-      override def sleepMillis: Long = 10
+      override def maxSleepMillis: Long = 10
       override def closingTimeout: FiniteDuration = 1.second
     }
 

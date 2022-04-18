@@ -55,16 +55,16 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.TopologyManagerError.DomainErrorGroup
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client._
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
-import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -201,6 +201,7 @@ class DomainNodeBootstrap(
         .attemptInitialization(
           name,
           parameters.sequencerClient,
+          parameters.devVersionSupport,
           adminClient,
           topologyManager,
           crypto.cryptoPublicStore,
@@ -282,7 +283,6 @@ class DomainNodeBootstrap(
       val attemptedStart = new AtomicBoolean(false)
 
       logger.info("Deferring domain startup until domain manager has been fully initialized")
-
       manager.addObserver(new DomainIdentityStateObserver {
         override def addedSignedTopologyTransaction(
             timestamp: CantonTimestamp,
@@ -324,204 +324,198 @@ class DomainNodeBootstrap(
     } yield ()
   }
 
-  private val startDomainQueue = new SimpleExecutionQueue()
-
   /** Attempt to create the domain and only return and call setInstance once it is ready to handle requests */
   private def startDomain(
       manager: DomainTopologyManager,
       nodeId: NodeId,
   ): EitherT[Future, String, Unit] =
-    startDomainQueue.executeE(
-      if (isInitialized) EitherT.rightT[Future, String](())
-      else {
-        // store with all topology transactions which were timestamped and distributed via sequencer
-        val domainId = DomainId(manager.id)
-        val sequencedTopologyStore = topologyStoreFactory.forId(DomainStore(domainId))
-        val publicSequencerConnectionEitherT =
-          config.publicApi.toSequencerConnectionConfig.toConnection.toEitherT[Future]
+    startInstanceUnlessClosing {
+      // store with all topology transactions which were timestamped and distributed via sequencer
+      val domainId = DomainId(manager.id)
+      val sequencedTopologyStore = topologyStoreFactory.forId(DomainStore(domainId))
+      val publicSequencerConnectionEitherT =
+        config.publicApi.toSequencerConnectionConfig.toConnection.toEitherT[Future]
 
-        for {
-          publicSequencerConnection <- publicSequencerConnectionEitherT
-          managerDiscriminator <- EitherT.right(
-            SequencerClientDiscriminator.fromDomainMember(manager.managerId, indexedStringStore)
-          )
-          topologyManagerSequencerCounterTrackerStore = SequencerCounterTrackerStore(
-            storage,
-            managerDiscriminator,
-            timeouts,
-            loggerFactory,
-          )
-          initialKeys <- EitherT.right(manager.getKeysForBootstrapping())
-          processorAndClient <- EitherT.right(
-            TopologyTransactionProcessor.createProcessorAndClientForDomain(
-              sequencedTopologyStore,
-              domainId,
-              crypto.pureCrypto,
-              SigningPublicKey.collect(initialKeys),
-              parameters,
-              clock,
-              futureSupervisor,
-              loggerFactory,
-            )
-          )
-          (topologyProcessor, topologyClient) = processorAndClient
-
-          staticDomainParameters <- staticDomainParametersET
-
-          sequencerClientFactoryFactory = (client: DomainTopologyClientWithInit) =>
-            new DomainNodeSequencerClientFactory(
-              domainId,
-              metrics,
-              client,
-              publicSequencerConnection,
-              parameters,
-              crypto,
-              staticDomainParameters,
-              testingConfig,
-              clock,
-              futureSupervisor,
-              loggerFactory,
-            )
-
-          auditLogger = ParticipantAuditor.factory(loggerFactory, config.auditLogging)
-
-          // add audit logging to the domain manager
-          _ = if (config.auditLogging) {
-            manager.addObserver(new DomainIdentityStateObserver {
-              override def willChangeTheParticipantState(
-                  participant: ParticipantId,
-                  attributes: ParticipantAttributes,
-              ): Unit = {
-                auditLogger.info(s"Updating participant $participant to $attributes")
-              }
-            })
-          }
-
-          syncCrypto: DomainSyncCryptoClient = {
-            ips.add(topologyClient)
-            new SyncCryptoApiProvider(
-              manager.managerId,
-              ips,
-              crypto,
-              parameters.cachingConfigs,
-              loggerFactory,
-            )
-              .tryForDomain(domainId)
-          }
-
-          // Setup the service agreement manager and its storage
-          agreementManager <- config.serviceAgreement
-            .traverse { agreementFile =>
-              ServiceAgreementManager
-                .create(agreementFile.toScala, storage, crypto.pureCrypto, timeouts, loggerFactory)
-            }
-            .toEitherT[Future]
-
-          sequencerRuntime = sequencerRuntimeFactory
-            .create(
-              domainId,
-              crypto,
-              sequencedTopologyStore,
-              topologyClient,
-              storage,
-              clock,
-              config,
-              staticDomainParameters,
-              testingConfig,
-              parameters.processingTimeouts,
-              auditLogger,
-              agreementManager,
-              parameters,
-              metrics.sequencer,
-              indexedStringStore,
-              loggerFactory,
-              logger,
-            )
-
-          domainIdentityService = DomainTopologyManagerRequestService.create(
-            config.topology,
-            manager,
-            topologyClient,
-            clock,
-            topologyStoreFactory,
-            parameters.processingTimeouts,
-            loggerFactory,
-          )
-
-          // must happen before the init of topology management since it will call the embedded sequencer's public api
-          publicServer = PublicGrpcServerInitialization(
-            config,
-            metrics,
+      for {
+        publicSequencerConnection <- publicSequencerConnectionEitherT
+        managerDiscriminator <- EitherT.right(
+          SequencerClientDiscriminator.fromDomainMember(manager.managerId, indexedStringStore)
+        )
+        topologyManagerSequencerCounterTrackerStore = SequencerCounterTrackerStore(
+          storage,
+          managerDiscriminator,
+          timeouts,
+          loggerFactory,
+        )
+        initialKeys <- EitherT.right(manager.getKeysForBootstrapping())
+        processorAndClient <- EitherT.right(
+          TopologyTransactionProcessor.createProcessorAndClientForDomain(
+            sequencedTopologyStore,
+            domainId,
+            crypto.pureCrypto,
+            SigningPublicKey.collect(initialKeys),
             parameters,
+            clock,
+            futureSupervisor,
+            loggerFactory,
+          )
+        )
+        (topologyProcessor, topologyClient) = processorAndClient
+
+        staticDomainParameters <- staticDomainParametersET
+
+        sequencerClientFactoryFactory = (client: DomainTopologyClientWithInit) =>
+          new DomainNodeSequencerClientFactory(
+            domainId,
+            metrics,
+            client,
+            publicSequencerConnection,
+            parameters,
+            crypto,
+            staticDomainParameters,
+            testingConfig,
+            clock,
+            futureSupervisor,
+            loggerFactory,
+          )
+
+        auditLogger = ParticipantAuditor.factory(loggerFactory, config.auditLogging)
+
+        // add audit logging to the domain manager
+        _ = if (config.auditLogging) {
+          manager.addObserver(new DomainIdentityStateObserver {
+            override def willChangeTheParticipantState(
+                participant: ParticipantId,
+                attributes: ParticipantAttributes,
+            ): Unit = {
+              auditLogger.info(s"Updating participant $participant to $attributes")
+            }
+          })
+        }
+
+        syncCrypto: DomainSyncCryptoClient = {
+          ips.add(topologyClient)
+          new SyncCryptoApiProvider(
+            manager.managerId,
+            ips,
+            crypto,
+            parameters.cachingConfigs,
+            loggerFactory,
+          )
+            .tryForDomain(domainId)
+        }
+
+        // Setup the service agreement manager and its storage
+        agreementManager <- config.serviceAgreement
+          .traverse { agreementFile =>
+            ServiceAgreementManager
+              .create(agreementFile.toScala, storage, crypto.pureCrypto, timeouts, loggerFactory)
+          }
+          .toEitherT[Future]
+
+        sequencerRuntime = sequencerRuntimeFactory
+          .create(
+            domainId,
+            crypto,
+            sequencedTopologyStore,
+            topologyClient,
+            storage,
+            clock,
+            config,
+            staticDomainParameters,
+            testingConfig,
+            parameters.processingTimeouts,
+            auditLogger,
+            agreementManager,
+            parameters,
+            metrics.sequencer,
+            indexedStringStore,
             loggerFactory,
             logger,
-            sequencerRuntime,
-            domainId,
-            agreementManager,
-            staticDomainParameters,
-            syncCrypto,
           )
 
-          topologyManagementArtefacts <- TopologyManagementInitialization(
+        domainIdentityService = DomainTopologyManagerRequestService.create(
+          config.topology,
+          manager,
+          topologyClient,
+          clock,
+          topologyStoreFactory,
+          parameters.processingTimeouts,
+          loggerFactory,
+        )
+
+        // must happen before the init of topology management since it will call the embedded sequencer's public api
+        publicServer = PublicGrpcServerInitialization(
+          config,
+          metrics,
+          parameters,
+          loggerFactory,
+          logger,
+          sequencerRuntime,
+          domainId,
+          agreementManager,
+          staticDomainParameters,
+          syncCrypto,
+        )
+
+        topologyManagementArtefacts <- TopologyManagementInitialization(
+          config,
+          domainId,
+          nodeId,
+          storage,
+          clock,
+          crypto,
+          syncCrypto,
+          sequencedTopologyStore,
+          publicSequencerConnection,
+          manager,
+          domainIdentityService,
+          topologyManagerSequencerCounterTrackerStore,
+          topologyProcessor,
+          topologyClient,
+          initialKeys,
+          sequencerClientFactoryFactory(topologyClient),
+          parameters,
+          indexedStringStore,
+          loggerFactory,
+        )
+
+        mediatorRuntime <- EmbeddedMediatorInitialization(
+          domainId,
+          nodeId,
+          parameters,
+          clock,
+          crypto,
+          topologyStoreFactory.forId(DomainStore(domainId, discriminator = "M")),
+          config.timeTracker,
+          storage,
+          sequencerClientFactoryFactory,
+          metrics,
+          mediatorFactory,
+          indexedStringStore,
+          futureSupervisor,
+          loggerFactory.append("node", "mediator"),
+        )
+
+        domain = {
+          logger.debug("Starting domain services")
+          new Domain(
             config,
-            domainId,
-            nodeId,
-            storage,
             clock,
-            crypto,
-            syncCrypto,
-            sequencedTopologyStore,
-            publicSequencerConnection,
+            staticDomainParameters,
+            adminServerRegistry,
             manager,
-            domainIdentityService,
-            topologyManagerSequencerCounterTrackerStore,
-            topologyProcessor,
-            topologyClient,
-            initialKeys,
-            sequencerClientFactoryFactory(topologyClient),
-            parameters,
-            indexedStringStore,
+            agreementManager,
+            topologyManagementArtefacts,
+            storage,
+            sequencerRuntime,
+            mediatorRuntime,
+            publicServer,
             loggerFactory,
           )
-
-          mediatorRuntime <- EmbeddedMediatorInitialization(
-            domainId,
-            nodeId,
-            parameters,
-            clock,
-            crypto,
-            topologyStoreFactory.forId(DomainStore(domainId, discriminator = "M")),
-            config.timeTracker,
-            storage,
-            sequencerClientFactoryFactory,
-            metrics,
-            mediatorFactory,
-            indexedStringStore,
-            futureSupervisor,
-            loggerFactory.append("node", "mediator"),
-          )
-
-          domain = {
-            logger.debug("Starting domain services")
-            new Domain(
-              config,
-              clock,
-              staticDomainParameters,
-              adminServerRegistry,
-              manager,
-              agreementManager,
-              topologyManagementArtefacts,
-              storage,
-              sequencerRuntime,
-              mediatorRuntime,
-              publicServer,
-              loggerFactory,
-            )
-          }
-        } yield setInstance(domain)
-      },
-      "starting domain",
-    )
+        }
+      } yield domain
+    }
 
   override def isActive: Boolean = true
 }

@@ -24,8 +24,7 @@ import com.digitalasset.canton.topology.client.{
   TopologySnapshot,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.digitalasset.canton.DomainAlias
 import com.google.protobuf.ByteString
 
@@ -83,6 +82,10 @@ trait SyncCryptoClient extends TopologyClientApi[SyncCryptoApi] {
   def awaitIpsSnapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[TopologySnapshot]
+
+  def awaitIpsSnapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[TopologySnapshot]
 
 }
 
@@ -170,6 +173,11 @@ class DomainSyncCryptoClient(
       traceContext: TraceContext
   ): Future[TopologySnapshot] =
     ips.awaitSnapshot(timestamp)
+
+  override def awaitIpsSnapshotUS(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[TopologySnapshot] =
+    ips.awaitSnapshotUS(timestamp)
 
   override def snapshotAvailable(timestamp: CantonTimestamp): Boolean =
     ips.snapshotAvailable(timestamp)

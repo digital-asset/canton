@@ -24,7 +24,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
 }
 import com.digitalasset.canton.topology.{AuthenticatedMember, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 

@@ -13,7 +13,8 @@ import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 import javax.crypto.Mac

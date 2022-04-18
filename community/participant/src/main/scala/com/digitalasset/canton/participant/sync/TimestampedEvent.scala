@@ -75,7 +75,7 @@ object TimestampedEvent {
       getResultByteArray: GetResult[Array[Byte]],
   ): GetResult[TimestampedEvent] =
     GetResult { r =>
-      import TraceContext.readTraceContextFromDb
+      import TraceContext.hasVersionedWrapperGetResult
 
       val requestCounter = r.nextLong()
       val requestSequencerCounter = r.nextLongOption()

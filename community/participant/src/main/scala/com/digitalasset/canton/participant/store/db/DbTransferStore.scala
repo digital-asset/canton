@@ -18,7 +18,6 @@ import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.store.TransferStore._
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.version.VersionedSignedContent
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -27,7 +26,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
@@ -66,19 +65,39 @@ class DbTransferStore(
     (r: FullTransferOutTree, pp: PositionedParameters) =>
       pp >> r.toByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
 
-  // format: off
-  implicit val getResultOptionDeliveredTransferOutResult: GetResult[Option[DeliveredTransferOutResult]] = GetResult(
+  private val protoConverterSequencedEventOpenEnvelope =
+    SignedContent.versionedProtoConverter[SequencedEvent[DefaultOpenEnvelope]](
+      "OpenEnvelope[ProtocolMessage]"
+    )
+
+  private def parseSignedContentProto(
+      signedContentProto: VersionedMessage[SignedContent[SequencedEvent[DefaultOpenEnvelope]]]
+  ) =
+    protoConverterSequencedEventOpenEnvelope.fromProtoVersioned(
+      SequencedEvent.fromByteString(
+        OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoApi))
+      )
+    )(signedContentProto)
+
+  implicit val getResultOptionDeliveredTransferOutResult
+      : GetResult[Option[DeliveredTransferOutResult]] = GetResult(
     _.<<[Option[Array[Byte]]].map(bytes =>
       (for {
-        signedContentProto <- ProtoConverter.protoParserArray(VersionedSignedContent.parseFrom)(bytes)
-        signedContent <- SignedContent.fromProtoVersioned(SequencedEvent.fromByteString(
-          OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoApi))))(signedContentProto)
-        result <- DeliveredTransferOutResult.create(signedContent).leftMap(err => OtherError(err.toString))
+        signedContentP <- ProtoConverter.protoParserArray(UntypedVersionedMessage.parseFrom)(bytes)
+        signedContent <- parseSignedContentProto(VersionedMessage(signedContentP))
+        result <- DeliveredTransferOutResult
+          .create(signedContent)
+          .leftMap(err => OtherError(err.toString))
       } yield result)
-        .fold(error =>
-                throw new DbDeserializationException(s"Error deserializing delivered transfer out result $error"),
-              identity)))
-  // format: on
+        .fold(
+          error =>
+            throw new DbDeserializationException(
+              s"Error deserializing delivered transfer out result $error"
+            ),
+          identity,
+        )
+    )
+  )
 
   implicit val setParameterDeliveredTransferOutResult: SetParameter[DeliveredTransferOutResult] =
     (r: DeliveredTransferOutResult, pp: PositionedParameters) =>

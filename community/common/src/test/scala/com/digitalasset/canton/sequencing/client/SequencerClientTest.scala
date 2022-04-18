@@ -541,7 +541,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
       for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
-          options = SequencerClientConfig(eventInboxSize = NonNegativeInt.tryCreate(1))
+          options = SequencerClientConfig(eventInboxSize = NonNegativeInt.one)
         )
         _ <- client.subscribeTracking(sequencerCounterTrackerStore, handler, timeTracker)
         _ <- transport.subscriber.value.sendToHandler(deliver)
@@ -664,16 +664,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
   }
 
   object Env {
-    val eventAlwaysValid: ValidateSequencedEvent = (event: OrdinarySerializedEvent) => {
-      val content = event.signedEvent.content
-      EitherT.rightT(
-        SequencedEventMetadata(
-          content.counter,
-          content.timestamp,
-          TestHash.digest(content.counter.toString),
-        )
-      )
-    }
+    val eventAlwaysValid: ValidateSequencedEvent = _ => EitherT.rightT(())
 
     /** @param useParallelExecutionContext Set to true to use a parallel execution context which is handy for
       *                                    verifying close behavior that can involve an Await that would deadlock

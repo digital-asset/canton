@@ -211,8 +211,8 @@ abstract class RetryWithDelay(
                 override def run(): Unit = logOnThrow {
                   val wrappedOutcome =
                     Future.successful(RetryOutcome(outcome, RetryTermination.Shutdown))
-                  val previouslyCompleted = invocationP.trySuccess(wrappedOutcome)
-                  if (!previouslyCompleted) {
+                  val promiseCompleted = invocationP.trySuccess(wrappedOutcome)
+                  if (promiseCompleted) {
                     logger.info(
                       s"The operation '$operationName' has been cancelled. Aborting. $longDescription"
                     )
@@ -262,7 +262,7 @@ abstract class RetryWithDelay(
                             retriesOfErrorKind + 1,
                             nextDelay(totalRetries + 1, delay),
                           )
-                          retryP.completeWith(retryF).future
+                          retryP.completeWith(retryF)
                         }(traceContext)
                       }
                     case failure: Failure[_] =>
