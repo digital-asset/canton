@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+
 import java.util.UUID
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
@@ -46,8 +48,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val dave = ConfirmingParty(LfPartyId.assertFromString("dave"), 1)
     val solo = ParticipantId("solo")
 
-    val viewCommonData2 = ViewCommonData.tryCreate(hashOps)(Set(bob, charlie), 2, salt(54170))
-    val viewCommonData1 = ViewCommonData.tryCreate(hashOps)(Set(alice, bob), 3, salt(54171))
+    val viewCommonData2 =
+      ViewCommonData.create(hashOps)(Set(bob, charlie), NonNegativeInt.tryCreate(2), salt(54170))
+    val viewCommonData1 =
+      ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(3), salt(54171))
     val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
     val view1 = TransactionView(hashOps)(viewCommonData1, b(8), view2 :: Nil)
 
@@ -106,7 +110,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       it("should check the policy's minimum threshold") {
         val viewcommonDataThresholdTooLow =
-          ViewCommonData.tryCreate(hashOps)(Set(alice), 0, salt(54172))
+          ViewCommonData.create(hashOps)(Set(alice), NonNegativeInt.zero, salt(54172))
         val viewThresholdTooLow =
           TransactionView(hashOps)(viewcommonDataThresholdTooLow, b(100), Nil)
         val fullInformeeTreeThresholdTooLow = FullInformeeTree(
@@ -307,9 +311,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
     describe("response Malformed") {
 
-      val viewCommonData1 =
-        ViewCommonData.tryCreate(hashOps)(Set(alice, bob, charlie), 3, salt(54170))
-      val viewCommonData2 = ViewCommonData.tryCreate(hashOps)(Set(alice, bob, dave), 3, salt(54171))
+      val viewCommonData1 = ViewCommonData.create(hashOps)(
+        Set(alice, bob, charlie),
+        NonNegativeInt.tryCreate(3),
+        salt(54170),
+      )
+      val viewCommonData2 = ViewCommonData.create(hashOps)(
+        Set(alice, bob, dave),
+        NonNegativeInt.tryCreate(3),
+        salt(54171),
+      )
       val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
       val view1 = TransactionView(hashOps)(viewCommonData1, b(8), Nil)
 

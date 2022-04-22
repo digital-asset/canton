@@ -150,7 +150,6 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
               query,
               eventsWithAssociatedDomainId,
               storage.profile,
-              useTransactionForOracle = true,
             ) { pp => eventWithClock =>
               val (TimestampedEventAndCausalChange(event, clock), associatedDomainIdO) =
                 eventWithClock

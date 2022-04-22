@@ -3,19 +3,23 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.version.VersionedMalformedMediatorRequestResult
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 /** Sent by the mediator to indicate that a mediator request was malformed.
@@ -33,7 +37,7 @@ case class MalformedMediatorRequestResult private (
 )(val deserializedFrom: Option[ByteString])
     extends MediatorResult
     with SignedProtocolMessageContent
-    with HasVersionedWrapper[VersionedMalformedMediatorRequestResult]
+    with HasVersionedWrapper[VersionedMessage[MalformedMediatorRequestResult]]
     with HasProtoV0[v0.MalformedMediatorRequestResult]
     with NoCopy
     with PrettyPrinting {
@@ -48,10 +52,7 @@ case class MalformedMediatorRequestResult private (
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedMalformedMediatorRequestResult =
-    VersionedMalformedMediatorRequestResult(
-      VersionedMalformedMediatorRequestResult.Version.V0(toProtoV0)
-    )
+  ): VersionedMessage[MalformedMediatorRequestResult] = VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.MalformedMediatorRequestResult =
     v0.MalformedMediatorRequestResult(
@@ -72,7 +73,14 @@ case class MalformedMediatorRequestResult private (
   )
 }
 
-object MalformedMediatorRequestResult {
+object MalformedMediatorRequestResult
+    extends HasMemoizedVersionedMessageCompanion[MalformedMediatorRequestResult] {
+  override val name: String = "MalformedMediatorRequestResult"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.MalformedMediatorRequestResult)(fromProtoV0)
+  )
+
   private def apply(
       requestId: RequestId,
       domainId: DomainId,
@@ -89,31 +97,8 @@ object MalformedMediatorRequestResult {
   ): MalformedMediatorRequestResult =
     new MalformedMediatorRequestResult(requestId, domainId, viewType, verdict)(None)
 
-  def fromByteString(
+  private def fromProtoV0(protoResultMsg: v0.MalformedMediatorRequestResult)(
       bytes: ByteString
-  ): ParsingResult[MalformedMediatorRequestResult] =
-    for {
-
-      protoResultMessage <- ProtoConverter.protoParser(
-        VersionedMalformedMediatorRequestResult.parseFrom
-      )(bytes)
-      result <- fromProtoVersioned(protoResultMessage, bytes)
-    } yield result
-
-  private def fromProtoVersioned(
-      protoResultMsg: VersionedMalformedMediatorRequestResult,
-      bytes: ByteString,
-  ): ParsingResult[MalformedMediatorRequestResult] =
-    protoResultMsg.version match {
-      case VersionedMalformedMediatorRequestResult.Version.Empty =>
-        Left(FieldNotSet("VersionedMalformedMediatorRequestResult.version"))
-      case VersionedMalformedMediatorRequestResult.Version.V0(resultMsg) =>
-        fromProtoV0(resultMsg, bytes)
-    }
-
-  private def fromProtoV0(
-      protoResultMsg: v0.MalformedMediatorRequestResult,
-      bytes: ByteString,
   ): ParsingResult[MalformedMediatorRequestResult] = {
 
     val v0.MalformedMediatorRequestResult(requestIdP, domainIdP, viewTypeP, rejectP) =

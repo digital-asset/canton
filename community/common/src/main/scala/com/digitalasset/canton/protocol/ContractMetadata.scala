@@ -9,11 +9,15 @@ import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
-import com.digitalasset.canton.protocol.version.VersionedContractMetadata
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.{LfPartyId, checked}
 
 /** Metadata for a contract.
@@ -26,7 +30,7 @@ case class ContractMetadata private (
     signatories: Set[LfPartyId],
     stakeholders: Set[LfPartyId],
     maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
-) extends HasVersionedWrapper[VersionedContractMetadata]
+) extends HasVersionedWrapper[VersionedMessage[ContractMetadata]]
     with HasProtoV0[v0.SerializableContract.Metadata]
     with PrettyPrinting {
 
@@ -49,8 +53,8 @@ case class ContractMetadata private (
   def maintainers: Set[LfPartyId] =
     maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.maintainers)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedContractMetadata =
-    VersionedContractMetadata(VersionedContractMetadata.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[ContractMetadata] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SerializableContract.Metadata = {
     v0.SerializableContract.Metadata(
@@ -73,10 +77,11 @@ case class ContractMetadata private (
   )
 }
 
-object ContractMetadata
-    extends HasVersionedWrapperCompanion[VersionedContractMetadata, ContractMetadata] {
-  override protected def ProtoClassCompanion: VersionedContractMetadata.type =
-    VersionedContractMetadata
+object ContractMetadata extends HasVersionedMessageCompanion[ContractMetadata] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SerializableContract.Metadata)(fromProtoV0)
+  )
+
   override protected def name: String = "contract metadata"
 
   case class InvalidContractMetadata(message: String) extends RuntimeException(message)
@@ -107,15 +112,6 @@ object ContractMetadata
       .leftMap(_.message)
 
   def empty: ContractMetadata = checked(ContractMetadata.tryCreate(Set.empty, Set.empty, None))
-
-  override def fromProtoVersioned(
-      metadataP: VersionedContractMetadata
-  ): ParsingResult[ContractMetadata] =
-    metadataP.version match {
-      case VersionedContractMetadata.Version.Empty =>
-        Left(FieldNotSet("VersionedContractMetadata.version"))
-      case VersionedContractMetadata.Version.V0(metadata) => fromProtoV0(metadata)
-    }
 
   def fromProtoV0(
       metadataP: v0.SerializableContract.Metadata

@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import java.util.UUID
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
@@ -15,7 +16,7 @@ trait MediatorRequest extends ProtocolMessage {
 
   def mediatorId: MediatorId
 
-  def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)]
+  def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)]
 
   def allInformees: Set[LfPartyId] =
     informeesAndThresholdByView

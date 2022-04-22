@@ -49,7 +49,7 @@ object ResponseAggregation {
         val confirmingParties = informees.collect { case c: ConfirmingParty => c }
         Either.cond(
           threshold >= minimumThreshold,
-          viewHash -> ViewState(confirmingParties, threshold, Nil),
+          viewHash -> ViewState(confirmingParties, threshold.unwrap, Nil),
           MediatorReject.MaliciousSubmitter.ViewThresholdBelowMinimumThreshold
             .Reject(show"viewHash=$viewHash, threshold=$threshold"),
         )

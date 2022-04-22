@@ -19,8 +19,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedToByteString}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec

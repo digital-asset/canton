@@ -345,9 +345,13 @@ class DbMultiDomainEventLog private[db] (
 
       val insertStatement = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
-          """insert /*+ IGNORE_ROW_ON_DUPKEY_INDEX ( linearized_event_log ( local_offset, log_id ) ) */
-            |into linearized_event_log(log_id, local_offset, publication_time)
-            |values (?, ?, ?)""".stripMargin
+          """merge /*+ INDEX ( linearized_event_log ( local_offset, log_id ) ) */ 
+            |into linearized_event_log lel
+            |using (select ? log_id, ? local_offset from dual) input
+            |on (lel.local_offset = input.local_offset and lel.log_id = input.log_id)
+            |when not matched then
+            |  insert (log_id, local_offset, publication_time)
+            |  values (input.log_id, input.local_offset, ?)""".stripMargin
         case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
           """insert into linearized_event_log (log_id, local_offset, publication_time)
             |values (?, ?, ?)

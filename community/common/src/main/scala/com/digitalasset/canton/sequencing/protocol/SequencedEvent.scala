@@ -4,17 +4,21 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.Applicative
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version.VersionedSequencedEvent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.{HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasVersionedWrapper,
+  ProtocolVersion,
+  UntypedVersionedMessage,
+  VersionedMessage,
+}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -26,7 +30,7 @@ sealed trait SequencedEvent[+Env]
     with Serializable
     with MemoizedEvidence
     with PrettyPrinting
-    with HasVersionedWrapper[VersionedSequencedEvent] {
+    with HasVersionedWrapper[VersionedMessage[SequencedEvent[Env]]] {
 
   /** a sequence counter for each recipient.
     */
@@ -56,27 +60,27 @@ sealed trait SequencedEvent[+Env]
 }
 
 object SequencedEvent {
-
   def fromByteString[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
   )(bytes: ByteString): ParsingResult[SequencedEvent[Env]] =
     ProtoConverter
-      .protoParser(VersionedSequencedEvent.parseFrom)(bytes)
+      .protoParser(UntypedVersionedMessage.parseFrom)(bytes)
       .flatMap(fromProtoWith(envelopeDeserializer)(_, bytes))
 
   private[sequencing] def fromProtoWith[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
   )(
-      sequencedEventP: VersionedSequencedEvent,
+      sequencedEventP: UntypedVersionedMessage,
       bytes: ByteString,
-  ): ParsingResult[SequencedEvent[Env]] = {
-    sequencedEventP.version match {
-      case VersionedSequencedEvent.Version.Empty =>
-        Left(FieldNotSet("VersionedSequencedEvent.version"))
-      case VersionedSequencedEvent.Version.V0(event) =>
-        fromProtoWithV0(envelopeDeserializer)(event, bytes)
+  ): ParsingResult[SequencedEvent[Env]] =
+    sequencedEventP.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet("data")).flatMap {
+      data =>
+        if (sequencedEventP.version == 0)
+          ProtoConverter
+            .protoParser(v0.SequencedEvent.parseFrom)(data)
+            .flatMap(fromProtoWithV0(envelopeDeserializer)(_, bytes))
+        else Left(ProtoDeserializationError.VersionError("SequencedEvent", sequencedEventP.version))
     }
-  }
 
   private[sequencing] def fromProtoWithV0[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
@@ -132,8 +136,9 @@ case class DeliverError private[sequencing] (
 )(val deserializedFrom: Option[ByteString])
     extends SequencedEvent[Nothing]
     with NoCopy {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSequencedEvent =
-    VersionedSequencedEvent(VersionedSequencedEvent.Version.V0(toProtoV0))
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[SequencedEvent[Nothing]] = VersionedMessage(toProtoV0.toByteString, 0)
 
   def toProtoV0: v0.SequencedEvent = v0.SequencedEvent(
     counter = counter,
@@ -203,8 +208,8 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     */
   lazy val isReceipt: Boolean = messageId.isDefined
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSequencedEvent =
-    VersionedSequencedEvent(VersionedSequencedEvent.Version.V0(toProtoV0(version)))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SequencedEvent[Env]] =
+    VersionedMessage(toProtoV0(version).toByteString, 0)
 
   def toProtoV0(version: ProtocolVersion): v0.SequencedEvent = v0.SequencedEvent(
     counter = counter,

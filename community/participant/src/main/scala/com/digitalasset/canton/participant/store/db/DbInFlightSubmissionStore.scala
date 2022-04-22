@@ -402,7 +402,6 @@ object DbInFlightSubmissionStore {
         insertQuery,
         submissions.map(_.value),
         storage.profile,
-        useTransactionForOracle = true,
       ) { pp => submission =>
         import DbStorage.Implicits._
         pp >> submission.changeIdHash

@@ -4,12 +4,10 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import java.util.concurrent.atomic.AtomicInteger
-
 import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
-import com.digitalasset.canton.util.HasVersionedToByteString
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi {

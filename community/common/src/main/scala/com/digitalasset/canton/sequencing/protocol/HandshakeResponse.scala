@@ -6,8 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 
 sealed trait HandshakeResponse extends HasProtoV0[v0.Handshake.Response] {
   val serverVersion: ProtocolVersion

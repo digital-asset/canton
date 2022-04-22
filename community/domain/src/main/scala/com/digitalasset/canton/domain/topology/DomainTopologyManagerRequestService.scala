@@ -40,7 +40,8 @@ import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, HasProtoV0, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
+import com.digitalasset.canton.version.HasProtoV0
 
 import scala.concurrent.{ExecutionContext, Future}
 

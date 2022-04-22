@@ -8,16 +8,20 @@ object StackTraceUtil {
   def formatStackTrace(filter: Thread => Boolean = _ => true): String = {
     import scala.jdk.CollectionConverters._
     Thread.getAllStackTraces.asScala.toMap
-      .filter { case (tr, _) =>
-        filter(tr)
+      .filter { case (thread, _) => filter(thread) }
+      .map { case (thread, stackTrace) =>
+        formatThread(thread) + formatStackTrace(stackTrace)
       }
-      .map { case (k, v) =>
-        s"  ${k.toString} is-daemon=${k.isDaemon} state=${k.getState.toString}" + "\n    " + v
-          .map(_.toString)
-          .mkString("\n    ")
-      }
-      .mkString("\n\n")
+      .mkString("\n")
   }
+
+  def formatThread(thread: Thread): String =
+    s"  ${thread.toString} is-daemon=${thread.isDaemon} state=${thread.getState.toString}"
+
+  def formatStackTrace(stackTrace: Array[StackTraceElement]): String = if (stackTrace.isEmpty) ""
+  else if (stackTrace(0).getMethodName == "park" && stackTrace(0).getClassName.endsWith("Unsafe"))
+    " <parked>"
+  else stackTrace.mkString("\n    ", "\n    ", "\n")
 
   def caller(offset: Int = 1): String = {
     val stack = Thread.currentThread().getStackTrace

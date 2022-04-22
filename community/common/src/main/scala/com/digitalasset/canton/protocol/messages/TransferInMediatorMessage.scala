@@ -10,9 +10,10 @@ import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.util.{EitherUtil, HasProtoV0}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 
 import java.util.UUID
 
@@ -36,9 +37,9 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
 
   override def requestUuid: UUID = commonData.uuid
 
-  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+  override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
     val confirmingParties = commonData.confirmingParties
-    val threshold = confirmingParties.size
+    val threshold = NonNegativeInt.tryCreate(confirmingParties.size)
     Map(tree.viewHash -> ((confirmingParties, threshold)))
   }
 
@@ -78,7 +79,7 @@ object TransferInMediatorMessage {
     for {
       tree <- ProtoConverter
         .required("TransferInMediatorMessage.tree", transferInMediatorMessageP.tree)
-        .flatMap(TransferInViewTree.fromProtoV0(hashOps))
+        .flatMap(TransferInViewTree.fromProtoV0(hashOps, _))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-in common data is blinded in request ${tree.rootHash}"),

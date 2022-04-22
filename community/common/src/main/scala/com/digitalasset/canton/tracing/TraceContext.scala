@@ -7,25 +7,28 @@ import cats.Show.Shown
 import cats.data.NonEmptyList
 import cats.syntax.list._
 import com.daml.{telemetry => damlTelemetry}
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.{ProtocolVersion, VersionedTraceContext}
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.v0
-import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.{Context => OpenTelemetryContext}
-import slick.jdbc.{GetResult, SetParameter}
 
 /** Container for values tracing operations through canton.
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
     extends HasProtoV0[v0.TraceContext]
-    with HasVersionedWrapper[VersionedTraceContext]
+    with HasVersionedWrapper[VersionedMessage[TraceContext]]
     with Equals
     with Serializable
     with NoCopy
@@ -61,8 +64,8 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   private def writeReplace(): Object =
     new TraceContext.JavaSerializedTraceContext(asW3CTraceContext)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedTraceContext =
-    VersionedTraceContext(VersionedTraceContext.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TraceContext] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
   override def canEqual(that: Any): Boolean = that.isInstanceOf[TraceContext]
@@ -82,7 +85,14 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   def showTraceId: Shown = Shown(s"tid:${traceId.getOrElse("")}")
 }
 
-object TraceContext {
+object TraceContext extends HasVersionedMessageCompanion[TraceContext] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.TraceContext)(fromProtoV0)
+  )
+
+  /** The name of the class as used for pretty-printing */
+  override protected def name: String = "TraceContext"
+
   private[tracing] def apply(context: OpenTelemetryContext): TraceContext = new TraceContext(
     context
   )
@@ -98,31 +108,6 @@ object TraceContext {
       implicit val traceContext: TraceContext = TraceContext.todo
     }
   }
-
-  // we can't pass a logger to the slick storage reader implicit, so we'll just define one within here
-  private val storageLogger = Logger(classOf[TraceContext])
-
-  implicit def readTraceContextFromDb(implicit
-      getResultByteArray: GetResult[Array[Byte]]
-  ): GetResult[TraceContext] = GetResult { r =>
-    fromByteArraySafe(storageLogger)(r.<<[Array[Byte]])
-  }
-
-  implicit def writeTraceContextToDb(implicit
-      setParameterByteArray: SetParameter[Array[Byte]]
-  ): SetParameter[TraceContext] = (v, pp) => pp >> v.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
-
-  implicit def getResultTraceContextOption(implicit
-      getResultByteArrayO: GetResult[Option[Array[Byte]]]
-  ): GetResult[Option[TraceContext]] = GetResult { r =>
-    r.<<[Option[Array[Byte]]].map(fromByteArraySafe(storageLogger))
-  }
-
-  @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  implicit def setParameterTraceContextOption(implicit
-      setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
-  ): SetParameter[Option[TraceContext]] = (v, pp) =>
-    pp >> v.map(_.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
 
   val empty: TraceContext = new TraceContext(OpenTelemetryContext.root())
 
@@ -163,25 +148,6 @@ object TraceContext {
     */
   def fromProtoSafeV0Opt(logger: Logger)(traceContextP: Option[v0.TraceContext]): TraceContext =
     safely(logger)(fromProtoV0Opt)(traceContextP)
-
-  def fromByteArray(bytes: Array[Byte]): ParsingResult[TraceContext] =
-    ProtoConverter
-      .protoParserArray(VersionedTraceContext.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned)
-
-  def fromByteString(bytes: ByteString): ParsingResult[TraceContext] =
-    for {
-      traceContextP <- ProtoConverter.protoParser(VersionedTraceContext.parseFrom)(bytes)
-      traceContext <- fromProtoVersioned(traceContextP)
-    } yield traceContext
-
-  def fromProtoVersioned(
-      traceContextP: VersionedTraceContext
-  ): ParsingResult[TraceContext] =
-    traceContextP.version match {
-      case VersionedTraceContext.Version.Empty => Left(FieldNotSet("VersionedTraceContext.version"))
-      case VersionedTraceContext.Version.V0(trace) => fromProtoV0(trace)
-    }
 
   def fromProtoV0Opt(
       traceContextP: Option[v0.TraceContext]

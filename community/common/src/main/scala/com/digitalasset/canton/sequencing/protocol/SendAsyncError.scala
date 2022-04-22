@@ -10,7 +10,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 /** Synchronous error returned by a sequencer. */
 sealed trait SendAsyncError extends HasProtoV0[v0.SendAsyncResponse.Error] with PrettyPrinting {

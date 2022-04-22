@@ -44,24 +44,21 @@ case class TimeoutDuration(duration: Duration) {
   /** Same as Await.result, but with this timeout */
   def await[F](
       description: => String = "",
-      stackTraceFilter: Thread => Boolean = _.getName.contains("-env-execution-context"),
       logFailing: Option[Level] = None,
   )(fut: Future[F])(implicit loggingContext: ErrorLoggingContext): F = {
     FutureUtil.noisyAwaitResult(
       logFailing.fold(fut)(level => FutureUtil.logOnFailure(fut, description, level = level)),
       description,
       timeout = duration,
-      stackTraceFilter = stackTraceFilter,
     )
   }
 
   /** Same as await, but not returning a value */
   def await_(
       description: => String = "",
-      stackTraceFilter: Thread => Boolean = _.getName.contains("-env-execution-context"),
       logFailing: Option[Level] = None,
   )(fut: Future[_])(implicit loggingContext: ErrorLoggingContext): Unit = {
-    await(description, stackTraceFilter, logFailing)(fut).discard
+    await(description, logFailing)(fut).discard
   }
 
   /** Await the completion of `future`. Log a message if the future does not complete within `timeout`.

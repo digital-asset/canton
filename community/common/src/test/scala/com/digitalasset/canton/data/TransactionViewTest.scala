@@ -72,14 +72,6 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
   }
 
   "A view common data" when {
-    "the threshold is negative" must {
-      "reject creation" in {
-        ViewCommonData.create(hashOps)(Set.empty, -1, factory.commonDataSalt(0)) shouldEqual Left(
-          "The threshold must not be negative, but is -1."
-        )
-      }
-    }
-
     "a weight is not positive" must {
       "reject creation" in {
         Informee.create(ExampleTransactionFactory.signatory, -1) shouldEqual Left(

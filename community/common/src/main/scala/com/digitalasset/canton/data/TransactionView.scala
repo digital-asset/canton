@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
@@ -14,16 +14,10 @@ import com.digitalasset.canton.data.ActionDescription.{
   LookupByKeyActionDescription,
 }
 import com.digitalasset.canton.data.TransactionView.InvalidView
-import com.digitalasset.canton.data.TreeSerialization.TransactionSerializationError
-import com.digitalasset.canton.data.ViewCommonData.InvalidViewCommonData
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.version.{
-  VersionedViewCommonData,
-  VersionedViewParticipantData,
-}
 import com.digitalasset.canton.protocol.{v0, _}
 import com.digitalasset.canton.serialization.{
   MemoizedEvidence,
@@ -32,13 +26,15 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.protocol.RollbackContext
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageWithContextCompanion,
   HasProtoV0,
   HasVersionedToByteString,
   HasVersionedWrapper,
-  NoCopy,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LfCommand,
   LfCreateCommand,
@@ -59,7 +55,6 @@ import com.google.protobuf.ByteString
   * @param subviews the top-most subviews of this view
   * @throws TransactionView$.InvalidView if the `viewCommonData` is unblinded and equals the `viewCommonData` of a direct subview
   */
-@SuppressWarnings(Array("org.wartremover.warts.Any"))
 case class TransactionView private (
     viewCommonData: MerkleTree[ViewCommonData],
     viewParticipantData: MerkleTree[ViewParticipantData],
@@ -188,7 +183,7 @@ object TransactionView {
 
   def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[TransactionView] =
     for {
-      protoView <- TreeSerialization.deserializeProtoNode(bytes, v0.ViewNode)
+      protoView <- ProtoConverter.protoParser(v0.ViewNode.parseFrom)(bytes)
       view <- fromProtoV0(hashOps, protoView)
     } yield view
 
@@ -259,18 +254,17 @@ object ParticipantTransactionView {
   *
   * @param threshold If the sum of the weights of the parties approving the view attains the threshold,
   *                  the view is considered approved.
-  * @throws ViewCommonData$.InvalidViewCommonData if `threshold` is negative
   */
 // This class is a reference example of serialization best practices, demonstrating:
 // - handling of object invariants (i.e., the construction of an instance may fail with an exception)
 // - memoized serialization, which is required if we need to compute a signature or cryptographic hash of a class
-// - use of a Versioned... wrapper when serializing to an anonymous binary format
+// - use of an UntypedVersionedMessage wrapper when serializing to an anonymous binary format
 // Please consult the team if you intend to change the design of serialization.
 //
 // The constructor and `fromProto...` methods are private to ensure that clients cannot create instances with an incorrect `deserializedFrom` field.
 //
 // Optional parameters are strongly discouraged, as each parameter needs to be consciously set in a production context.
-case class ViewCommonData private (informees: Set[Informee], threshold: Int, salt: Salt)(
+case class ViewCommonData private (informees: Set[Informee], threshold: NonNegativeInt, salt: Salt)(
     hashOps: HashOps,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewCommonData](hashOps)
@@ -280,14 +274,9 @@ case class ViewCommonData private (informees: Set[Informee], threshold: Int, sal
     with MemoizedEvidence
     // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
     // the version of the serialized Protobuf message
-    with HasVersionedWrapper[VersionedViewCommonData]
+    with HasVersionedWrapper[VersionedMessage[ViewCommonData]]
     with HasProtoV0[v0.ViewCommonData]
     with NoCopy {
-
-  // If an object invariant is violated, throw an exception specific to the class.
-  // Thus, the exception can be caught during deserialization and translated to a human readable error message.
-  if (threshold < 0)
-    throw InvalidViewCommonData(s"The threshold must not be negative, but is $threshold.")
 
   // The toProto... methods are deliberately protected, as they could otherwise be abused to bypass memoization.
   //
@@ -296,21 +285,24 @@ case class ViewCommonData private (informees: Set[Informee], threshold: Int, sal
 
   // A `toProtoVersioned` method for a message which only has a single version of the corresponding Protobuf message,
   // typically ignores the version-argument
-  // If it has multiple versions, it needs to pattern-match on the versions to decide which version it should embed within the Versioned... wrapper
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedViewCommonData =
-    VersionedViewCommonData(VersionedViewCommonData.Version.V0(toProtoV0))
+  // If it has multiple versions, it needs to pattern-match on the versions to decide which version it should embed
+  // within the UntypedVersionedMessage wrapper
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[ViewCommonData] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   // We use named parameters, because then the code remains correct even when the ProtoBuf code generator
   // changes the order of parameters.
   override protected def toProtoV0: v0.ViewCommonData =
     v0.ViewCommonData(
       informees = informees.map(_.toProtoV0).toSeq,
-      threshold = threshold,
+      threshold = threshold.unwrap,
       salt = Some(salt.toProtoV0),
     )
 
   // TODO(i5768): remove `toByteString` from MemoizedEvidence so `super[HasVersionedWrapper]` is no longer required to avoid infinite recursion
-  // When serializing the class to an anonymous binary format, we serialize it to a Versioned... version of the
+  // When serializing the class to an anonymous binary format, we serialize it to an UntypedVersionedMessage version of the
   // corresponding Protobuf message
   override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
     super[HasVersionedWrapper].toByteString(version)
@@ -326,17 +318,23 @@ case class ViewCommonData private (informees: Set[Informee], threshold: Int, sal
   @VisibleForTesting
   private[data] def copy(
       informees: Set[Informee] = this.informees,
-      threshold: Int = this.threshold,
+      threshold: NonNegativeInt = this.threshold,
       salt: Salt = this.salt,
   ): ViewCommonData =
     new ViewCommonData(informees, threshold, salt)(hashOps, None)
 }
 
-object ViewCommonData {
+object ViewCommonData
+    extends HasMemoizedVersionedMessageWithContextCompanion[ViewCommonData, HashOps] {
+  override val name: String = "ViewCommonData"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.ViewCommonData)(fromProtoV0)
+  )
 
   // Make the auto-generated apply method inaccessible to prevent clients from creating instances with an incorrect
   // `deserializedFrom` field.
-  private[this] def apply(informees: Set[Informee], threshold: Int, salt: Salt)(
+  private[this] def apply(informees: Set[Informee], threshold: NonNegativeInt, salt: Salt)(
       hashOps: HashOps,
       deserializedFrom: Option[ByteString],
   ): ViewCommonData =
@@ -360,44 +358,16 @@ object ViewCommonData {
   //
   // The "tryCreate" method is optional.
   // Feel free to omit "tryCreate", if the auto-generated "apply" method is good enough.
-  def tryCreate(
+  def create(
       hashOps: HashOps
-  )(informees: Set[Informee], threshold: Int, salt: Salt): ViewCommonData =
+  )(informees: Set[Informee], threshold: NonNegativeInt, salt: Salt): ViewCommonData =
     // The deserializedFrom field is set to "None" as this is for creating "fresh" instances.
     new ViewCommonData(informees, threshold, salt)(hashOps, None)
 
-  /** Creates a fresh [[ViewCommonData]].
-    *
-    * Yields `Left(...)` if `threshold` is negative
-    */
-  // Variant of "tryCreate" that returns Left(...) instead of throwing an exception.
-  // This is for callers who *do not know up front* whether the parameters meet the object invariants.
-  //
-  // Optional method, feel free to omit it.
-  def create(
-      hashOps: HashOps
-  )(informees: Set[Informee], threshold: Int, salt: Salt): Either[String, ViewCommonData] =
-    returnLeftWhenInitializationFails(ViewCommonData.tryCreate(hashOps)(informees, threshold, salt))
-
-  private[data] def returnLeftWhenInitializationFails[A](initialization: => A): Either[String, A] =
-    Either.catchOnly[InvalidViewCommonData](initialization).leftMap(_.message)
-
-  // The "fromProto..." methods are private for similar reasons as for "toProto...":
-  // Note that a "bytes" parameter is needed to initialize "deserializedFrom".
-  // The method is private, because it assumes (but does not check) that the "bytes" parameter is a
-  // valid serialization of "viewCommonDataP".
-  private def fromProtoVersioned(
-      hashOps: HashOps
-  )(bytes: ByteString, viewCommonDataP: VersionedViewCommonData): ParsingResult[ViewCommonData] =
-    viewCommonDataP.version match {
-      case VersionedViewCommonData.Version.Empty =>
-        Left(FieldNotSet("VersionedViewCommonData.version"))
-      case VersionedViewCommonData.Version.V0(data) => fromProtoV0(hashOps)(bytes, data)
-    }
-
   private def fromProtoV0(
-      hashOps: HashOps
-  )(bytes: ByteString, viewCommonDataP: v0.ViewCommonData): ParsingResult[ViewCommonData] =
+      hashOps: HashOps,
+      viewCommonDataP: v0.ViewCommonData,
+  )(bytes: ByteString): ParsingResult[ViewCommonData] =
     for {
       informees <- viewCommonDataP.informees.traverse(Informee.fromProtoV0)
 
@@ -405,22 +375,8 @@ object ViewCommonData {
         .parseRequired(Salt.fromProtoV0, "salt", viewCommonDataP.salt)
         .leftMap(_.inField("salt"))
 
-      // The constructor of ViewCommandData throws an exception if an object invariant would be violated,
-      // which must not escape this method. Therefore we translate the exception to Left(...).
-      // We only translate `InvalidViewCommonData` and no other exceptions, because other exceptions
-      // indicate a bug in the code and can therefore not be recovered from.
-      viewCommonData <- returnLeftWhenInitializationFails(
-        new ViewCommonData(informees.toSet, viewCommonDataP.threshold, salt)(hashOps, Some(bytes))
-      ).leftMap(ProtoDeserializationError.OtherError(_))
-    } yield viewCommonData
-
-  // Unlike "create" and "tryCreate", this method initializes the "deserializedFrom" field with the given byte string.
-  // This is to ensure that subsequent calls of "toByteString" yield the same byte string.
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[ViewCommonData] =
-    for {
-      viewCommonDataP <- TreeSerialization.deserializeProtoNode(bytes, VersionedViewCommonData)
-      viewCommonData <- ViewCommonData.fromProtoVersioned(hashOps)(bytes, viewCommonDataP)
-    } yield viewCommonData
+      threshold <- NonNegativeInt.create(viewCommonDataP.threshold).leftMap(_.inField("threshold"))
+    } yield new ViewCommonData(informees.toSet, threshold, salt)(hashOps, Some(bytes))
 
   /** Indicates an attempt to create an invalid [[ViewCommonData]] */
   case class InvalidViewCommonData(message: String) extends RuntimeException(message)
@@ -463,7 +419,7 @@ case class ViewParticipantData private (
     salt: Salt,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[ViewParticipantData](hashOps)
-    with HasVersionedWrapper[VersionedViewParticipantData]
+    with HasVersionedWrapper[VersionedMessage[ViewParticipantData]]
     with MemoizedEvidence
     with NoCopy {
   {
@@ -622,8 +578,10 @@ case class ViewParticipantData private (
         )
     }
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedViewParticipantData =
-    VersionedViewParticipantData(VersionedViewParticipantData.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[ViewParticipantData] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.ViewParticipantData =
     v0.ViewParticipantData(
@@ -652,7 +610,15 @@ case class ViewParticipantData private (
   )
 }
 
-object ViewParticipantData {
+object ViewParticipantData
+    extends HasMemoizedVersionedMessageWithContextCompanion[MerkleTree[
+      ViewParticipantData
+    ], HashOps] {
+  override val name: String = "ViewParticipantData"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV0)
+  )
 
   private[this] def apply(
       coreInputs: Map[LfContractId, InputContract],
@@ -680,7 +646,7 @@ object ViewParticipantData {
     *   and the key is not in [[ViewParticipantData.resolvedKeys]].
     * @throws com.digitalasset.canton.serialization.SerializationCheckFailed if this instance cannot be serialized
     */
-  @throws[SerializationCheckFailed[TransactionSerializationError]]
+  @throws[SerializationCheckFailed[com.daml.lf.value.ValueCoder.EncodeError]]
   def apply(hashOps: HashOps)(
       coreInputs: Map[LfContractId, InputContract],
       createdCore: Seq[CreatedContract],
@@ -742,7 +708,7 @@ object ViewParticipantData {
       Right(initialization)
     } catch {
       case InvalidViewParticipantData(message) => Left(message)
-      case SerializationCheckFailed(TransactionSerializationError(message)) => Left(message)
+      case SerializationCheckFailed(err) => Left(err.toString)
     }
 
   private def fromProtoV0(hashOps: HashOps, dataP: v0.ViewParticipantData)(
@@ -790,26 +756,6 @@ object ViewParticipantData {
           salt = salt,
         )(hashOps, Some(bytes))
       ).leftMap(ProtoDeserializationError.OtherError(_))
-    } yield viewParticipantData
-
-  private def fromProtoVersioned(hashOps: HashOps, dataP: VersionedViewParticipantData)(
-      bytes: ByteString
-  ): ParsingResult[MerkleTree[ViewParticipantData]] =
-    dataP.version match {
-      case VersionedViewParticipantData.Version.Empty =>
-        Left(FieldNotSet("VersionedViewParticipantData.version"))
-      case VersionedViewParticipantData.Version.V0(data) => fromProtoV0(hashOps, data)(bytes)
-    }
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[MerkleTree[ViewParticipantData]] =
-    for {
-      protoViewParticipantData <- TreeSerialization.deserializeProtoNode(
-        bytes,
-        VersionedViewParticipantData,
-      )
-      viewParticipantData <- fromProtoVersioned(hashOps, protoViewParticipantData)(bytes)
     } yield viewParticipantData
 
   case class RootAction(command: LfCommand, authorizers: Set[LfPartyId], failed: Boolean)

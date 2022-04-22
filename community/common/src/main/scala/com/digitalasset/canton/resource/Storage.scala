@@ -633,6 +633,9 @@ object DbStorage {
   /** Construct a bulk operation (e.g., insertion, deletion).
     * The operation must not return a result set!
     *
+    * The returned action will run as a single big database transaction. If the execution of the transaction results
+    * in deadlocks, you should order `values` according to some consistent order.
+    *
     * The returned update counts are merely lower bounds to the number of affected rows
     * or SUCCESS_NO_INFO, because `Statement.executeBatch`
     * reports partial execution of a batch as a `BatchUpdateException` with
@@ -640,49 +643,26 @@ object DbStorage {
     *
     * This operation is idempotent if the statement is idempotent for each value.
     *
-    * @throws java.lang.IllegalArgumentException if the database is Oracle and one of the following holds:
-    *                                            - `statement` contains `"IGNORE_ROW_ON_DUPKEY_INDEX"`
-    *                                            - or `statements` contains `merge` and
-    *                                              useTransactionForOracle is `false`.
+    * @throws java.lang.IllegalArgumentException if `statement` contains `"IGNORE_ROW_ON_DUPKEY_INDEX"`
     *                                            (See UpsertTestOracle for details.)
     */
   def bulkOperation[A](
       statement: String,
       values: Seq[A],
       profile: Profile,
-      useTransactionForOracle: Boolean = false,
   )(
       setParams: PositionedParameters => A => Unit
   )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Array[Int], NoStream, Effect.All] = {
-    profile match {
-      case Oracle(_) =>
-        // Bail out if the statement contains IGNORE_ROW_ON_DUPKEY_INDEX, because update counts are known to be broken.
-        // Use bulkOperation_ instead.
-        // See UpsertTestOracle for details.
-        ErrorUtil.requireArgument(
-          !statement.toUpperCase.contains("IGNORE_ROW_ON_DUPKEY_INDEX"),
-          s"Illegal usage of bulkOperation with IGNORE_ROW_ON_DUPKEY_INDEX. $statement",
-        )
-      case _ => // nothing to check
-    }
-    doBulkOperation(
-      statement,
-      values,
-      profile,
-      validateUpdateCountsResult = true,
-      useTransactionForOracle = useTransactionForOracle,
-    )(setParams)
-  }
+    // Bail out if the statement contains IGNORE_ROW_ON_DUPKEY_INDEX, because update counts are known to be broken.
+    // Use MERGE instead.
+    // Ignoring update counts is not an option, because the JDBC driver reads them internally and may fail with
+    // low-level exceptions.
+    // See UpsertTestOracle for details.
+    ErrorUtil.requireArgument(
+      !statement.toUpperCase.contains("IGNORE_ROW_ON_DUPKEY_INDEX"),
+      s"Illegal usage of bulkOperation with IGNORE_ROW_ON_DUPKEY_INDEX. $statement",
+    )
 
-  private def doBulkOperation[A](
-      statement: String,
-      values: Seq[A],
-      profile: Profile,
-      validateUpdateCountsResult: Boolean,
-      useTransactionForOracle: Boolean,
-  )(
-      setParams: PositionedParameters => A => Unit
-  )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Array[Int], NoStream, Effect.All] = {
     if (values.isEmpty) DBIOAction.successful(Array.empty)
     else {
       val action = SimpleJdbcAction { session =>
@@ -695,61 +675,48 @@ object DbStorage {
             preparedStatement.addBatch()
           }
           val updateCounts = preparedStatement.executeBatch()
-          if (validateUpdateCountsResult) {
-            ErrorUtil.requireState(
-              updateCounts.length == values.length,
-              s"executeBatch returned ${updateCounts.length} update counts for ${values.length} rows. " +
-                s"${updateCounts.mkString("Array(", ", ", ")")}",
-            )
-            ErrorUtil.requireState(
-              updateCounts.forall(x => x == Statement.SUCCESS_NO_INFO || (x >= 0 && x <= 1000)),
-              show"Batch operation update counts must be either ${Statement.SUCCESS_NO_INFO} or between 0 and 1000. " +
-                show"Actual results were ${updateCounts.mkString("Array(", ", ", ")")}",
-            )
-            // The JDBC documentation demands that `executeBatch` throw a `BatchUpdateException`
-            // if some updates in the batch fail and set the corresponding row update entry to `EXECUTE_FAILED`.
-            // We check here for EXECUTE_BATCH not being reported without an exception to be super safe.
-          }
+          ErrorUtil.requireState(
+            updateCounts.length == values.length,
+            s"executeBatch returned ${updateCounts.length} update counts for ${values.length} rows. " +
+              s"${updateCounts.mkString("Array(", ", ", ")")}",
+          )
+          ErrorUtil.requireState(
+            updateCounts.forall(x => x == Statement.SUCCESS_NO_INFO || x >= 0),
+            show"Batch operation update counts must be either ${Statement.SUCCESS_NO_INFO} or non-negative. " +
+              show"Actual results were ${updateCounts.mkString("Array(", ", ", ")")}",
+          )
+          // The JDBC documentation demands that `executeBatch` throw a `BatchUpdateException`
+          // if some updates in the batch fail and set the corresponding row update entry to `EXECUTE_FAILED`.
+          // We check here for EXECUTE_BATCH not being reported without an exception to be super safe.
           updateCounts
         }
       }
 
+      import profile.DbStorageAPI._
       profile match {
-        case Oracle(_) if useTransactionForOracle =>
-          import profile.DbStorageAPI._
+        case _: Oracle =>
+          // Oracle has the habit of not properly rolling back, if an error occurs and
+          // there is no transaction (i.e. autoCommit = true). Further details on this can be found in UpsertTestOracle.
           action.transactionally
-        case Oracle(_) =>
-          // Enforce serializable isolation level for bulk merges to avoid deadlocks.
-          // See UpsertTestOracle for details.
-          ErrorUtil.requireArgument(
-            !statement.toLowerCase.contains("merge"),
-            s"A bulk merge must be executed within a transaction. $statement",
-          )
+
+        case _ if values.sizeCompare(1) <= 0 =>
+          // Disable auto-commit for better performance.
           action
-        case _ => action
+
+        case _ => action.transactionally
       }
     }
   }
 
-  /** Same as [[bulkOperation]] except that no update counts are returned.
-    * Can also be used if `statement` contains `"IGNORE_ROW_ON_DUPKEY_INDEX"`.
-    */
+  /** Same as [[bulkOperation]] except that no update counts are returned. */
   def bulkOperation_[A](
       statement: String,
       values: Seq[A],
       profile: Profile,
-      useTransactionForOracle: Boolean = false,
   )(
       setParams: PositionedParameters => A => Unit
   )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Unit, NoStream, Effect.All] =
-    doBulkOperation(
-      statement,
-      values,
-      profile,
-      validateUpdateCountsResult = false,
-      useTransactionForOracle = useTransactionForOracle,
-    )(setParams)
-      .andThen(DbAction.unit)
+    bulkOperation(statement, values, profile)(setParams).andThen(DbAction.unit)
 
   /* Helper methods to make usage of EitherT[DBIO,] possible without requiring type hints */
   def dbEitherT[A, B](value: DBIO[Either[A, B]]): EitherT[DBIO, A, B] = EitherT[DBIO, A, B](value)

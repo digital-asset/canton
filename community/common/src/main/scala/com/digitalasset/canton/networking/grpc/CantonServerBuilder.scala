@@ -48,7 +48,6 @@ object CantonServerBuilder {
     */
   private class BaseBuilder(
       serverBuilder: ServerBuilder[_ <: ServerBuilder[_]],
-      loggerFactory: NamedLoggerFactory,
       interceptors: CantonServerInterceptors,
   ) extends CantonServerBuilder {
 
@@ -146,7 +145,6 @@ object CantonServerBuilder {
 
     new BaseBuilder(
       reifyBuilder(configureKeepAlive(config.keepAliveServer, builderWithSsl)),
-      loggerFactory,
       config.instantiateServerInterceptors(tracing, apiLoggingConfig, nodeMetrics, loggerFactory),
     )
   }

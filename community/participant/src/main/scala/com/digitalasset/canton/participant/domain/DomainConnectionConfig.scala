@@ -7,12 +7,11 @@ import cats.data.NonEmptyList
 import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, InvariantViolation}
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.admin.v0
-import com.digitalasset.canton.participant.admin.version.VersionedDomainConnectionConfig
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   HttpSequencerConnection,
@@ -21,13 +20,14 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
-import com.digitalasset.canton.util.{
+import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasVersionedMessageCompanion,
   HasVersionedWrapper,
-  HasVersionedWrapperCompanion,
-  OptionUtil,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
@@ -43,7 +43,7 @@ case class DomainConnectionConfig(
     initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
     timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
-) extends HasVersionedWrapper[VersionedDomainConnectionConfig]
+) extends HasVersionedWrapper[VersionedMessage[DomainConnectionConfig]]
     with HasProtoV0[v0.DomainConnectionConfig]
     with PrettyPrinting {
 
@@ -102,8 +102,8 @@ case class DomainConnectionConfig(
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedDomainConnectionConfig =
-    VersionedDomainConnectionConfig(VersionedDomainConnectionConfig.Version.V0(toProtoV0))
+  ): VersionedMessage[DomainConnectionConfig] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.DomainConnectionConfig =
     v0.DomainConnectionConfig(
@@ -118,10 +118,10 @@ case class DomainConnectionConfig(
     )
 }
 
-object DomainConnectionConfig
-    extends HasVersionedWrapperCompanion[VersionedDomainConnectionConfig, DomainConnectionConfig] {
-  override protected def ProtoClassCompanion: VersionedDomainConnectionConfig.type =
-    VersionedDomainConnectionConfig
+object DomainConnectionConfig extends HasVersionedMessageCompanion[DomainConnectionConfig] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.DomainConnectionConfig)(fromProtoV0)
+  )
   override protected def name: String = "domain connection config"
 
   def grpc(
@@ -145,15 +145,6 @@ object DomainConnectionConfig
       maxRetryDelay,
       timeTracker,
     )
-
-  override def fromProtoVersioned(
-      domainConnectionConfigP: VersionedDomainConnectionConfig
-  ): ParsingResult[DomainConnectionConfig] =
-    domainConnectionConfigP.version match {
-      case VersionedDomainConnectionConfig.Version.Empty =>
-        Left(FieldNotSet("VersionedDomainConnectionConfig.version"))
-      case VersionedDomainConnectionConfig.Version.V0(config) => fromProtoV0(config)
-    }
 
   def fromProtoV0(
       domainConnectionConfigP: v0.DomainConnectionConfig

@@ -646,22 +646,28 @@ class DbActiveContractStore(
 
     val insertQuery = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
-        """insert /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( active_contracts ( contract_id, ts, request_counter, change, domain_id ) ) */
-          into active_contracts(domain_id, contract_id, change, operation, ts, request_counter, remote_domain_id)
-          values (?, ?, ?, ?, ?, ?, ?)"""
+        """merge /*+ INDEX ( active_contracts ( contract_id, ts, request_counter, change, domain_id ) ) */  
+          |into active_contracts
+          |using (select ? contract_id, ? ts, ? request_counter, ? change, ? domain_id from dual) input
+          |on (active_contracts.contract_id = input.contract_id and active_contracts.ts = input.ts and 
+          |    active_contracts.request_counter = input.request_counter and active_contracts.change = input.change and
+          |    active_contracts.domain_id = input.domain_id)
+          |when not matched then
+          |  insert (contract_id, ts, request_counter, change, domain_id, operation, remote_domain_id)
+          |  values (input.contract_id, input.ts, input.request_counter, input.change, input.domain_id, ?, ?)""".stripMargin
       case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
-        """insert into active_contracts(domain_id, contract_id, change, operation, ts, request_counter, remote_domain_id)
-          values (?, ?, CAST(? as change_type), CAST(? as operation_type), ?, ?, ?)
+        """insert into active_contracts(contract_id, ts, request_counter, change, domain_id, operation, remote_domain_id)
+          values (?, ?, ?, CAST(? as change_type), ?, CAST(? as operation_type), ?)
           on conflict do nothing"""
     }
     val insertAll = DbStorage.bulkOperation_(insertQuery, contractIds, storage.profile) {
       pp => contractId =>
-        pp >> domainId
         pp >> contractId
-        pp >> change
-        pp >> operation
         pp >> toc.timestamp
         pp >> toc.rc
+        pp >> change
+        pp >> domainId
+        pp >> operation
         pp >> remoteDomain
     }
 

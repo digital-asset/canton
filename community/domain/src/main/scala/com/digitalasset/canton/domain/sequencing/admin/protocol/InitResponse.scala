@@ -7,7 +7,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 case class InitResponse private (keyId: String, publicKey: SigningPublicKey, replicated: Boolean)
     extends HasProtoV0[v0.InitResponse] {

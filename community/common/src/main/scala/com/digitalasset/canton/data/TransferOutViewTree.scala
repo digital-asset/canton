@@ -4,28 +4,25 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
-import com.digitalasset.canton.protocol.version.{
-  VersionedTransferOutCommonData,
-  VersionedTransferOutView,
-  VersionedTransferViewTree,
-}
 import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.util.{
-  EitherUtil,
+import com.digitalasset.canton.util.{EitherUtil, NoCopy}
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageWithContextCompanion,
+  HasVersionedMessageWithContextCompanion,
   HasVersionedToByteString,
   HasVersionedWrapper,
-  NoCopy,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
@@ -62,16 +59,14 @@ case class TransferOutViewTree(
   )
 }
 
-object TransferOutViewTree {
+object TransferOutViewTree
+    extends HasVersionedMessageWithContextCompanion[TransferOutViewTree, HashOps] {
 
-  def fromProtoVersioned(crypto: CryptoPureApi)(
-      transferOutViewTreeP: VersionedTransferViewTree
-  ): ParsingResult[TransferOutViewTree] =
-    transferOutViewTreeP.version match {
-      case VersionedTransferViewTree.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferViewTree.version"))
-      case VersionedTransferViewTree.Version.V0(tree) => fromProtoV0(crypto)(tree)
-    }
+  override val name: String = "TransferOutViewTree"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto))
+  )
 
   def fromProtoV0(hashOps: HashOps)(
       transferOutViewTreeP: v0.TransferViewTree
@@ -82,14 +77,6 @@ object TransferOutViewTree {
     )((commonData, view) => new TransferOutViewTree(commonData, view)(hashOps))(
       transferOutViewTreeP
     )
-
-  def fromByteString(
-      crypto: CryptoPureApi
-  )(bytes: ByteString): ParsingResult[TransferOutViewTree] =
-    ProtoConverter
-      .protoParser(VersionedTransferViewTree.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(crypto))
-
 }
 
 /** Aggregates the data of a transfer-out request that is sent to the mediator and the involved participants.
@@ -110,14 +97,13 @@ case class TransferOutCommonData private (
     uuid: UUID,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[TransferOutCommonData](hashOps)
-    with HasVersionedWrapper[VersionedTransferOutCommonData]
+    with HasVersionedWrapper[VersionedMessage[TransferOutCommonData]]
     with MemoizedEvidence
     with NoCopy {
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedTransferOutCommonData =
-    VersionedTransferOutCommonData(VersionedTransferOutCommonData.Version.V0(toProtoV0))
+  ): VersionedMessage[TransferOutCommonData] = VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.TransferOutCommonData =
     v0.TransferOutCommonData(
@@ -146,7 +132,16 @@ case class TransferOutCommonData private (
   )
 }
 
-object TransferOutCommonData {
+object TransferOutCommonData
+    extends HasMemoizedVersionedMessageWithContextCompanion[
+      TransferOutCommonData,
+      HashOps,
+    ] {
+  override val name: String = "TransferOutCommonData"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0)
+  )
 
   private[this] def apply(
       salt: Salt,
@@ -175,17 +170,8 @@ object TransferOutCommonData {
       uuid,
     )(hashOps, None)
 
-  private[this] def fromProtoVersioned(hashOps: HashOps, bytes: ByteString)(
-      transferOutCommonDataP: VersionedTransferOutCommonData
-  ): ParsingResult[TransferOutCommonData] =
-    transferOutCommonDataP.version match {
-      case VersionedTransferOutCommonData.Version.Empty =>
-        Left(FieldNotSet("TransferOutCommonData.version"))
-      case VersionedTransferOutCommonData.Version.V0(data) => fromProtoV0(hashOps, bytes)(data)
-    }
-
-  private[this] def fromProtoV0(hashOps: HashOps, bytes: ByteString)(
-      transferOutCommonDataP: v0.TransferOutCommonData
+  private[this] def fromProtoV0(hashOps: HashOps, transferOutCommonDataP: v0.TransferOutCommonData)(
+      bytes: ByteString
   ): ParsingResult[TransferOutCommonData] = {
     val v0.TransferOutCommonData(
       saltP,
@@ -211,14 +197,6 @@ object TransferOutCommonData {
       uuid,
     )(hashOps, Some(bytes))
   }
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[TransferOutCommonData] =
-    ProtoConverter
-      .protoParser(VersionedTransferOutCommonData.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(hashOps, bytes))
-
 }
 
 /** Aggregates the data of a transfer-out request that is only sent to the involved participants
@@ -238,14 +216,17 @@ case class TransferOutView private (
     targetTimeProof: TimeProof,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[TransferOutView](hashOps)
-    with HasVersionedWrapper[VersionedTransferOutView]
+    with HasVersionedWrapper[VersionedMessage[TransferOutView]]
     with MemoizedEvidence
     with NoCopy {
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedTransferOutView =
-    VersionedTransferOutView(VersionedTransferOutView.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[TransferOutView] =
+    VersionedMessage(toProtoV0.toByteString, 0)
+
   protected def toProtoV0: v0.TransferOutView =
     v0.TransferOutView(
       salt = Some(salt.toProtoV0),
@@ -267,7 +248,13 @@ case class TransferOutView private (
   )
 }
 
-object TransferOutView {
+object TransferOutView
+    extends HasMemoizedVersionedMessageWithContextCompanion[TransferOutView, HashOps] {
+  override val name: String = "TransferOutView"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0)
+  )
 
   private[this] def apply(
       salt: Salt,
@@ -287,17 +274,8 @@ object TransferOutView {
   ): TransferOutView =
     new TransferOutView(salt, submitter, contractId, targetDomain, targetTimeProof)(hashOps, None)
 
-  private[this] def fromProtoVersioned(hashOps: HashOps, bytes: ByteString)(
-      transferOutViewP: VersionedTransferOutView
-  ): ParsingResult[TransferOutView] =
-    transferOutViewP.version match {
-      case VersionedTransferOutView.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferOutView.version"))
-      case VersionedTransferOutView.Version.V0(view) => fromProtoV0(hashOps, bytes)(view)
-    }
-
-  private[this] def fromProtoV0(hashOps: HashOps, bytes: ByteString)(
-      transferOutViewP: v0.TransferOutView
+  private[this] def fromProtoV0(hashOps: HashOps, transferOutViewP: v0.TransferOutView)(
+      bytes: ByteString
   ): ParsingResult[TransferOutView] = {
     val v0.TransferOutView(saltP, submitterP, contractIdP, targetDomainP, targetTimeProofP) =
       transferOutViewP
@@ -314,14 +292,6 @@ object TransferOutView {
       Some(bytes),
     )
   }
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[TransferOutView] =
-    ProtoConverter
-      .protoParser(VersionedTransferOutView.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(hashOps, bytes))
-
 }
 
 /** A fully unblinded [[TransferOutViewTree]]

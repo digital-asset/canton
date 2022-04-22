@@ -7,7 +7,7 @@ import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.data.KeyResolution
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 case class ResolvedKey(key: LfGlobalKey, resolution: KeyResolution)
     extends HasProtoV0[v0.ViewParticipantData.ResolvedKey] {

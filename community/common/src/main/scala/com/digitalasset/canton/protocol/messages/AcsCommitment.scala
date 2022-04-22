@@ -4,21 +4,25 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version.VersionedAcsCommitment
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
@@ -119,13 +123,15 @@ case class AcsCommitment private (
     period: CommitmentPeriod,
     commitment: AcsCommitment.CommitmentType,
 )(override val deserializedFrom: Option[ByteString])
-    extends HasVersionedWrapper[VersionedAcsCommitment]
+    extends HasVersionedWrapper[VersionedMessage[AcsCommitment]]
     with HasProtoV0[v0.AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedAcsCommitment =
-    VersionedAcsCommitment(VersionedAcsCommitment.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[AcsCommitment] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.AcsCommitment = {
     v0.AcsCommitment(
@@ -158,7 +164,12 @@ case class AcsCommitment private (
   }
 }
 
-object AcsCommitment {
+object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment] {
+  override val name: String = "AcsCommitment"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0)
+  )
 
   type CommitmentType = ByteString
   implicit val getResultCommitmentType: GetResult[CommitmentType] =
@@ -175,11 +186,7 @@ object AcsCommitment {
   }
 
   def commitmentTypeToProto(commitment: CommitmentType): ByteString = commitment
-
-  def commitmentTypeFromByteString(
-      bytes: ByteString
-  ): ParsingResult[CommitmentType] =
-    Right(bytes)
+  def commitmentTypeFromByteString(bytes: ByteString): CommitmentType = bytes
 
   private[this] def apply(
       domainId: DomainId,
@@ -198,19 +205,8 @@ object AcsCommitment {
   ): AcsCommitment =
     new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(None)
 
-  private def fromProtoVersioned(
-      protoMsg: VersionedAcsCommitment,
-      bytes: ByteString,
-  ): ParsingResult[AcsCommitment] =
-    protoMsg.version match {
-      case VersionedAcsCommitment.Version.Empty =>
-        Left(FieldNotSet("VersionedAcsCommitment.version"))
-      case VersionedAcsCommitment.Version.V0(msg) => fromProtoV0(msg, bytes)
-    }
-
-  private def fromProtoV0(
-      protoMsg: v0.AcsCommitment,
-      bytes: ByteString,
+  private def fromProtoV0(protoMsg: v0.AcsCommitment)(
+      bytes: ByteString
   ): ParsingResult[AcsCommitment] = {
     for {
       domainId <- DomainId.fromProtoPrimitive(protoMsg.domainId, "AcsCommitment.domainId")
@@ -239,15 +235,9 @@ object AcsCommitment {
 
       period = CommitmentPeriod(fromExclusive, periodLength)
       cmt = protoMsg.commitment
-      commitment <- commitmentTypeFromByteString(cmt)
+      commitment = commitmentTypeFromByteString(cmt)
     } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(Some(bytes))
   }
-
-  def fromByteString(bytes: ByteString): ParsingResult[AcsCommitment] =
-    for {
-      protoMsg <- ProtoConverter.protoParser(VersionedAcsCommitment.parseFrom)(bytes)
-      commitment <- fromProtoVersioned(protoMsg, bytes)
-    } yield commitment
 
   implicit val acsCommitmentCast: SignedMessageContentCast[AcsCommitment] = {
     case m: AcsCommitment => Some(m)

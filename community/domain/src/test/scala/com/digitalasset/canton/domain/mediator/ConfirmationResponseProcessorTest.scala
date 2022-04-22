@@ -8,6 +8,7 @@ import cats.syntax.option._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.CachingConfigs
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
@@ -116,7 +117,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
       when(
         sequencerClient.sendAsync(
-          any[Batch[OpenEnvelope[ProtocolMessage]]],
+          any[Batch[DefaultOpenEnvelope]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],
@@ -194,9 +195,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "timestamp of mediator request is propagated" in {
       val sut = Fixture()
       val testMediatorRequest = new InformeeMessage(fullInformeeTree) {
-        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           super.informeesAndThresholdByView map { case (key, (informee, _)) =>
-            (key, (informee, 0))
+            (key, (informee, NonNegativeInt.zero))
           }
         }
 
@@ -213,7 +214,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         )
         _ = verify(sut.sequencerClient, times(1))
           .sendAsync(
-            any[Batch[OpenEnvelope[ProtocolMessage]]],
+            any[Batch[DefaultOpenEnvelope]],
             any[SendType],
             eqMatch[Option[CantonTimestamp]](Some(requestTimestamp)),
             any[CantonTimestamp],
@@ -227,12 +228,12 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "request timestamp is propagated to mediator result when response aggregation is performed" should {
       // Send mediator request
       val informeeMessage = new InformeeMessage(fullInformeeTree) {
-        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val top = super.informeesAndThresholdByView
           top map { case (key, (informee, _)) =>
             if (informee == Set(submitter))
-              (key, (informee, 1))
-            else (key, (informee, 0))
+              (key, (informee, NonNegativeInt.one))
+            else (key, (informee, NonNegativeInt.zero))
           }
         }
 
@@ -311,7 +312,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           _ <- handleEvents(sut.processor)
           _ = verify(sut.sequencerClient, timeout(1000).times(1))
             .sendAsync(
-              any[Batch[OpenEnvelope[ProtocolMessage]]],
+              any[Batch[DefaultOpenEnvelope]],
               any[SendType],
               eqMatch[Option[CantonTimestamp]](Some(requestTimestamp)),
               any[CantonTimestamp],
@@ -352,7 +353,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           List(OpenEnvelope(rootHashMessage, Recipients.cc(mediatorId, participant))),
         )
         _ = verify(sut.sequencerClient, never).sendAsync(
-          any[Batch[OpenEnvelope[ProtocolMessage]]],
+          any[Batch[DefaultOpenEnvelope]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],
@@ -379,12 +380,12 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "request rejected when informee not hosted on active participant" in {
       val sut = Fixture()
       val informeeMessage = new InformeeMessage(fullInformeeTree) {
-        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+        override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val top = super.informeesAndThresholdByView
           top map { case (key, (informee, _)) =>
             if (informee == Set(submitter))
-              (key, (Set[Informee](PlainInformee(partyNoActiveParticipant)), 1))
-            else (key, (informee, 0))
+              (key, (Set[Informee](PlainInformee(partyNoActiveParticipant)), NonNegativeInt.one))
+            else (key, (informee, NonNegativeInt.zero))
           }
         }
 
@@ -437,7 +438,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val correctRootHash = RootHash(TestHash.digest("root-hash"))
       // Create a custom informee message with several recipient participants
       val informeeMessage = new InformeeMessage(fullInformeeTree) {
-        override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+        override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val submitterI = Informee.tryCreate(submitter, 1)
           val signatoryI = Informee.tryCreate(signatory, 1)
           val observerI = Informee.tryCreate(observer, 1)
@@ -446,7 +447,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
               submitterI,
               signatoryI,
               observerI,
-            ) -> 1)
+            ) -> NonNegativeInt.one)
           )
         }
 
@@ -787,7 +788,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
       // Create a custom informee message with many quorums such that the first Malformed rejection doesn't finalize the request
       val informeeMessage = new InformeeMessage(fullInformeeTree) {
-        override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], Int)] = {
+        override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val submitterI = Informee.tryCreate(submitter, 1)
           val signatoryI = Informee.tryCreate(signatory, 1)
           val observerI = Informee.tryCreate(observer, 1)
@@ -795,21 +796,21 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             factory.MultipleRootsAndViewNestings.view0.viewHash -> (Set(
               submitterI,
               signatoryI,
-            ) -> 1),
+            ) -> NonNegativeInt.one),
             factory.MultipleRootsAndViewNestings.view1.viewHash -> (Set(
               submitterI,
               signatoryI,
               observerI,
-            ) -> 1),
+            ) -> NonNegativeInt.one),
             factory.MultipleRootsAndViewNestings.view11.viewHash -> (Set(
               observerI,
               signatoryI,
-            ) -> 1),
+            ) -> NonNegativeInt.one),
             factory.MultipleRootsAndViewNestings.view10.viewHash -> (Set(
               submitterI,
               signatoryI,
               observerI,
-            ) -> 1),
+            ) -> NonNegativeInt.one),
           )
         }
 

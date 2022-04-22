@@ -5,16 +5,20 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either._
 import com.daml.lf.value.ValueCoder
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
+import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.version.VersionedSerializableContract
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 
 /** Represents a serializable contract.
   *
@@ -24,7 +28,7 @@ import com.digitalasset.canton.version.ProtocolVersion
   * @param ledgerCreateTime The ledger time of the transaction '''creating''' the contract
   */
 // This class is a reference example of serialization best practices, demonstrating:
-// - use of a Versioned... wrapper when serializing to an anonymous binary format. For a more extensive example of this,
+// - use of an UntypedVersionedMessage wrapper when serializing to an anonymous binary format. For a more extensive example of this,
 // please also see the writeup under `Backwards-incompatible Protobuf changes` in `CONTRIBUTING.md`.
 
 // Please consult the team if you intend to change the design of serialization.
@@ -36,7 +40,7 @@ case class SerializableContract(
 )
 // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format (ByteString/Array[Byte]) when
 // writing to the TransferStore and thus need to encode the version of the serialized Protobuf message
-    extends HasVersionedWrapper[VersionedSerializableContract]
+    extends HasVersionedWrapper[VersionedMessage[SerializableContract]]
     // Even if implementing HasVersionedWrapper, we should still implement HasProtoV0
     with HasProtoV0[v0.SerializableContract]
     with PrettyPrinting {
@@ -44,19 +48,24 @@ case class SerializableContract(
 
   override def toByteArray(version: ProtocolVersion): Array[Byte] = super.toByteArray(version)
 
-  // A `toProtoVersioned` method for a class which only has a single version of the corresponding Protobuf message
-  // typically ignores the version-argument.
-  // If there are multiple versions of the corresponding Protobuf message (e.g. v0.DomainTopologyTransaction and v1.DomainTopologyTransaction),
-  // it needs to pattern-match on the versions to decide which version it should embed within the Versioned... wrapper
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSerializableContract =
-    VersionedSerializableContract(VersionedSerializableContract.Version.V0(toProtoV0))
+  /*
+  A `toProtoVersioned` method for a class which only has a single version of the corresponding Protobuf message
+  typically ignores the version-argument.
+  If there are multiple versions of the corresponding Protobuf message (e.g. v0.DomainTopologyTransaction and
+  v1.DomainTopologyTransaction), it needs to pattern-match on the versions to decide which version it should embed
+  within the UntypedVersionedMessage wrapper. Note: `VersionedMessage[SerializableContract]` is an alias
+  for UntypedVersionedMessage.
+   */
+
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SerializableContract] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SerializableContract =
     v0.SerializableContract(
       contractId = contractId.toProtoPrimitive,
       rawContractInstance = rawContractInstance.getCryptographicEvidence,
       // Even though [[ContractMetadata]] also implements `HasVersionedWrapper`, we explicitly use Protobuf V0
-      // -> we only use `Versioned...` when required and not for 'regularly' nested Protobuf messages
+      // -> we only use `UntypedVersionedMessage` when required and not for 'regularly' nested Protobuf messages
       metadata = Some(metadata.toProtoV0),
       ledgerCreateTime = Some(ledgerCreateTime.toProtoPrimitive),
     )
@@ -83,10 +92,11 @@ case class SerializableContractWithWitnesses(
     witnesses: Set[PartyId],
 )
 
-object SerializableContract
-    extends HasVersionedWrapperCompanion[VersionedSerializableContract, SerializableContract] {
-  override protected def ProtoClassCompanion: VersionedSerializableContract.type =
-    VersionedSerializableContract
+object SerializableContract extends HasVersionedMessageCompanion[SerializableContract] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SerializableContract)(fromProtoV0)
+  )
+
   override protected def name: String = "serializable contract"
 
   def apply(
@@ -98,17 +108,6 @@ object SerializableContract
     SerializableRawContractInstance
       .create(contractInstance)
       .map(SerializableContract(contractId, _, metadata, ledgerTime))
-
-  // A `fromProtoVersioned` method usually just pattern-matches upon the encoded version and then calls the
-  // appropriate `fromProto<version>` method
-  override def fromProtoVersioned(
-      serializableContractInstanceP: VersionedSerializableContract
-  ): ParsingResult[SerializableContract] =
-    serializableContractInstanceP.version match {
-      case VersionedSerializableContract.Version.Empty =>
-        Left(FieldNotSet("VersionedSerializableContract.version"))
-      case VersionedSerializableContract.Version.V0(contract) => fromProtoV0(contract)
-    }
 
   def fromProtoV0(
       serializableContractInstanceP: v0.SerializableContract

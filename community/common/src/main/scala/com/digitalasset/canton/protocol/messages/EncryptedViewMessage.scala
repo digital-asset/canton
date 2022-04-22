@@ -17,7 +17,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, ProtoConverter}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

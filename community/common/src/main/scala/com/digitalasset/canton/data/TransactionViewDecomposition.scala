@@ -6,6 +6,7 @@ package com.digitalasset.canton.data
 import cats.data.{EitherT, NonEmptyList}
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
@@ -37,7 +38,7 @@ object TransactionViewDecomposition {
   case class NewView(
       rootNode: LfActionNode,
       informees: Set[Informee],
-      threshold: Int,
+      threshold: NonNegativeInt,
       rootSeed: Option[LfHash],
       override val nodeId: LfNodeId,
       tailNodes: Seq[TransactionViewDecomposition],
@@ -143,7 +144,7 @@ object TransactionViewDecomposition {
     def collectTailNodes(
         rootNode: LfActionNode,
         viewInformees: Set[Informee],
-        viewThreshold: Int,
+        viewThreshold: NonNegativeInt,
         rbContext: RollbackContext,
     )(implicit ec: ExecutionContext): Future[Seq[TransactionViewDecomposition]] = {
 

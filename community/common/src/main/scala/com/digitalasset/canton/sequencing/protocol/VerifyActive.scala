@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 final case class VerifyActiveRequest()
     extends HasProtoV0[v0.SequencerConnect.VerifyActive.Request] {
@@ -16,7 +16,7 @@ final case class VerifyActiveRequest()
 
   /* We allow serializing this message to a ByteArray despite it implementing ProtoNonSerializable because the serialization
    is (and should) only used in the HttpSequencerClient.
-  If you need to save this message in a database, please add a Versioned... message as documented in contributing.md  */
+  If you need to save this message in a database, please add an UntypedVersionedMessage message as documented in contributing.md  */
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteString.toByteArray
 }
 

@@ -17,7 +17,8 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.util.{AkkaUtil, LoggerUtil}
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -67,10 +68,14 @@ class LocalSequencerStateEventSignaller(
       .filter(_.includes(memberId))
       .map(_ => ReadSignal)
 
-  private def queueWithLogging[A](name: String, queue: SourceQueueWithComplete[A])(
-      item: A
+  private def queueWithLogging(name: String, queue: SourceQueueWithComplete[WriteNotification])(
+      item: WriteNotification
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    logger.debug(s"Pushing item to $name: $item")
+    val logLevel = item match {
+      case WriteNotification.None => Level.TRACE
+      case _: WriteNotification.Members => Level.DEBUG
+    }
+    LoggerUtil.logAtLevel(logLevel, s"Pushing item to $name: $item")
     queue.offer(item) map {
       case result: QueueCompletionResult =>
         logger.warn(s"Failed to queue item on $name: $result")

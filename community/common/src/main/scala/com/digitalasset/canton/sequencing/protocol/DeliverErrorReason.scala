@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 /** Why was the sequencer unable to sequence the requested send */
 sealed trait DeliverErrorReason extends HasProtoV0[v0.DeliverErrorReason] with PrettyPrinting {

@@ -149,20 +149,30 @@ class ManagedNodes[
     } yield instance
   })
 
-  override def migrateDatabase(name: String): Either[StartupError, Unit] = blocking(synchronized {
+  private def configAndParams(
+      name: String
+  ): Either[StartupError, (NodeConfig, LocalNodeParameters)] = {
     for {
       config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
       _ <- checkNotRunning(name)
-      _ <- runMigration(name, config.storage)
+      params = parametersFor(name)
+    } yield (config, params)
+  }
+
+  override def migrateDatabase(name: String): Either[StartupError, Unit] = blocking(synchronized {
+    for {
+      cAndP <- configAndParams(name)
+      (config, params) = cAndP
+      _ <- runMigration(name, config.storage, params.devVersionSupport)
     } yield ()
   })
 
   override def repairDatabaseMigration(name: String): Either[StartupError, Unit] = blocking(
     synchronized {
       for {
-        config <- configs.get(name).toRight(ConfigurationNotFound(name): StartupError)
-        _ <- checkNotRunning(name)
-        _ <- runRepairMigration(name, config.storage)
+        cAndP <- configAndParams(name)
+        (config, params) = cAndP
+        _ <- runRepairMigration(name, config.storage, params.devVersionSupport)
       } yield ()
     }
   )
@@ -207,7 +217,7 @@ class ManagedNodes[
       params: LocalNodeParameters,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
-      val migrations = migrationsFactory.create(dbConfig, name)
+      val migrations = migrationsFactory.create(dbConfig, name, params.devVersionSupport)
       import TraceContext.Implicits.Empty._
       logger.info(s"Setting up database schemas for $name")
       val started = System.nanoTime()
@@ -250,10 +260,14 @@ class ManagedNodes[
     if (isRunning(name)) Left(AlreadyRunning(name))
     else Right(())
 
-  private def runMigration(name: String, storageConfig: StorageConfig): Either[StartupError, Unit] =
+  private def runMigration(
+      name: String,
+      storageConfig: StorageConfig,
+      devVersionSupport: Boolean,
+  ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
       migrationsFactory
-        .create(dbConfig, name)
+        .create(dbConfig, name, devVersionSupport)
         .migrateDatabase()
         .leftMap(FailedDatabaseMigration(name, _))
         .value
@@ -263,10 +277,11 @@ class ManagedNodes[
   private def runRepairMigration(
       name: String,
       storageConfig: StorageConfig,
+      devVersionSupport: Boolean,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
       migrationsFactory
-        .create(dbConfig, name)
+        .create(dbConfig, name, devVersionSupport)
         .repairFlywayMigration()
         .leftMap(FailedDatabaseRepairMigration(name, _))
         .value

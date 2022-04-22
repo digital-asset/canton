@@ -14,7 +14,10 @@ import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingC
 import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiProvider}
 import com.digitalasset.canton.lifecycle._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
-import com.digitalasset.canton.participant.config.ParticipantNodeParameters
+import com.digitalasset.canton.participant.config.{
+  ParticipantNodeParameters,
+  ParticipantProtocolConfig,
+}
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
 import com.digitalasset.canton.participant.domain.grpc.ParticipantInitializeTopology
@@ -62,7 +65,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
 
   protected def getDomainHandle(
       config: DomainConnectionConfig,
-      minimumProtocolVersion: Option[ProtocolVersion],
+      protocolConfig: ParticipantProtocolConfig,
       sequencerConnection: SequencerConnection,
       syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
   )(
@@ -101,7 +104,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
         sequencerConnectClient,
         config.domain,
         domainId,
-        minimumProtocolVersion,
+        protocolConfig,
       ).mapK(FutureUnlessShutdown.outcomeK)
 
       _ <- aliasManager
@@ -233,8 +236,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
           futureSupervisor,
           participantNodeParameters.loggingConfig,
           domainLoggerFactory,
-          ProtocolVersion.supportedProtocolsParticipant,
-          minimumProtocolVersion,
+          ProtocolVersion.supportedProtocolsParticipant(protocolConfig.devVersionSupport),
+          protocolConfig.minimumProtocolVersion,
         )
       }
 
@@ -304,7 +307,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       sequencerConnectClient: SequencerConnectClient,
       alias: DomainAlias,
       domainId: DomainId,
-      minimumProtocolVersion: Option[ProtocolVersion],
+      protocolConfig: ParticipantProtocolConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, DomainRegistryError, HandshakeResponse.Success] =
@@ -312,7 +315,10 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       success <- sequencerConnectClient
         .handshake(
           alias,
-          HandshakeRequest(ProtocolVersion.supportedProtocolsParticipant, minimumProtocolVersion),
+          HandshakeRequest(
+            ProtocolVersion.supportedProtocolsParticipant(protocolConfig.devVersionSupport),
+            protocolConfig.minimumProtocolVersion,
+          ),
         )
         .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
         .subflatMap {

@@ -28,8 +28,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbTy
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 

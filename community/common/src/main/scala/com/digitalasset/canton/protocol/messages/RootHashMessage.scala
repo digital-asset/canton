@@ -13,8 +13,7 @@ import com.digitalasset.canton.protocol.{RootHash, v0}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 /** One root hash message is sent for each participant involved in a mediator request that requires root hash messages.

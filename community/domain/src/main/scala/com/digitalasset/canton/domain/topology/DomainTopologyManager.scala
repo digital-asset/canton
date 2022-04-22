@@ -257,7 +257,9 @@ class DomainTopologyManager(
       }
   }
 
-  def executeSequential(fut: => Future[Unit], description: String): Future[Unit] = {
+  def executeSequential(fut: => Future[Unit], description: String)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
     sequentialQueue.execute(fut, description)
   }
 

@@ -43,5 +43,6 @@ trait LocalNodeParameters {
   def sequencerClient: SequencerClientConfig
   def cachingConfigs: CachingConfigs
   def nonStandardConfig: Boolean
+  def devVersionSupport: Boolean
 
 }

@@ -8,14 +8,21 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{Hash, SignatureCheckError, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
+import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
+import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
+import com.digitalasset.canton.store.SequencedEventStore.{
+  IgnoredSequencedEvent,
+  OrdinarySequencedEvent,
+}
 import com.digitalasset.canton.topology.{DomainId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 
 import java.time.Duration
+import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -35,11 +42,16 @@ object SequencedEventValidationError {
   ) extends SequencedEventValidationError
   case class ForkHappened(
       counter: SequencerCounter,
-      suppliedTimestamp: CantonTimestamp,
-      expectedTimestamp: CantonTimestamp,
-      suppliedHash: Hash,
-      expectedHash: Hash,
+      suppliedEvent: SequencedEvent[ClosedEnvelope],
+      expectedEvent: SequencedEvent[ClosedEnvelope],
   ) extends SequencedEventValidationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ForkHappened] = prettyOfClass(
+      param("counter", _.counter),
+      param("supplied event", _.suppliedEvent),
+      param("expected event", _.expectedEvent),
+    )
+  }
   case class SignatureInvalid(
       sequencedTimestamp: CantonTimestamp,
       usedTimestamp: CantonTimestamp,
@@ -56,7 +68,7 @@ trait ValidateSequencedEvent {
 
 /** Validate whether a received event is valid for processing.
   *
-  * @param initialPriorEventMetadata the preceding event of the first event to be validated (can be none on a new connection)
+  * @param initialPriorEvent the preceding event of the first event to be validated (can be none on a new connection)
   * @param unauthenticated if true, then the connection is unauthenticated. in such cases, we have to skip some validations.
   * @param optimistic if true, we'll try to be optimistic and validate the event possibly with some stale data. this
   *                   means that during sequencer key rolling, a message might have been signed by a key that was just revoked.
@@ -67,7 +79,7 @@ trait ValidateSequencedEvent {
   *                       only use it in case of a programming error and the need to unblock a deployment.
   */
 class SequencedEventValidator(
-    initialPriorEventMetadata: Option[SequencedEventMetadata],
+    initialPriorEvent: Option[PossiblyIgnoredSerializedEvent],
     unauthenticated: Boolean,
     optimistic: Boolean,
     skipValidation: Boolean,
@@ -89,8 +101,8 @@ class SequencedEventValidator(
   import SequencedEventValidationError._
 
   private type ValidationResult = Either[SequencedEventValidationError, Unit]
-  private case class PriorEventMetadata(
-      event: SequencedEventMetadata,
+  private case class PriorEvent(
+      event: PossiblyIgnoredSerializedEvent,
       skipNextSignatureValidation: Boolean,
   )
   private def invalid(error: SequencedEventValidationError): ValidationResult = Left(error)
@@ -99,19 +111,22 @@ class SequencedEventValidator(
   private def topologyChangeDelayAt(
       ts: CantonTimestamp,
       context: => String,
-  )(implicit traceContext: TraceContext): Future[Duration] =
-    timely.supervised(context)(
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Duration] =
+    timely.supervisedUS(context) {
       syncCryptoApi
-        .awaitIpsSnapshot(ts)
-        .flatMap(
-          _.findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
-            .map(_.topologyChangeDelay.duration)
-        )
-    )
+        .awaitIpsSnapshotUS(ts)
+        .flatMap { snapshot =>
+          FutureUnlessShutdown.outcomeF {
+            snapshot
+              .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
+              .map(_.topologyChangeDelay.duration)
+          }
+        }
+    }
 
-  private val priorEventMetadataRef: AtomicReference[Option[PriorEventMetadata]] =
-    new AtomicReference[Option[PriorEventMetadata]](
-      initialPriorEventMetadata.map(x => PriorEventMetadata(x, true))
+  private val priorEventRef: AtomicReference[Option[PriorEvent]] =
+    new AtomicReference[Option[PriorEvent]](
+      initialPriorEvent.map(x => PriorEvent(x, true))
     )
 
   /** Validates that the supplied event is suitable for processing from the prior event.
@@ -120,38 +135,41 @@ class SequencedEventValidator(
     * If the event is successfully validated (regardless of the signature check) it becomes the event that the event
     * in a following call will be validated against. We currently assume this is safe to do as if the event fails to be
     * handled by the application then the sequencer client will halt and will need recreating to restart event processing.
-    * This method should not be called concurrently as it will corrupt the prior event state.
+    * This method must not be called concurrently as it will corrupt the prior event state.
     */
   override def validate(
       event: OrdinarySerializedEvent
   ): EitherT[Future, SequencedEventValidationError, Unit] = if (skipValidation) EitherT.pure(())
   else {
     implicit val traceContext: TraceContext = event.traceContext
-    val priorEventRefO = priorEventMetadataRef.get()
-    val priorEventMetadataO = priorEventRefO.map(_.event)
-    val oldCounter = priorEventMetadataO.fold(GenesisSequencerCounter - 1L)(_.counter)
-    val oldTimestamp = priorEventMetadataO.fold(CantonTimestamp.MinValue)(_.timestamp)
-    val oldHashO = priorEventMetadataO.flatMap(_.hash)
+    val priorEventRefO = priorEventRef.get()
+    val priorEventO = priorEventRefO.map(_.event)
+    val oldCounter = priorEventO.fold(GenesisSequencerCounter - 1L)(_.counter)
+    val oldTimestamp = priorEventO.fold(CantonTimestamp.MinValue)(_.timestamp)
+    val oldSequencedEventO = priorEventO.flatMap {
+      case OrdinarySequencedEvent(signedContent) => Some(signedContent.content)
+      case _: IgnoredSequencedEvent[_] => None
+    }
 
-    val newEventMetadata @ SequencedEventMetadata(newCounter, newTimestamp, newHashO) =
-      SequencedEventMetadata.fromPossiblyIgnoredSequencedEvent(syncCryptoApi.pureCrypto, event)
-    val newHash = newHashO.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException("Undefined hash for ordinary sequenced event!")
-      )
-    )
+    val newSequencedEvent = event.signedEvent.content
+    val newCounter = newSequencedEvent.counter
+    val newTimestamp = newSequencedEvent.timestamp
 
     def checkCounter: ValidationResult =
       if (newCounter < oldCounter) invalid(DecreasingSequencerCounter(newCounter, oldCounter))
       else if (newCounter > oldCounter + 1) invalid(GapInSequencerCounter(newCounter, oldCounter))
       else valid
 
-    def checkForFork: ValidationResult = oldHashO match {
-      case Some(oldHash) if oldCounter == newCounter =>
+    def checkForFork: ValidationResult = oldSequencedEventO match {
+      case Some(oldSequencedEvent) if oldCounter == newCounter =>
         Either.cond(
-          newTimestamp == oldTimestamp && oldHash == newHash,
+          // We compare the contents of the `SequencedEvent` rather than their serialization
+          // because the SequencerReader serializes the `SequencedEvent` afresh upon each resubscription
+          // and the serialization may therefore differ from time to time. This is fine for auditability
+          // because the sequencer also delivers a new signature on the new serialization.
+          oldSequencedEvent == newSequencedEvent,
           (),
-          ForkHappened(oldCounter, newTimestamp, oldTimestamp, newHash, oldHash),
+          ForkHappened(oldCounter, newSequencedEvent, oldSequencedEvent),
         )
       case _ => valid
     }
@@ -186,17 +204,20 @@ class SequencedEventValidator(
       priorEventRefO.filterNot(_.skipNextSignatureValidation).map(_.event.timestamp)
     for {
       _ <- EitherT.fromEither[Future](validateSync)
+      newHash = SignedContent.hashContent(syncCryptoApi.pureCrypto, newSequencedEvent)
       _ <- verifySignature(priorTimestamp, event, newHash)
       _ =
         if (
-          !priorEventMetadataRef.compareAndSet(
+          !priorEventRef.compareAndSet(
             priorEventRefO,
-            Some(PriorEventMetadata(newEventMetadata, skipNext)),
+            Some(PriorEvent(event, skipNext)),
           )
         ) {
           // shouldn't happen but likely implies a bug in the caller if it does
-          sys.error(
-            "The prior event metadata has been unexpectedly changed. Multiple events may be incorrectly being validated concurrently."
+          ErrorUtil.internalError(
+            new ConcurrentModificationException(
+              "The prior event has been unexpectedly changed. Multiple events may be incorrectly being validated concurrently."
+            )
           )
         }
     } yield ()
@@ -221,7 +242,9 @@ class SequencedEventValidator(
         val topologyStateKnownUntil = syncCryptoApi.topologyKnownUntilTimestamp
         import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax.EitherTOnShutdownSyntax
 
-        def performValidation(timestamp: CantonTimestamp) = {
+        def performValidation(
+            timestamp: CantonTimestamp
+        ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
           for {
             snapshot <- EitherT.right(
               timely.supervisedUS(
@@ -237,13 +260,9 @@ class SequencedEventValidator(
               )
               .mapK(FutureUnlessShutdown.outcomeK)
           } yield ()
-          // TODO(i4933) on shutdown, we would skip the validation step. rather, we should propagate the shutdown
-        }.onShutdown {
-          logger.debug("Aborting sequenced event validation due to shutdown")
-          Right(())
         }
 
-        def determineTimestamp(): Future[CantonTimestamp] = {
+        def determineTimestamp(): FutureUnlessShutdown[CantonTimestamp] = {
           // determine timestamp against which we are going to evaluate this snapshot
           val evaluationTs = event.signedEvent.timestampOfSigningKey match {
             case None => event.timestamp
@@ -265,7 +284,7 @@ class SequencedEventValidator(
           // in most cases, this should work directly, as the "topology state" is known ahead, so we don't need
           // to wait until previous processing has finished before we can check the signatures here
           if (evaluationTs <= topologyStateKnownUntil)
-            Future.successful(evaluationTs)
+            FutureUnlessShutdown.pure(evaluationTs)
           else {
             // the evaluationTs is newer than we know. this can be due to three reasons:
             // (1) we do not have a last update
@@ -296,12 +315,18 @@ class SequencedEventValidator(
         // snapshot and only if that one fails, we'll wait for the "real" one.
         // we do this in order to not require topology management to have finished processing
         // the previous event before we start with the remaining ones
-        if (optimistic) {
-          performValidation(syncCryptoApi.approximateTimestamp).recoverWith { _ =>
+        {
+          if (optimistic) {
+            performValidation(syncCryptoApi.approximateTimestamp).recoverWith { _ =>
+              EitherT.right(determineTimestamp()).flatMap(performValidation)
+            }
+          } else {
             EitherT.right(determineTimestamp()).flatMap(performValidation)
           }
-        } else {
-          EitherT.right(determineTimestamp()).flatMap(performValidation)
+        }.onShutdown {
+          // TODO(i4933) on shutdown, we would skip the validation step. rather, we should propagate the shutdown
+          logger.debug("Aborting sequenced event validation due to shutdown")
+          Right(())
         }
     }
 }

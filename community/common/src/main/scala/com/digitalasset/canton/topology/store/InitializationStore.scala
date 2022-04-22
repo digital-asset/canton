@@ -10,6 +10,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Stor
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
 
@@ -26,6 +27,10 @@ trait InitializationStore extends AutoCloseable {
   def id(implicit traceContext: TraceContext): Future[Option[NodeId]]
 
   def setId(id: NodeId)(implicit traceContext: TraceContext): Future[Unit]
+
+  /** Function used for testing dev version flag. */
+  @VisibleForTesting
+  def throwIfNotDev(implicit traceContext: TraceContext): Future[Boolean]
 
 }
 
@@ -56,6 +61,10 @@ class InMemoryInitializationStore(override protected val loggerFactory: NamedLog
       )
 
   override def close(): Unit = ()
+
+  override def throwIfNotDev(implicit traceContext: TraceContext): Future[Boolean] =
+    Future.failed(new NotImplementedError("isDev does not make sense on the in-memory store"))
+
 }
 
 class DbInitializationStore(
@@ -103,4 +112,8 @@ class DbInitializationStore(
       }.transactionally.withTransactionIsolation(Serializable),
       functionFullName,
     )
+
+  override def throwIfNotDev(implicit traceContext: TraceContext): Future[Boolean] =
+    storage.query(sql"SELECT test_column FROM node_id".as[Int], functionFullName).map(_ => true)
+
 }

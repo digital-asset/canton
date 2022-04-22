@@ -4,19 +4,18 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.api.version.VersionedSubmissionRequest
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{
+import com.digitalasset.canton.version.{
   HasProtoV0WithVersion,
+  HasVersionedMessageCompanion,
   HasVersionedWrapper,
-  HasVersionedWrapperCompanion,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 
 case class SubmissionRequest private (
     sender: Member,
@@ -25,10 +24,10 @@ case class SubmissionRequest private (
     batch: Batch[ClosedEnvelope],
     maxSequencingTime: CantonTimestamp,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasVersionedWrapper[VersionedSubmissionRequest]
+) extends HasVersionedWrapper[VersionedMessage[SubmissionRequest]]
     with HasProtoV0WithVersion[v0.SubmissionRequest] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSubmissionRequest =
-    VersionedSubmissionRequest(VersionedSubmissionRequest.Version.V0(toProtoV0(version)))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SubmissionRequest] =
+    VersionedMessage(toProtoV0(version).toByteString, 0)
 
   // added for serializing in HttpSequencerClient
   def toByteArrayV0(version: ProtocolVersion): Array[Byte] = toProtoV0(version).toByteArray
@@ -51,20 +50,12 @@ case class SubmissionRequest private (
     batch.envelopes.nonEmpty && batch.envelopes.forall(_.recipients.allRecipients == Set(mediator))
 }
 
-object SubmissionRequest
-    extends HasVersionedWrapperCompanion[VersionedSubmissionRequest, SubmissionRequest] {
-  override protected def ProtoClassCompanion: VersionedSubmissionRequest.type =
-    VersionedSubmissionRequest
-  override protected def name: String = "submission request"
+object SubmissionRequest extends HasVersionedMessageCompanion[SubmissionRequest] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SubmissionRequest)(fromProtoV0)
+  )
 
-  override def fromProtoVersioned(
-      requestP: VersionedSubmissionRequest
-  ): ParsingResult[SubmissionRequest] =
-    requestP.version match {
-      case VersionedSubmissionRequest.Version.Empty =>
-        Left(FieldNotSet("VersionedSubmissionRequest.version"))
-      case VersionedSubmissionRequest.Version.V0(request) => fromProtoV0(request)
-    }
+  override protected def name: String = "submission request"
 
   def fromProtoV0(
       requestP: v0.SubmissionRequest

@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.mediator.store
 import java.util.UUID
 import com.digitalasset.canton.crypto._
 import cats.syntax.traverse._
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
@@ -38,7 +39,8 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     def h(i: Int): Hash = TestHash.digest(i)
     def rh(index: Int): RootHash = RootHash(h(index))
     def s(i: Int): Salt = TestSalt.generate(i)
-    val viewCommonData = ViewCommonData.tryCreate(hashOps)(Set(alice, bob), 2, s(999))
+    val viewCommonData =
+      ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(2), s(999))
     val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
     val commonMetadata = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,

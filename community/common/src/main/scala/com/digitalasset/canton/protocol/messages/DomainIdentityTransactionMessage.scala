@@ -12,8 +12,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{HasProtoV0, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}

@@ -46,6 +46,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def cachingConfigs: CachingConfigs = ???
     override def nonStandardConfig: Boolean = ???
     override def loggingConfig: LoggingConfig = ???
+    override def devVersionSupport: Boolean = ???
   }
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
     override def name: InstanceName = ???

@@ -100,7 +100,10 @@ trait DbConfig extends StorageConfig with PrettyPrinting {
   /** Where should database migrations be read from.
     * Enables specialized DDL for different database servers (e.g. Postgres, Oracle).
     */
-  val migrationsPaths: Seq[String]
+  def migrationsPaths: Seq[String]
+
+  /** Function to combine the defined migration path together with dev version changes */
+  def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String]
 
   /** Canton attempts to generate appropriate configuration for the daml ledger-api to persist the data it requires.
     * In most circumstances this should be sufficient and there is no need to override this.
@@ -162,30 +165,53 @@ object CommunityDbConfig {
   case class H2(
       override val config: Config,
       override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] = Seq(DbConfig.h2MigrationsPath),
+      override val migrationsPaths: Seq[String] = Seq(DbConfig.h2MigrationsPathStable),
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
   ) extends CommunityDbConfig
-      with H2DbConfig
+      with H2DbConfig {
+    override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
+      if (devVersionSupport)
+        migrationsPaths :+ DbConfig.h2MigrationsPathDev
+      else
+        migrationsPaths
+    }
+  }
 
   case class Postgres(
       override val config: Config,
       override val maxConnections: Option[Int] = None,
-      override val migrationsPaths: Seq[String] = Seq(DbConfig.postgresMigrationsPath),
+      override val migrationsPaths: Seq[String] = Seq(DbConfig.postgresMigrationsPathStable),
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
       override val cleanOnValidationError: Boolean = false,
   ) extends CommunityDbConfig
-      with PostgresDbConfig
+      with PostgresDbConfig {
+    override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
+      if (devVersionSupport)
+        migrationsPaths :+ DbConfig.postgresMigrationsPathDev
+      else
+        migrationsPaths
+    }
+
+  }
 }
 
 object DbConfig extends NoTracing {
 
   val defaultConnectionTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
 
-  val postgresMigrationsPath: String = "classpath:db/migration/canton/postgres"
-  val h2MigrationsPath: String = "classpath:db/migration/canton/h2"
-  val oracleMigrationPath: String = "classpath:db/migration/canton/oracle"
+  private val stableDir = "stable"
+  private val devDir = "dev"
+  private val basePostgresMigrationsPath: String = "classpath:db/migration/canton/postgres/"
+  private val baseH2MigrationsPath: String = "classpath:db/migration/canton/h2/"
+  private val baseOracleMigrationPath: String = "classpath:db/migration/canton/oracle/"
+  val postgresMigrationsPathStable: String = basePostgresMigrationsPath + stableDir
+  val h2MigrationsPathStable: String = baseH2MigrationsPath + stableDir
+  val oracleMigrationPathStable: String = baseOracleMigrationPath + stableDir
+  val postgresMigrationsPathDev: String = basePostgresMigrationsPath + devDir
+  val h2MigrationsPathDev: String = baseH2MigrationsPath + devDir
+  val oracleMigrationPathDev: String = baseOracleMigrationPath + devDir
 
   def postgresUrl(host: String, port: Int, name: String): String =
     s"jdbc:postgresql://$host:$port/$name"

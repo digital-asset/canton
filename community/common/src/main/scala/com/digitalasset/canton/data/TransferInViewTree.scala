@@ -6,18 +6,13 @@ package com.digitalasset.canton.data
 import java.util.UUID
 import cats.syntax.bifunctor._
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
   DeliveredTransferOutResult,
   ProtocolMessage,
   TransferInMediatorMessage,
-}
-import com.digitalasset.canton.protocol.version.{
-  VersionedTransferInCommonData,
-  VersionedTransferInView,
-  VersionedTransferViewTree,
 }
 import com.digitalasset.canton.protocol.{
   RootHash,
@@ -30,13 +25,15 @@ import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.util.{
-  EitherUtil,
+import com.digitalasset.canton.util.{EitherUtil, NoCopy}
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageWithContextCompanion,
+  HasVersionedMessageWithContextCompanion,
   HasVersionedToByteString,
   HasVersionedWrapper,
-  NoCopy,
+  ProtocolVersion,
+  VersionedMessage,
 }
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
@@ -69,32 +66,22 @@ case class TransferInViewTree(
   )
 }
 
-object TransferInViewTree {
+object TransferInViewTree
+    extends HasVersionedMessageWithContextCompanion[TransferInViewTree, HashOps] {
+  override val name: String = "TransferInViewTree"
 
-  def fromProtoVersioned(crypto: CryptoPureApi)(
-      transferInViewTreeP: VersionedTransferViewTree
-  ): ParsingResult[TransferInViewTree] =
-    transferInViewTreeP.version match {
-      case VersionedTransferViewTree.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferViewTree.version"))
-      case VersionedTransferViewTree.Version.V0(tree) => fromProtoV0(crypto)(tree)
-    }
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.TransferViewTree)(fromProtoV0)
+  )
 
-  def fromProtoV0(hashOps: HashOps)(
-      transferInViewTreeP: v0.TransferViewTree
+  def fromProtoV0(
+      hashOps: HashOps,
+      transferInViewTreeP: v0.TransferViewTree,
   ): ParsingResult[TransferInViewTree] =
     GenTransferViewTree.fromProtoV0(
       TransferInCommonData.fromByteString(hashOps),
       TransferInView.fromByteString(hashOps),
     )((commonData, view) => new TransferInViewTree(commonData, view)(hashOps))(transferInViewTreeP)
-
-  def fromByteString(
-      crypto: CryptoPureApi
-  )(bytes: ByteString): ParsingResult[TransferInViewTree] =
-    ProtoConverter
-      .protoParser(VersionedTransferViewTree.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(crypto))
-
 }
 
 /** Aggregates the data of a transfer-in request that is sent to the mediator and the involved participants.
@@ -113,14 +100,16 @@ case class TransferInCommonData private (
     uuid: UUID,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[TransferInCommonData](hashOps)
-    with HasVersionedWrapper[VersionedTransferInCommonData]
+    with HasVersionedWrapper[VersionedMessage[TransferInCommonData]]
     with MemoizedEvidence
     with NoCopy {
 
   def confirmingParties: Set[Informee] = stakeholders.map(ConfirmingParty(_, 1))
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedTransferInCommonData =
-    VersionedTransferInCommonData(VersionedTransferInCommonData.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[TransferInCommonData] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.TransferInCommonData = v0.TransferInCommonData(
     salt = Some(salt.toProtoV0),
@@ -144,7 +133,13 @@ case class TransferInCommonData private (
   )
 }
 
-object TransferInCommonData {
+object TransferInCommonData
+    extends HasMemoizedVersionedMessageWithContextCompanion[TransferInCommonData, HashOps] {
+  override val name: String = "TransferInCommonData"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0)
+  )
 
   private[this] def apply(
       salt: Salt,
@@ -164,17 +159,8 @@ object TransferInCommonData {
   ): TransferInCommonData =
     new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(hashOps, None)
 
-  private[this] def fromProtoVersioned(hashOps: HashOps, bytes: ByteString)(
-      transferInCommonDataP: VersionedTransferInCommonData
-  ): ParsingResult[TransferInCommonData] =
-    transferInCommonDataP.version match {
-      case VersionedTransferInCommonData.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferInCommonData.version"))
-      case VersionedTransferInCommonData.Version.V0(data) => fromProtoV0(hashOps, bytes)(data)
-    }
-
-  private[this] def fromProtoV0(hashOps: HashOps, bytes: ByteString)(
-      transferInCommonDataP: v0.TransferInCommonData
+  private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
+      bytes: ByteString
   ): ParsingResult[TransferInCommonData] = {
     val v0.TransferInCommonData(saltP, targetDomainP, stakeholdersP, uuidP, targetMediatorP) =
       transferInCommonDataP
@@ -189,13 +175,6 @@ object TransferInCommonData {
       Some(bytes),
     )
   }
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[TransferInCommonData] =
-    ProtoConverter
-      .protoParser(VersionedTransferInCommonData.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(hashOps, bytes))
 }
 
 /** Aggregates the data of a transfer-in request that is only sent to the involved participants
@@ -214,14 +193,16 @@ case class TransferInView private (
     transferOutResultEvent: DeliveredTransferOutResult,
 )(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
     extends MerkleTreeLeaf[TransferInView](hashOps)
-    with HasVersionedWrapper[VersionedTransferInView]
+    with HasVersionedWrapper[VersionedMessage[TransferInView]]
     with MemoizedEvidence
     with NoCopy {
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedTransferInView =
-    VersionedTransferInView(VersionedTransferInView.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[TransferInView] = VersionedMessage(toProtoV0.toByteString, 0)
+
   protected def toProtoV0: v0.TransferInView =
     v0.TransferInView(
       salt = Some(salt.toProtoV0),
@@ -243,7 +224,13 @@ case class TransferInView private (
   )
 }
 
-object TransferInView {
+object TransferInView
+    extends HasMemoizedVersionedMessageWithContextCompanion[TransferInView, HashOps] {
+  override val name: String = "TransferInView"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0)
+  )
 
   private[this] def apply(
       salt: Salt,
@@ -266,17 +253,8 @@ object TransferInView {
       None,
     )
 
-  private[this] def fromProtoVersioned(hashOps: HashOps, bytes: ByteString)(
-      transferInViewP: VersionedTransferInView
-  ): ParsingResult[TransferInView] =
-    transferInViewP.version match {
-      case VersionedTransferInView.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferInView.version"))
-      case VersionedTransferInView.Version.V0(view) => fromProtoV0(hashOps, bytes)(view)
-    }
-
-  private[this] def fromProtoV0(hashOps: HashOps, bytes: ByteString)(
-      transferInViewP: v0.TransferInView
+  private[this] def fromProtoV0(hashOps: HashOps, transferInViewP: v0.TransferInView)(
+      bytes: ByteString
   ): ParsingResult[TransferInView] = {
     val v0.TransferInView(
       saltP,
@@ -313,13 +291,6 @@ object TransferInView {
       transferOutResultEvent,
     )(hashOps, Some(bytes))
   }
-
-  def fromByteString(
-      hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[TransferInView] =
-    ProtoConverter
-      .protoParser(VersionedTransferInView.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(hashOps, bytes))
 }
 
 /** A fully unblinded [[TransferInViewTree]]

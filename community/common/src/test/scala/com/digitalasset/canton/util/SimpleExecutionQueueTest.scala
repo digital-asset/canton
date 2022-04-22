@@ -23,12 +23,13 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
     }
 
     def complete(): Unit = promise.success(name)
+
     def fail(): Unit = promise.failure(new RuntimeException(s"mocked failure for $name"))
   }
 
-  "SimpleExecutionQueue" should {
+  def simpleExecutionQueueTests(mk: () => SimpleExecutionQueue): Unit = {
     "only run one future at a time" in {
-      val queue = new SimpleExecutionQueue()
+      val queue = mk()
       val task1 = new MockTask("task1")
       val task2 = new MockTask("task2")
       val task3 = new MockTask("task3")
@@ -53,7 +54,7 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
     }
 
     "not run a future in case of a previous failure" in {
-      val queue = new SimpleExecutionQueue()
+      val queue = mk()
       val task1 = new MockTask("task1")
       val task2 = new MockTask("task2")
       val task3 = new MockTask("task3")
@@ -81,7 +82,7 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
     }
 
     "correctly propagate failures" in {
-      val queue = new SimpleExecutionQueue()
+      val queue = mk()
       val task1 = new MockTask("task1")
       val task2 = new MockTask("task2")
       val task3 = new MockTask("task3")
@@ -103,7 +104,7 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
     }
 
     "flush never fails" in {
-      val queue = new SimpleExecutionQueue()
+      val queue = mk()
       val task1 = new MockTask("task1")
       val task1Result = queue.execute(task1.run(), "Task1")
 
@@ -119,7 +120,7 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
     }
 
     "list the outstanding tasks" in {
-      val queue = new SimpleExecutionQueue()
+      val queue = mk()
       val task1 = new MockTask("task1")
       val task2 = new MockTask("task2")
       val task3 = new MockTask("task3")
@@ -148,6 +149,16 @@ class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {
         queue4 shouldBe Seq("Task4 (completed)")
       }
 
+    }
+  }
+
+  "SimpleExecutionQueue" when {
+    "not logging task timing" should {
+      behave like simpleExecutionQueueTests(() => new SimpleExecutionQueue(logTaskTiming = false))
+    }
+
+    "logging task timing" should {
+      behave like simpleExecutionQueueTests(() => new SimpleExecutionQueue(logTaskTiming = true))
     }
   }
 }

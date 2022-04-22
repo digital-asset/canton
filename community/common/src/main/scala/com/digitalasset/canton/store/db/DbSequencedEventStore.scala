@@ -13,7 +13,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging._
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.protocol.version.VersionedSignedContent
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
@@ -22,7 +21,7 @@ import com.digitalasset.canton.store._
 import com.digitalasset.canton.store.db.DbSequencedEventStore._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -89,9 +88,10 @@ class DbSequencedEventStore(
           IgnoredSequencedEvent(timestamp, sequencerCounter, None)(traceContext)
         case _ =>
           val signedEvent = ProtoConverter
-            .protoParserArray(VersionedSignedContent.parseFrom)(eventBytes)
+            .protoParserArray(UntypedVersionedMessage.parseFrom)(eventBytes)
+            .map(VersionedMessage.apply)
             .flatMap(
-              SignedContent.fromProtoVersioned(
+              SignedContent.protoConvertedSequencedEventClosedEnvelope.fromProtoVersioned(
                 SequencedEvent.fromByteString(ClosedEnvelope.fromProtoV0)
               )
             )
@@ -123,11 +123,13 @@ class DbSequencedEventStore(
   )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Unit, NoStream, Effect.All] = {
     val insertSql = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
-        """
-           insert /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequenced_events ( ts, client ) ) */
-           into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore)
-           values (?, ?, ?, ?, ?, ?, ?)
-      	""".stripMargin
+        """merge /*+ INDEX ( sequenced_events ( ts, client ) ) */ 
+          |into sequenced_events
+          |using (select ? client, ? ts from dual) input
+          |on (sequenced_events.ts = input.ts and sequenced_events.client = input.client)
+          |when not matched then
+          |  insert (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore)
+          |  values (input.client, input.ts, ?, ?, ?, ?, ?)""".stripMargin
 
       case _ =>
         "insert into sequenced_events (client, ts, sequenced_event, type, sequencer_counter, trace_context, ignore) " +

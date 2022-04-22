@@ -661,8 +661,7 @@ class TransactionTreeFactoryImpl(
   private[this] def createViewCommonData(
       rootView: TransactionViewDecomposition.NewView,
       salt: Salt,
-  ): ViewCommonData =
-    ViewCommonData.tryCreate(cryptoOps)(rootView.informees, rootView.threshold, salt)
+  ): ViewCommonData = ViewCommonData.create(cryptoOps)(rootView.informees, rootView.threshold, salt)
 
   private def createViewParticipantData(
       coreCreatedNodes: List[(LfNodeCreate, RollbackScope)],

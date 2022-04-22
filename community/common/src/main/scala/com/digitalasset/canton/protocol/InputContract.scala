@@ -6,8 +6,8 @@ package com.digitalasset.canton.protocol
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.version.HasProtoV0
 
 case class InputContract(contract: SerializableContract, consumed: Boolean)
     extends HasProtoV0[v0.ViewParticipantData.InputContract]

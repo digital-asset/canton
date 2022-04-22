@@ -6,8 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.protocol.v0
 import cats.syntax.traverse._
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 
 final case class HandshakeRequest(
     clientProtocolVersions: Seq[ProtocolVersion],
@@ -24,7 +23,7 @@ final case class HandshakeRequest(
 
   /* We allow serializing this message to a ByteArray despite it not implementing HasVersionedWrapper because the serialization
    is (and should only be used) in the HttpSequencerClient.
-  If you need to save this message in a database, please add a Versioned... message as documented in CONTRIBUTING.md  */
+  If you need to save this message in a database, please add an UntypedVersionedMessage message as documented in CONTRIBUTING.md  */
   // IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
   // when changing the handshake message format
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteArray

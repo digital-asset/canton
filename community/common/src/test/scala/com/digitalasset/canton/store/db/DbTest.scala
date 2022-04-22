@@ -27,6 +27,9 @@ trait DbTest
 
   type Config <: DbConfig
 
+  /** Flag to define the migration mode for the schemas */
+  def migrationMode: MigrationMode = MigrationMode.Standard
+
   @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
   private var setup: DbStorageSetup[Config] = _
 
@@ -71,7 +74,8 @@ trait H2Test extends DbTest with BaseTest with HasExecutionContext {
 
   override type Config = H2DbConfig
 
-  override def createSetup(): DbStorageSetup[H2DbConfig] = DbStorageSetup.h2(loggerFactory)
+  override def createSetup(): DbStorageSetup[H2DbConfig] =
+    DbStorageSetup.h2(migrationMode, loggerFactory)
 }
 
 /** Run db test for running against postgres */
@@ -81,5 +85,12 @@ trait PostgresTest extends DbTest with BaseTest with HasExecutionContext {
   override type Config = PostgresDbConfig
 
   override def createSetup(): DbStorageSetup[PostgresDbConfig] =
-    DbStorageSetup.postgresFunctionalTestSetup(loggerFactory)
+    DbStorageSetup.postgresFunctionalTestSetup(loggerFactory, migrationMode)
+}
+
+trait DevDbTest {
+  this: DbTest =>
+
+  override def migrationMode: MigrationMode = MigrationMode.DevVersion
+
 }

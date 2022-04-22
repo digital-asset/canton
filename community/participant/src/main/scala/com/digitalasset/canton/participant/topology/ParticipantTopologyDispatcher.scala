@@ -81,7 +81,7 @@ class ParticipantTopologyDispatcher(
 
   private val domains = new TrieMap[DomainAlias, DomainOutbox]()
 
-  def domainDisconnected(domain: DomainAlias): Future[Unit] = {
+  def domainDisconnected(domain: DomainAlias)(implicit traceContext: TraceContext): Future[Unit] = {
     def run(): Future[Unit] = {
       domains.remove(domain) match {
         case Some(outbox) =>

@@ -82,7 +82,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val mockSequencerClient = mock[SequencerClient]
   when(
     mockSequencerClient.sendAsync(
-      any[Batch[OpenEnvelope[ProtocolMessage]]],
+      any[Batch[DefaultOpenEnvelope]],
       any[SendType],
       any[Option[CantonTimestamp]],
       any[CantonTimestamp],
@@ -312,7 +312,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val sendError = SendAsyncClientError.RequestFailed("no thank you")
       when(
         failingSequencerClient.sendAsync(
-          any[Batch[OpenEnvelope[ProtocolMessage]]],
+          any[Batch[DefaultOpenEnvelope]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],

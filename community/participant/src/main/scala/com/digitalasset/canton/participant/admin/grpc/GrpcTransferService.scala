@@ -14,9 +14,10 @@ import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, HasProtoV0, OptionUtil}
+import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.HasProtoV0
 
 import scala.concurrent.{ExecutionContext, Future}
 

@@ -493,7 +493,7 @@ class ExampleTransactionFactory(
     val (informees, threshold) =
       Await.result(confirmationPolicy.informeesAndThreshold(node, topologySnapshot), 10.seconds)
     val viewCommonData =
-      ViewCommonData.tryCreate(cryptoOps)(informees, threshold, commonDataSalt(viewIndex))
+      ViewCommonData.create(cryptoOps)(informees, threshold, commonDataSalt(viewIndex))
 
     val createWithSerialization = created.map { contract =>
       val coid = contract.contractId
@@ -542,17 +542,15 @@ class ExampleTransactionFactory(
   }
 
   val submitterMetadata: SubmitterMetadata =
-    SubmitterMetadata
-      .create(cryptoOps)(
-        Set(submitter),
-        applicationId,
-        commandId,
-        submitterParticipant,
-        Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
-        DefaultDamlValues.submissionId().some,
-        DeduplicationDuration(JDuration.ofSeconds(100)),
-      )
-      .value
+    SubmitterMetadata(
+      NonEmpty(Set, submitter),
+      applicationId,
+      commandId,
+      submitterParticipant,
+      Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
+      DefaultDamlValues.submissionId().some,
+      DeduplicationDuration(JDuration.ofSeconds(100)),
+    )(cryptoOps, None)
 
   val commonMetadata: CommonMetadata =
     CommonMetadata(cryptoOps)(

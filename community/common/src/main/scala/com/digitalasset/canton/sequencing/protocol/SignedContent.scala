@@ -6,17 +6,20 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.traverse._
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version.VersionedSignedContent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageWithContextCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -25,10 +28,10 @@ case class SignedContent[+A <: MemoizedEvidence](
     content: A,
     signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasVersionedWrapper[VersionedSignedContent]
+) extends HasVersionedWrapper[VersionedMessage[SignedContent[A]]]
     with HasProtoV0[v0.SignedContent] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSignedContent =
-    VersionedSignedContent(VersionedSignedContent.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SignedContent[A]] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SignedContent =
     v0.SignedContent(
@@ -48,6 +51,11 @@ case class SignedContent[+A <: MemoizedEvidence](
 }
 
 object SignedContent {
+  val protoConvertedSequencedEventClosedEnvelope
+      : HasVersionedMessageWithContextCompanion[SignedContent[
+        SequencedEvent[ClosedEnvelope]
+      ], ByteString => ParsingResult[SequencedEvent[ClosedEnvelope]]] =
+    SignedContent.versionedProtoConverter[SequencedEvent[ClosedEnvelope]]("ClosedEnvelope")
 
   def create[Env <: Envelope[_]](
       cryptoApi: CryptoPureApi,
@@ -84,13 +92,17 @@ object SignedContent {
         identity,
       )
 
-  def fromProtoVersioned[A <: MemoizedEvidence](
-      deserializer: ByteString => ParsingResult[A]
-  )(signedValueP: VersionedSignedContent): ParsingResult[SignedContent[A]] =
-    signedValueP.version match {
-      case VersionedSignedContent.Version.Empty =>
-        Left(FieldNotSet("VersionedSignedContent.version"))
-      case VersionedSignedContent.Version.V0(content) => fromProtoV0(deserializer)(content)
+  def versionedProtoConverter[A <: MemoizedEvidence](
+      contentType: String
+  ): HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] =
+    new HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] {
+      override val name: String = s"SignedContent[$contentType]"
+
+      val supportedProtoVersions: Map[Int, Parser] = Map(
+        0 -> supportedProtoVersion(v0.SignedContent) { (deserializer, proto) =>
+          fromProtoV0(deserializer)(proto)
+        }
+      )
     }
 
   def fromProtoV0[A <: MemoizedEvidence](

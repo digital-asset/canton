@@ -14,14 +14,19 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult.InvalidTransferOutResult
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.messages.TransferDomainId.TransferDomainIdCast
-import com.digitalasset.canton.protocol.version.VersionedTransferResult
 import com.digitalasset.canton.protocol.{RequestId, TransferId, v0}
 import com.digitalasset.canton.sequencing.RawProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
@@ -37,7 +42,7 @@ case class TransferResult[+Domain <: TransferDomainId] private (
     override val verdict: Verdict,
 )(override val deserializedFrom: Option[ByteString])
     extends RegularMediatorResult
-    with HasVersionedWrapper[VersionedTransferResult]
+    with HasVersionedWrapper[VersionedMessage[TransferResult[Domain]]]
     with HasProtoV0[v0.TransferResult]
     with NoCopy
     with PrettyPrinting {
@@ -54,8 +59,11 @@ case class TransferResult[+Domain <: TransferDomainId] private (
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult(getCryptographicEvidence)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedTransferResult =
-    VersionedTransferResult(VersionedTransferResult.Version.V0(toProtoV0))
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[TransferResult[Domain]] =
+    VersionedMessage(toProtoV0.toByteString, 0)
+
   override def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {
       case TransferOutDomainId(domainId) =>
@@ -96,7 +104,16 @@ case class TransferResult[+Domain <: TransferDomainId] private (
     )
 }
 
-object TransferResult {
+object TransferResult
+    extends HasMemoizedVersionedMessageCompanion[
+      TransferResult[TransferDomainId],
+    ] {
+  override val name: String = "TransferResult"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.TransferResult)(fromProtoV0)
+  )
+
   private def apply[Domain <: TransferDomainId](
       requestId: RequestId,
       informees: Set[LfPartyId],
@@ -116,19 +133,8 @@ object TransferResult {
   ) =
     new TransferResult[Domain](requestId, informees, domain, verdict)(None)
 
-  private def fromProtoVersioned(
-      transferResultP: VersionedTransferResult,
-      bytes: ByteString,
-  ): ParsingResult[TransferResult[TransferDomainId]] =
-    transferResultP.version match {
-      case VersionedTransferResult.Version.Empty =>
-        Left(FieldNotSet("VersionedTransferResult.version"))
-      case VersionedTransferResult.Version.V0(result) => fromProtoV0(result, bytes)
-    }
-
-  private def fromProtoV0(
-      transferResultP: v0.TransferResult,
-      bytes: ByteString,
+  private def fromProtoV0(transferResultP: v0.TransferResult)(
+      bytes: ByteString
   ): ParsingResult[TransferResult[TransferDomainId]] =
     transferResultP match {
       case v0.TransferResult(maybeRequestIdP, domainP, informeesP, maybeVerdictP) =>
@@ -155,14 +161,6 @@ object TransferResult {
             .flatMap(Verdict.fromProtoV0)
         } yield new TransferResult(requestId, informees.toSet, domain, verdict)(Some(bytes))
     }
-
-  def fromByteString(
-      bytes: ByteString
-  ): ParsingResult[TransferResult[TransferDomainId]] =
-    for {
-      transferOutResultP <- ProtoConverter.protoParser(VersionedTransferResult.parseFrom)(bytes)
-      transferOutResult <- fromProtoVersioned(transferOutResultP, bytes)
-    } yield transferOutResult
 
   implicit def transferResultCast[Kind <: TransferDomainId](implicit
       cast: TransferDomainIdCast[Kind]

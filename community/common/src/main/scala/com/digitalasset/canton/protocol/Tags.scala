@@ -15,7 +15,8 @@ import com.digitalasset.canton.serialization.{
   ProtoConverter,
 }
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.{ByteStringUtil, HasProtoV0}
+import com.digitalasset.canton.util.ByteStringUtil
+import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}

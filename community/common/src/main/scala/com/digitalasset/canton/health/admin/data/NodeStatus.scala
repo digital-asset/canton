@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifi
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 import java.time.Duration

@@ -31,7 +31,7 @@ class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionC
     val closeInvocations = new AtomicInteger(0)
 
     // we can use a short polling time to decrease test latency as we aren't running any real tasks
-    override protected def sleepMillis: Long = 10
+    override protected def maxSleepMillis: Long = 10
 
     // listen on isClosed flag
     override protected def runStateChanged(waitingState: Boolean = false): Unit = {

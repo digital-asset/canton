@@ -7,20 +7,23 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import cats.data.NonEmptyList
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version.VersionedSequencerConnection
 import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 import io.grpc.netty.NettyChannelBuilder
 
@@ -37,11 +40,11 @@ import java.util.concurrent.Executor
 sealed trait SequencerConnection
     extends Product
     with Serializable
-    with HasVersionedWrapper[VersionedSequencerConnection]
+    with HasVersionedWrapper[VersionedMessage[SequencerConnection]]
     with HasProtoV0[v0.SequencerConnection]
     with PrettyPrinting {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedSequencerConnection =
-    VersionedSequencerConnection(VersionedSequencerConnection.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SequencerConnection] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SequencerConnection
 }
@@ -119,20 +122,12 @@ object GrpcSequencerConnection {
     }
 }
 
-object SequencerConnection
-    extends HasVersionedWrapperCompanion[VersionedSequencerConnection, SequencerConnection] {
-  override protected def ProtoClassCompanion: VersionedSequencerConnection.type =
-    VersionedSequencerConnection
-  override protected def name: String = "sequencer connection"
+object SequencerConnection extends HasVersionedMessageCompanion[SequencerConnection] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SequencerConnection)(fromProtoV0)
+  )
 
-  override def fromProtoVersioned(
-      configP: VersionedSequencerConnection
-  ): ParsingResult[SequencerConnection] =
-    configP.version match {
-      case VersionedSequencerConnection.Version.Empty =>
-        Left(FieldNotSet("VersionedSequencerConnection.version"))
-      case VersionedSequencerConnection.Version.V0(config) => fromProtoV0(config)
-    }
+  override protected def name: String = "sequencer connection"
 
   def fromProtoV0(
       configP: v0.SequencerConnection

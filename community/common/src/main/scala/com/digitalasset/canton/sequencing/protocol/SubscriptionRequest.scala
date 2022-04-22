@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 /** A request to receive events from a given counter from a sequencer.
   *

@@ -116,13 +116,31 @@ abstract class CantonNodeBootstrapBase[
 
   // reference to the node once it has been started
   private val ref: AtomicReference[Option[T]] = new AtomicReference(None)
+  private val starting = new AtomicBoolean(false)
 
-  protected def setInstance(instance: T): Unit = {
-    val _ = ref.updateAndGet {
-      // potentially over-defensive, but ensures a runner will not be set twice.
-      // if called twice it indicates a bug in initialization.
-      case Some(_) => sys.error("Runner has already been set and cannot be set again")
-      case None => Some(instance)
+  /** kick off initialisation during startup */
+  protected def startInstanceUnlessClosing(
+      instanceET: => EitherT[Future, String, T]
+  ): EitherT[Future, String, Unit] = {
+    if (isInitialized) {
+      logger.warn("Will not start instance again as it is already initialised")
+      EitherT.pure[Future, String](())
+    } else {
+      performUnlessClosingEitherT("Aborting startup due to shutdown") {
+        if (starting.compareAndSet(false, true))
+          instanceET.map { instance =>
+            val previous = ref.getAndSet(Some(instance))
+            // potentially over-defensive, but ensures a runner will not be set twice.
+            // if called twice it indicates a bug in initialization.
+            previous.foreach { shouldNotBeThere =>
+              logger.error(s"Runner has already been set: $shouldNotBeThere")
+            }
+          }
+        else {
+          logger.warn("Will not start instance again as it is already starting up")
+          EitherT.pure[Future, String](())
+        }
+      }
     }
   }
 

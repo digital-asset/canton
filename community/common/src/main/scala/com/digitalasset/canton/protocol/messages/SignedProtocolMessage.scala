@@ -6,26 +6,23 @@ package com.digitalasset.canton.protocol.messages
 import cats.Functor
 import cats.data.EitherT
 import cats.syntax.option._
-import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, OtherError}
-import com.digitalasset.canton.crypto.{
-  CryptoPureApi,
-  HashOps,
-  Signature,
-  SyncCryptoApi,
-  SyncCryptoError,
-}
+import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.version.VersionedSignedProtocolMessage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageWithContextCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -34,14 +31,13 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     signature: Signature,
 ) extends ProtocolMessage
     with HasProtoV0[v0.SignedProtocolMessage]
-    with HasVersionedWrapper[VersionedSignedProtocolMessage] {
+    with HasVersionedWrapper[VersionedMessage[SignedProtocolMessage[M]]] {
 
   override def domainId: DomainId = message.domainId
 
   override protected def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedSignedProtocolMessage =
-    VersionedSignedProtocolMessage(VersionedSignedProtocolMessage.Version.V0(toProtoV0))
+  ): VersionedMessage[SignedProtocolMessage[M]] = VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = message.toProtoSomeSignedProtocolMessage
@@ -68,7 +64,15 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     prettyOfClass(unnamedParam(_.message), param("signature", _.signature))
 }
 
-object SignedProtocolMessage {
+object SignedProtocolMessage
+    extends HasVersionedMessageWithContextCompanion[SignedProtocolMessage[_], HashOps] {
+  override val name: String = "SignedProtocolMessage"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.SignedProtocolMessage) { (hashOps, proto) =>
+      fromProtoV0(hashOps)(proto)
+    }
+  )
 
   def create[M <: SignedProtocolMessageContent](
       message: M,
@@ -94,15 +98,6 @@ object SignedProtocolMessage {
         identity,
       )
 
-  def fromProtoVersioned(cryptoApi: CryptoPureApi)(
-      signedMessageP: VersionedSignedProtocolMessage
-  ): ParsingResult[SignedProtocolMessage[_]] =
-    signedMessageP.version match {
-      case VersionedSignedProtocolMessage.Version.Empty =>
-        Left(FieldNotSet("VersionedSignedProtocolMessage.version"))
-      case VersionedSignedProtocolMessage.Version.V0(message) => fromProtoV0(cryptoApi)(message)
-    }
-
   def fromProtoV0(hashOps: HashOps)(
       signedMessageP: v0.SignedProtocolMessage
   ): ParsingResult[SignedProtocolMessage[_]] = {
@@ -126,13 +121,6 @@ object SignedProtocolMessage {
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", maybeSignatureP)
     } yield SignedProtocolMessage(message, signature)
   }
-
-  def fromByteString(
-      cryptoApi: CryptoPureApi
-  )(bytes: ByteString): ParsingResult[SignedProtocolMessage[_]] =
-    ProtoConverter
-      .protoParser(VersionedSignedProtocolMessage.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(cryptoApi))
 
   implicit def signedMessageCast[M <: SignedProtocolMessageContent](implicit
       cast: SignedMessageContentCast[M]

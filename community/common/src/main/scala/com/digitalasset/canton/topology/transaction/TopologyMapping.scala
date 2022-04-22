@@ -6,15 +6,20 @@ package com.digitalasset.canton.topology.transaction
 import cats.syntax.traverse._
 import cats.syntax.either._
 import cats.syntax.option._
+import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
-import com.digitalasset.canton.ProtoDeserializationError._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
-import com.digitalasset.canton.protocol.version._
 import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, NoCopy}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.{
+  HasMemoizedVersionedMessageCompanion,
+  HasProtoV0,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 import scala.Ordered.orderingToOrdered
@@ -231,12 +236,14 @@ final case class LegalIdentityClaim private (
     evidence: LegalIdentityClaimEvidence,
 )(override val deserializedFrom: Option[ByteString])
     extends MemoizedEvidence
-    with HasVersionedWrapper[VersionedLegalIdentityClaim]
+    with HasVersionedWrapper[VersionedMessage[LegalIdentityClaim]]
     with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
-  override protected def toProtoVersioned(version: ProtocolVersion): VersionedLegalIdentityClaim =
-    VersionedLegalIdentityClaim(VersionedLegalIdentityClaim.Version.V0(toProtoV0))
+  override protected def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[LegalIdentityClaim] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   override protected def toProtoV0: v0.LegalIdentityClaim =
     v0.LegalIdentityClaim(
@@ -251,7 +258,12 @@ final case class LegalIdentityClaim private (
     super[HasVersionedWrapper].toByteString(version)
 }
 
-object LegalIdentityClaim {
+object LegalIdentityClaim extends HasMemoizedVersionedMessageCompanion[LegalIdentityClaim] {
+  override val name: String = "LegalIdentityClaim"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersionMemoized(v0.LegalIdentityClaim)(fromProtoV0)
+  )
 
   private[this] def apply(
       uid: UniqueIdentifier,
@@ -269,20 +281,6 @@ object LegalIdentityClaim {
       uid <- UniqueIdentifier.fromProtoPrimitive(claimP.uniqueIdentifier, "uniqueIdentifier")
       evidence <- LegalIdentityClaimEvidence.fromProtoOneOf(claimP.evidence)
     } yield new LegalIdentityClaim(uid, evidence)(Some(bytes))
-
-  def fromProtoVersioned(
-      claimP: VersionedLegalIdentityClaim
-  )(bytes: ByteString): ParsingResult[LegalIdentityClaim] =
-    claimP.version match {
-      case VersionedLegalIdentityClaim.Version.Empty =>
-        Left(FieldNotSet("VersionedLegalIdentityClaim.version"))
-      case VersionedLegalIdentityClaim.Version.V0(claim) => fromProtoV0(claim)(bytes)
-    }
-  def fromByteString(bytes: ByteString): ParsingResult[LegalIdentityClaim] =
-    ProtoConverter
-      .protoParser(VersionedLegalIdentityClaim.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(_)(bytes))
-
 }
 
 sealed trait LegalIdentityClaimEvidence {

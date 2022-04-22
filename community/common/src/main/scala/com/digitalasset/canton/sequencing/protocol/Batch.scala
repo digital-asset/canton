@@ -11,11 +11,17 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.version.VersionedBatch
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{ByteStringUtil, HasProtoV0WithVersion, HasVersionedWrapper}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.ByteStringUtil
+import com.digitalasset.canton.version.{
+  HasProtoV0WithVersion,
+  HasVersionedMessageWithContextCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  UntypedVersionedMessage,
+  VersionedMessage,
+}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -25,7 +31,7 @@ import com.google.protobuf.ByteString
   *  for `0 <= i < n`.
   */
 case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])
-    extends HasVersionedWrapper[VersionedBatch]
+    extends HasVersionedWrapper[VersionedMessage[Batch[Env]]]
     with HasProtoV0WithVersion[v0.CompressedBatch]
     with PrettyPrinting {
 
@@ -44,9 +50,8 @@ case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])
     Batch(forRecipient)
   }
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedBatch = {
-    VersionedBatch(VersionedBatch.Version.V0(toProtoV0(version)))
-  }
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Batch[Env]] =
+    VersionedMessage(toProtoV0(version).toByteString, 0)
 
   override def toProtoV0(version: ProtocolVersion): v0.CompressedBatch = {
     val batch = v0.Batch(envelopes = envelopes.map(_.toProtoV0(version)))
@@ -70,6 +75,31 @@ case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])
 }
 
 object Batch {
+  def versionedProtoConverter[Env <: Envelope[_]](envelopeType: String) =
+    new HasVersionedMessageWithContextCompanion[Batch[Env], v0.Envelope => ParsingResult[Env]] {
+      override val name: String = s"Batch[$envelopeType]"
+
+      val supportedProtoVersions: Map[Int, Parser] = Map(
+        0 -> supportedProtoVersion(v0.CompressedBatch) { (deserializer, proto) =>
+          fromProtoV0(deserializer)(proto)
+        }
+      )
+    }
+
+  private lazy val protoConverterBatchClosedEnvelopes =
+    versionedProtoConverter[ClosedEnvelope]("ClosedEnvelope")
+
+  def batchClosedEnvelopesFromByteString(bytes: ByteString): ParsingResult[Batch[ClosedEnvelope]] =
+    ProtoConverter
+      .protoParser(UntypedVersionedMessage.parseFrom)(bytes)
+      .map(VersionedMessage.apply)
+      .flatMap(batchClosedEnvelopesFromProtoVersioned(_))
+
+  def batchClosedEnvelopesFromProtoVersioned(
+      batchProto: VersionedMessage[Batch[ClosedEnvelope]]
+  ): ParsingResult[Batch[ClosedEnvelope]] =
+    protoConverterBatchClosedEnvelopes.fromProtoVersioned(ClosedEnvelope.fromProtoV0)(batchProto)
+
   def of[M <: ProtocolMessage](envs: (M, Recipients)*): Batch[OpenEnvelope[M]] = {
     val envelopes = envs.map { case (m, addresses) => OpenEnvelope[M](m, addresses) }.toList
     Batch[OpenEnvelope[M]](envelopes)
@@ -77,22 +107,6 @@ object Batch {
 
   @VisibleForTesting
   def fromClosed(envelopes: ClosedEnvelope*): Batch[ClosedEnvelope] = Batch(envelopes.toList)
-
-  def fromByteString[Env <: Envelope[_]](
-      envelopeDeserializer: v0.Envelope => ParsingResult[Env],
-      bytes: ByteString,
-  ): ParsingResult[Batch[Env]] =
-    ProtoConverter
-      .protoParser(VersionedBatch.parseFrom)(bytes)
-      .flatMap(fromProtoVersioned(envelopeDeserializer)(_))
-
-  def fromProtoVersioned[Env <: Envelope[_]](
-      envelopeDeserializer: v0.Envelope => ParsingResult[Env]
-  )(batchProto: VersionedBatch): ParsingResult[Batch[Env]] =
-    batchProto.version match {
-      case VersionedBatch.Version.Empty => Left(FieldNotSet("VersionedBatch.version"))
-      case VersionedBatch.Version.V0(batch) => fromProtoV0(envelopeDeserializer)(batch)
-    }
 
   def fromProtoV0[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]

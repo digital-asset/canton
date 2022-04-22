@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.HasProtoV0
+import com.digitalasset.canton.version.HasProtoV0
 
 trait InitializeMediatorResponse extends HasProtoV0[v0.InitializeMediatorResponse] {
   override def toProtoV0: v0.InitializeMediatorResponse // make public

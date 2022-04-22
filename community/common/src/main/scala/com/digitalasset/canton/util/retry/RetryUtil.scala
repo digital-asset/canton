@@ -119,6 +119,12 @@ object RetryUtil {
                 // Class 40 — Transaction Rollback: 40001	serialization_failure
                 // Failure to serialize db accesses, happens due to contention
                 TransientErrorKind
+              } else if (error == "40P01") {
+                // Deadlock
+                // See DatabaseDeadlockTestPostgres
+                // This also covers deadlocks reported as BatchUpdateExceptions,
+                // because they refer to a PSQLException has cause.
+                TransientErrorKind
               } else if (error == "25006") {
                 // Retry on read only transaction, which can occur on Azure
                 TransientErrorKind
@@ -157,6 +163,10 @@ object RetryUtil {
               } else if (ex.getErrorCode == 54) {
                 // ORA timeout occurred while waiting to lock object or because NOWAIT has been set
                 // e.g. as part of truncate table
+                TransientErrorKind
+              } else if (ex.getErrorCode == 60) {
+                // Deadlock
+                // See DatabaseDeadlockTestOracle
                 TransientErrorKind
               } else if (
                 ex.getErrorCode == 604 &&

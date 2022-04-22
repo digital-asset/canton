@@ -15,11 +15,15 @@ import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.MediatorRejection.Code
-import com.digitalasset.canton.protocol.version.VersionedVerdict
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.{HasProtoV0, HasVersionedWrapper, HasVersionedWrapperCompanion}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.protobuf.empty
@@ -30,14 +34,19 @@ sealed trait Verdict
     extends Product
     with Serializable
     with PrettyPrinting
-    with HasVersionedWrapper[VersionedVerdict]
+    with HasVersionedWrapper[VersionedMessage[Verdict]]
     with HasProtoV0[v0.Verdict] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedVerdict =
-    VersionedVerdict(VersionedVerdict.Version.V0(toProtoV0))
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Verdict] =
+    VersionedMessage(toProtoV0.toByteString, 0)
+
   override def toProtoV0: v0.Verdict
 }
 
-object Verdict extends HasVersionedWrapperCompanion[VersionedVerdict, Verdict] {
+object Verdict extends HasVersionedMessageCompanion[Verdict] {
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.Verdict)(fromProtoV0)
+  )
+
   case object Approve extends Verdict {
     override def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Approve(empty.Empty()))
@@ -281,17 +290,7 @@ object Verdict extends HasVersionedWrapperCompanion[VersionedVerdict, Verdict] {
     override def pretty: Pretty[Timeout.type] = prettyOfObject[Timeout.type]
   }
 
-  override protected def ProtoClassCompanion: VersionedVerdict.type = VersionedVerdict
   override protected def name: String = "verdict"
-
-  override def fromProtoVersioned(
-      protoVerdict: VersionedVerdict
-  ): ParsingResult[Verdict] = {
-    protoVerdict.version match {
-      case VersionedVerdict.Version.Empty => Left(FieldNotSet("VersionedVerdict.version"))
-      case VersionedVerdict.Version.V0(verdict) => fromProtoV0(verdict)
-    }
-  }
 
   def fromProtoV0(protoVerdict: v0.Verdict): ParsingResult[Verdict] = {
     import v0.Verdict.{SomeVerdict => V}

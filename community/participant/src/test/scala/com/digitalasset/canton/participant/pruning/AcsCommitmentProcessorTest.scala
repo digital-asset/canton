@@ -44,7 +44,7 @@ import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
-  ProtocolMessage,
+  DefaultOpenEnvelope,
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.client._
@@ -164,7 +164,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     val sequencerClient = mock[SequencerClient]
     when(
       sequencerClient.sendAsync(
-        any[Batch[OpenEnvelope[ProtocolMessage]]],
+        any[Batch[DefaultOpenEnvelope]],
         any[SendType],
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],
@@ -545,7 +545,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         received <- store.searchReceivedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
       } yield {
         verify(processor.sequencerClient, times(2)).sendAsync(
-          any[Batch[OpenEnvelope[ProtocolMessage]]],
+          any[Batch[DefaultOpenEnvelope]],
           any[SendType],
           any[Option[CantonTimestamp]],
           any[CantonTimestamp],

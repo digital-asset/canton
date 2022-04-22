@@ -57,6 +57,11 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
   final case class UnknownGrpcCodeError(error: String) extends ProtoDeserializationError {
     override def message = error
   }
+  final case class VersionError(versionedMessage: String, invalidVersion: Int)
+      extends ProtoDeserializationError {
+    override val message =
+      s"Invalid version $invalidVersion in versioned message `$versionedMessage`"
+  }
   final case class OtherError(error: String) extends ProtoDeserializationError {
     override def message = error
   }
