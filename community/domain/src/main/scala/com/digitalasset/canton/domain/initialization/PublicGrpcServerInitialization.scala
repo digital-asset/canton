@@ -55,7 +55,7 @@ object PublicGrpcServerInitialization {
 
     // the server builder is mutable
     sequencerRuntime.registerPublicGrpcServices { service =>
-      val _ = serverBuilder.addService(service)
+      serverBuilder.addService(service).discard
     }
 
     val domainService = new GrpcDomainService(agreementManager, loggerFactory)
@@ -65,6 +65,7 @@ object PublicGrpcServerInitialization {
         domainId,
         staticDomainParameters,
         cryptoApi,
+        agreementManager,
         loggerFactory,
       )
 

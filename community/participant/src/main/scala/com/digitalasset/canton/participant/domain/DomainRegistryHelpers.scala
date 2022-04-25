@@ -127,7 +127,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       sequencerId = SequencerId(domainId.unwrap)
 
       acceptedAgreement <- agreementClient
-        .isRequiredAgreementAccepted(domainId)
+        .isRequiredAgreementAccepted(domainId, staticDomainParameters.protocolVersion)
         .leftMap(e =>
           DomainRegistryError.HandshakeErrors.ServiceAgreementAcceptanceFailed.Error(e.reason)
         )

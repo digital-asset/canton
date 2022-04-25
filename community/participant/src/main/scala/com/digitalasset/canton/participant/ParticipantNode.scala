@@ -35,7 +35,7 @@ import com.digitalasset.canton.participant.admin.{
   ResourceManagementService,
 }
 import com.digitalasset.canton.participant.config._
-import com.digitalasset.canton.participant.domain.grpc.{GrpcDomainRegistry, GrpcDomainServiceClient}
+import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.domain.{
   AgreementService,
   DomainAliasManager,
@@ -298,11 +298,8 @@ class ParticipantNodeBootstrap(
       case _: MemoryStorage => new InMemoryServiceAgreementStore(loggerFactory)
     }
 
-    val domainServiceClient =
-      new GrpcDomainServiceClient(cantonParameterConfig.tracing.propagation, loggerFactory)
-
     val agreementService =
-      new AgreementService(acceptedAgreements, domainServiceClient, timeouts, loggerFactory)
+      new AgreementService(acceptedAgreements, cantonParameterConfig, loggerFactory)
 
     for {
       domainConnectionConfigStore <- EitherT.right(

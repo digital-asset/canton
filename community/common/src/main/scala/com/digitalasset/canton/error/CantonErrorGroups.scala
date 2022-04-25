@@ -15,6 +15,8 @@ object CantonErrorGroups {
 
   abstract class EthereumErrorGroup extends ErrorGroup
 
+  abstract class FabricErrorGroup extends ErrorGroup
+
   abstract class ProtoDeserializationErrorGroup extends ErrorGroup
 
   abstract class SequencerSubscriptionErrorGroup extends ErrorGroup()

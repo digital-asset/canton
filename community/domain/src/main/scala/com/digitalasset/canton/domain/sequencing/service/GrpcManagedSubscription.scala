@@ -125,7 +125,9 @@ private[service] class GrpcManagedSubscription(
           true
         case Success(Right(subscription)) =>
           subscriptionRef.set(Some(subscription))
-          logger.debug("Underlying subscription has been successfully created")
+          logger.debug(
+            "Underlying subscription has been successfully created (may still be starting)"
+          )
           false
       }
     } onShutdown false

@@ -112,6 +112,7 @@ class SequencerRuntime(
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
     indexedStringStore: IndexedStringStore,
+    agreementManager: Option[ServiceAgreementManager],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer, actorSystem: ActorSystem)
     extends FlagCloseable
@@ -393,6 +394,7 @@ class SequencerRuntime(
             domainId,
             staticDomainParameters,
             syncCrypto,
+            agreementManager,
             loggerFactory,
           )(
             ec

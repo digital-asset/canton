@@ -22,18 +22,27 @@ template Iou
     ensure (amount.value >= 0.0)
 
     signatory payer
+    observer owner
     observer viewers
 
-    controller owner can
-      Call : ContractId GetCash do
+    choice Call : ContractId GetCash
+      controller owner
+      do
         create GetCash with payer; owner; amount
-      Transfer : ContractId Iou
-         with newOwner: Party do
-           create this with owner = newOwner; viewers = []
-      Share : ContractId Iou
-            with viewer : Party
-          do
-            create this with viewers = (viewer :: viewers)
+
+    choice Transfer : ContractId Iou
+      with
+        newOwner: Party
+      controller owner
+      do
+        create this with owner = newOwner; viewers = []
+
+    choice Share : ContractId Iou
+      with
+        viewer : Party
+      controller owner
+        do
+          create this with viewers = (viewer :: viewers)
 
 -- architecture-handbook-entry-end: IouDaml
 
@@ -56,8 +65,9 @@ template DiscloseIou
     signatory sender
     observer receiver
 
-    controller sender can
-      Disclose : () do
+    choice Disclose: ()
+      controller sender
+      do
         fetch iou
         return ()
 

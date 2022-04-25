@@ -12,13 +12,18 @@ template DivulgeIouByExercise
     divulgee: Party
   where
     signatory divulgee
-    controller payer can
-      nonconsuming Divulge : () with ref : ContractId Iou
-        do 
+    observer payer
+
+    nonconsuming choice Divulge : ()
+      with ref : ContractId Iou
+      controller payer
+        do
           iou <- fetch ref
           return  ()
-    controller payer can
-      nonconsuming NotDivulge : () with ref : ContractId Iou
+
+    nonconsuming choice NotDivulge : ()
+      with ref : ContractId Iou
+      controller payer
         do 
           return ()
 

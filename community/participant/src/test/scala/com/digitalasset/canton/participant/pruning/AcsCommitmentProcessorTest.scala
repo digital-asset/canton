@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TimeoutDuratio
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -187,7 +188,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       domainCrypto,
       interval,
       store,
-      (_, _) => Future.unit,
+      (_, _) => FutureUnlessShutdown.unit,
       killSwitch,
       ParticipantTestMetrics.pruning,
       DefaultProcessingTimeouts.testing

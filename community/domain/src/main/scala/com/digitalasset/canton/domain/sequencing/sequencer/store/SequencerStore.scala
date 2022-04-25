@@ -459,15 +459,15 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
     * Return a human readable report on what has been removed.
     * @param requestedTimestamp the timestamp that we would like to prune from (see docs on using the pruning status and disabling members for picking this value)
     * @param status the pruning status that should be used for determining a safe to prune time for validation
-    * @param payloadToEventBound the maximum time bound between payloads and events.
-    *                            once we have a safe to prune timestamp we simply prune all payloads at `safeTimestamp - bound`
+    * @param payloadToEventMargin the maximum time margin between payloads and events.
+    *                            once we have a safe to prune timestamp we simply prune all payloads at `safeTimestamp - margin`
     *                            to ensure no payloads are removed where events will remain.
-    *                            typically sourced from [[SequencerWriterConfig.payloadToEventBound]].
+    *                            typically sourced from [[SequencerWriterConfig.payloadToEventMargin]].
     */
   def prune(
       requestedTimestamp: CantonTimestamp,
       status: SequencerPruningStatus,
-      payloadToEventBound: NonNegativeFiniteDuration,
+      payloadToEventMargin: NonNegativeFiniteDuration,
   )(implicit traceContext: TraceContext): EitherT[Future, PruningError, String] = {
     val disabledClients = status.disabledClients
 
@@ -519,7 +519,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
         // we do this as this approach is much quicker than looking at each event we prune and then looking up that payload
         // to delete, and also ensures payloads that may have been written for events that weren't sequenced are removed
         // (if the event was dropped due to a crash or validation issue).
-        payloadsRemoved <- prunePayloads(adjustedTimestamp.minus(payloadToEventBound.duration))
+        payloadsRemoved <- prunePayloads(adjustedTimestamp.minus(payloadToEventMargin.duration))
         checkpointsRemoved <- pruneCheckpoints(adjustedTimestamp)
       } yield s"Removed: at least $eventsRemoved events, at least $payloadsRemoved payloads, at least $checkpointsRemoved counter checkpoints"
 

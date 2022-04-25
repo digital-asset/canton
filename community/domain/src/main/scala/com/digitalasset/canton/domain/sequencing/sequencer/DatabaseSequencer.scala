@@ -235,7 +235,7 @@ class DatabaseSequencer(
   )(implicit traceContext: TraceContext): EitherT[Future, PruningError, String] =
     for {
       status <- EitherT.right[PruningError](this.pruningStatus)
-      result <- store.prune(requestedTimestamp, status, config.writer.payloadToEventBound)
+      result <- store.prune(requestedTimestamp, status, config.writer.payloadToEventMargin)
     } yield result
 
   override def snapshot(timestamp: CantonTimestamp)(implicit

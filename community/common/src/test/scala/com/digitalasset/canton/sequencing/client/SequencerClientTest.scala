@@ -28,10 +28,12 @@ import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetric
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.GapInSequencerCounter
-import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.UnrecoverableError
+import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
+  ClientShutdown,
+  UnrecoverableError,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
   ApplicationHandlerException,
-  ApplicationHandlerShutdown,
   EventValidationError,
 }
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
@@ -285,24 +287,18 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(eventHandler = handler)
-        closeReason <- loggerFactory.assertLogs(
+        closeReason <- {
           for {
             _ <- transport.subscriber.value.sendToHandler(deliver)
             // Send the next event so that the client notices that an error has occurred.
             _ <- client.flush()
             _ <- transport.subscriber.value.sendToHandler(nextDeliver)
             closeReason <- client.completion
-          } yield closeReason,
-          _.warningMessage should include(
-            s"Closing resilient sequencer subscription due to error: HandlerError($ApplicationHandlerShutdown)"
-          ),
-        )
+          } yield closeReason
+        }
       } yield {
         client.close() // make sure that we can still close the sequencer client
-        closeReason should matchPattern {
-          case e: UnrecoverableError
-              if e.cause == s"handler returned error: $ApplicationHandlerShutdown" =>
-        }
+        closeReason shouldBe ClientShutdown
       }
     }
 
@@ -354,28 +350,20 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(CantonTimestamp.MinValue, _ => asyncShutdown)
-        closeReason <- loggerFactory.assertLogs(
-          {
-            for {
-              _ <- transport.subscriber.value.sendToHandler(deliver)
-              _ <- client.flush() // Make sure that the asynchronous error has been noticed
-              // Send the next event so that the client notices that an error has occurred.
-              _ <- transport.subscriber.value.sendToHandler(nextDeliver)
-              _ <- client.flush()
-              closeReason <- client.completion
+        closeReason <- {
+          for {
+            _ <- transport.subscriber.value.sendToHandler(deliver)
+            _ <- client.flush() // Make sure that the asynchronous error has been noticed
+            // Send the next event so that the client notices that an error has occurred.
+            _ <- transport.subscriber.value.sendToHandler(nextDeliver)
+            _ <- client.flush()
+            closeReason <- client.completion
 
-            } yield closeReason
-          },
-          _.warningMessage should include(
-            s"Closing resilient sequencer subscription due to error: HandlerError($ApplicationHandlerShutdown)"
-          ),
-        )
+          } yield closeReason
+        }
       } yield {
         client.close() // make sure that we can still close the sequencer client
-        closeReason should matchPattern {
-          case e: UnrecoverableError
-              if e.cause == s"handler returned error: $ApplicationHandlerShutdown" =>
-        }
+        closeReason shouldBe ClientShutdown
       }
     }
 

@@ -80,7 +80,9 @@ class DirectSequencerSubscriptionFactory(
     )
 
     subscription.start
-    logger.debug(show"Created sequencer subscription for $member from $startingAt.")
+    logger.debug(
+      show"Created sequencer subscription for $member from $startingAt (may still be starting)"
+    )
 
     EitherT.pure(subscription)
   }

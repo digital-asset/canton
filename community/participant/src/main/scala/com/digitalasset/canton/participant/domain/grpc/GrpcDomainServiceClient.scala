@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
-class GrpcDomainServiceClient(
+private[domain] class GrpcDomainServiceClient(
     traceContextPropagation: TracingConfig.Propagation,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContextExecutor)

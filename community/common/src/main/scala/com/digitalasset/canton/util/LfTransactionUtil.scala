@@ -274,13 +274,13 @@ object LfTransactionUtil {
     ) {
       case (
             _,
-            LfNodeExercises(_, templateId, _, true, _, _, _, _, _, _, _, Some(key), _, _),
+            LfNodeExercises(_, templateId, _, _, true, _, _, _, _, _, _, _, Some(key), _, _),
             state,
           ) =>
         state.consumed(LfGlobalKey.assertBuild(templateId, key.key))
       case (
             _,
-            LfNodeExercises(_, templateId, _, false, _, _, _, _, _, _, _, Some(key), _, _),
+            LfNodeExercises(_, templateId, _, _, false, _, _, _, _, _, _, _, Some(key), _, _),
             state,
           ) =>
         state.referenced(LfGlobalKey.assertBuild(templateId, key.key))

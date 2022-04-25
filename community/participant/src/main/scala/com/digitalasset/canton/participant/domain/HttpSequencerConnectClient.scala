@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.domain
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.http.{
@@ -60,6 +61,13 @@ class HttpSequencerConnectClient(
     httpSequencerClient
       .handshakeUnauthenticated(request)(loggingContext.traceContext)
       .leftMap(toSequencerConnectError)
+
+  override def getAgreement(domainId: DomainId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SequencerConnectClient.Error, Option[ServiceAgreement]] = {
+    logger.info("GetAgreement is not implemented for HTTP sequencers; returning none")
+    EitherT.pure(None)
+  }
 
   private def toSequencerConnectError(
       error: HttpSequencerClientError

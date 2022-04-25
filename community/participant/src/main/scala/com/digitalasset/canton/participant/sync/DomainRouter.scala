@@ -137,14 +137,16 @@ class DomainRouter(
         )
       })
 
-      inputDomains = domainOfInputContracts.mapFilter(_._2.map(_.domain)).toSet
-      contractsOnOneDomain = inputDomains.size < 2
+      inputDomains = domainOfInputContracts.mapFilter { case (_, contractDataO) =>
+        contractDataO.map(_.domain)
+      }.toSet
+      contractsOnOneDomain = inputDomains.sizeCompare(2) < 0
 
       informees = LfTransactionUtil.informees(transaction)
       inputDomainsHostAllInformees <- EitherT.liftF(
         inputDomains.toList
           .traverse(allInformeesOnDomain(informees)(_))
-          .map(_.forall(x => x))
+          .map(_.forall(identity))
       )
 
       // We have a multi-domain transaction if the input contracts are on more than one domain or if the (single) input
@@ -538,7 +540,7 @@ class DomainRouter(
         .right(inputContractIds.toList.traverseFilter(id => domainOfContract(id).value))
         .map(_.toSet)
       maybeDomainId <- EitherT.cond[Future](
-        domainIdsOfInputContracts.size <= 1,
+        domainIdsOfInputContracts.sizeCompare(1) <= 0,
         domainIdsOfInputContracts.headOption, {
           // Input contracts reside on different domains
           // Fail...
@@ -553,8 +555,8 @@ class DomainRouter(
       maybeWorkflowId: Option[Ref.WorkflowId]
   ): Either[String, Option[DomainId]] = {
     for {
-      mybDomainAlias <- maybeWorkflowId.map(DomainAlias.create(_)).sequence
-      res = mybDomainAlias.flatMap(x => recoveredDomainOfAlias(x))
+      domainAliasO <- maybeWorkflowId.traverse(DomainAlias.create(_))
+      res = domainAliasO.flatMap(x => recoveredDomainOfAlias(x))
     } yield res
   }
 
@@ -622,12 +624,12 @@ object DomainRouter {
       coid: LfContractId
   )(implicit ec: ExecutionContext, traceContext: TraceContext): OptionT[Future, DomainId] = {
     connectedDomains
-      .filter(_._2.readyForSubmission)
-      .map { case (domainId, syncDomain) =>
-        syncDomain.ephemeral.requestTracker
-          .getApproximateState(coid)
-          .filter(_.status == Active)
-          .map(_ => domainId)
+      .collect {
+        case (domainId, syncDomain) if syncDomain.readyForSubmission =>
+          syncDomain.ephemeral.requestTracker
+            .getApproximateState(coid)
+            .filter(_.status == Active)
+            .map(_ => domainId)
       }
       .reduceOption[OptionT[Future, DomainId]] { case (d1, d2) =>
         d1.orElse(d2)

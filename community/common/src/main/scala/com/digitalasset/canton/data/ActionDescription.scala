@@ -99,6 +99,7 @@ object ActionDescription {
       case LfNodeExercises(
             inputContract,
             _templateId,
+            _interfaceId,
             choice,
             _consuming,
             actors,

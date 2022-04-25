@@ -80,15 +80,18 @@ object TopologyManagementInitialization {
       authorizedTopologySnapshot: StoredTopologyTransactions[TopologyChangeOp],
       domainMembers: Set[DomainMember],
       recentSnapshot: DomainSnapshotSyncCryptoApi,
+      loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
       loggingContext: ErrorLoggingContext,
   ): Future[Unit] = {
     implicit val traceContext = loggingContext.traceContext
+    val logger = loggerFactory.getLogger(getClass)
     for {
       content <- DomainTopologyTransactionMessage
         .tryCreate(authorizedTopologySnapshot.result.map(_.transaction).toList, recentSnapshot, id)
       batch = domainMembers.map(member => OpenEnvelope(content, Recipients.cc(member)))
+      _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient.sendWithRetries(
         callback => client.sendAsync(Batch(batch.toList), SendType.Other, callback = callback),
         maxRetries = 600,
@@ -214,6 +217,7 @@ object TopologyManagementInitialization {
               authorizedTopologySnapshot,
               DomainMember.list(id, addressSequencerAsDomainMember),
               syncCrypto.currentSnapshotApproximation,
+              loggerFactory,
             )
           } yield ())
         } else EitherT.rightT(())
