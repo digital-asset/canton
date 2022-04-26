@@ -1,9 +1,5 @@
-sdk-version: 2.1.0-snapshot.20220411.9707.0.f6fed6ea
+sdk-version: 2.2.0-snapshot.20220421.9765.0.fc8ec7f2
 name: ai-analysis
-parties: 
-- Alice
-- Registry
-- AIAnalysis
 exposed-modules: 
 - AIAnalysis
 source: AIAnalysis.daml

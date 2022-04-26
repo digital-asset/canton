@@ -18,7 +18,10 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
-import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.ApplicationHandlerPassive
+import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
+  ApplicationHandlerPassive,
+  ApplicationHandlerShutdown,
+}
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handlers.{CounterCapture, HasReceivedEvent}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
@@ -90,6 +93,9 @@ class ResilientSequencerSubscription[HandlerError](
           hasReceivedEvent: HasReceivedEvent,
           newSubscription: SequencerSubscription[HandlerError],
       ): Unit = {
+        logger.debug(
+          s"The sequencer subscription has been successfully started"
+        )
 
         // register resolution
         FutureUtil.doNotAwait(
@@ -201,6 +207,8 @@ class ResilientSequencerSubscription[HandlerError](
     reason match {
       case Success(SubscriptionCloseReason.Closed) =>
         logger.trace("Sequencer subscription is being closed")
+      case Success(SubscriptionCloseReason.HandlerError(_: ApplicationHandlerShutdown.type)) =>
+        logger.info("Sequencer subscription is being closed due to handler shutdown")
       case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(reason))) =>
         logger.warn(
           s"Closing resilient sequencer subscription because instance became passive: $reason"

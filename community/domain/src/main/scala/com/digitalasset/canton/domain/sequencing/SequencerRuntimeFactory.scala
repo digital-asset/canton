@@ -85,8 +85,7 @@ object SequencerRuntimeFactory {
         system: ActorSystem,
     ): SequencerRuntime =
       new SequencerRuntime(
-        SequencerFactory
-          .database(sequencerConfig, loggerFactory),
+        SequencerFactory.database(sequencerConfig, loggerFactory),
         staticDomainParameters,
         localParameters,
         domainConfig.timeTracker,
@@ -113,6 +112,7 @@ object SequencerRuntimeFactory {
         registerSequencerMember =
           false, // the community sequencer is always an embedded single sequencer
         indexedStringStore,
+        agreementManager,
         loggerFactory,
       )
   }

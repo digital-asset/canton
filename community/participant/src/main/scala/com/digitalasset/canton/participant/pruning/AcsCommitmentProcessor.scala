@@ -118,8 +118,8 @@ import scala.math.Ordering.Implicits._
   *
   *  Finally, the class requires the reconciliation interval to be a multiple of 1 second.
   *
-  * The ``commitmentPeriodObserver`` is guaranteed to be called whenever a commitment is computed for a period. If
-  * [[publish]] is called multiple times for the same timestamp (once before a crash and once after the recovery),
+  * The ``commitmentPeriodObserver`` is called whenever a commitment is computed for a period, except if the participant crashes.
+  * If [[publish]] is called multiple times for the same timestamp (once before a crash and once after the recovery),
   * the observer may also be called twice for the same period.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -130,7 +130,7 @@ class AcsCommitmentProcessor(
     domainCrypto: SyncCryptoClient,
     reconciliationInterval: PositiveSeconds,
     store: AcsCommitmentStore,
-    commitmentPeriodObserver: (ExecutionContext, TraceContext) => Future[Unit],
+    commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
     killSwitch: => Unit,
     metrics: PruningMetrics,
     override protected val timeouts: ProcessingTimeout,
@@ -181,7 +181,7 @@ class AcsCommitmentProcessor(
   }
 
   private val timestampsWithPotentialTopologyChanges =
-    new AtomicReference[List[CantonTimestamp]](List())
+    new AtomicReference[List[Traced[CantonTimestamp]]](List())
 
   private[pruning] val queue: SimpleExecutionQueue = new SimpleExecutionQueue(logTaskTiming = true)
 
@@ -223,43 +223,46 @@ class AcsCommitmentProcessor(
       timestamps: List[CantonTimestamp]
   )(implicit traceContext: TraceContext) = {
     // assuming timestamps to be ordered
-    val cur = timestampsWithPotentialTopologyChanges.getAndSet(timestamps)
+    val cur = timestampsWithPotentialTopologyChanges.getAndSet(timestamps.map(Traced(_)))
     ErrorUtil.requireArgument(
       cur.isEmpty,
       s"Bad initialization attempt of timestamps with ticks, as we've already scheduled ${cur.length} ",
     )
   }
 
-  def scheduleTopologyTick(effectiveTime: CantonTimestamp): Unit =
+  def scheduleTopologyTick(effectiveTime: Traced[CantonTimestamp]): Unit =
     timestampsWithPotentialTopologyChanges.updateAndGet { cur =>
       // only append if this timestamp is higher than the last one (relevant during init)
-      if (cur.lastOption.forall(_ < effectiveTime))
-        cur :+ effectiveTime
+      if (cur.lastOption.forall(_.value < effectiveTime.value)) cur :+ effectiveTime
       else cur
     }.discard
 
-  override def publish(initialToc: RecordTime, acsChange: AcsChange)(implicit
+  override def publish(toc: RecordTime, acsChange: AcsChange)(implicit
       traceContext: TraceContext
   ): Unit = {
     @tailrec
-    def go(toc: RecordTime): Unit =
+    def go(): Unit =
       timestampsWithPotentialTopologyChanges.get().headOption match {
         // no upcoming topology change queued
         case None => publishTick(toc, acsChange)
         // pre-insert topology change queued
-        case Some(effectiveTime) if effectiveTime <= toc.timestamp =>
+        case Some(effectiveTime) if effectiveTime.value <= toc.timestamp =>
           // remove the tick from our update
           timestampsWithPotentialTopologyChanges.updateAndGet(_.drop(1))
           // only update if this is a separate timestamp
-          if (effectiveTime < toc.timestamp && lastPublished.forall(_.timestamp < effectiveTime)) {
-            publishTick(RecordTime(timestamp = effectiveTime, tieBreaker = 0), AcsChange.empty)
+          val eft = effectiveTime.value
+          if (eft < toc.timestamp && lastPublished.forall(_.timestamp < eft)) {
+            publishTick(
+              RecordTime(timestamp = eft, tieBreaker = 0),
+              AcsChange.empty,
+            )(effectiveTime.traceContext)
           }
           // now, iterate (there might have been several effective time updates)
-          go(toc)
+          go()
         case Some(_) =>
           publishTick(toc, acsChange)
       }
-    go(initialToc)
+    go()
   }
 
   /** Event processing consists of two steps: one (primarily) for computing local commitments, and one for handling remote ones.
@@ -309,9 +312,18 @@ class AcsCommitmentProcessor(
         // as otherwise we can get a race where an incoming commitment doesn't "clear" the outstanding period
         _ = indicateReadyForRemote(completedPeriod.toInclusive)
         _ <- processBuffered(completedPeriod.toInclusive)
-        _ <- commitmentPeriodObserver(ec, traceContext)
         _ <- indicateLocallyProcessed(completedPeriod)
-      } yield ()
+      } yield {
+        // Run the observer asynchronously so that it does not block the further generation / processing of ACS commitments
+        // Since this runs after we mark the period as locally processed, there are no guarantees that the observer
+        // actually runs (e.g., if the participant crashes before be spawn this future).
+        FutureUtil.doNotAwait(
+          commitmentPeriodObserver(ec, traceContext).onShutdown {
+            logger.info("Skipping commitment period observer due to shutdown")
+          },
+          "commitment period observer failed",
+        )
+      }
     }
 
     def performPublish(): Future[Unit] = performUnlessClosingF {

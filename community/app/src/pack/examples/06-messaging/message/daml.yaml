@@ -1,10 +1,7 @@
-sdk-version: 2.1.0-snapshot.20220411.9707.0.f6fed6ea
+sdk-version: 2.2.0-snapshot.20220421.9765.0.fc8ec7f2
 sandbox-options: 
 - --wall-clock-time
 name: message
-parties: 
-- Alice
-- Bob
 source: daml
 version: 0.0.1
 dependencies: 

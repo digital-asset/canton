@@ -72,6 +72,7 @@ class GrpcSequencerTopologyBootstrapService(
                       topologySnapshot,
                       DomainMember.listAll(id),
                       syncCrypto.headSnapshot,
+                      loggerFactory,
                     )
                 )
             } yield ()

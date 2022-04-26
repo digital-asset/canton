@@ -9,8 +9,11 @@ import com.daml.ledger.api.auth.{AuthService, AuthServiceJWT, AuthServiceWildcar
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
-import com.daml.platform.configuration.{CommandConfiguration, IndexConfiguration}
-import com.daml.platform.indexer.{IndexerConfig => DamlIndexerConfig}
+import com.daml.platform.configuration.{
+  CommandConfiguration,
+  IndexConfiguration => DamlIndexConfiguration,
+}
+import com.daml.platform.indexer.{IndexerStartupMode, IndexerConfig => DamlIndexerConfig}
 import com.daml.platform.usermanagement.UserManagementConfig
 import com.digitalasset.canton.config.RequireTypes.{
   ExistingFile,
@@ -327,7 +330,6 @@ object LedgerApiServerConfig {
     config match {
       case DamlApiServerConfig(
             _participantId,
-            _archiveFiles,
             port,
             address,
             _jdbcUrl,
@@ -337,20 +339,22 @@ object LedgerApiServerConfig {
             _maxInboundMessageSize, // configured via participant.maxInboundMessageSize
             _initialLedgerConfiguration, // not used by canton - always None
             _configurationLoadTimeout, // time the ledger api submit services wait for canton to send time model configuration
-            _eventPageSize, // configured via participant.eventsPageSize
-            _eventsProcessingParallelism,
-            acsIdPageSize,
-            acsIdFetchingParallelism,
-            acsContractFetchingParallelism,
-            acsGlobalParallelism,
-            acsIdQueueLimit,
+            DamlIndexConfiguration(
+              _archiveFiles,
+              _eventPageSize, // configured via participant.eventsPageSize,
+              _eventsProcessingParallelism,
+              acsIdPageSize,
+              acsIdFetchingParallelism,
+              acsContractFetchingParallelism,
+              acsGlobalParallelism,
+              _maxContractStateCacheSize,
+              _maxContractKeyStateCacheSize,
+              _maxTransactionsInMemoryFanOutBufferSize,
+              _enableInMemoryFanOutForLedgerApi,
+            ),
             _portFile,
             _seeding,
             managementServiceTimeout,
-            _maxContractStateCacheSize,
-            _maxContractKeyStateCacheSize,
-            _maxTransactionsInMemoryFanOutBufferSize,
-            _enableInMemoryFanOutForLedgerApi,
             _enableUserManagement,
           ) =>
         def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -397,7 +401,6 @@ object LedgerApiServerConfig {
             acsIdFetchingParallelism,
             acsContractFetchingParallelism,
             acsGlobalParallelism,
-            acsIdQueueLimit,
           ),
           managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout),
         )
@@ -440,11 +443,11 @@ object LedgerApiServerConfig {
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
 case class ActiveContractsServiceConfig(
-    acsIdPageSize: Int = IndexConfiguration.DefaultAcsIdPageSize,
-    acsIdFetchingParallelism: Int = IndexConfiguration.DefaultAcsIdFetchingParallelism,
-    acsContractFetchingParallelism: Int = IndexConfiguration.DefaultAcsContractFetchingParallelism,
-    acsGlobalParallelism: Int = IndexConfiguration.DefaultAcsGlobalParallelism,
-    acsIdQueueLimit: Int = IndexConfiguration.DefaultAcsIdQueueLimit,
+    acsIdPageSize: Int = DamlIndexConfiguration.DefaultAcsIdPageSize,
+    acsIdFetchingParallelism: Int = DamlIndexConfiguration.DefaultAcsIdFetchingParallelism,
+    acsContractFetchingParallelism: Int =
+      DamlIndexConfiguration.DefaultAcsContractFetchingParallelism,
+    acsGlobalParallelism: Int = DamlIndexConfiguration.DefaultAcsGlobalParallelism,
 )
 
 /** Ledger api command service specific configurations
@@ -538,7 +541,7 @@ case class IndexerConfig(
       NonNegativeInt.tryCreate(DamlIndexerConfig.DefaultTailingRateLimitPerSecond),
     batchWithinMillis: Long = DamlIndexerConfig.DefaultBatchWithinMillis,
     enableCompression: Boolean = DamlIndexerConfig.DefaultEnableCompression,
-    schemaMigrationAttempts: Int = DamlIndexerConfig.DefaultSchemaMigrationAttempts,
+    schemaMigrationAttempts: Int = IndexerStartupMode.DefaultSchemaMigrationAttempts,
     schemaMigrationAttemptBackoff: NonNegativeFiniteDuration =
       IndexerConfig.DefaultSchemaMigrationAttemptBackoff,
     postgresTcpKeepalivesIdle: Option[Int] = IndexerConfig.DefaultPostgresTcpKeepalivesIdle,
@@ -551,7 +554,7 @@ object IndexerConfig {
     NonNegativeFiniteDuration.ofSeconds(DamlIndexerConfig.DefaultRestartDelay.toSeconds)
   val DefaultSchemaMigrationAttemptBackoff: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(
-      DamlIndexerConfig.DefaultSchemaMigrationAttemptBackoff.toSeconds
+      IndexerStartupMode.DefaultSchemaMigrationAttemptBackoff.toSeconds
     )
   // See com.daml.platform.indexer.IndexerConfig for background on the tcp postgres configurations.
   val DefaultPostgresTcpKeepalivesIdle: Option[Int] = Some(10)
@@ -567,13 +570,8 @@ object IndexerConfig {
       case DamlIndexerConfig(
             _participantIdUsedFromLedgerApiConfig,
             _jdbcUrlUsedFromLedgerApiConfig,
-            _startupMode, // not configurable in canton and decided based on participant-HA replica role
-            _databaseConnectionTimeoutUsedFromLedgerApiConfig,
+            startupMode, // not configurable in canton and decided based on participant-HA replica role
             restartDelay,
-            _eventsPageSizeUsedFromLedgerApiConfig,
-            _eventsProcessingParallelismFromLedgerApiConfig,
-            _updatePreparationParallelism, // not configurable as applicable only to pipelined indexer that will be removed
-            _allowExistingSchema, // not configurable in canton as we don't expose this for the canton dbs either
             _asyncCommitModeUsedFromLedgerApiConfig,
             maxInputBufferSize,
             inputMappingParallelism,
@@ -583,13 +581,27 @@ object IndexerConfig {
             tailingRateLimitPerSecond,
             batchWithinMillis,
             enableCompression,
-            schemaMigrationAttempts,
-            schemaMigrationAttemptBackoff,
             _haConfig, // consider making a subset of these settings configurable once the ha-dust settles
             postgresTcpKeepalivesIdle,
             postgresTcpKeepalivesInterval,
             postgresTcpKeepalivesCount,
           ) =>
+        val (schemaMigrationAttempts, schemaMigrationAttemptBackoff) = (startupMode match {
+          case IndexerStartupMode.ValidateAndStart => None
+          case IndexerStartupMode.MigrateAndStart(_) => None
+          case IndexerStartupMode.ValidateAndWaitOnly(
+                schemaMigrationAttempts,
+                schemaMigrationAttemptBackoff,
+              ) =>
+            Some((schemaMigrationAttempts, schemaMigrationAttemptBackoff))
+          case IndexerStartupMode.MigrateOnEmptySchemaAndStart => None
+        }).getOrElse(
+          (
+            IndexerStartupMode.DefaultSchemaMigrationAttempts,
+            IndexerStartupMode.DefaultSchemaMigrationAttemptBackoff,
+          )
+        )
+
         IndexerConfig(
           restartDelay = NonNegativeFiniteDuration.ofSeconds(restartDelay.toSeconds),
           maxInputBufferSize = NonNegativeInt.tryCreate(maxInputBufferSize),

@@ -61,10 +61,10 @@ template Orchestrator
   where
     signatory sig
 
-    controller sig can 
-      nonconsuming Initialize: Optional (ContractId Initialization)
-        with
-          k: Int
+    nonconsuming choice Initialize: Optional (ContractId Initialization)
+      with
+        k: Int
+      controller sig
         do
           optCid <- lookupByKey @Keyed (sig, k)
           case optCid of
@@ -109,10 +109,10 @@ template Generator
   where
     signatory sig
 
-    controller sig can
-      Generate : (ContractId Generator, ContractId Keyed)
-        with
-          k: Int
+    choice Generate : (ContractId Generator, ContractId Keyed)
+      with
+        k: Int
+      controller sig
         do
           existing <- lookupByKey @Keyed (sig, k)
           keyed <- case existing of
@@ -150,15 +150,16 @@ template KeyState
   where
     signatory sig
 
-    controller sig can
-      Allocate : (ContractId KeyState, ContractId Keyed)
+    choice Allocate : (ContractId KeyState, ContractId Keyed)
+      controller sig
         do
           assert $ not allocated
           newState <- create this with allocated = True
           keyed <- create Keyed with ..
           pure (newState, keyed)
 
-      Deallocate : ContractId KeyState
+    choice Deallocate : ContractId KeyState
+      controller sig
         do
           assert $ allocated
           (cid, _) <- fetchByKey @Keyed (sig, k)

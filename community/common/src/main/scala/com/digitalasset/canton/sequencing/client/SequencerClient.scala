@@ -900,6 +900,8 @@ class SequencerClient(
         SequencerClient.CloseReason.UnrecoverableException(ex)
       case SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(_reason)) =>
         SequencerClient.CloseReason.BecamePassive
+      case SubscriptionCloseReason.HandlerError(ApplicationHandlerShutdown) =>
+        SequencerClient.CloseReason.ClientShutdown
       case SubscriptionCloseReason.HandlerError(err) =>
         SequencerClient.CloseReason.UnrecoverableError(s"handler returned error: $err")
       case permissionDenied: SubscriptionCloseReason.PermissionDeniedError =>

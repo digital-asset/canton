@@ -394,14 +394,14 @@ object SequenceWritesFlow {
           case other => Future.successful(other)
         }
 
-      def checkPayloadToEventBound(
+      def checkPayloadToEventMargin(
           presequencedEvent: Presequenced[StoreEvent[PayloadId]]
       ): Either[String, Presequenced[StoreEvent[PayloadId]]] =
         presequencedEvent match {
           // we only need to check deliver events for payloads
           case presequencedDeliver @ Presequenced(deliver: DeliverStoreEvent[PayloadId], _) =>
             val payloadTs = deliver.payload.unwrap
-            val bound = writerConfig.payloadToEventBound.unwrap
+            val bound = writerConfig.payloadToEventMargin.unwrap
             val maxAllowableEventTime = payloadTs.add(bound)
 
             Either
@@ -415,7 +415,7 @@ object SequenceWritesFlow {
         }
 
       val resultE = for {
-        event <- checkPayloadToEventBound(presequencedEvent)
+        event <- checkPayloadToEventMargin(presequencedEvent)
         event <- checkMaxSequencingTime(event)
       } yield event
 

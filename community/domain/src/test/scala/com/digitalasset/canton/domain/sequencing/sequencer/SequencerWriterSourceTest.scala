@@ -172,7 +172,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       // setup advancing the clock past the payload to event bound immediately after the payload is persisted
       // (but before the event time is generated which will then be beyond a valid bound).
       store.setClockAdvanceBeforeSavePayloads(
-        testWriterConfig.payloadToEventBound.duration.plusSeconds(1)
+        testWriterConfig.payloadToEventMargin.duration.plusSeconds(1)
       )
 
       val nowish = clock.now.plusSeconds(10)

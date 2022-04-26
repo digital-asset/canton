@@ -25,12 +25,16 @@ template OfferToPaintHouseByPainter
     amount: Amount
   where
     signatory painter
-    controller houseOwner can
-      AcceptByOwner : ContractId Iou with iouId : ContractId Iou
-        do
-          iouId2 <- exercise iouId Transfer with newOwner = painter
-          paint <- create $ PaintHouse with painter; houseOwner
-          return iouId2
+    observer houseOwner
+
+    choice AcceptByOwner : ContractId Iou
+      with
+        iouId : ContractId Iou
+      controller houseOwner
+      do
+        iouId2 <- exercise iouId Transfer with newOwner = painter
+        paint <- create $ PaintHouse with painter; houseOwner
+        return iouId2
 
 -- architecture-handbook-entry-end: PaintDaml
 
@@ -42,8 +46,10 @@ template OfferToPaintHouseByOwner
     iouId: ContractId Iou
   where
     signatory houseOwner
-    controller painter can
-      AcceptByPainter : ContractId Iou
+    observer painter
+
+    choice AcceptByPainter : ContractId Iou
+      controller painter
         do
           iouId2 <- exercise iouId Transfer with newOwner = painter
           paint <- create $ PaintHouse with painter; houseOwner

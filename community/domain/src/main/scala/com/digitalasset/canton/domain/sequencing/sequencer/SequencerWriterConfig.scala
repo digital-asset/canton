@@ -43,15 +43,52 @@ object CommitMode {
   * @param maxSqlInListSize will limit the number of items in a SQL in clause. useful for databases where this may have a low limit (e.g. Oracle).
   */
 sealed trait SequencerWriterConfig {
+  this: {
+    def copy(
+        payloadQueueSize: Int,
+        payloadWriteBatchMaxSize: Int,
+        payloadWriteBatchMaxDuration: NonNegativeFiniteDuration,
+        payloadWriteMaxConcurrency: Int,
+        payloadToEventMargin: NonNegativeFiniteDuration,
+        eventWriteBatchMaxSize: Int,
+        eventWriteBatchMaxDuration: NonNegativeFiniteDuration,
+        commitModeValidation: Option[CommitMode],
+        maxSqlInListSize: PositiveNumeric[Int],
+    ): SequencerWriterConfig
+  } =>
+
   val payloadQueueSize: Int
   val payloadWriteBatchMaxSize: Int
   val payloadWriteBatchMaxDuration: NonNegativeFiniteDuration
   val payloadWriteMaxConcurrency: Int
-  val payloadToEventBound: NonNegativeFiniteDuration
+  val payloadToEventMargin: NonNegativeFiniteDuration
   val eventWriteBatchMaxSize: Int
   val eventWriteBatchMaxDuration: NonNegativeFiniteDuration
   val commitModeValidation: Option[CommitMode]
   val maxSqlInListSize: PositiveNumeric[Int]
+
+  def modify(
+      payloadQueueSize: Int = this.payloadQueueSize,
+      payloadWriteBatchMaxSize: Int = this.payloadWriteBatchMaxSize,
+      payloadWriteBatchMaxDuration: NonNegativeFiniteDuration = this.payloadWriteBatchMaxDuration,
+      payloadWriteMaxConcurrency: Int = this.payloadWriteMaxConcurrency,
+      payloadToEventMargin: NonNegativeFiniteDuration = this.payloadToEventMargin,
+      eventWriteBatchMaxSize: Int = this.eventWriteBatchMaxSize,
+      eventWriteBatchMaxDuration: NonNegativeFiniteDuration = this.eventWriteBatchMaxDuration,
+      commitModeValidation: Option[CommitMode] = this.commitModeValidation,
+      maxSqlInListSize: PositiveNumeric[Int] = this.maxSqlInListSize,
+  ): SequencerWriterConfig =
+    copy(
+      payloadQueueSize,
+      payloadWriteBatchMaxSize,
+      payloadWriteBatchMaxDuration,
+      payloadWriteMaxConcurrency,
+      payloadToEventMargin,
+      eventWriteBatchMaxSize,
+      eventWriteBatchMaxDuration,
+      commitModeValidation,
+      maxSqlInListSize,
+    )
 }
 
 /** Expose config as different named versions using different default values to allow easy switching for the different
@@ -59,7 +96,7 @@ sealed trait SequencerWriterConfig {
   * overridden if required.
   */
 object SequencerWriterConfig {
-  val DefaultPayloadTimestampBound: NonNegativeFiniteDuration =
+  val DefaultPayloadTimestampMargin: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(60L)
   // the Oracle limit is likely 1000 however this is currently only used for payload lookups on conflicts (savePayloads)
   // so just set a bit above the default max payload batch size (50)
@@ -74,7 +111,7 @@ object SequencerWriterConfig {
       override val payloadWriteBatchMaxDuration: NonNegativeFiniteDuration =
         NonNegativeFiniteDuration.ofMillis(10),
       override val payloadWriteMaxConcurrency: Int = 2,
-      override val payloadToEventBound: NonNegativeFiniteDuration = DefaultPayloadTimestampBound,
+      override val payloadToEventMargin: NonNegativeFiniteDuration = DefaultPayloadTimestampMargin,
       override val eventWriteBatchMaxSize: Int = 1,
       override val eventWriteBatchMaxDuration: NonNegativeFiniteDuration =
         NonNegativeFiniteDuration.ofMillis(20),
@@ -92,7 +129,7 @@ object SequencerWriterConfig {
       override val payloadWriteBatchMaxDuration: NonNegativeFiniteDuration =
         NonNegativeFiniteDuration.ofMillis(50),
       override val payloadWriteMaxConcurrency: Int = 4,
-      override val payloadToEventBound: NonNegativeFiniteDuration = DefaultPayloadTimestampBound,
+      override val payloadToEventMargin: NonNegativeFiniteDuration = DefaultPayloadTimestampMargin,
       override val eventWriteBatchMaxSize: Int = 100,
       override val eventWriteBatchMaxDuration: NonNegativeFiniteDuration =
         NonNegativeFiniteDuration.ofMillis(50),

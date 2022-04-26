@@ -87,7 +87,7 @@ class TopologyTransactionProcessor(
     cryptoPureApi: CryptoPureApi,
     store: TopologyStore,
     clock: Clock,
-    acsCommitmentScheduleEffectiveTime: CantonTimestamp => Unit,
+    acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
@@ -519,7 +519,7 @@ class TopologyTransactionProcessor(
         tmpF.map { eft =>
           // this is safe to do here, as the acs commitment processor `publish` method will only be
           // invoked long after the outer future here has finished processing
-          acsCommitmentScheduleEffectiveTime(eft.value)
+          acsCommitmentScheduleEffectiveTime(Traced(eft.value))
           eft
         }
       } else {

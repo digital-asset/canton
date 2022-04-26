@@ -99,6 +99,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
     domainId = domainId,
     staticDomainParameters = TestDomainParameters.defaultStatic,
     cryptoApi = cryptoApi,
+    agreementManager = None,
     loggerFactory = loggerFactory,
   )
 

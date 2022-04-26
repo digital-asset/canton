@@ -230,6 +230,7 @@ class RepairService(
                 LfNodeExercises(
                   targetCoid = contract.contractId,
                   templateId = contract.rawContractInstance.contractInstance.unversioned.template,
+                  interfaceId = None,
                   choiceId = Ref.ChoiceName.assertFromString(s"Archive"),
                   consuming = true,
                   actingParties = contract.metadata.signatories,

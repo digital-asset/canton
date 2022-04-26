@@ -187,6 +187,21 @@ class SyncDomain(
     loggerFactory,
   )
 
+  private val pruneObserver = new PruneObserver(
+    persistent.requestJournalStore,
+    persistent.sequencerCounterTrackerStore,
+    staticDomainParameters.reconciliationInterval,
+    persistent.acsCommitmentStore,
+    persistent.activeContractStore,
+    persistent.contractKeyJournal,
+    participantNodePersistentState.inFlightSubmissionStore,
+    domainId,
+    parameters.stores.acsPruningInterval,
+    clock,
+    timeouts,
+    loggerFactory,
+  )
+
   private val acsCommitmentProcessor = {
     val listener = new AcsCommitmentProcessor(
       domainId,
@@ -195,19 +210,7 @@ class SyncDomain(
       domainCrypto,
       staticDomainParameters.reconciliationInterval,
       persistent.acsCommitmentStore,
-      new PruneObserver(
-        persistent.requestJournalStore,
-        persistent.sequencerCounterTrackerStore,
-        staticDomainParameters.reconciliationInterval,
-        persistent.acsCommitmentStore,
-        persistent.activeContractStore,
-        persistent.contractKeyJournal,
-        participantNodePersistentState.inFlightSubmissionStore,
-        domainId,
-        parameters.stores.acsPruningInterval,
-        clock,
-        loggerFactory,
-      ).observer(_, _),
+      pruneObserver.observer(_, _),
       killSwitch = selfKillSwitch,
       pruningMetrics,
       timeouts,
@@ -719,6 +722,7 @@ class SyncDomain(
           // Start with closing the sequencer subscription so that the processors won't receive or handle events when
           // their shutdown is initiated.
           () => domainHandle.sequencerClient.closeSubscription(),
+          pruneObserver,
           acsCommitmentProcessor,
           topologyProcessor,
           transactionProcessor,

@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, HttpSequence
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.common.domain.ServiceAgreement
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -37,6 +38,10 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
   def isActive(participantId: ParticipantId, waitForActive: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, Boolean]
+
+  def getAgreement(domainId: DomainId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, Error, Option[ServiceAgreement]]
 
   protected def handleVerifyActiveResponse(
       response: v0.SequencerConnect.VerifyActive.Response

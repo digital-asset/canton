@@ -5,14 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.domain.api.v0;
 
-import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+import "com/digitalasset/canton/domain/api/v0/service_agreement.proto";
 
 service DomainService {
     rpc GetServiceAgreement(GetServiceAgreementRequest) returns (GetServiceAgreementResponse);
-}
-
-message GetServiceAgreementRequest { }
-
-message GetServiceAgreementResponse {
-    com.digitalasset.canton.protocol.v0.ServiceAgreement agreement = 1; // Optional, present if the domain requires a service agreement
 }

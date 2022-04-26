@@ -116,6 +116,7 @@ object LfTransactionBuilder {
       LfNodeExercises(
         targetCoid = targetCoid,
         templateId = templateId,
+        interfaceId = None,
         choiceId = LfChoiceName.assertFromString("choice"),
         consuming = consuming,
         actingParties = actingParties,

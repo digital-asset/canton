@@ -26,7 +26,11 @@ import com.daml.platform.apiserver.{
   StandaloneIndexService,
   TimeServiceBackend,
 }
-import com.daml.platform.configuration.{PartyConfiguration, ServerRole}
+import com.daml.platform.configuration.{
+  IndexConfiguration => LedgerIndexConfiguration,
+  PartyConfiguration,
+  ServerRole,
+}
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
   IndexerStartupMode,
@@ -150,16 +154,13 @@ object CantonLedgerApiServerWrapper extends NoTracing {
         )
         asyncCommitMode <- asyncCommitMode(config.serverConfig.synchronousCommitMode)
           .leftMap(FailedToConfigureIndexer)
+
         indexerConfig = DamlIndexerConfig(
           participantId = config.participantId,
           jdbcUrl = ledgerApiStorage.jdbcUrl,
-          startupMode = IndexerStartupMode.MigrateAndStart,
-          databaseConnectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
+          startupMode = IndexerStartupMode.MigrateAndStart(false),
           restartDelay = config.indexerConfig.restartDelay.toScala,
-          eventsPageSize = config.serverConfig.eventsPageSize,
-          eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
           // updatePreparationParallelism not configurable as applicable only to pipelined indexer that will be removed
-          allowExistingSchema = false,
           asyncCommitMode = asyncCommitMode,
           maxInputBufferSize = config.indexerConfig.maxInputBufferSize.unwrap,
           inputMappingParallelism = config.indexerConfig.inputMappingParallelism.unwrap,
@@ -169,9 +170,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           tailingRateLimitPerSecond = config.indexerConfig.tailingRateLimitPerSecond.unwrap,
           batchWithinMillis = config.indexerConfig.batchWithinMillis,
           enableCompression = config.indexerConfig.enableCompression,
-          schemaMigrationAttempts = config.indexerConfig.schemaMigrationAttempts,
-          schemaMigrationAttemptBackoff =
-            config.indexerConfig.schemaMigrationAttemptBackoff.toScala,
           haConfig = config.indexerLockIds.fold(HaConfig()) {
             case IndexerLockIds(mainLockId, workerLockId) =>
               HaConfig(indexerLockId = mainLockId, indexerWorkerLockId = workerLockId)
@@ -187,9 +185,20 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       .flatMap { case (ledgerApiStorage, indexerConfig) =>
         val uniquifier = randomUUID.toString
 
+        val ledgerIndexConfiguration = LedgerIndexConfiguration(
+          archiveFiles = List.empty,
+          eventsPageSize = config.serverConfig.eventsPageSize,
+          eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
+          acsIdPageSize = config.serverConfig.activeContractsService.acsIdPageSize,
+          acsIdFetchingParallelism =
+            config.serverConfig.activeContractsService.acsIdFetchingParallelism,
+          acsContractFetchingParallelism =
+            config.serverConfig.activeContractsService.acsContractFetchingParallelism,
+          acsGlobalParallelism = config.serverConfig.activeContractsService.acsGlobalParallelism,
+        )
+
         val ledgerApiServerConfig = ApiServerConfig(
           participantId = config.participantId,
-          archiveFiles = List.empty,
           port = DamlPort(config.serverConfig.port.unwrap),
           address = Some(config.serverConfig.address),
           jdbcUrl = ledgerApiStorage.jdbcUrl,
@@ -202,23 +211,11 @@ object CantonLedgerApiServerWrapper extends NoTracing {
             None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
           configurationLoadTimeout =
             JDuration.ofNanos(config.serverConfig.configurationLoadTimeout.unwrap.toNanos),
-          eventsPageSize = config.serverConfig.eventsPageSize,
-          eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
-          acsIdPageSize = config.serverConfig.activeContractsService.acsIdPageSize,
-          acsIdFetchingParallelism =
-            config.serverConfig.activeContractsService.acsIdFetchingParallelism,
-          acsContractFetchingParallelism =
-            config.serverConfig.activeContractsService.acsContractFetchingParallelism,
-          acsGlobalParallelism = config.serverConfig.activeContractsService.acsGlobalParallelism,
+          indexConfiguration = ledgerIndexConfiguration,
           portFile = None,
           seeding = config.cantonParameterConfig.contractIdSeeding,
           managementServiceTimeout =
             JDuration.ofNanos(config.serverConfig.managementServiceTimeout.unwrap.toNanos),
-          maxContractStateCacheSize = config.serverConfig.maxContractStateCacheSize,
-          maxContractKeyStateCacheSize = config.serverConfig.maxContractKeyStateCacheSize,
-          maxTransactionsInMemoryFanOutBufferSize =
-            config.serverConfig.maxTransactionsInMemoryFanOutBufferSize,
-          enableInMemoryFanOutForLedgerApi = config.serverConfig.enableInMemoryFanOutForLedgerApi,
           userManagementConfig = config.serverConfig.userManagementService.damlConfig,
         )
 
@@ -237,15 +234,20 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                 metrics = metrics,
               )
 
+            val indexerStartupMode: IndexerStartupMode =
+              if (startIndexer) IndexerStartupMode.MigrateOnEmptySchemaAndStart
+              else
+                IndexerStartupMode.ValidateAndWaitOnly(
+                  schemaMigrationAttempts = config.indexerConfig.schemaMigrationAttempts,
+                  schemaMigrationAttemptBackoff =
+                    config.indexerConfig.schemaMigrationAttemptBackoff.toScala,
+                )
+
             val indexerResource = for {
               _ <- tryCreateSchemaAsResource(ledgerApiStorage, config.logger).acquire()
               reportsHealth <- new StandaloneIndexerServer(
                 config.syncService,
-                indexerConfig.copy(
-                  startupMode =
-                    if (startIndexer) IndexerStartupMode.MigrateOnEmptySchemaAndStart
-                    else IndexerStartupMode.ValidateAndWaitOnly
-                ),
+                indexerConfig.copy(startupMode = indexerStartupMode),
                 metrics,
                 lfValueTranslationCache,
                 config.serverConfig.additionalMigrationPaths,
@@ -303,7 +305,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               indexService <- StandaloneIndexService(
                 dbSupport = dbSupport,
                 ledgerId = config.ledgerId,
-                config = ledgerApiServerConfig,
+                config = ledgerIndexConfiguration,
+                participantId = config.participantId,
                 metrics = metrics,
                 engine = config.engine,
                 servicesExecutionContext = ec,

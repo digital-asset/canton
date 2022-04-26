@@ -4,10 +4,14 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
+import cats.syntax.bifunctor._
 import cats.syntax.either._
+import cats.syntax.traverse._
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.domain.api.v0.GetServiceAgreementRequest
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.VerifyActive
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
@@ -41,7 +45,7 @@ class GrpcSequencerConnectClient(
   private val builder =
     sequencerConnection.mkChannelBuilder(clientChannelBuilder, traceContextPropagation)
 
-  def getDomainId(
+  override def getDomainId(
       domainAlias: DomainAlias
   )(implicit traceContext: TraceContext): EitherT[Future, Error, DomainId] = for {
     response <- CantonGrpcUtil
@@ -64,7 +68,7 @@ class GrpcSequencerConnectClient(
     domainId <- EitherT.fromEither[Future](domainId)
   } yield domainId
 
-  def getDomainParameters(
+  override def getDomainParameters(
       domainAlias: DomainAlias
   )(implicit traceContext: TraceContext): EitherT[Future, Error, StaticDomainParameters] = for {
     responseP <- CantonGrpcUtil
@@ -115,6 +119,31 @@ class GrpcSequencerConnectClient(
         .fromEither[Future](HandshakeResponse.fromProtoV0(responseP))
         .leftMap[Error](err => Error.DeserializationFailure(err.toString))
     } yield handshakeResponse
+
+  override def getAgreement(
+      domainId: DomainId
+  )(implicit traceContext: TraceContext): EitherT[Future, Error, Option[ServiceAgreement]] = for {
+    response <- CantonGrpcUtil
+      .sendSingleGrpcRequest(
+        domainId.toString,
+        "getting service agreement from remote domain",
+        channel = builder.build(),
+        stubFactory = v0.SequencerConnectServiceGrpc.stub,
+        timeout = timeouts.network.unwrap,
+        logger = logger,
+        logPolicy = CantonGrpcUtil.silentLogPolicy,
+        retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
+      )(_.getServiceAgreement(GetServiceAgreementRequest()))(loggingContext.traceContext)
+      .leftMap(e => Error.Transport(e.toString))
+    optAgreement <- EitherT
+      .fromEither[Future](
+        response.agreement
+          .traverse(ag =>
+            ServiceAgreement.fromProtoV0(ag).leftMap(e => Error.DeserializationFailure(e.toString))
+          )
+      )
+      .leftWiden[Error]
+  } yield optAgreement
 
   def isActive(participantId: ParticipantId, waitForActive: Boolean)(implicit
       traceContext: TraceContext
