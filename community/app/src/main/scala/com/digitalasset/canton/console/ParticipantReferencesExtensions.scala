@@ -4,6 +4,7 @@
 package com.digitalasset.canton.console
 
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.commands.ParticipantCommands
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
@@ -93,10 +94,24 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
     }
 
     @Help.Summary("Register and potentially connect to new local domain")
-    @Help.Description("If manualConnect is true, then we just store the configuration.")
-    def connect_local(domain: LocalDomainReference, manualConnect: Boolean = false): Unit = {
+    @Help.Description("""
+        The arguments are:
+          domain - A local domain or sequencer reference
+          manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+        """)
+    def connect_local(
+        domain: InstanceReferenceWithSequencerConnection,
+        manualConnect: Boolean = false,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): Unit = {
       val config = ParticipantCommands.domains.referenceToConfig(domain, manualConnect)
       register(config)
+      synchronize.foreach { timeout =>
+        ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)
+      }
     }
   }
 

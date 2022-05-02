@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.alternative._
 import cats.syntax.either._
 import cats.syntax.functor._
@@ -262,7 +262,7 @@ class TransferInProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[FullTransferInTree]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[FullTransferInTree]]],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -273,7 +273,7 @@ class TransferInProcessingSteps(
     for {
       txInRequest <- EitherT.cond[Future](
         correctRootHashes.toList.sizeCompare(1) == 0,
-        correctRootHashes.head,
+        correctRootHashes.head1,
         ReceivedMultipleRequests(correctRootHashes.map(_.viewHash)): TransferProcessorError,
       )
       contractId = txInRequest.contract.contractId

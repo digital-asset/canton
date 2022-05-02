@@ -271,6 +271,11 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
         id = "DOMAIN_REGISTRY_INTERNAL_ERROR",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
+    case class InitialOnboardingError(override val cause: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause)
+        with DomainRegistryError
+
     case class TopologyHandshakeError(throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(

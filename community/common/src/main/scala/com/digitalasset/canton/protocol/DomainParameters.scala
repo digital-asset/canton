@@ -4,9 +4,8 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.data.{NonEmptyList, NonEmptySet}
-import cats.instances.either._
 import cats.syntax.either._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
@@ -36,11 +35,11 @@ final case class StaticDomainParameters(
     maxRatePerParticipant: NonNegativeInt,
     maxInboundMessageSize: NonNegativeInt,
     uniqueContractKeys: Boolean,
-    requiredSigningKeySchemes: NonEmptySet[SigningKeyScheme],
-    requiredEncryptionKeySchemes: NonEmptySet[EncryptionKeyScheme],
-    requiredSymmetricKeySchemes: NonEmptySet[SymmetricKeyScheme],
-    requiredHashAlgorithms: NonEmptySet[HashAlgorithm],
-    requiredCryptoKeyFormats: NonEmptySet[CryptoKeyFormat],
+    requiredSigningKeySchemes: NonEmpty[Set[SigningKeyScheme]],
+    requiredEncryptionKeySchemes: NonEmpty[Set[EncryptionKeyScheme]],
+    requiredSymmetricKeySchemes: NonEmpty[Set[SymmetricKeyScheme]],
+    requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
+    requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
     protocolVersion: ProtocolVersion,
 ) extends HasVersionedWrapper[VersionedMessage[StaticDomainParameters]]
     with HasProtoV0[protoV0.StaticDomainParameters] {
@@ -63,13 +62,11 @@ final case class StaticDomainParameters(
       maxInboundMessageSize = maxInboundMessageSize.unwrap,
       maxRatePerParticipant = maxRatePerParticipant.unwrap,
       uniqueContractKeys = uniqueContractKeys,
-      requiredSigningKeySchemes = requiredSigningKeySchemes.toSortedSet.toSeq.map(_.toProtoEnum),
-      requiredEncryptionKeySchemes =
-        requiredEncryptionKeySchemes.toSortedSet.toSeq.map(_.toProtoEnum),
-      requiredSymmetricKeySchemes =
-        requiredSymmetricKeySchemes.toSortedSet.toSeq.map(_.toProtoEnum),
-      requiredHashAlgorithms = requiredHashAlgorithms.toSortedSet.toSeq.map(_.toProtoEnum),
-      requiredCryptoKeyFormats = requiredCryptoKeyFormats.toSortedSet.toSeq.map(_.toProtoEnum),
+      requiredSigningKeySchemes = requiredSigningKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredEncryptionKeySchemes = requiredEncryptionKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredSymmetricKeySchemes = requiredSymmetricKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredHashAlgorithms = requiredHashAlgorithms.toSeq.map(_.toProtoEnum),
+      requiredCryptoKeyFormats = requiredCryptoKeyFormats.toSeq.map(_.toProtoEnum),
       protocolVersion = protocolVersion.fullVersion,
     )
 }
@@ -98,13 +95,8 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
         field: String,
         content: Seq[P],
         parse: (String, P) => ParsingResult[A],
-    ): ParsingResult[NonEmptySet[A]] =
-      for {
-        contentList <- NonEmptyList
-          .fromList(content.toList)
-          .toRight(ProtoDeserializationError.OtherError(s"Sequence $field not set or empty"))
-        parsed <- contentList.traverse(parse(field, _))
-      } yield parsed.toNes
+    ): ParsingResult[NonEmpty[Set[A]]] =
+      ProtoConverter.pareRequiredNonEmpty(parse(field, _), field, content).map(_.toSet)
 
     val protoV0.StaticDomainParameters(
       reconciliationIntervalP,

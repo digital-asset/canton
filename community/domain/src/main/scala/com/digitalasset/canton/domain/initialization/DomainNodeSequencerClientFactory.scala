@@ -47,7 +47,7 @@ class DomainNodeSequencerClientFactory(
     override val loggerFactory: NamedLoggerFactory,
 ) extends SequencerClientFactory
     with NamedLogging {
-  override def apply(
+  override def create(
       member: Member,
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
@@ -105,6 +105,6 @@ class DomainNodeSequencerClientFactory(
       supportedProtocolVersions =
         ProtocolVersion.supportedProtocolsDomain(cantonParameterConfig.devVersionSupport),
       minimumProtocolVersion = None,
-    )(member, sequencedEventStore, sendTrackerStore)
+    ).create(member, sequencedEventStore, sendTrackerStore)
   }
 }

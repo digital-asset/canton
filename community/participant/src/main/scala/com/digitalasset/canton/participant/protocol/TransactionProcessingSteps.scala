@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, NonEmptyList, NonEmptySet, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
@@ -26,6 +26,7 @@ import com.digitalasset.canton.error.TransactionError
 import com.daml.error.ErrorCode
 import com.daml.nonempty.NonEmptyUtil
 import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -469,7 +470,7 @@ class TransactionProcessingSteps(
 
   // TODO(#8057) extract the decryption into a helper class that can be unit-tested.
   override def decryptViews(
-      batch: NonEmptyList[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]],
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
@@ -583,8 +584,8 @@ class TransactionProcessingSteps(
       }
 
       val result = for {
-        decryptionResult <- batch.traverse(decryptView)
-      } yield DecryptedViews(decryptionResult.toList)
+        decryptionResult <- batch.toNEF.traverse(decryptView)
+      } yield DecryptedViews(decryptionResult)
       EitherT.right(result)
     }
 
@@ -601,7 +602,7 @@ class TransactionProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -612,14 +613,14 @@ class TransactionProcessingSteps(
 
     // The transaction ID is the root hash and all `decryptedViews` have the same root hash
     // so we can take any.
-    val transactionId = lightViewTrees.head.transactionId
+    val transactionId = lightViewTrees.head1.transactionId
 
-    val policies = lightViewTrees.map(_.confirmationPolicy).toNes
+    val policies = lightViewTrees.map(_.confirmationPolicy).toSet
     val workflowId =
-      IterableUtil.assertAtMostOne(lightViewTrees.toList.mapFilter(_.workflowId), "workflow")
+      IterableUtil.assertAtMostOne(lightViewTrees.forgetNE.mapFilter(_.workflowId), "workflow")
     val submitterMeta =
       IterableUtil.assertAtMostOne(
-        lightViewTrees.toList.mapFilter(_.tree.submitterMetadata.unwrap.toOption),
+        lightViewTrees.forgetNE.mapFilter(_.tree.submitterMetadata.unwrap.toOption),
         "submitterMetadata",
       )
     // TODO(M40): don't die on a malformed light transaction list. Moreover, pick out the views that are valid
@@ -888,11 +889,11 @@ class TransactionProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
   )(implicit
       traceContext: TraceContext
   ): (Option[TimestampedEvent], Option[PendingSubmissionId]) = {
-    val someView = decryptedViews.head
+    val someView = decryptedViews.head1
     val mediatorId = someView.unwrap.mediatorId
     val submitterMetadataO = someView.unwrap.tree.submitterMetadata.unwrap.toOption
     submitterMetadataO.flatMap(completionInfoFromSubmitterMetadata).map { completionInfo =>
@@ -1507,7 +1508,7 @@ object TransactionProcessingSteps {
   )
 
   case class EnrichedTransaction(
-      policies: NonEmptySet[ConfirmationPolicy],
+      policies: NonEmpty[Set[ConfirmationPolicy]],
       rootViewsWithUsedAndCreated: UsedAndCreated,
       workflowId: Option[WorkflowId],
       submitterMetadata: Option[SubmitterMetadata],

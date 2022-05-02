@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.config.store
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
@@ -33,7 +33,8 @@ trait DomainNodeSequencerConfigStoreTest {
       val store = mkStore
       val originalConfig = DomainNodeSequencerConfig(
         GrpcSequencerConnection(
-          NonEmptyList.of(
+          NonEmpty(
+            Seq,
             Endpoint("sequencer", Port.tryCreate(100)),
             Endpoint("sequencer", Port.tryCreate(200)),
           ),
@@ -52,7 +53,8 @@ trait DomainNodeSequencerConfigStoreTest {
       val store = mkStore
       val originalConfig = DomainNodeSequencerConfig(
         GrpcSequencerConnection(
-          NonEmptyList.of(
+          NonEmpty(
+            Seq,
             Endpoint("sequencer", Port.tryCreate(100)),
             Endpoint("sequencer", Port.tryCreate(200)),
           ),
@@ -62,7 +64,8 @@ trait DomainNodeSequencerConfigStoreTest {
       )
       val updatedConfig = DomainNodeSequencerConfig(
         GrpcSequencerConnection(
-          NonEmptyList.of(
+          NonEmpty(
+            Seq,
             Endpoint("sequencer", Port.tryCreate(300)),
             Endpoint("sequencer", Port.tryCreate(400)),
           ),

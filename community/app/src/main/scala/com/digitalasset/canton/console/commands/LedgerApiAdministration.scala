@@ -78,13 +78,6 @@ trait BaseLedgerApiAdministration {
   @Help.Group("Ledger Api")
   object ledger_api extends Helpful {
 
-    @Help.Summary("Get ledger id", FeatureFlag.Testing)
-    def ledger_id: String = check(FeatureFlag.Testing)(consoleEnvironment.run {
-      ledgerApiCommand(
-        LedgerApiCommands.LedgerIdentityService.GetLedgerIdentity()
-      )
-    })
-
     @Help.Summary("Read from transaction stream", FeatureFlag.Testing)
     @Help.Group("Transactions")
     object transactions extends Helpful {
@@ -92,7 +85,7 @@ trait BaseLedgerApiAdministration {
       @Help.Summary("Get ledger end", FeatureFlag.Testing)
       def end(): LedgerOffset =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(id => LedgerApiCommands.TransactionService.GetLedgerEnd(id))
+          ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd())
         })
 
       @Help.Summary("Get transaction trees", FeatureFlag.Testing)
@@ -163,7 +156,6 @@ trait BaseLedgerApiAdministration {
           consoleEnvironment.run {
             ledgerApiCommand(
               LedgerApiCommands.TransactionService.SubscribeTrees(
-                _,
                 observer,
                 beginOffset,
                 endOffset,
@@ -222,7 +214,6 @@ trait BaseLedgerApiAdministration {
           consoleEnvironment.run {
             ledgerApiCommand(
               LedgerApiCommands.TransactionService.SubscribeFlat(
-                _,
                 observer,
                 beginOffset,
                 endOffset,
@@ -310,7 +301,7 @@ trait BaseLedgerApiAdministration {
       def by_id(parties: Set[PartyId], id: String): Option[TransactionTree] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
-            LedgerApiCommands.TransactionService.GetTransactionById(_, parties.map(_.toLf), id)(
+            LedgerApiCommands.TransactionService.GetTransactionById(parties.map(_.toLf), id)(
               consoleEnvironment.environment.executionContext
             )
           )
@@ -355,9 +346,8 @@ trait BaseLedgerApiAdministration {
           minLedgerTimeAbs: Option[Instant] = None,
       ): TransactionTree = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitTransactionTree(
-              ledgerId,
               actAs.map(_.toLf),
               commands,
               workflowId,
@@ -397,9 +387,8 @@ trait BaseLedgerApiAdministration {
           minLedgerTimeAbs: Option[Instant] = None,
       ): Transaction = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitTransaction(
-              ledgerId,
               actAs.map(_.toLf),
               commands,
               workflowId,
@@ -428,9 +417,8 @@ trait BaseLedgerApiAdministration {
           minLedgerTimeAbs: Option[Instant] = None,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.CommandSubmissionService.Submit(
-              ledgerId,
               actAs.map(_.toLf),
               commands,
               workflowId,
@@ -458,9 +446,9 @@ trait BaseLedgerApiAdministration {
           verbose: Boolean = true,
           filterTemplates: Seq[P.TemplateId[_]] = Seq.empty,
       ): Seq[WrappedCreatedEvent] = check(FeatureFlag.Testing)(consoleEnvironment.run {
-        ledgerApiCommand(ledgerId =>
+        ledgerApiCommand(
           LedgerApiCommands.AcsService
-            .GetActiveContracts(ledgerId, Set(party.toLf), limit, filterTemplates, verbose)
+            .GetActiveContracts(Set(party.toLf), limit, filterTemplates, verbose)
         )
       })
 
@@ -484,16 +472,16 @@ trait BaseLedgerApiAdministration {
             localParties <- parties.filter(_.isLocal).map(_.party).traverse(LfPartyId.fromString)
             res <- {
               if (localParties.isEmpty) Right(Seq.empty)
-              else
-                ledgerApiCommand(ledgerId =>
+              else {
+                ledgerApiCommand(
                   LedgerApiCommands.AcsService.GetActiveContracts(
-                    ledgerId,
                     localParties.toSet,
                     limit,
                     filterTemplates,
                     verbose,
                   )
                 ).toEither
+              }
             }
           } yield res)
         }
@@ -636,8 +624,8 @@ trait BaseLedgerApiAdministration {
       @Help.Summary("Read the current command completion offset", FeatureFlag.Testing)
       def end(): LedgerOffset =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
-            LedgerApiCommands.CommandCompletionService.CompletionEnd(ledgerId)
+          ledgerApiCommand(
+            LedgerApiCommands.CommandCompletionService.CompletionEnd()
           )
         })
 
@@ -655,9 +643,8 @@ trait BaseLedgerApiAdministration {
           filter: Completion => Boolean = _ => true,
       ): Seq[Completion] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.CommandCompletionService.CompletionRequest(
-              ledgerId,
               partyId.toLf,
               offset,
               atLeastNumCompletions,
@@ -684,9 +671,8 @@ trait BaseLedgerApiAdministration {
           filter: Completion => Boolean = _ => true,
       ): Seq[(Completion, Option[Checkpoint])] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.CommandCompletionService.CompletionCheckpointRequest(
-              ledgerId,
               partyId.toLf,
               offset,
               atLeastNumCompletions,
@@ -709,9 +695,8 @@ trait BaseLedgerApiAdministration {
           timeout: TimeoutDuration = timeouts.ledgerCommand,
       ): Seq[LedgerConfiguration] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(ledgerId =>
+          ledgerApiCommand(
             LedgerApiCommands.LedgerConfigurationService.GetLedgerConfiguration(
-              ledgerId,
               expectedConfigs,
               timeout.asFiniteApproximation,
             )(consoleEnvironment.environment.scheduler)

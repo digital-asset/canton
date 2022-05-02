@@ -5,7 +5,7 @@ package com.digitalasset.canton.config
 
 import better.files._
 import cats.syntax.traverse._
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.networking.Endpoint
@@ -86,7 +86,7 @@ object SequencerConnectionConfig {
           X509CertificatePem.fromFile(file.pemFile.unwrap.toScala)
         )
       } yield GrpcSequencerConnection(
-        NonEmptyList.one(Endpoint(address, port)),
+        NonEmpty(Seq, Endpoint(address, port)),
         transportSecurity,
         pem.map(_.unwrap),
       )

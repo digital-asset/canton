@@ -28,7 +28,7 @@ class StoreSequencedEvent(
   def apply(
       handler: OrdinaryApplicationHandler[ClosedEnvelope]
   ): OrdinaryApplicationHandler[ClosedEnvelope] =
-    tracedEvents =>
+    handler.replace(tracedEvents =>
       tracedEvents.withTraceContext { implicit batchTraceContext => events =>
         val wrongDomainEvents = events.filter(_.signedEvent.content.domainId != domainId)
         for {
@@ -41,10 +41,14 @@ class StoreSequencedEvent(
               },
             )
           )
+          // The events must be stored before we call the handler
+          // so that during crash recovery the `SequencerClient` can use the first event in the
+          // `SequencedEventStore` as the beginning of the resubscription even if that event is not known to be clean.
           _ <- FutureUnlessShutdown.outcomeF(store.store(events))
           result <- handler(tracedEvents)
         } yield result
       }
+    )
 }
 
 object StoreSequencedEvent {

@@ -242,7 +242,7 @@ class DomainTimeTracker(
   /** Create a [[sequencing.OrdinaryApplicationHandler]] for updating this time tracker */
   def wrapHandler[Env](
       handler: OrdinaryApplicationHandler[Env]
-  ): OrdinaryApplicationHandler[Env] = { tracedEvents =>
+  ): OrdinaryApplicationHandler[Env] = handler.replace { tracedEvents =>
     tracedEvents.withTraceContext { implicit batchTraceContext => events =>
       update(events)
 

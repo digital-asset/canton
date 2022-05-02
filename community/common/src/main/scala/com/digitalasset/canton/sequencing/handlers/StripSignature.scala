@@ -6,8 +6,10 @@ package com.digitalasset.canton.sequencing.handlers
 import com.digitalasset.canton.sequencing.{OrdinaryApplicationHandler, UnsignedApplicationHandler}
 import com.digitalasset.canton.tracing.Traced
 
-/** Removes the SignedContent wrapper before providing to a handler */
+/** Removes the [[com.digitalasset.canton.sequencing.protocol.SignedContent]] wrapper before providing to a handler */
 object StripSignature {
   def apply[Env](handler: UnsignedApplicationHandler[Env]): OrdinaryApplicationHandler[Env] =
-    events => handler(events.map(_.map(e => Traced(e.signedEvent.content)(e.traceContext))))
+    handler.replace(events =>
+      handler(events.map(_.map(e => Traced(e.signedEvent.content)(e.traceContext))))
+    )
 }

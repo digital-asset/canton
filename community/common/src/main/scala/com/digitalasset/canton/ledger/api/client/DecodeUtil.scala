@@ -9,7 +9,6 @@ import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.value.Identifier
 import com.daml.ledger.api.v1.{value => V}
 import com.daml.ledger.client.binding.{Contract, Template, TemplateCompanion, Primitive => P}
-import scalaz.Liskov
 
 object DecodeUtil {
   def decodeAllCreated[T](
@@ -30,12 +29,11 @@ object DecodeUtil {
       decoded <- decodeArchived(companion)(archive).toList
     } yield decoded
 
-  type With[+A, B] = A with B
-  private def widenToWith[A, B](lt: Liskov.<~<[A, B]): Liskov.<~<[A, B with A] =
-    Liskov.trans[A, With[A, A], With[B, A]](
-      Liskov.co2[With, B, A, A](lt),
-      Liskov.isa[A, With[A, A]],
-    )
+  private def widenToWith[T](value: T)(implicit ev: T <:< Template[T]): T with Template[T] = {
+    type W[+A] = A with T
+    implicit val liftedEv: W[T] <:< W[Template[T]] = ev.liftCo[W]
+    liftedEv.apply(value)
+  }
 
   def decodeCreated[T](
       companion: TemplateCompanion[T]
@@ -44,7 +42,7 @@ object DecodeUtil {
       record <- event.createArguments: Option[V.Record]
       if event.templateId.exists(templateMatches(companion.id))
       value <- companion.fromNamedArguments(record): Option[T]
-      tValue = widenToWith[T, Template[T]](companion.describesTemplate).apply(value)
+      tValue = widenToWith[T](value)(companion.describesTemplate)
     } yield Contract(
       P.ContractId(event.contractId),
       tValue,

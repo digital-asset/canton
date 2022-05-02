@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.sync
 import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.implicits._
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error._
@@ -17,6 +17,7 @@ import com.daml.ledger.participant.state
 import com.daml.ledger.participant.state.v2._
 import com.daml.lf.engine.Engine
 import com.daml.logging.LoggingContext
+import com.daml.nonempty.NonEmpty
 import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -874,10 +875,8 @@ class CantonSyncService(
         } yield ()).value.map(v => (domain, v))
       )
       EitherT(futE.map { res =>
-        val failed = res.flatMap { x =>
-          x._2.left.toOption.toList
-        }.toList
-        NonEmptyList.fromList(failed) match {
+        val failed = res.collect { case (_, Left(err)) => err }
+        NonEmpty.from(failed) match {
           case None => Right(())
           case Some(lst) =>
             domains.foreach(performDomainDisconnect)
@@ -1175,11 +1174,6 @@ class CantonSyncService(
       }
 
       def disconnectOn(cause: String): Unit = {
-        logger.debug(s"Disconnecting identity dispatcher on $cause to ${domainAlias.unwrap}")
-        FutureUtil.doNotAwait(
-          identityPusher.domainDisconnected(domainAlias),
-          s"Disconnect identity dispatcher on $cause to ${domainAlias.unwrap}",
-        )
         // only invoke domain disconnect if we actually got so far that the domain-id has been read from the remote node
         if (aliasManager.domainIdForAlias(domainAlias).nonEmpty)
           performDomainDisconnect(
@@ -1437,6 +1431,8 @@ class CantonSyncService(
 
     Lifecycle.close(instances: _*)(logger)
   }
+
+  override def toString: String = s"CantonSyncService($participantId)"
 }
 
 object CantonSyncService {
@@ -1727,7 +1723,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
   }
 
-  case class SyncServiceStartupError(override val errors: NonEmptyList[SyncServiceError])(implicit
+  case class SyncServiceStartupError(override val errors: NonEmpty[Seq[SyncServiceError]])(implicit
       val loggingContext: ErrorLoggingContext
   ) extends SyncServiceError
       with CombinedError[SyncServiceError]

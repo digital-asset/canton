@@ -21,6 +21,8 @@ import scala.util.{Failure, Success}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 
+import java.util.ConcurrentModificationException
+
 /** Compute and synchronise the effective timestamps
   *
   * Transaction validation and processing depends on the topology state at the given sequencer time.
@@ -50,22 +52,23 @@ class TopologyTimestampPlusEpsilonTracker(
   /** track changes to epsilon carefully.
     *
     * increasing the epsilon is straight forward. reducing it requires more care
+    *
+    * @param epsilon the epsilon is the time we add to the timestamp
+    * @param validFrom from when on should this one be valid (as with all topology transactions, the time is exclusive)
     */
-  private case class MyState(
-      // the epsilon is the time we add to the timestamp
-      epsilon: NonNegativeFiniteDuration,
-      // from when on should this one be valid (as with all topology transactions, the time is exclusive)
-      validFrom: EffectiveTime,
-  )
+  private case class State(epsilon: NonNegativeFiniteDuration, validFrom: EffectiveTime)
 
-  // sorted list of epsilon updates
-  private val state = new AtomicReference[List[MyState]](List())
-  // protect us against broken domains that send topology transactions in times when they've just reduced the
-  // epsilon in a way that could lead the second topology transaction to take over the epsilon change.
+  /** sorted list of epsilon updates (in descending order of sequencing) */
+  private val state = new AtomicReference[List[State]](List())
+
+  /** protect us against broken domains that send topology transactions in times when they've just reduced the
+    * epsilon in a way that could lead the second topology transaction to take over the epsilon change.
+    */
   private val uniqueUpdateTime = new AtomicReference[EffectiveTime](EffectiveTime.MinValue)
 
   private val lastEffectiveTimeProcessed =
     new AtomicReference[EffectiveTime](EffectiveTime.MinValue)
+
   private val sequentialWait =
     new AtomicReference[FutureUnlessShutdown[EffectiveTime]](
       FutureUnlessShutdown.pure(EffectiveTime.MinValue)
@@ -77,7 +80,7 @@ class TopologyTimestampPlusEpsilonTracker(
       sequencingTime: SequencedTime
   )(implicit traceContext: TraceContext): EffectiveTime = {
     @tailrec
-    def go(items: List[MyState]): NonNegativeFiniteDuration = items match {
+    def go(items: List[State]): NonNegativeFiniteDuration = items match {
       case item :: _ if sequencingTime.value > item.validFrom.value =>
         item.epsilon
       case last :: Nil =>
@@ -191,33 +194,37 @@ class TopologyTimestampPlusEpsilonTracker(
 
   /** adjust epsilon if it changed
     *
-    * @return None if epsilon is unchanged, otherwise we return the previous epsilon
+    * @return [[scala.None$]] if epsilon is unchanged or wasn't set before (e.g. when called for the first time),
+    *         otherwise [[scala.Some$]] the previous epsilon
     */
   def adjustEpsilon(
       effectiveTime: EffectiveTime,
       sequencingTime: SequencedTime,
       epsilon: NonNegativeFiniteDuration,
   )(implicit traceContext: TraceContext): Option[NonNegativeFiniteDuration] = {
-    val currentState = state.get().headOption
-    val currentEpsilonO = currentState.map(_.epsilon)
-    val ext = MyState(epsilon, effectiveTime)
+    val oldStates = state.get()
+    val currentState = oldStates.headOption
+    val ext = State(epsilon, effectiveTime)
     ErrorUtil.requireArgument(
-      currentState.exists(_.validFrom.value < effectiveTime.value) || currentState.isEmpty,
+      currentState.forall(_.validFrom.value < effectiveTime.value),
       s"Invalid epsilon adjustment from $currentState to $ext",
     )
-    if (!currentEpsilonO.contains(epsilon)) {
-      state.updateAndGet { lst =>
-        lst
-          // we prepend this new datapoint
-          .foldLeft((List(ext), false)) {
-            // this fold here will keep everything which is not yet valid and the first item which is valid before the sequencing time
-            case ((acc, true), _) => (acc, true)
-            case ((acc, false), elem) =>
-              (acc :+ elem, elem.validFrom.value >= sequencingTime.value)
-          }
-          ._1
-      }.discard
-      currentEpsilonO
+    if (!currentState.exists(_.epsilon == epsilon)) {
+      // we prepend this new datapoint and
+      // keep everything which is not yet valid and the first item which is valid before the sequencing time
+      val (effectivesAtOrAfterSequencing, effectivesBeforeSequencing) =
+        oldStates.span(_.validFrom.value >= sequencingTime.value)
+      val newStates =
+        ext +: (effectivesAtOrAfterSequencing ++ effectivesBeforeSequencing.headOption.toList)
+
+      if (!state.compareAndSet(oldStates, newStates)) {
+        ErrorUtil.internalError(
+          new ConcurrentModificationException(
+            s"Topology change delay was updated concurrently. Effective time $effectiveTime, sequencing time $sequencingTime, epsilon $epsilon"
+          )
+        )
+      }
+      currentState.map(_.epsilon)
     } else None
   }
 
@@ -225,35 +232,81 @@ class TopologyTimestampPlusEpsilonTracker(
 
 object TopologyTimestampPlusEpsilonTracker {
 
-  /** compute effective time of sequencedTs and populate t+e tracker with the current epsilon */
-  def initialiseFromStore(
+  /** This is a new subscription (rather than a resubscription).
+    * Try to figure out whether this node was bootstrapped by checking whether we find something in the store.
+    *
+    * If so, approximate the sequencing time of the topology transactions from the
+    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.WithValidity.validFrom]]
+    * and the new topology change delay.
+    */
+  def initializeOnFirstSubscription(
       tracker: TopologyTimestampPlusEpsilonTracker,
       store: TopologyStore,
-      sequencedTs: CantonTimestamp,
-      loggerFactory: NamedLoggerFactory,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): FutureUnlessShutdown[EffectiveTime] = {
     for {
+      // read the timestamp from the state store so we deal with crashes during startup / bootstrapping
+      // as we write first to the transaction store and then subsequently to the state store,
+      // but when we serve the topology state, then we serve it from the state store.
+      timestampO <- FutureUnlessShutdown.outcomeF(store.timestamp(useStateStore = true))
       topologyChangeDelay <- FutureUnlessShutdown.outcomeF(
-        TopologyTimestampPlusEpsilonTracker.determineEpsilonFromStore(
-          sequencedTs,
+        determineEpsilonFromStore(
+          timestampO.getOrElse(CantonTimestamp.MinValue),
           store,
-          loggerFactory,
+          tracker.loggerFactory,
         )
       )
-      // we initialise our tracker with the current topology change delay, using the sequenced timestamp
-      // as the effective time. this is fine as we know that if epsilon(sequencedTs) = e, then this e was activated by
-      // some transaction with effective time <= sequencedTs
-      _ = tracker.adjustEpsilon(
+      effectiveTime <- adjustEpsilonAndTick(
+        tracker,
+        sequencedTs = timestampO.fold(CantonTimestamp.MinValue) { timestamp =>
+          // Our best guess of when the topology change delay transaction was sequenced.
+          // Unfortunately, we cannot figure out when this change was really sequenced
+          // because the topology snapshot does not store the sequencing time of transactions.
+          // TODO(#1251) Include the original sequencing time of topology transactions during bootstrapping
+          timestamp - topologyChangeDelay
+        },
+        topologyChangeDelay,
+      )
+    } yield effectiveTime
+  }
+
+  /** compute effective time of sequencedTs and populate t+e tracker with the current epsilon */
+  def initializeFromStore(
+      tracker: TopologyTimestampPlusEpsilonTracker,
+      store: TopologyStore,
+      sequencedTs: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[EffectiveTime] = {
+    FutureUnlessShutdown
+      .outcomeF(determineEpsilonFromStore(sequencedTs, store, tracker.loggerFactory))
+      .flatMap { topologyChangeDelay =>
+        adjustEpsilonAndTick(tracker, sequencedTs, topologyChangeDelay)
+      }
+  }
+
+  private def adjustEpsilonAndTick(
+      tracker: TopologyTimestampPlusEpsilonTracker,
+      sequencedTs: CantonTimestamp,
+      topologyChangeDelay: NonNegativeFiniteDuration,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[EffectiveTime] = {
+    // we initialize our tracker with the current topology change delay, using the sequenced timestamp
+    // as the effective time. this is fine as we know that if epsilon(sequencedTs) = e, then this e was activated by
+    // some transaction with effective time <= sequencedTs
+    tracker
+      .adjustEpsilon(
         EffectiveTime(sequencedTs),
         SequencedTime(CantonTimestamp.MinValue),
         topologyChangeDelay,
       )
-      effectiveTime <- tracker.adjustTimestampForTick(SequencedTime(sequencedTs))
-    } yield effectiveTime
-
+      .discard[Option[NonNegativeFiniteDuration]]
+    tracker.adjustTimestampForTick(SequencedTime(sequencedTs))
   }
 
   private[topology] def determineEpsilonFromStore(

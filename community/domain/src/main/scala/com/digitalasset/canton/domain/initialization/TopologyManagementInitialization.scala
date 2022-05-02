@@ -29,7 +29,6 @@ import com.digitalasset.canton.sequencing.handlers.{
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.sequencing.{
-  AsyncResult,
   HttpSequencerConnection,
   SequencerConnection,
   UnsignedEnvelopeBox,
@@ -152,7 +151,7 @@ object TopologyManagementInitialization {
             dispatcherLoggerFactory,
           )
         val sendTrackerStore = SendTrackerStore(storage)
-        sequencerClientFactory(
+        sequencerClientFactory.create(
           managerId,
           sequencedEventStore,
           sendTrackerStore,
@@ -176,11 +175,8 @@ object TopologyManagementInitialization {
         val topologyProcessorHandler = topologyProcessor.createHandler(id)
         DiscardIgnoredEvents {
           StripSignature {
-            EnvelopeOpener[UnsignedEnvelopeBox](crypto.pureCrypto) { ev =>
-              for {
-                r1 <- domainTopologyServiceHandler(ev)
-                r2 <- topologyProcessorHandler(ev)
-              } yield AsyncResult.monoidAsyncResult.combine(r1, r2)
+            EnvelopeOpener[UnsignedEnvelopeBox](crypto.pureCrypto) {
+              domainTopologyServiceHandler.combineWith(topologyProcessorHandler)
             }
           }
         }

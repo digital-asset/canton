@@ -289,7 +289,7 @@ class ConfirmationResponseFactory(
       )
     else {
       val confirmationPolicies = transactionValidationResult.confirmationPolicies
-      if (confirmationPolicies.toSortedSet.sizeCompare(1) != 0)
+      if (confirmationPolicies.sizeCompare(1) != 0)
         Future.successful(
           malformed(
             LocalReject.MalformedRejects.MultipleConfirmationPolicies
@@ -297,7 +297,7 @@ class ConfirmationResponseFactory(
           )
         )
       else
-        wellformedPayloads(transactionValidationResult, confirmationPolicies.head)
+        wellformedPayloads(transactionValidationResult, confirmationPolicies.head1)
     }
   }
 }

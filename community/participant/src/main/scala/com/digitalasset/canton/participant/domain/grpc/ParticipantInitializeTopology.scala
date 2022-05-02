@@ -11,7 +11,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.domain.DomainRegistryError
-import com.digitalasset.canton.participant.topology.ParticipantTopologyDispatcher
+import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
@@ -19,7 +19,12 @@ import com.digitalasset.canton.sequencing.handlers.{
   StripSignature,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
-import com.digitalasset.canton.sequencing.{HandlerResult, UnsignedProtocolEventHandler}
+import com.digitalasset.canton.sequencing.{
+  BoxedEnvelope,
+  HandlerResult,
+  UnsignedEnvelopeBox,
+  UnsignedProtocolEventHandler,
+}
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -28,6 +33,7 @@ import com.digitalasset.canton.topology.{DomainId, NodeId, ParticipantId, Unauth
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor
@@ -47,7 +53,7 @@ object ParticipantInitializeTopology {
       clock: Clock,
       timeTracker: DomainTimeTrackerConfig,
       processingTimeout: ProcessingTimeout,
-      identityPusher: ParticipantTopologyDispatcher,
+      authorizedStore: TopologyStore,
       targetDomainStore: TopologyStore,
       topologyClient: DomainTopologyClientWithInit,
       loggerFactory: NamedLoggerFactory,
@@ -76,15 +82,25 @@ object ParticipantInitializeTopology {
         loggerFactory,
       )
 
-      val eventHandler: UnsignedProtocolEventHandler = events =>
-        MonadUtil.sequentialTraverseMonoid(events.value) {
-          _.withTraceContext { implicit traceContext =>
-            {
-              case Deliver(_, _, _, _, batch) => handle.processor(Traced(batch.envelopes))
-              case _ => HandlerResult.done
+      val eventHandler = new UnsignedProtocolEventHandler {
+        override def name: String = s"participant-initialize-topology-$alias"
+
+        override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
+
+        override def apply(
+            events: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
+        ): HandlerResult =
+          MonadUtil.sequentialTraverseMonoid(events.value) {
+            _.withTraceContext { implicit traceContext =>
+              {
+                case Deliver(_, _, _, _, batch) => handle.processor(Traced(batch.envelopes))
+                case _ => HandlerResult.done
+              }
             }
           }
-        }
+      }
 
       for {
         _ <- EitherT.right[DomainRegistryError](
@@ -97,26 +113,31 @@ object ParticipantInitializeTopology {
           )
         )
         // push the initial set of topology transactions to the domain and stop using the unauthenticated member
-        // therefore, we set pushAndClose = true
-        _ <- EitherT(
-          identityPusher.domainConnected(
+        _ <- DomainOnboardingOutbox
+          .initiateOnboarding(
             alias,
             domainId,
+            participantId,
             handle,
-            topologyClient,
+            authorizedStore,
             targetDomainStore,
-            pushAndClose = true,
+            processingTimeout,
+            loggerFactory,
           )
-        )
+          .leftMap(
+            DomainRegistryError.DomainRegistryInternalError
+              .InitialOnboardingError(_): DomainRegistryError
+          )
       } yield ()
     }
 
     for {
-      unauthenticatedSequencerClient <- sequencerClientFactory(
-        unauthenticatedMember,
-        new InMemorySequencedEventStore(loggerFactory),
-        new InMemorySendTrackerStore(),
-      )
+      unauthenticatedSequencerClient <- sequencerClientFactory
+        .create(
+          unauthenticatedMember,
+          new InMemorySequencedEventStore(loggerFactory),
+          new InMemorySendTrackerStore(),
+        )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
         )

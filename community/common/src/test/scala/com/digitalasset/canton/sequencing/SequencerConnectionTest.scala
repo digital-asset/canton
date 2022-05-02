@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.X509CertificatePem
@@ -19,13 +19,13 @@ class SequencerConnectionTest extends AnyWordSpec with BaseTest {
   def endpoint(n: Int) = Endpoint(s"host$n", Port.tryCreate(100 * n))
 
   val grpc1 = GrpcSequencerConnection(
-    NonEmptyList.of(endpoint(1), endpoint(2)),
+    NonEmpty(Seq, endpoint(1), endpoint(2)),
     false,
     Some(ByteString.copyFromUtf8("certificates")),
   )
-  val grpc2 = GrpcSequencerConnection(NonEmptyList.of(endpoint(3), endpoint(4)), false, None)
+  val grpc2 = GrpcSequencerConnection(NonEmpty(Seq, endpoint(3), endpoint(4)), false, None)
   val grpcMerged = GrpcSequencerConnection(
-    NonEmptyList.of(endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
+    NonEmpty(Seq, endpoint(1), endpoint(2), endpoint(3), endpoint(4)),
     false,
     Some(ByteString.copyFromUtf8("certificates")),
   )

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.logging.pretty
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.util.ShowUtil._
 import org.mockito.exceptions.verification.SmartNullPointerException
 import org.scalatest.wordspec.AnyWordSpec
@@ -122,6 +123,26 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     import Pretty.PrettyOps
     (the[SmartNullPointerException] thrownBy mockedInst.toPrettyString()).getMessage should
       endWith("exampleCaseClass.pretty();\n")
+  }
+
+  "catch exception when pretty printing invalid control-chars" in {
+    case class Invalid(str: String) extends PrettyPrinting {
+      override protected[pretty] def pretty: Pretty[Invalid] = prettyOfString(_.str)
+    }
+
+    case class Invalid2(str: String)
+
+    val invalidAnsi = "\u001b[0;31m"
+    val errorStr =
+      "Unknown ansi-escape [0;31m at index 0 inside string cannot be parsed into an fansi.Str"
+
+    val invalid = Invalid(invalidAnsi)
+    show"$invalid" should include(errorStr)
+
+    val invalid2 = Invalid2(invalidAnsi)
+    val config = ApiLoggingConfig()
+    val pprinter = new CantonPrettyPrinter(config.maxStringLength, config.maxMessageLines)
+    pprinter.printAdHoc(invalid2) should include(errorStr)
   }
 
   "prettyOfClass" should {

@@ -5,8 +5,10 @@ package com.digitalasset.canton.serialization
 
 import java.time.{DateTimeException, Duration, Instant}
 import java.util.UUID
-
 import cats.syntax.either._
+import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.ProtoDeserializationError.{
   BufferException,
   FieldNotSet,
@@ -76,6 +78,18 @@ object ProtoConverter {
       value: ByteString,
   ): ParsingResult[A] =
     protoParser(parseFrom)(value).flatMap(fromProto)
+
+  def pareRequiredNonEmpty[A, P](
+      fromProto: P => ParsingResult[A],
+      field: String,
+      content: Seq[P],
+  ): ParsingResult[NonEmpty[Seq[A]]] =
+    for {
+      contentNE <- NonEmpty
+        .from(content)
+        .toRight(ProtoDeserializationError.OtherError(s"Sequence $field not set or empty"))
+      parsed <- contentNE.toNEF.traverse(fromProto)
+    } yield parsed
 
   def parseLfPartyId(party: String): Either[StringConversionError, LfPartyId] =
     LfPartyId.fromString(party).leftMap(StringConversionError)

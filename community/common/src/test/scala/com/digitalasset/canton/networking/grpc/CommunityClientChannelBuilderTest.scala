@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
@@ -17,7 +17,8 @@ class CommunityClientChannelBuilderTest extends BaseTestWordSpec {
 
       loggerFactory.assertLogs(
         clientChannelBuilder.create(
-          NonEmptyList.of(
+          NonEmpty(
+            Seq,
             Endpoint("localhost", Port.tryCreate(3000)),
             Endpoint("localhost", Port.tryCreate(3001)),
           ),

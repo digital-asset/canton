@@ -281,7 +281,7 @@ trait TopologyStoreTest
                 )
               )
             )
-            currentTs <- store.timestamp
+            currentTs <- store.timestamp()
           } yield currentTs shouldBe Some(ts.plusSeconds(5))
         }
 
@@ -412,7 +412,7 @@ trait TopologyStoreTest
         "queries don't bail on empty table" in {
           val store = mk()
           for {
-            _ <- store.timestamp
+            _ <- store.timestamp()
             _ <- store.allTransactions
             _ <- store.headTransactions
             _ <- store.findPositiveTransactions(
@@ -508,7 +508,7 @@ trait TopologyStoreTest
           for {
             _ <- store.append(ts, first)
             _ <- store.append(ts1, snd)
-            maxTimestamp <- store.timestamp
+            maxTimestamp <- store.timestamp()
             all <- store.allTransactions
             headState <- store.headTransactions
             empty1 <- snapshot(ts.immediatePredecessor)
@@ -728,7 +728,39 @@ trait TopologyStoreTest
               sequencer -> Seq(factory.SigningKeys.key3, factory.SigningKeys.key4),
             )
           }
+        }
 
+        "querying for participant initial state works" in {
+          val store = mk()
+
+          val namespace = factory.SigningKeys.key1
+          val participant1 =
+            ParticipantId(
+              UniqueIdentifier(Identifier.tryCreate("foo"), Namespace(namespace.fingerprint))
+            )
+          val okmS = factory.mkAdd(OwnerToKeyMapping(participant1, factory.SigningKeys.key7))
+          val okmE = factory.mkAdd(OwnerToKeyMapping(participant1, factory.EncryptionKeys.key1))
+          val crtE = factory.mkAdd(
+            ParticipantState(
+              RequestSide.To,
+              domainId,
+              participant1,
+              ParticipantPermission.Submission,
+              TrustLevel.Ordinary,
+            )
+          )
+
+          val first = List[ValidatedTopologyTransaction](ns1k1, p2p1, p2p2, okmS, okmE, crtE)
+          for {
+            _ <- store.append(ts, first)
+            bootstrap <- store.findParticipantOnboardingTransactions(participant1)
+            empty1 <- store.findParticipantOnboardingTransactions(participant2)
+          } yield {
+            empty1.result.map(_.transaction) shouldBe List(
+              ns1k1
+            ) // TODO(#6300) should be empty once we have authorization data
+            bootstrap.result.map(_.transaction) shouldBe List(ns1k1, okmS, okmE, crtE)
+          }
         }
 
         "asOf inclusive flag works" in {

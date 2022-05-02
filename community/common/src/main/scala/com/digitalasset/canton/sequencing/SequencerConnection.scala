@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing
 
 import cats.syntax.either._
 import cats.syntax.traverse._
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.X509CertificatePem
@@ -73,7 +73,7 @@ case class HttpSequencerConnection(urls: HttpSequencerEndpoints, certificate: X5
 }
 
 final case class GrpcSequencerConnection(
-    endpoints: NonEmptyList[Endpoint],
+    endpoints: NonEmpty[Seq[Endpoint]],
     transportSecurity: Boolean,
     customTrustCertificates: Option[ByteString],
 ) extends SequencerConnection {
@@ -108,7 +108,7 @@ object GrpcSequencerConnection {
       customTrustCertificates: Option[ByteString] = None,
   ): Either[String, GrpcSequencerConnection] =
     for {
-      endpointsWithTlsFlag <- Endpoint.fromUris(NonEmptyList.one(new URI(connection)))
+      endpointsWithTlsFlag <- Endpoint.fromUris(NonEmpty(Seq, new URI(connection)))
       (endpoints, useTls) = endpointsWithTlsFlag
     } yield GrpcSequencerConnection(endpoints, useTls, customTrustCertificates)
 
@@ -167,8 +167,8 @@ object SequencerConnection extends HasVersionedMessageCompanion[SequencerConnect
       grpcP: v0.SequencerConnection.Grpc
   ): ParsingResult[SequencerConnection] =
     for {
-      uris <- NonEmptyList
-        .fromList(grpcP.connections.toList.map(new URI(_)))
+      uris <- NonEmpty
+        .from(grpcP.connections.map(new URI(_)))
         .toRight(ProtoDeserializationError.FieldNotSet("connections"))
       endpoints <- Endpoint
         .fromUris(uris)
@@ -181,20 +181,20 @@ object SequencerConnection extends HasVersionedMessageCompanion[SequencerConnect
 
   def merge(connections: Seq[SequencerConnection]): Either[String, SequencerConnection] =
     for {
-      connectionsNel <- NonEmptyList
-        .fromList(connections.toList)
+      connectionsNel <- NonEmpty
+        .from(connections)
         .toRight("There must be at least one sequencer connection defined")
-      conn <- connectionsNel.head match {
+      conn <- connectionsNel.head1 match {
         case grpc @ GrpcSequencerConnection(endpoints, _, _) =>
           for {
-            allMergedEndpoints <- connectionsNel.tail.flatTraverse {
-              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.toList)
+            allMergedEndpoints <- connectionsNel.tail1.flatTraverse {
+              case grpc: GrpcSequencerConnection => Right(grpc.endpoints.forgetNE)
               case _ => Left("Cannot merge grpc and http sequencer connections")
             }
           } yield grpc.copy(endpoints = endpoints ++ allMergedEndpoints)
         case http: HttpSequencerConnection =>
           Either.cond(
-            connectionsNel.tail.isEmpty,
+            connectionsNel.tail1.isEmpty,
             http,
             "http connection currently only supports one endpoint",
           )

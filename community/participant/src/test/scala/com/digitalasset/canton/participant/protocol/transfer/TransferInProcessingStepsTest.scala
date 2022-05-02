@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.implicits._
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -401,7 +402,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       for {
         inTree <- inTreeF
         inRequest <- inRequestF
-        envelopes = NonEmptyList.of(OpenEnvelope(inRequest, RecipientsTest.testInstance))
+        envelopes = NonEmpty(Seq, OpenEnvelope(inRequest, RecipientsTest.testInstance))
         decrypted <- valueOrFail(transferInProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
           "decrypt request failed"
         )
@@ -410,7 +411,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             CantonTimestamp.Epoch,
             1L,
             1L,
-            NonEmptyList.fromListUnsafe(decrypted.views.toList),
+            NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
           )
@@ -437,7 +438,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             CantonTimestamp.Epoch,
             1L,
             1L,
-            NonEmptyList.of(WithRecipients(inTree2, RecipientsTest.testInstance)),
+            NonEmpty(Seq, WithRecipients(inTree2, RecipientsTest.testInstance)),
             Seq.empty,
             cryptoSnapshot,
           )
@@ -461,7 +462,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             CantonTimestamp.Epoch,
             1L,
             1L,
-            NonEmptyList.of(
+            NonEmpty(
+              Seq,
               WithRecipients(inTree, RecipientsTest.testInstance),
               WithRecipients(inTree, RecipientsTest.testInstance),
             ),
@@ -470,7 +472,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           )
         )("compute activenss set did not return a left")
       } yield {
-        result should matchPattern { case ReceivedMultipleRequests(NonEmptyList(_, List(_))) =>
+        result should matchPattern { case ReceivedMultipleRequests(Seq(_, _)) =>
         }
       }
     }

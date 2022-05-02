@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.config
 
-import cats.data.NonEmptySet
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
@@ -37,11 +37,11 @@ final case class DomainParametersConfig(
     maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
     maxInboundMessageSize: NonNegativeInt = StaticDomainParameters.defaultMaxInboundMessageSize,
     uniqueContractKeys: Boolean = true,
-    requiredSigningKeySchemes: Option[NonEmptySet[SigningKeyScheme]] = None,
-    requiredEncryptionKeySchemes: Option[NonEmptySet[EncryptionKeyScheme]] = None,
-    requiredSymmetricKeySchemes: Option[NonEmptySet[SymmetricKeyScheme]] = None,
-    requiredHashAlgorithms: Option[NonEmptySet[HashAlgorithm]] = None,
-    requiredCryptoKeyFormats: Option[NonEmptySet[CryptoKeyFormat]] = None,
+    requiredSigningKeySchemes: Option[NonEmpty[Set[SigningKeyScheme]]] = None,
+    requiredEncryptionKeySchemes: Option[NonEmpty[Set[EncryptionKeyScheme]]] = None,
+    requiredSymmetricKeySchemes: Option[NonEmpty[Set[SymmetricKeyScheme]]] = None,
+    requiredHashAlgorithms: Option[NonEmpty[Set[HashAlgorithm]]] = None,
+    requiredCryptoKeyFormats: Option[NonEmpty[Set[CryptoKeyFormat]]] = None,
     protocolVersion: DomainProtocolVersion = DomainProtocolVersion(
       ProtocolVersion.latest
     ),
@@ -57,9 +57,9 @@ final case class DomainParametersConfig(
   ): Either[String, StaticDomainParameters] = {
 
     def selectSchemes[S](
-        configuredRequired: Option[NonEmptySet[S]],
-        allowedFn: CryptoConfig => Either[String, NonEmptySet[S]],
-    ): Either[String, NonEmptySet[S]] =
+        configuredRequired: Option[NonEmpty[Set[S]]],
+        allowedFn: CryptoConfig => Either[String, NonEmpty[Set[S]]],
+    ): Either[String, NonEmpty[Set[S]]] =
       for {
         allowed <- allowedFn(cryptoConfig)
         required = configuredRequired.getOrElse(allowed)

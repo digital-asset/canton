@@ -58,4 +58,5 @@ object Nonce {
         DeserializationError(s"Nonce of invalid length: ${bytes.size()}", bytes)
       ),
     )
+
 }

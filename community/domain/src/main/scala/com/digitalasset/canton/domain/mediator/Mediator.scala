@@ -12,12 +12,19 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.PruningError
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
-import com.digitalasset.canton.lifecycle.{Lifecycle, StartAndCloseable, SyncCloseable}
+import com.digitalasset.canton.lifecycle.{
+  FutureUnlessShutdown,
+  Lifecycle,
+  StartAndCloseable,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, LoggingAlarmStreamer}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
+import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
@@ -92,7 +99,7 @@ class Mediator(
     sequencerClient.subscribeTracking(
       sequencerCounterTrackerStore,
       DiscardIgnoredEvents(
-        EnvelopeOpener[OrdinaryEnvelopeBox](syncCrypto.crypto.pureCrypto)(handle)
+        EnvelopeOpener[OrdinaryEnvelopeBox](syncCrypto.crypto.pureCrypto)(handler)
       ),
       timeTracker,
     )
@@ -169,15 +176,31 @@ class Mediator(
     } yield ()
   }
 
-  private def handle(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
-    tracedEvents.withTraceContext { implicit traceContext => events =>
-      // update the delay logger using the latest event we've been handed
-      events.lastOption.foreach(e => delayLogger.checkForDelay(e))
+  private def handler: ApplicationHandler[
+    Lambda[`+X` => Traced[Seq[OrdinarySequencedEvent[X]]]],
+    DefaultOpenEnvelope,
+  ] =
+    new ApplicationHandler[
+      Lambda[`+X` => Traced[Seq[OrdinarySequencedEvent[X]]]],
+      DefaultOpenEnvelope,
+    ] {
+      override def name: String = s"mediator-${mediatorId}"
 
-      logger.trace(s"Processing ${events.size} events for the mediator")
-      eventsProcessor.handle(events)
+      override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Unit] =
+        topologyTransactionProcessor.resubscriptionStartsAt(ts)
+
+      override def apply(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
+        tracedEvents.withTraceContext { implicit traceContext => events =>
+          // update the delay logger using the latest event we've been handed
+          events.lastOption.foreach(e => delayLogger.checkForDelay(e))
+
+          logger.trace(s"Processing ${events.size} events for the mediator")
+          eventsProcessor.handle(events)
+        }
+      }
     }
-  }
 
   override def closeAsync() =
     Seq(

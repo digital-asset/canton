@@ -48,7 +48,7 @@ class CleanSequencerCounterTracker(
 
   def apply[E <: Envelope[_]](
       handler: PossiblyIgnoredApplicationHandler[E]
-  ): PossiblyIgnoredApplicationHandler[E] = { tracedEvents =>
+  ): PossiblyIgnoredApplicationHandler[E] = handler.replace { tracedEvents =>
     tracedEvents.withTraceContext { implicit batchTraceContext => events =>
       events.lastOption match {
         case None => HandlerResult.done // ignore empty event batches

@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.implicits._
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.HashPurpose
@@ -507,7 +508,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       for {
         outTree <- outTreeF
         encryptedOutRequest <- encryptedOutRequestF
-        envelopes = NonEmptyList.of(OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance))
+        envelopes = NonEmpty(Seq, OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance))
         decrypted <- valueOrFail(outProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
           "decrypt request failed"
         )
@@ -516,7 +517,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
             CantonTimestamp.Epoch,
             1L,
             1L,
-            NonEmptyList.fromListUnsafe(decrypted.views.toList),
+            NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
           )

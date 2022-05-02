@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.syntax.functor._
 import cats.syntax.functorFilter._
-import cats.syntax.list._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
@@ -19,7 +20,13 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
-import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult, UnsignedProtocolEventHandler}
+import com.digitalasset.canton.sequencing.{
+  AsyncResult,
+  BoxedEnvelope,
+  HandlerResult,
+  UnsignedEnvelopeBox,
+  UnsignedProtocolEventHandler,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, KeyOwner}
 import com.digitalasset.canton.topology.client.{
@@ -118,19 +125,11 @@ class TopologyTransactionProcessor(
 
   private def initialise(
       resubscriptionTs: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[EffectiveTime] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     ErrorUtil.requireState(
       !initialised.getAndSet(true),
       "topology processor is already initialised",
     )
-    // on startup, we need to figure out what was our current epsilon at the resubscriptionTs. we can read this straight from the db.
-    val effectiveTsOfSequencedTsF =
-      TopologyTimestampPlusEpsilonTracker.initialiseFromStore(
-        timeAdjuster,
-        store,
-        resubscriptionTs,
-        loggerFactory,
-      )
 
     def mergeEffectiveTimesWithApproximateTimestamps(
         effectiveTsOfSequencedTs: EffectiveTime,
@@ -145,22 +144,38 @@ class TopologyTransactionProcessor(
         .sortBy(_._1.value)
     }
 
-    // we need to figure out any future effective time. if we had been running, there would be a clock
-    // scheduled to poke the domain client at the given time in order to adjust the approximate timestamp up to the
-    // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
-    // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
-    // anyway).
     for {
-      effectiveTsOfSequencedTs <- effectiveTsOfSequencedTsF
+      // on startup, we need to figure out up to which point we know the topology state
+      effectiveKnownUntil <-
+        if (resubscriptionTs == CantonTimestamp.MinValue) {
+          TopologyTimestampPlusEpsilonTracker.initializeOnFirstSubscription(
+            timeAdjuster,
+            store,
+          )
+        } else {
+          TopologyTimestampPlusEpsilonTracker.initializeFromStore(
+            timeAdjuster,
+            store,
+            resubscriptionTs,
+          )
+        }
+
+      // we need to figure out any future effective time. if we had been running, there would be a clock
+      // scheduled to poke the domain client at the given time in order to adjust the approximate timestamp up to the
+      // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
+      // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
+      // anyway).
       futureEffectiveTimes <- performUnlessClosingF(
         store.findEffectiveTimestampsSince(resubscriptionTs)
       )
     } yield {
       val tmp =
-        mergeEffectiveTimesWithApproximateTimestamps(effectiveTsOfSequencedTs, futureEffectiveTimes)
+        mergeEffectiveTimesWithApproximateTimestamps(effectiveKnownUntil, futureEffectiveTimes)
       logger.debug(s"Initialising topology processing with effective ts ${tmp.map(_._1)}")
       tmp.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
+        // TODO(ratko/andreas) This should be scheduled via the DomainTimeTracker or something similar
+        //  rather than via the participant's local clock
         if (effective.value > clock.now) {
           // set approximate time now and schedule task to update the approximate time to the effective time in the future
           if (effective.value != approximate.value) {
@@ -175,7 +190,6 @@ class TopologyTransactionProcessor(
           listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true)
         }
       }
-      effectiveTsOfSequencedTs
     }
   }
 
@@ -277,27 +291,25 @@ class TopologyTransactionProcessor(
         }
       timeAdjuster.effectiveTimeProcessed(effectiveTimestamp)
     }
-    validated
+    val domainParamChanges = validated
       .collect {
         case validatedTx
             if validatedTx.rejectionReason.isEmpty && validatedTx.transaction.transaction.op == TopologyChangeOp.Replace =>
           validatedTx.transaction.transaction.element
       }
-      .collect { case DomainGovernanceElement(change: DomainParametersChange) =>
-        change
-      }
-      .toList
-      .toNel match {
+      .collect { case DomainGovernanceElement(change: DomainParametersChange) => change }
+    NonEmpty.from(domainParamChanges) match {
       // normally, we shouldn't have any adjustment
       case None => timeAdjuster.effectiveTimeProcessed(effectiveTimestamp)
-      // if there is one, there should be exactly one
-      case Some(lst) if lst.length == 1 => applyEpsilon(lst.head)
-      // let's panic now, we have several. however, we just pick the last and try to keep working
-      case Some(list) =>
-        logger.error(
-          s"Broken or malicious domain topology manager has sent (${list.length}) domain parameter adjustments at $effectiveTimestamp, will ignore all of them except the last"
-        )
-        applyEpsilon(list.last)
+      case Some(changes) =>
+        // if there is one, there should be exactly one
+        // If we have several, let's panic now. however, we just pick the last and try to keep working
+        if (changes.lengthCompare(1) > 0) {
+          logger.error(
+            s"Broken or malicious domain topology manager has sent (${changes.length}) domain parameter adjustments at $effectiveTimestamp, will ignore all of them except the last"
+          )
+        }
+        applyEpsilon(changes.last1)
     }
   }
 
@@ -485,6 +497,11 @@ class TopologyTransactionProcessor(
       .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
       .map(_.protocolMessage)
 
+  /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
+  def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = initialise(ts)
+
   /** process envelopes mostly asynchronously
     *
     * Here, we return a Future[Future[Unit]]. We need to ensure the outer future finishes processing
@@ -529,10 +546,12 @@ class TopologyTransactionProcessor(
       }
     }
 
-    (for {
+    for {
       updates <- updatesF
-      // initialise on the fly if we need to
-      _ <- if (initialised.get()) FutureUnlessShutdown.unit else initialise(ts.immediatePredecessor)
+      _ <- ErrorUtil.requireStateAsyncShutdown(
+        initialised.get(),
+        s"Topology client for $domainId is not initialized. Cannot process sequenced event with counter ${sc} at ${ts}",
+      )
       // compute effective time
       effectiveTime <- computeEffectiveTime(updates)
     } yield {
@@ -554,42 +573,57 @@ class TopologyTransactionProcessor(
         )
       )
       AsyncResult(scheduledF)
-    })
-  }
-
-  def createHandler(domainId: DomainId): UnsignedProtocolEventHandler = { tracedBatch =>
-    MonadUtil.sequentialTraverseMonoid(tracedBatch.value) {
-      _.withTraceContext { implicit traceContext =>
-        {
-          case Deliver(sc, ts, _, _, batch) =>
-            // TODO(#8744) avoid discarded future as part of AlarmStreamer design
-            @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
-            def extractAndCheckMessages(
-                batch: Batch[DefaultOpenEnvelope]
-            ): List[DomainTopologyTransactionMessage] = {
-              extractDomainTopologyTransactionMsg(
-                ProtocolMessage.filterDomainsEnvelopes(
-                  batch,
-                  domainId,
-                  (wrongMsgs: List[DefaultOpenEnvelope]) => {
-                    alarmer.alarm(
-                      s"received messages with wrong domain ids: ${wrongMsgs.map(_.protocolMessage.domainId)}"
-                    )
-                    ()
-                  },
-                )
-              )
-            }
-            internalProcessEnvelopes(
-              sc,
-              ts,
-              extractAndCheckMessages(batch),
-            )
-          case _: DeliverError => HandlerResult.done
-        }
-      }
     }
   }
+
+  def createHandler(domainId: DomainId): UnsignedProtocolEventHandler =
+    new UnsignedProtocolEventHandler {
+
+      override def name: String = s"topology-processor-$domainId"
+
+      override def apply(
+          tracedBatch: BoxedEnvelope[UnsignedEnvelopeBox, DefaultOpenEnvelope]
+      ): HandlerResult = {
+        MonadUtil.sequentialTraverseMonoid(tracedBatch.value) {
+          _.withTraceContext { implicit traceContext =>
+            {
+              case Deliver(sc, ts, _, _, batch) =>
+                logger.debug(s"Processing sequenced event with counter $sc and timestamp $ts")
+                // TODO(#8744) avoid discarded future as part of AlarmStreamer design
+                @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
+                def extractAndCheckMessages(
+                    batch: Batch[DefaultOpenEnvelope]
+                ): List[DomainTopologyTransactionMessage] = {
+                  extractDomainTopologyTransactionMsg(
+                    ProtocolMessage.filterDomainsEnvelopes(
+                      batch,
+                      domainId,
+                      (wrongMsgs: List[DefaultOpenEnvelope]) => {
+                        alarmer.alarm(
+                          s"received messages with wrong domain ids: ${wrongMsgs.map(_.protocolMessage.domainId)}"
+                        )
+                        ()
+                      },
+                    )
+                  )
+                }
+
+                internalProcessEnvelopes(
+                  sc,
+                  ts,
+                  extractAndCheckMessages(batch),
+                )
+              case _: DeliverError => HandlerResult.done
+            }
+          }
+        }
+      }
+
+      override def resubscriptionStartsAt(
+          timestamp: CantonTimestamp
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+        TopologyTransactionProcessor.this.resubscriptionStartsAt(timestamp)
+    }
 
   override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)
 
@@ -627,7 +661,6 @@ object TopologyTransactionProcessor {
           domainId,
           topologyStore,
           SigningPublicKey.collect(initKeys),
-          initialProcessedTimestamp = None,
           StoreBasedDomainTopologyClient.NoPackageDependencies,
           parameters.cachingConfigs,
           parameters.processingTimeouts,

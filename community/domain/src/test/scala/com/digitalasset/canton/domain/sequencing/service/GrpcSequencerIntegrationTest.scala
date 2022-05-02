@@ -4,7 +4,8 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import akka.NotUsed
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -35,8 +36,9 @@ import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.sequencing.{
+  ApplicationHandler,
   GrpcSequencerConnection,
-  HandlerResult,
+  OrdinaryApplicationHandler,
   SerializedEventHandler,
 }
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
@@ -147,7 +149,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
   private val sendTrackerStore = new InMemorySendTrackerStore()
   private val connection =
-    GrpcSequencerConnection(NonEmptyList.one(Endpoint("localhost", serverPort)), false, None)
+    GrpcSequencerConnection(NonEmpty(Seq, Endpoint("localhost", serverPort)), false, None)
 
   val client = Await
     .result(
@@ -172,7 +174,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         loggerFactory,
         ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions = false),
         Some(ProtocolVersion.latestForTest),
-      )(
+      ).create(
         participant,
         sequencedEventStore,
         sendTrackerStore,
@@ -243,11 +245,15 @@ class GrpcSequencerIntegrationTest
       // return to caller a subscription that will resolve the unsubscribe promise on close
       env.mockSubscription(_ => subscribePromise.success(()), _ => unsubscribePromise.success(()))
 
+      val domainTimeTracker = mock[DomainTimeTracker]
+      when(domainTimeTracker.wrapHandler(any[OrdinaryApplicationHandler[Any]]))
+        .thenAnswer(Predef.identity[OrdinaryApplicationHandler[Any]] _)
+
       // kick of subscription
       val initF = env.client.subscribeAfter(
         CantonTimestamp.MinValue,
-        _ => HandlerResult.done,
-        mock[DomainTimeTracker],
+        ApplicationHandler.success(),
+        domainTimeTracker,
       )
 
       val result = for {

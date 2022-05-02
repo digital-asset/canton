@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -56,16 +58,13 @@ object TransactionViewDecomposition {
     override def lfNode: LfActionNode = rootNode
 
     /** All nodes of this view, i.e. core nodes and subviews, in execution order */
-    def allNodes: NonEmptyList[TransactionViewDecomposition] =
-      NonEmptyList.of(SameView(rootNode, nodeId, rbContext), tailNodes: _*)
+    def allNodes: NonEmpty[Seq[TransactionViewDecomposition]] =
+      NonEmpty(Seq, SameView(rootNode, nodeId, rbContext), tailNodes: _*)
 
     def childViews: Seq[NewView] = tailNodes.collect { case v: NewView => v }
 
-    def coreNodes: NonEmptyList[LfActionNode] =
-      NonEmptyList.of(
-        rootNode,
-        tailNodes.collect { case sameView: SameView => sameView.lfNode }: _*
-      )
+    def coreNodes: NonEmpty[Seq[LfActionNode]] =
+      NonEmpty(Seq, rootNode, tailNodes.collect { case sameView: SameView => sameView.lfNode }: _*)
 
     /** Checks whether the core nodes of this view have informees [[informees]] and threshold [[threshold]] under
       * the given confirmation policy and identity snapshot.
@@ -77,12 +76,12 @@ object TransactionViewDecomposition {
     ): EitherT[Future, String, Unit] = {
 
       EitherT(
-        coreNodes.toList
+        coreNodes.toNEF
           .traverse(coreNode =>
             confirmationPolicy.informeesAndThreshold(coreNode, topologySnapshot)
           )
-          .map { nodeList =>
-            nodeList
+          .map { nodes =>
+            nodes
               .traverse { case (nodeInformees, nodeThreshold) =>
                 Either.cond(
                   (nodeInformees, nodeThreshold) == ((informees, threshold)),

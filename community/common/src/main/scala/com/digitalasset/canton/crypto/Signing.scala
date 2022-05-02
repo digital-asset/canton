@@ -4,7 +4,8 @@
 package com.digitalasset.canton.crypto
 
 import cats.Order
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
@@ -225,8 +226,8 @@ object SigningKeyScheme {
     override def toProtoEnum: v0.SigningKeyScheme = v0.SigningKeyScheme.Sm2
   }
 
-  val EcDsaSchemes: NonEmptySet[SigningKeyScheme] = NonEmptySet.of(EcDsaP256, EcDsaP384)
-  val EcSchemes: NonEmptySet[SigningKeyScheme] = EcDsaSchemes.add(Sm2)
+  val EcDsaSchemes: NonEmpty[Set[SigningKeyScheme]] = NonEmpty(Set, EcDsaP256, EcDsaP384)
+  val EcSchemes: NonEmpty[Set[SigningKeyScheme]] = EcDsaSchemes.incl(Sm2)
 
   def fromProtoEnum(
       field: String,

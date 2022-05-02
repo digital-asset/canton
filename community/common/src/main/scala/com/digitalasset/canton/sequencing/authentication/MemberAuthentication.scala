@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.sequencing.authentication
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.traverseFilter._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
@@ -32,7 +33,7 @@ sealed trait MemberAuthentication {
       member: Member,
       nonce: Nonce,
       domainId: DomainId,
-      possibleSigningKeys: NonEmptyList[Fingerprint],
+      possibleSigningKeys: NonEmpty[Seq[Fingerprint]],
       agreementId: Option[ServiceAgreementId],
       crypto: Crypto,
   )(implicit ec: ExecutionContext): EitherT[Future, AuthenticationError, Signature] = {
@@ -40,7 +41,7 @@ sealed trait MemberAuthentication {
 
     for {
       // see if we have any of the possible keys that could be used to sign
-      availableSigningKey <- possibleSigningKeys.toList
+      availableSigningKey <- possibleSigningKeys.forgetNE
         .filterA(key => crypto.cryptoPrivateStore.existsSigningKey(key)(TraceContext.empty))
         .map(_.headOption) // the first we find is as good as any
         .leftMap(_ => NoKeysRegistered(member))

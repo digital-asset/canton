@@ -36,8 +36,8 @@ class JceCryptoTest
     behave like hmacProvider(jceCrypto().map(_.privateCrypto))
     behave like hkdfProvider(jceCrypto().map(_.pureCrypto))
     behave like javaKeyConverterProvider(
-      Jce.signing.supported.toSortedSet,
-      Jce.encryption.supported.toSortedSet,
+      Jce.signing.supported,
+      Jce.encryption.supported,
       jceCrypto(),
     )
   }

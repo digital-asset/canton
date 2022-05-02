@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.instances.future._
 import cats.syntax.bifunctor._
-import cats.syntax.list._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -75,18 +75,17 @@ class MemberAuthenticationService(
     */
   def generateNonce(member: Member)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AuthenticationError, (Nonce, NonEmptyList[Fingerprint])] = {
+  ): EitherT[Future, AuthenticationError, (Nonce, NonEmpty[Seq[Fingerprint]])] = {
     for {
       _ <- EitherT.right(waitForInitialized)
       snapshot = cryptoApi.ips.currentSnapshotApproximation
       _ <- isActive(member)
       fingerprints <- EitherT(
-        snapshot
-          .signingKeys(member)
-          .map(
-            _.map(_.fingerprint).toList.toNel
-              .toRight(NoKeysRegistered(member): AuthenticationError)
-          )
+        snapshot.signingKeys(member).map { keys =>
+          NonEmpty
+            .from(keys.map(_.fingerprint))
+            .toRight(NoKeysRegistered(member): AuthenticationError)
+        }
       )
       nonce = Nonce.generate()
       storedNonce = StoredNonce(member, nonce, clock.now, nonceExpirationTime)

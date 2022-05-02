@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.protocol
 
 import akka.stream.Materializer
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, TestHash}
@@ -291,7 +292,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   )
   lazy val someRecipients = Recipients.cc(DefaultTestIdentities.participant1)
   lazy val someRequestBatch = RequestAndRootHashMessage(
-    NonEmptyList.of(OpenEnvelope(viewMessage, someRecipients)),
+    NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)),
     rootHashMessage,
     DefaultTestIdentities.mediator,
   )
@@ -466,7 +467,8 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         domainId = DefaultTestIdentities.domainId,
       )
       val requestBatchWrongRH = RequestAndRootHashMessage(
-        NonEmptyList.of(
+        NonEmpty(
+          Seq,
           OpenEnvelope(viewMessage, someRecipients),
           OpenEnvelope(viewMessageWrongRH, someRecipients),
         ),
@@ -498,7 +500,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         domainId = DefaultTestIdentities.domainId,
       )
       val requestBatchDecryptError = RequestAndRootHashMessage(
-        NonEmptyList.of(OpenEnvelope(viewMessageDecryptError, someRecipients)),
+        NonEmpty(Seq, OpenEnvelope(viewMessageDecryptError, someRecipients)),
         rootHashMessage,
         DefaultTestIdentities.mediator,
       )
@@ -521,7 +523,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     "check the declared mediator ID against the root hash message mediator" in {
       val otherMediatorId = MediatorId(UniqueIdentifier.tryCreate("mediator", "other"))
       val requestBatch = RequestAndRootHashMessage(
-        NonEmptyList.of(OpenEnvelope(viewMessage, someRecipients)),
+        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients)),
         rootHashMessage,
         otherMediatorId,
       )

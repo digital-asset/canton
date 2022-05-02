@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ClientConfig, KeepAliveClientConfig, TlsClientConfig}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -22,7 +22,7 @@ import java.util.concurrent.{Executor, TimeUnit}
 /** Construct a GRPC channel to be used by a client within canton. */
 trait ClientChannelBuilder {
   def create(
-      endpoints: NonEmptyList[Endpoint],
+      endpoints: NonEmpty[Seq[Endpoint]],
       useTls: Boolean,
       executor: Executor,
       trustCertificate: Option[ByteString] = None,
@@ -61,12 +61,12 @@ trait ClientChannelBuilder {
   }
 
   /** Create the initial netty channel builder before customizing settings */
-  protected def createNettyChannelBuilder(endpoints: NonEmptyList[Endpoint]): NettyChannelBuilder
+  protected def createNettyChannelBuilder(endpoints: NonEmpty[Seq[Endpoint]]): NettyChannelBuilder
 
   /** Set implementation specific channel settings */
   protected def additionalChannelBuilderSettings(
       builder: NettyChannelBuilder,
-      endpoints: NonEmptyList[Endpoint],
+      endpoints: NonEmpty[Seq[Endpoint]],
   ): Unit = ()
 }
 
@@ -82,9 +82,9 @@ class CommunityClientChannelBuilder(protected val loggerFactory: NamedLoggerFact
 
   /** Create the initial netty channel builder before customizing settings */
   override protected def createNettyChannelBuilder(
-      endpoints: NonEmptyList[Endpoint]
+      endpoints: NonEmpty[Seq[Endpoint]]
   ): NettyChannelBuilder = {
-    val singleHost = endpoints.head
+    val singleHost = endpoints.head1
 
     // warn that community does not support more than one domain connection if we've been passed multiple
     if (endpoints.size > 1) {

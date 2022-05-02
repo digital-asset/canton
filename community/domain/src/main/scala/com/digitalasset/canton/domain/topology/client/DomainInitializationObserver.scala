@@ -58,7 +58,7 @@ class DomainInitializationObserver(
 
   /** returns true if the initialisation data exists (but might not yet be effective) */
   def initialisedAtHead: Future[Boolean] =
-    sequencedStore.timestamp.flatMap {
+    sequencedStore.timestamp().flatMap {
       case Some(ts) => initialisedAt(ts.immediateSuccessor)
       case None => Future.successful(false)
     }

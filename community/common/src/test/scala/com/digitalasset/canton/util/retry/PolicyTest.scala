@@ -12,7 +12,6 @@ import com.digitalasset.canton.lifecycle.{
   Lifecycle,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{NamedEventCapturingLogger, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.Jitter.RandomSource
@@ -20,6 +19,7 @@ import com.digitalasset.canton.util.retry.RetryUtil.{AllExnRetryable, DbExceptio
 import com.digitalasset.canton.util.{FutureUtil, LoggerUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import org.scalatest.funspec.AsyncFunSpec
+import org.slf4j.event.Level
 
 import java.util.Random
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
@@ -30,11 +30,6 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
 
   val random = new Random()
   val randomSource: RandomSource = Jitter.randomSource(random)
-
-  val capturingLogger: NamedEventCapturingLogger = new NamedEventCapturingLogger(
-    getClass.getSimpleName
-  )
-  override protected val logger: TracedLogger = TracedLogger(capturingLogger.getLogger(getClass))
 
   val flagCloseable: FlagCloseable = FlagCloseable(logger, DefaultProcessingTimeouts.testing)
 
@@ -138,9 +133,9 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       }
     }
 
-    testStopOnClosing(Directly(logger, _, Forever, "op"), 10)
+    testStopOnClosing(Directly(logger, _, Forever, "op", retryLogLevel = Some(Level.INFO)), 10)
 
-    testClosedExecutionContext(Directly(logger, _, Forever, "op"))
+    testClosedExecutionContext(Directly(logger, _, Forever, "op", retryLogLevel = Some(Level.INFO)))
 
     testStopOnShutdown(Directly(logger, _, Forever, "op"), 10)
   }
@@ -193,9 +188,14 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
 
     testSynchronousException(Pause(logger, flagCloseable, 1, 1.millis, "op"), 1)
 
-    testStopOnClosing(Pause(logger, _, Forever, 50.millis, "op"), 3)
+    testStopOnClosing(
+      Pause(logger, _, Forever, 50.millis, "op", retryLogLevel = Some(Level.INFO)),
+      3,
+    )
 
-    testClosedExecutionContext(Pause(logger, _, Forever, 10.millis, "op"))
+    testClosedExecutionContext(
+      Pause(logger, _, Forever, 10.millis, "op", retryLogLevel = Some(Level.INFO))
+    )
 
     testStopOnShutdown(Pause(logger, _, Forever, 1.millis, "op"), 10)
   }
@@ -249,9 +249,14 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
 
     testSynchronousException(Backoff(logger, flagCloseable, 1, 1.millis, Duration.Inf, "op"), 1)
 
-    testStopOnClosing(Backoff(logger, _, Forever, 10.millis, Duration.Inf, "op"), 3)
+    testStopOnClosing(
+      Backoff(logger, _, Forever, 10.millis, Duration.Inf, "op", retryLogLevel = Some(Level.INFO)),
+      3,
+    )
 
-    testClosedExecutionContext(Backoff(logger, _, Forever, 10.millis, Duration.Inf, "op"))
+    testClosedExecutionContext(
+      Backoff(logger, _, Forever, 10.millis, Duration.Inf, "op", retryLogLevel = Some(Level.INFO))
+    )
 
     testStopOnShutdown(Backoff(logger, _, 10, 1.millis, Duration.Inf, "op"), 3)
   }

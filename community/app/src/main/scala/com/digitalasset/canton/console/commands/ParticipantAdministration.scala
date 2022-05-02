@@ -24,6 +24,7 @@ import com.digitalasset.canton.console.{
   CommandFailure,
   ConsoleCommandResult,
   ConsoleEnvironment,
+  ConsoleMacros,
   DomainReference,
   FeatureFlag,
   FeatureFlagFilter,
@@ -567,7 +568,7 @@ class LocalParticipantPruningAdministrationGroup(
   def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[LedgerOffset] =
     check(FeatureFlag.Preview)(consoleEnvironment.run(access { node =>
       ConsoleCommandResult.fromEither(for {
-        ledgerEnd <- ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd).toEither
+        ledgerEnd <- ledgerApiCommand(LedgerApiCommands.TransactionService.GetLedgerEnd()).toEither
         offset <- node.sync.stateInspection.safeToPrune(timestampFromInstant(beforeOrAt), ledgerEnd)
       } yield offset)
     }))
@@ -1023,12 +1024,24 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Summary(
       "Macro to connect a participant to a locally configured domain given by reference"
     )
+    @Help.Description("""
+        The arguments are:
+          domain - A local domain or sequencer reference
+          manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          alias - The name you will be using to refer to this domain. Can not be changed anymore.
+          certificatesPath - Path to TLS certificate files to use as a trust anchor.
+          priority - The priority of the domain. The higher the more likely a domain will be used.
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+        """)
     def connect_local(
         domain: InstanceReferenceWithSequencerConnection,
         manualConnect: Boolean = false,
         alias: Option[DomainAlias] = None,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
     ): Unit = {
       val config = ParticipantCommands.domains.referenceToConfig(
         domain,
@@ -1037,7 +1050,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         maxRetryDelayMillis.map(NonNegativeFiniteDuration.ofMillis),
         priority,
       )
-      connectFromConfig(config)
+      connectFromConfig(config, synchronize)
     }
 
     @Help.Summary("Macro to connect a participant to a domain given by connection")
@@ -1049,11 +1062,16 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |convenience, we support idempotent invocations where subsequent calls just ensure
         |that the participant reconnects to the domain.
         |""")
-    def connect(config: DomainConnectionConfig): Unit = {
-      connectFromConfig(config)
+    def connect(
+        config: DomainConnectionConfig
+    ): Unit = {
+      connectFromConfig(config, None)
     }
 
-    private def connectFromConfig(config: DomainConnectionConfig): Unit = {
+    private def connectFromConfig(
+        config: DomainConnectionConfig,
+        synchronize: Option[TimeoutDuration],
+    ): Unit = {
       val current = this.config(config.domain)
       // if the config did not change, we'll just treat this as idempotent, otherwise, we'll use register to fail
       if (current.isEmpty) {
@@ -1076,6 +1094,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         val _ = reconnect(config.domain, retry = false)
         modify(config.domain.unwrap, _.copy(manualConnect = false))
       }
+      synchronize.foreach { timeout =>
+        ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)
+      }
     }
 
     @Help.Summary("Macro to connect a participant to a domain given by connection")
@@ -1090,15 +1111,16 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |If the reconnect succeeded, the registered configuration will be updated  
         |with manualStart = true. If anything fails, the domain will remain registered with `manualConnect = true` and
         |you will have to perform these steps manually.
-        |The arguments are:
-        |  domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
-        |  connection - The connection string to connect to this domain. I.e. https://url:port
-        |  manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
-        |  domainId - Optionally the domainId you expect to see on this domain.
-        |  certificatesPath - Path to TLS certificate files to use as a trust anchor.
-        |  priority - The priority of the domain. The higher the more likely a domain will be used.
-        |  timeTrackerConfig - The configuration for the domain time tracker.
-        |""")
+        The arguments are:
+          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          connection - The connection string to connect to this domain. I.e. https://url:port
+          manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          domainId - Optionally the domainId you expect to see on this domain.
+          certificatesPath - Path to TLS certificate files to use as a trust anchor.
+          priority - The priority of the domain. The higher the more likely a domain will be used.
+          timeTrackerConfig - The configuration for the domain time tracker.
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+        """)
     def connect(
         domainAlias: DomainAlias,
         connection: String,
@@ -1107,6 +1129,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         certificatesPath: String = "",
         priority: Int = 0,
         timeTrackerConfig: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
     ): DomainConnectionConfig = {
       val config = ParticipantCommands.domains.toConfig(
         domainAlias,
@@ -1117,25 +1142,15 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         priority,
         timeTrackerConfig = timeTrackerConfig,
       )
-      connect(config)
+      connectFromConfig(config, synchronize)
       config
     }
 
     @Help.Summary(
-      "Macro to connect a participant to a domain that supports connecting via many endpoints"
+      "Deprecated macro to connect a participant to a domain that supports connecting via many endpoints"
     )
-    @Help.Description("""Domains can provide many endpoints to connect to for availability and performance benefits.
-        |This version of connect allows specifying multiple endpoints for a single domain connection:
-        |   connect_ha("mydomain", sequencer1, sequencer2)
-        |   or:
-        |   connect_ha("mydomain", "https://host1.mydomain.net", "https://host2.mydomain.net", "https://host3.mydomain.net")
-        |
-        |To create a more advanced connection config use domains.toConfig with a single host,
-        |then use config.addConnection to add additional connections before connecting:
-        |   config = myparticipaint.domains.toConfig("mydomain", "https://host1.mydomain.net", ...otherArguments)
-        |   config = config.addConnection("https://host2.mydomain.net", "https://host3.mydomain.net")
-        |   myparticipant.domains.connect(config)
-        |""")
+    @Help.Description("""Use the command connect_ha with the updated arguments list""")
+    @Deprecated(since = "2.2.0")
     def connect_ha(
         domainAlias: DomainAlias,
         firstConnection: SequencerConnection,
@@ -1149,37 +1164,106 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       config
     }
 
+    @Help.Summary(
+      "Macro to connect a participant to a domain that supports connecting via many endpoints"
+    )
+    @Help.Description("""Domains can provide many endpoints to connect to for availability and performance benefits.
+        This version of connect allows specifying multiple endpoints for a single domain connection:
+           connect_ha("mydomain", Seq(sequencer1, sequencer2))
+           or:
+           connect_ha("mydomain", Seq("https://host1.mydomain.net", "https://host2.mydomain.net", "https://host3.mydomain.net"))
+        
+        To create a more advanced connection config use domains.toConfig with a single host,
+        |then use config.addConnection to add additional connections before connecting:
+           config = myparticipaint.domains.toConfig("mydomain", "https://host1.mydomain.net", ...otherArguments)
+           config = config.addConnection("https://host2.mydomain.net", "https://host3.mydomain.net")
+           myparticipant.domains.connect(config)
+           
+        The arguments are:
+          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          connections - The sequencer connection definitions (can be an URL) to connect to this domain. I.e. https://url:port
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.           
+        """)
+    def connect_ha(
+        domainAlias: DomainAlias,
+        connections: Seq[SequencerConnection],
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): DomainConnectionConfig = {
+      val config = DomainConnectionConfig(
+        domainAlias,
+        SequencerConnection.merge(connections).getOrElse(sys.error("Invalid sequencer connection")),
+      )
+      connectFromConfig(config, synchronize)
+      config
+    }
+
     @Help.Summary("Reconnect this participant to the given domain")
     @Help.Description("""Idempotent attempts to re-establish a connection to a certain domain.
         |If retry is set to false, the command will throw an exception if unsuccessful.
         |If retry is set to true, the command will terminate after the first attempt with the result,
-        |but the server will keep on retrying to connect to the domain.""")
-    def reconnect(domainAlias: DomainAlias, retry: Boolean = true): Boolean = {
-      consoleEnvironment.run {
+        |but the server will keep on retrying to connect to the domain.
+        |
+        The arguments are:
+          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          retry - Whether the reconnect should keep on retrying until it succeeded or abort noisly if the connection attempt fails.
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+        """)
+    def reconnect(
+        domainAlias: DomainAlias,
+        retry: Boolean = true,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): Boolean = {
+      val ret = consoleEnvironment.run {
         adminCommand(ParticipantAdminCommands.DomainConnectivity.ConnectDomain(domainAlias, retry))
       }
+      if (ret) {
+        synchronize.foreach { timeout =>
+          ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)
+        }
+      }
+      ret
     }
 
     @Help.Summary("Reconnect this participant to the given local domain")
-    @Help.Description(
-      """Idempotent attempts to re-establish a connection to the given local domain. 
-        |Same behaviour as generic reconnect."""
-    )
-    def reconnect_local(ref: DomainReference, retry: Boolean = true): Boolean = {
-      consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.DomainConnectivity.ConnectDomain(ref.name, retry))
-      }
-    }
+    @Help.Description("""Idempotent attempts to re-establish a connection to the given local domain. 
+        |Same behaviour as generic reconnect.
+
+        The arguments are:
+          ref - The domain reference to connect to
+          retry - Whether the reconnect should keep on retrying until it succeeded or abort noisly if the connection attempt fails.
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+        """)
+    def reconnect_local(
+        ref: DomainReference,
+        retry: Boolean = true,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): Boolean = reconnect(ref.name, retry, synchronize)
 
     @Help.Summary("Reconnect this participant to all domains which are not marked as manual start")
-    @Help.Description(
-      "If ignoreFailures is set to true (default), the command will ignore domains we currenty can't connect and proceed with all other domains."
-    )
-    def reconnect_all(ignoreFailures: Boolean = true): Unit = {
+    @Help.Description("""
+      The arguments are:
+          ignoreFailures - If set to true (default), we'll attempt to connect to all, ignoring any failure
+          synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
+    """)
+    def reconnect_all(
+        ignoreFailures: Boolean = true,
+        synchronize: Option[TimeoutDuration] = Some(
+          consoleEnvironment.commandTimeouts.bounded
+        ),
+    ): Unit = {
       consoleEnvironment.run {
         adminCommand(
           ParticipantAdminCommands.DomainConnectivity.ReconnectDomains(ignoreFailures)
         )
+      }
+      synchronize.foreach { timeout =>
+        ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)
       }
     }
 

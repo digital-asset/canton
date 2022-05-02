@@ -15,12 +15,7 @@ import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClient.Subscriber
-import com.digitalasset.canton.topology.processing.{
-  ApproximateTime,
-  EffectiveTime,
-  SequencedTime,
-  TopologyTimestampPlusEpsilonTracker,
-}
+import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -178,7 +173,6 @@ object CachingDomainTopologyClient {
       domainId: DomainId,
       store: TopologyStore,
       initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
-      initialProcessedTimestamp: Option[CantonTimestamp],
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
       cachingConfigs: CachingConfigs,
       timeouts: ProcessingTimeout,
@@ -207,18 +201,11 @@ object CachingDomainTopologyClient {
         loggerFactory,
       )
 
-    val initF = initialProcessedTimestamp match {
-      case Some(ts) =>
-        // find epsilon at this point in time to compute the effective time
-        TopologyTimestampPlusEpsilonTracker
-          .determineEpsilonFromStore(ts, store, loggerFactory)
-          .map { epsilon =>
-            Some((ApproximateTime(ts), EffectiveTime(ts.plus(epsilon.duration))))
-          }
-      case None =>
-        // ts is "effective time", but during startup if we don't have an processed timestamp, we can use this one
-        store.timestamp.map { tsO => tsO.map(ts => (ApproximateTime(ts), EffectiveTime(ts))) }
-    }
+    val initF =
+      // ts is "effective time", but during startup if we don't have an processed timestamp, we can use this one
+      store.timestamp(useStateStore = true).map { tsO =>
+        tsO.map(ts => (ApproximateTime(ts), EffectiveTime(ts)))
+      }
 
     initF.map { initWithTsO =>
       initWithTsO.foreach { case (sequencedTs, effectiveTs) =>

@@ -4,10 +4,10 @@
 package com.digitalasset.canton
 
 import better.files.File
-import cats.data.NonEmptyList
 import cats.syntax.either._
 import ch.qos.logback.classic.{Logger, LoggerContext}
 import ch.qos.logback.core.status.{ErrorStatus, Status, StatusListener, WarnStatus}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.cli.{Cli, Command, LogFileAppender}
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.{CantonConfig, ConfigErrors, Generate}
@@ -83,11 +83,11 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
   logbackStatusManager.remove(killingStatusListener)
 
   val cantonConfig: E#Config = {
-    val mergedUserConfigsE = NonEmptyList.fromList(cliOptions.configFiles.toList) match {
+    val mergedUserConfigsE = NonEmpty.from(cliOptions.configFiles) match {
       case None if cliOptions.configMap.isEmpty =>
         Left(ConfigErrors.NoConfigFiles.Error())
       case None => Right(ConfigFactory.empty())
-      case Some(nonEmptyList) => CantonConfig.parseAndMergeJustCLIConfigs(nonEmptyList)
+      case Some(neConfigFiles) => CantonConfig.parseAndMergeJustCLIConfigs(neConfigFiles)
     }
     val mergedUserConfigs =
       mergedUserConfigsE.valueOr { _ =>

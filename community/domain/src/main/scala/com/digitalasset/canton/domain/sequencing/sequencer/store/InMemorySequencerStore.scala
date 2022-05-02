@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.functor._
@@ -335,7 +335,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
 
       // if there are some timestamps then take the minimum
       // (the only reason there wouldn't be any timestamps would be no registered members or every member being ignored)
-      NonEmptyList.fromList(timestamps.toList).map(_.reduceLeft(_ min _))
+      NonEmpty.from(timestamps.toSeq).map(_.reduceLeft(_ min _))
     }
 
   override def status(

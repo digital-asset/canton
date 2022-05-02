@@ -4,8 +4,10 @@
 package com.daml.nonempty
 
 import com.digitalasset.canton.logging.pretty.Pretty
+import pureconfig.{ConfigReader, ConfigWriter}
 
 import scala.collection.immutable
+import scala.reflect.ClassTag
 
 /** Additional methods for [[com.daml.nonempty.NonEmpty]].
   *
@@ -25,5 +27,25 @@ object NonEmptyUtil {
       type K[T[_]] = Pretty[T[A]]
       NonEmptyColl.Instance.subst[K](F)
     }
+
+    implicit def nonEmptyPureConfigReader[C <: scala.collection.immutable.Iterable[_]](implicit
+        reader: ConfigReader[C],
+        ct: ClassTag[C],
+    ): ConfigReader[NonEmpty[C]] =
+      reader.emap(c => NonEmpty.from(c).toRight(EmptyCollectionFound(ct.toString)))
+
+    implicit def nonEmptyPureConfigWriter[C](implicit
+        writer: ConfigWriter[C]
+    ): ConfigWriter[NonEmpty[C]] =
+      writer.contramap(_.forgetNE)
+  }
+
+  /** A failure representing an unexpected empty collection
+    *
+    * @param typ
+    *   the type that was attempted to be converted to from an empty string
+    */
+  final case class EmptyCollectionFound(typ: String) extends pureconfig.error.FailureReason {
+    override def description = s"Empty collection found when trying to convert to NonEmpty[$typ]."
   }
 }

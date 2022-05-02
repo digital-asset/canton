@@ -3,16 +3,11 @@
 
 package com.digitalasset.canton.console
 
-import com.daml.ledger.configuration.LedgerId
 import com.digitalasset.canton._
-import com.digitalasset.canton.admin.api.client.commands.{
-  GrpcAdminCommand,
-  HttpAdminCommand,
-  LedgerApiCommands,
-}
+import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config._
-import com.digitalasset.canton.console.CommandErrors.{CommandError, NodeNotStarted}
+import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
 import com.digitalasset.canton.console.commands._
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.config.RemoteDomainConfig
@@ -33,7 +28,6 @@ import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.util.hashing.MurmurHash3
 
 trait InstanceReference
@@ -333,40 +327,6 @@ class CommunityLocalDomainReference(
     with CommunityDomainReference
     with LocalDomainReference
 
-trait BaseLedgerApiClient {
-  this: LedgerApiCommandRunner =>
-
-  private val myLedgerId = new AtomicReference[Option[LedgerId]](None)
-
-  override protected[console] def ledgerApiCommand[Result](
-      command: LedgerId => GrpcAdminCommand[_, _, Result]
-  ): ConsoleCommandResult[Result] =
-    ledgerId() match {
-      case Right(lid) => ledgerApiCommand(command(lid))
-      case Left(err) => err
-    }
-
-  protected def clearLedgerId(): Unit = myLedgerId.set(None)
-
-  protected[console] def ledgerId(): Either[CommandError, LedgerId] = {
-    def fetchLedgerId(): Either[CommandError, LedgerId] = {
-      ledgerApiCommand(LedgerApiCommands.LedgerIdentityService.GetLedgerIdentity()) match {
-        case CommandSuccessful(value) => Right(value)
-        case err: CommandError => Left(err)
-      }
-    }
-    myLedgerId.get() match {
-      case None =>
-        fetchLedgerId().map { id =>
-          myLedgerId.set(Some(id))
-          id
-        }
-      case Some(id) => Right(id)
-    }
-  }
-
-}
-
 /** Bare, Canton agnostic parts of the ledger-api client
   *
   * This implementation allows to access any kind of ledger-api client, which does not need to be Canton based.
@@ -386,7 +346,6 @@ class ExternalLedgerApiClient(
 )(implicit val consoleEnvironment: ConsoleEnvironment)
     extends BaseLedgerApiAdministration
     with LedgerApiCommandRunner
-    with BaseLedgerApiClient
     with FeatureFlagFilter
     with NamedLogging {
 
@@ -432,7 +391,6 @@ abstract class ParticipantReference(
     val name: String,
 ) extends InstanceReference
     with ParticipantAdministration
-    with BaseLedgerApiClient
     with LedgerApiAdministration
     with LedgerApiCommandRunner {
 
@@ -466,11 +424,6 @@ abstract class ParticipantReference(
   @Help.Group("Topology")
   @Help.Description("This group contains access to the full set of topology management commands.")
   def topology: TopologyAdministrationGroup = topology_
-
-  override def clear_cache(): Unit = {
-    super.clear_cache()
-    clearLedgerId()
-  }
 
   @Help.Summary("Commands used for development and testing", FeatureFlag.Testing)
   @Help.Group("Testing")

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.config
 
-import cats.data.ValidatedNel
-
 import java.io.File
+import cats.data.Validated
 import cats.syntax.functor._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.{CommunityDomainConfig, RemoteDomainConfig}
@@ -40,7 +40,8 @@ case class CantonCommunityConfig(
   /** renders the config as json (used for dumping config for diagnostic purposes) */
   override def dumpString: String = CantonCommunityConfig.makeConfidentialString(this)
 
-  override def validate: ValidatedNel[String, Unit] = CommunityConfigValidations.validate(this)
+  override def validate: Validated[NonEmpty[Seq[String]], Unit] =
+    CommunityConfigValidations.validate(this)
 
   override def withDefaults: CantonCommunityConfig =
     this
