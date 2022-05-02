@@ -191,8 +191,12 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
       validFrom < asOf && validUntil.forall(until => asOf <= until)
     }
 
-  override def timestamp(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
-    Future.successful(topologyTransactionStore.lastOption.map(_.from))
+  override def timestamp(
+      useStateStore: Boolean
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
+    Future.successful(
+      (if (useStateStore) topologyStateStore else topologyTransactionStore).lastOption.map(_.from)
+    )
 
   private def filteredState(
       table: Seq[TopologyStoreEntry[TopologyChangeOp]],
@@ -516,17 +520,36 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
   }
 
   override def findDispatchingTransactionsAfter(
-      timestamp: CantonTimestamp
+      timestampExclusive: CantonTimestamp,
+      limit: Option[Int],
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     blocking(synchronized {
-      val res = topologyTransactionStore
+      val selected = topologyTransactionStore
         .filter(x =>
-          x.from > timestamp && (x.until.isEmpty || x.operation == TopologyChangeOp.Remove) && x.rejected.isEmpty
+          x.from > timestampExclusive && (x.until.isEmpty || x.operation == TopologyChangeOp.Remove) && x.rejected.isEmpty
         )
         .map(_.toStoredTransaction)
         .toSeq
-      Future.successful(StoredTopologyTransactions(res))
+      Future.successful(StoredTopologyTransactions(limit.fold(selected)(selected.take)))
     })
+
+  override def findParticipantOnboardingTransactions(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
+    blocking(synchronized {
+      val res = topologyTransactionStore.filter(x =>
+        x.until.isEmpty &&
+          // TODO(#6300) only dispatch necessary transactions (this here is an approximation)
+          TopologyStore.initialParticipantDispatchingSet.contains(x.transaction.uniquePath.dbType)
+      )
+      Future.successful(
+        TopologyStore.filterInitialParticipantDispatchingTransactions(
+          participantId,
+          StoredTopologyTransactions(res.map(_.toStoredTransaction).toSeq),
+        )
+      )
+    })
+  }
 
   override def findTsOfParticipantStateChangesBefore(
       beforeExclusive: CantonTimestamp,

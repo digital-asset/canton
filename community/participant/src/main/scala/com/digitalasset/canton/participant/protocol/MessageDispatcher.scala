@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{Chain, NonEmptyList}
+import cats.data.Chain
 import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.{Foldable, Monoid}
@@ -416,7 +416,7 @@ trait MessageDispatcher { this: NamedLogging =>
             show"Expected view type $viewType, but received view types ${badEncryptedViewTypes.distinct}"
           )
         else Checked.result(())
-      val goodEncryptedViewsC = NonEmptyList.fromList(goodEncryptedViews) match {
+      val goodEncryptedViewsC = NonEmpty.from(goodEncryptedViews) match {
         case None =>
           // We received a batch with at least one root hash message,
           // but no view with the same root hash and view type.
@@ -573,18 +573,18 @@ object MessageDispatcher {
   private sealed trait GoodRequest {
     val rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload]
     val mediatorId: MediatorId
-    val requestEnvelopes: NonEmptyList[
+    val requestEnvelopes: NonEmpty[Seq[
       OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]
-    ]
+    ]]
   }
   private object GoodRequest {
     def apply(rhm: RootHashMessage[SerializedRootHashMessagePayload], mediator: MediatorId)(
-        envelopes: NonEmptyList[OpenEnvelope[EncryptedViewMessage[rhm.viewType.type]]]
+        envelopes: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[rhm.viewType.type]]]]
     ): GoodRequest = new GoodRequest {
       override val rootHashMessage: rhm.type = rhm
       override val mediatorId: MediatorId = mediator
       override val requestEnvelopes
-          : NonEmptyList[OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]] =
+          : NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[rootHashMessage.viewType.type]]]] =
         envelopes
     }
   }

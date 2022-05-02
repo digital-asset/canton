@@ -9,6 +9,7 @@ import com.digitalasset.canton.logging.pretty.Pretty.{
   DefaultShowFieldNames,
   DefaultWidth,
 }
+import com.digitalasset.canton.util.ErrorUtil
 import com.google.protobuf.ByteString
 import pprint.{PPrinter, Tree}
 
@@ -20,7 +21,11 @@ class CantonPrettyPrinter(maxStringLength: Int, maxMessageLines: Int) {
     message match {
       case null => ""
       case product: Product =>
-        pprinter(product).toString
+        try {
+          pprinter(product).toString
+        } catch {
+          case err: IllegalArgumentException => ErrorUtil.messageWithStacktrace(err)
+        }
       case _: Any =>
         import com.digitalasset.canton.logging.pretty.Pretty._
         message.toString.limit(maxStringLength).toString

@@ -5,9 +5,9 @@ package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
 import cats.syntax.functorFilter._
-import cats.syntax.list._
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
@@ -774,12 +774,12 @@ class StoreBasedTopologySnapshot(
           case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
             domainParameters
         }
-      domainParameters.toNel.map { domainParametersNel =>
-        if (domainParametersNel.size > 1)
+      NonEmpty.from(domainParameters).map { domainParametersNel =>
+        if (domainParametersNel.sizeCompare(1) > 0)
           logger.warn(
             s"Expecting only one dynamic domain parameters, ${domainParametersNel.size} found. Considering the most recent one."
           )
-        domainParametersNel.last
+        domainParametersNel.last1
       }
     }
 

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.data.NonEmptySet
 import cats.syntax.functor._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
 import com.digitalasset.canton.data.SubmitterMetadata
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
@@ -18,7 +18,7 @@ import scala.concurrent.Future
 // TODO(Andreas, M40): Push model conformance down to individual views, not just for the transaction as a whole
 case class TransactionValidationResult(
     transactionId: TransactionId,
-    confirmationPolicies: NonEmptySet[ConfirmationPolicy],
+    confirmationPolicies: NonEmpty[Set[ConfirmationPolicy]],
     submitterMetadata: Option[SubmitterMetadata],
     workflowId: Option[WorkflowId],
     contractConsistencyResult: Either[List[ReferenceToFutureContractError], Unit],

@@ -12,9 +12,9 @@ import com.digitalasset.canton.tracing.Traced
 
 object DiscardIgnoredEvents {
   def apply[Env](handler: OrdinaryApplicationHandler[Env]): PossiblyIgnoredApplicationHandler[Env] =
-    _.withTraceContext { batchTraceContext => events =>
-      handler(Traced(events.collect { case e: OrdinarySequencedEvent[Env] =>
-        e
-      })(batchTraceContext))
-    }
+    handler.replace(_.withTraceContext { batchTraceContext => events =>
+      handler(
+        Traced(events.collect { case e: OrdinarySequencedEvent[Env] => e })(batchTraceContext)
+      )
+    })
 }

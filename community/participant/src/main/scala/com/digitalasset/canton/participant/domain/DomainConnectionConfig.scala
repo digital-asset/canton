@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.domain
 
-import cats.data.NonEmptyList
 import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -47,21 +47,21 @@ case class DomainConnectionConfig(
     with HasProtoV0[v0.DomainConnectionConfig]
     with PrettyPrinting {
 
-  /** Helper methods to avoid having to use NonEmptyList in the console */
+  /** Helper methods to avoid having to use NonEmpty[Seq in the console */
   def addConnection(connection: String, additionalConnections: String*): DomainConnectionConfig =
     addConnection(new URI(connection), additionalConnections.map(new URI(_)): _*)
   def addConnection(connection: URI, additionalConnections: URI*): DomainConnectionConfig =
     sequencerConnection match {
       case GrpcSequencerConnection(endpoints, transportSecurity, customTrustCertificates) =>
-        val newEndpoints = Endpoint
-          .fromUris(NonEmptyList(connection, additionalConnections.toList)) match {
+        val (newEndpoints, _) = Endpoint
+          .fromUris(NonEmpty(Seq, connection, additionalConnections: _*)) match {
           case Left(err) =>
             throw new IllegalArgumentException(s"invalid connection $connection : $err")
           case Right(es) => es
         }
         copy(
           sequencerConnection = GrpcSequencerConnection(
-            endpoints.concatNel(newEndpoints._1),
+            endpoints ++ newEndpoints,
             transportSecurity,
             customTrustCertificates,
           )

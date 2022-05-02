@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.logging.pretty
 
-import com.digitalasset.canton.util.ShowUtil
+import com.digitalasset.canton.util.{ErrorUtil, ShowUtil}
 import pprint.{PPrinter, Tree}
 
 /** Type class indicating that pretty printing is enabled for type `T`.
@@ -57,7 +57,12 @@ object Pretty extends ShowUtil with PrettyUtil with PrettyInstances {
     /** Yields a readable string representation based on a configurable [[pprint.PPrinter]].
       */
     final def toPrettyString(pprinter: PPrinter = DefaultPprinter): String = {
-      pprinter.copy(additionalHandlers = { case p: Tree => p })(toTree).toString
+      try {
+        pprinter.copy(additionalHandlers = { case p: Tree => p })(toTree).toString
+      } catch {
+        case err: IllegalArgumentException =>
+          ErrorUtil.messageWithStacktrace(err)
+      }
     }
 
     /** The tree representation of `value`.

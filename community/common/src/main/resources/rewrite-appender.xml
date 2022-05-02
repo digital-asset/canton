@@ -198,14 +198,14 @@
              log some duplicate key violation errors.
         -->
         <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Postgres -->
-            <logger>com.daml.platform.store.appendonlydao.DbDispatcherImpl</logger>
+            <logger>com.daml.platform.store.dao.DbDispatcherImpl</logger>
             <contains>Processing the request failed due to a non-transient database error: ERROR: duplicate key value violates unique constraint</contains>
             <exceptionMessage>ERROR: duplicate key value violates unique constraint</exceptionMessage>
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
         <rewrite class="com.digitalasset.canton.logging.Rewrite"> <!-- for Oracle -->
-            <logger>com.daml.platform.store.appendonlydao.DbDispatcherImpl</logger>
+            <logger>com.daml.platform.store.dao.DbDispatcherImpl</logger>
             <contains>Processing the request failed due to a non-transient database error: ORA-00001: unique constraint</contains>
             <exceptionMessage>ORA-00001: unique constraint</exceptionMessage>
             <maxLevel>INFO</maxLevel>

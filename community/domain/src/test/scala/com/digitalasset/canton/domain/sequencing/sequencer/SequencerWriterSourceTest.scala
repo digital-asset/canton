@@ -7,9 +7,9 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.QueueOfferResult
 import akka.stream.scaladsl.{Keep, Sink, Source}
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.functor._
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.{
@@ -408,10 +408,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             val newItems = items.updateAndGet(_ :+ notification)
 
             if (newItems.size == writeCount) {
-              val combined = NonEmptyList
-                .fromListUnsafe(newItems.toList)
-                .reduceLeft(_ union _)
-
+              val combined = NonEmptyUtil.fromUnsafe(newItems).reduceLeft(_ union _)
               promise.success(combined)
             }
           }

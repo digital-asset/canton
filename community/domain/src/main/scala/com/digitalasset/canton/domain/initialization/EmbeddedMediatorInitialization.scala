@@ -100,7 +100,7 @@ object EmbeddedMediatorInitialization {
           loggerFactory,
         )
 
-      sequencerClient <- sequencerClientFactoryFactory(topologyClient)(
+      sequencerClient <- sequencerClientFactoryFactory(topologyClient).create(
         mediatorId,
         sequencedEventStore,
         sendTrackerStore,

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console
 
-import com.daml.ledger.configuration.LedgerId
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{CantonConfig, TimeoutDuration}
@@ -66,12 +65,6 @@ object AdminCommandRunner {
 /** Support for running an ledgerApi commands
   */
 trait LedgerApiCommandRunner {
-
-  /** Run an admin command and return its result.
-    */
-  protected[console] def ledgerApiCommand[Result](
-      commandGenerator: LedgerId => GrpcAdminCommand[_, _, Result]
-  ): ConsoleCommandResult[Result]
 
   protected[console] def ledgerApiCommand[Result](
       command: GrpcAdminCommand[_, _, Result]

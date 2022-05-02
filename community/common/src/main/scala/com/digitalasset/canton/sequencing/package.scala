@@ -21,9 +21,6 @@ package object sequencing {
     */
   type BoxedEnvelope[+Box[+_], +Env] = Box[Env]
 
-  /** An application handler processes boxed envelopes and returns a [[HandlerResult]] */
-  type ApplicationHandler[-Box[+_], -Env] = BoxedEnvelope[Box, Env] => HandlerResult
-
   /** A handler processes an event synchronously in the [[scala.concurrent.Future]]
     * and returns an [[AsyncResult]] that may be computed asynchronously by the contained future.
     * Asynchronous processing may run concurrently with later events' synchronous processing

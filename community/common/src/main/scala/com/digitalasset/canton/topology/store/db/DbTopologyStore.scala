@@ -396,10 +396,13 @@ class DbTopologyStore(
     else "<="} valid_until)"
   }
 
-  override def timestamp(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
+  override def timestamp(
+      useStateStore: Boolean
+  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
 
+    val storeId = if (useStateStore) stateStoreIdFilterName else transactionStoreIdName
     val query = sql"""SELECT valid_from FROM topology_transactions
-           WHERE store_id = $transactionStoreIdName ORDER BY id DESC #${storage.limit(1)}"""
+           WHERE store_id = $storeId ORDER BY id DESC #${storage.limit(1)}"""
 
     readTime.metric
       .event {
@@ -832,11 +835,26 @@ class DbTopologyStore(
   }
 
   override def findDispatchingTransactionsAfter(
-      timestamp: CantonTimestamp
+      timestampExclusive: CantonTimestamp,
+      limitO: Option[Int],
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val subQuery =
-      sql"AND valid_from > $timestamp AND (valid_until is NULL OR operation = ${TopologyChangeOp.Remove})"
-    queryForTransactions(transactionStoreIdName, subQuery)
+      sql"AND valid_from > $timestampExclusive AND (valid_until is NULL OR operation = ${TopologyChangeOp.Remove})"
+    val limitQ = limitO.fold("")(storage.limit(_))
+    queryForTransactions(transactionStoreIdName, subQuery, limitQ)
+  }
+
+  override def findParticipantOnboardingTransactions(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
+    // TODO(#6300) only dispatch necessary transactions (this here is an approximation)
+    val subQuery =
+      sql"AND valid_until is NULL AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
+        .map(s => sql"$s")
+        .intercalate(sql", ") ++ sql")"
+    queryForTransactions(transactionStoreIdName, subQuery).map(
+      TopologyStore.filterInitialParticipantDispatchingTransactions(participantId, _)
+    )
   }
 
   override def findTsOfParticipantStateChangesBefore(

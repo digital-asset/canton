@@ -4,7 +4,7 @@
 package com.digitalasset.canton.data
 
 import java.util.UUID
-import cats.data.{EitherT, NonEmptyList}
+import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
@@ -1111,60 +1111,57 @@ object LightTransactionViewTree
     * suffix.
     * Errors on an empty sequence, or a sequence whose prefix doesn't describe a full transaction view tree.
     */
-  def toFullViewTree(trees: List[LightTransactionViewTree]): Either[
+  private def toFullViewTree(trees: NonEmpty[Seq[LightTransactionViewTree]]): Either[
     InvalidLightTransactionViewTreeSequence,
-    (TransactionViewTree, List[LightTransactionViewTree]),
+    (TransactionViewTree, Seq[LightTransactionViewTree]),
   ] = {
 
-    def toFullView(trees: List[LightTransactionViewTree]): Either[
+    def toFullView(trees: NonEmpty[Seq[LightTransactionViewTree]]): Either[
       InvalidLightTransactionViewTreeSequence,
-      (TransactionView, List[LightTransactionViewTree]),
+      (TransactionView, Seq[LightTransactionViewTree]),
     ] = {
-      trees match {
-        case Nil =>
-          Left(
-            InvalidLightTransactionViewTreeSequence(
-              "Can't extract a transaction view from an empty sequence of lightweight transaction view trees"
-            )
-          )
-        case t :: ts if t.view.subviews.isEmpty => Right(t.view -> ts)
-        case t :: ts =>
-          for {
-            subViewsAndRemaining <- (1 to t.view.subviews.length).toList
-              .foldM(Seq.empty[TransactionView] -> ts) { case ((leftSiblings, remaining), _) =>
-                // TODO(M40): the recursion may blow the stack here
-                toFullView(remaining).map { case (fv, newRemaining) =>
-                  (fv +: leftSiblings) -> newRemaining
+      val headView = trees.head1.view
+      if (headView.subviews.isEmpty)
+        Right(headView -> trees.tail1)
+      else {
+        for {
+          subViewsAndRemaining <- ((1 to headView.subviews.length): Seq[Int])
+            .foldM(Seq.empty[TransactionView] -> trees.tail1) {
+              case ((leftSiblings, remaining), _) =>
+                NonEmpty.from(remaining) match {
+                  case None =>
+                    Left(
+                      InvalidLightTransactionViewTreeSequence(
+                        "Can't extract a transaction view from an empty sequence of lightweight transaction view trees"
+                      )
+                    )
+                  case Some(remainingNE) =>
+                    // TODO(M40): the recursion may blow the stack here
+                    toFullView(remainingNE).map { case (fv, newRemaining) =>
+                      (fv +: leftSiblings) -> newRemaining
+                    }
                 }
-              }
-            (subViewsReversed, remaining) = subViewsAndRemaining
-            subViews = subViewsReversed.reverse
-            // Check that the ordering of the reconstructed transaction view trees matches the expected one
-            _ <- Either.cond(
-              subViews.map(_.rootHash) == t.view.subviews.map(_.rootHash),
-              (),
-              InvalidLightTransactionViewTreeSequence(
-                s"Mismatch in expected hashes of subtrees and what was found"
-              ),
-            )
-            newView = t.view.copy(subviews = subViews)
-          } yield (newView, remaining)
+            }
+          (subViewsReversed, remaining) = subViewsAndRemaining
+          subViews = subViewsReversed.reverse
+          // Check that the ordering of the reconstructed transaction view trees matches the expected one
+          _ <- Either.cond(
+            subViews.map(_.rootHash) == headView.subviews.map(_.rootHash),
+            (),
+            InvalidLightTransactionViewTreeSequence(
+              s"Mismatch in expected hashes of subtrees and what was found"
+            ),
+          )
+          newView = headView.copy(subviews = subViews)
+        } yield (newView, remaining)
       }
     }
-    trees.headOption match {
-      case None =>
-        Left(
-          InvalidLightTransactionViewTreeSequence(
-            "Can't extract a transaction view tree from an empty sequence of lightweight transaction view trees"
-          )
-        )
-      case Some(t) =>
-        toFullView(trees).flatMap { case (tv, remaining) =>
-          val wrappedEnrichedTree = t.tree.topLevelViewMap(_.replace(tv.viewHash, tv))
-          TransactionViewTree
-            .create(checked(wrappedEnrichedTree.tryUnwrap))
-            .bimap(InvalidLightTransactionViewTreeSequence, tvt => tvt -> remaining)
-        }
+    val t = trees.head1
+    toFullView(trees).flatMap { case (tv, remaining) =>
+      val wrappedEnrichedTree = t.tree.topLevelViewMap(_.replace(tv.viewHash, tv))
+      TransactionViewTree
+        .create(checked(wrappedEnrichedTree.tryUnwrap))
+        .bimap(InvalidLightTransactionViewTreeSequence, tvt => tvt -> remaining)
     }
   }
 
@@ -1175,38 +1172,39 @@ object LightTransactionViewTree
     * ([[GenTransactionTree.allTransactionViewTrees]])
     */
   def toAllFullViewTrees(
-      trees: NonEmptyList[LightTransactionViewTree]
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmptyList[TransactionViewTree]] =
+      trees: NonEmpty[Seq[LightTransactionViewTree]]
+  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
     sequenceConsumer(trees, true)
 
   /** Returns the top-level full transaction view trees described by a sequence of lightweight ones */
   def toToplevelFullViewTrees(
-      trees: NonEmptyList[LightTransactionViewTree]
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmptyList[TransactionViewTree]] =
+      trees: NonEmpty[Seq[LightTransactionViewTree]]
+  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] =
     sequenceConsumer(trees, false)
 
   // Extracts the common logic behind extracting all full trees and just top-level ones
   private def sequenceConsumer(
-      trees: NonEmptyList[LightTransactionViewTree],
+      trees: NonEmpty[Seq[LightTransactionViewTree]],
       repeats: Boolean,
-  ): Either[InvalidLightTransactionViewTreeSequence, NonEmptyList[TransactionViewTree]] = {
+  ): Either[InvalidLightTransactionViewTreeSequence, NonEmpty[Seq[TransactionViewTree]]] = {
     val resBuilder = List.newBuilder[TransactionViewTree]
     @tailrec
-    def go(ts: List[LightTransactionViewTree]): Option[InvalidLightTransactionViewTreeSequence] = {
-      ts match {
-        case Nil => None
-        case (_l :: ls) =>
-          toFullViewTree(ts) match {
-            case Right((fvt, rest)) =>
-              resBuilder += fvt
-              go(if (repeats) ls else rest)
-            case Left(err) =>
-              Some(err)
+    def go(
+        ts: NonEmpty[Seq[LightTransactionViewTree]]
+    ): Option[InvalidLightTransactionViewTreeSequence] = {
+      toFullViewTree(ts) match {
+        case Right((fvt, rest)) =>
+          resBuilder += fvt
+          NonEmpty.from(if (repeats) ts.tail1 else rest) match {
+            case None => None
+            case Some(next) => go(next)
           }
+        case Left(err) =>
+          Some(err)
       }
     }
-    go(trees.toList) match {
-      case None => Right(NonEmptyList.fromListUnsafe(resBuilder.result()))
+    go(trees) match {
+      case None => Right(NonEmptyUtil.fromUnsafe(resBuilder.result()))
       case Some(err) => Left(err)
     }
   }

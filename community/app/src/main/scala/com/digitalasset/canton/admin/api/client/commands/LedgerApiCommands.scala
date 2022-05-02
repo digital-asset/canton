@@ -57,19 +57,12 @@ import com.daml.ledger.api.v1.ledger_configuration_service.{
   LedgerConfiguration,
   LedgerConfigurationServiceGrpc,
 }
-import com.daml.ledger.api.v1.ledger_identity_service.LedgerIdentityServiceGrpc.LedgerIdentityServiceStub
-import com.daml.ledger.api.v1.ledger_identity_service.{
-  GetLedgerIdentityRequest,
-  GetLedgerIdentityResponse,
-  LedgerIdentityServiceGrpc,
-}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.transaction_service.TransactionServiceGrpc.TransactionServiceStub
 import com.daml.ledger.api.v1.transaction_service._
 import com.daml.ledger.client.binding.{Primitive => P}
-import com.daml.ledger.configuration.LedgerId
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -106,36 +99,13 @@ import com.digitalasset.canton.data.CantonTimestamp
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
-import scala.annotation.nowarn
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
-@nowarn(
-  "cat=deprecation&origin=com\\.daml\\.ledger\\.api\\.v1\\.ledger_identity_service\\..*"
-) // TODO(i8518) properly deal with deprecation warning
 object LedgerApiCommands {
 
   final val applicationId = "CantonConsole"
-
-  object LedgerIdentityService {
-    final case class GetLedgerIdentity()
-        extends GrpcAdminCommand[GetLedgerIdentityRequest, GetLedgerIdentityResponse, String] {
-      override type Svc = LedgerIdentityServiceStub
-      override def createService(channel: ManagedChannel): LedgerIdentityServiceStub =
-        LedgerIdentityServiceGrpc.stub(channel)
-      override def createRequest(): Either[String, GetLedgerIdentityRequest] =
-        Right(GetLedgerIdentityRequest())
-      override def submitRequest(
-          service: LedgerIdentityServiceStub,
-          request: GetLedgerIdentityRequest,
-      ): Future[GetLedgerIdentityResponse] =
-        service.getLedgerIdentity(request)
-
-      override def handleResponse(response: GetLedgerIdentityResponse): Either[String, String] =
-        Right(response.ledgerId)
-    }
-  }
 
   object TransactionService {
 
@@ -145,10 +115,11 @@ object LedgerApiCommands {
         TransactionServiceGrpc.stub(channel)
     }
 
-    final case class GetLedgerEnd(ledgerId: LedgerId)
+    final case class GetLedgerEnd()
         extends BaseCommand[GetLedgerEndRequest, GetLedgerEndResponse, LedgerOffset] {
-      override def createRequest(): Either[String, GetLedgerEndRequest] =
-        Right(GetLedgerEndRequest(ledgerId = ledgerId))
+      override def createRequest(): Either[String, GetLedgerEndRequest] = Right(
+        GetLedgerEndRequest()
+      )
       override def submitRequest(
           service: TransactionServiceStub,
           request: GetLedgerEndRequest,
@@ -162,8 +133,6 @@ object LedgerApiCommands {
         extends BaseCommand[GetTransactionsRequest, AutoCloseable, AutoCloseable] {
       // The subscription should never be cut short because of a gRPC timeout
       override def timeoutType: TimeoutType = ServerEnforcedTimeout
-
-      def ledgerId: LedgerId
 
       def observer: StreamObserver[Res]
 
@@ -187,7 +156,6 @@ object LedgerApiCommands {
 
       override def createRequest(): Either[String, GetTransactionsRequest] = Right {
         GetTransactionsRequest(
-          ledgerId = ledgerId,
           begin = Some(begin),
           end = end,
           verbose = verbose,
@@ -211,7 +179,6 @@ object LedgerApiCommands {
     }
 
     final case class SubscribeTrees(
-        override val ledgerId: LedgerId,
         override val observer: StreamObserver[TransactionTree],
         override val begin: LedgerOffset,
         override val end: Option[LedgerOffset],
@@ -233,7 +200,6 @@ object LedgerApiCommands {
     }
 
     final case class SubscribeFlat(
-        override val ledgerId: LedgerId,
         override val observer: StreamObserver[Transaction],
         override val begin: LedgerOffset,
         override val end: Option[LedgerOffset],
@@ -252,15 +218,14 @@ object LedgerApiCommands {
         response.transactions
     }
 
-    final case class GetTransactionById(ledgerId: LedgerId, parties: Set[LfPartyId], id: String)(
-        implicit ec: ExecutionContext
+    final case class GetTransactionById(parties: Set[LfPartyId], id: String)(implicit
+        ec: ExecutionContext
     ) extends BaseCommand[GetTransactionByIdRequest, GetTransactionResponse, Option[
           TransactionTree
         ]]
         with PrettyPrinting {
       override def createRequest(): Either[String, GetTransactionByIdRequest] = Right {
         GetTransactionByIdRequest(
-          ledgerId = ledgerId,
           transactionId = id,
           requestingParties = parties.toSeq,
         )
@@ -287,7 +252,6 @@ object LedgerApiCommands {
       override def pretty: Pretty[GetTransactionById] =
         prettyOfClass(
           param("id", _.id.unquoted),
-          param("ledgerId", _.ledgerId.singleQuoted),
           param("parties", _.parties),
         )
     }
@@ -390,11 +354,11 @@ object LedgerApiCommands {
         CommandCompletionServiceGrpc.stub(channel)
     }
 
-    final case class CompletionEnd(ledgerId: LedgerId)
+    final case class CompletionEnd()
         extends BaseCommand[CompletionEndRequest, CompletionEndResponse, LedgerOffset] {
 
       override def createRequest(): Either[String, CompletionEndRequest] =
-        Right(CompletionEndRequest(ledgerId = ledgerId))
+        Right(CompletionEndRequest())
 
       override def submitRequest(
           service: CommandCompletionServiceStub,
@@ -406,7 +370,6 @@ object LedgerApiCommands {
     }
 
     final case class CompletionRequest(
-        ledgerId: LedgerId,
         partyId: LfPartyId,
         offset: LedgerOffset,
         expectedCompletions: Int,
@@ -418,7 +381,6 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, CompletionStreamRequest] =
         Right(
           CompletionStreamRequest(
-            ledgerId = ledgerId,
             applicationId = applicationId,
             parties = Seq(partyId),
             offset = Some(offset),
@@ -447,7 +409,6 @@ object LedgerApiCommands {
     }
 
     final case class CompletionCheckpointRequest(
-        ledgerId: LedgerId,
         partyId: LfPartyId,
         offset: LedgerOffset,
         expectedCompletions: Int,
@@ -461,7 +422,6 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, CompletionStreamRequest] =
         Right(
           CompletionStreamRequest(
-            ledgerId = ledgerId,
             applicationId = applicationId,
             parties = Seq(partyId),
             offset = Some(offset),
@@ -517,7 +477,6 @@ object LedgerApiCommands {
     }
 
     final case class GetLedgerConfiguration(
-        ledgerId: LedgerId,
         expectedConfigs: Int,
         timeout: FiniteDuration,
     )(scheduler: ScheduledExecutorService)
@@ -526,7 +485,7 @@ object LedgerApiCommands {
         ]] {
 
       override def createRequest(): Either[String, GetLedgerConfigurationRequest] =
-        Right(GetLedgerConfigurationRequest(ledgerId = ledgerId))
+        Right(GetLedgerConfigurationRequest())
 
       override def submitRequest(
           service: LedgerConfigurationServiceStub,
@@ -555,7 +514,6 @@ object LedgerApiCommands {
   }
 
   private[commands] trait SubmitCommand extends PrettyPrinting {
-    def ledgerId: LedgerId
     def actAs: Seq[LfPartyId]
     def commands: Seq[Command]
     def workflowId: String
@@ -565,7 +523,6 @@ object LedgerApiCommands {
     def minLedgerTimeAbs: Option[Instant]
 
     protected def mkCommand: CommandsV1 = CommandsV1(
-      ledgerId = ledgerId,
       workflowId = workflowId,
       applicationId = applicationId,
       commandId = if (commandId.isEmpty) UUID.randomUUID().toString else commandId,
@@ -595,7 +552,6 @@ object LedgerApiCommands {
         param("workflowId", _.workflowId.singleQuoted),
         param("submissionId", _.submissionId.singleQuoted),
         param("deduplicationPeriod", _.deduplicationPeriod),
-        param("ledgerId", _.ledgerId.singleQuoted),
         paramIfDefined("minLedgerTimeAbs", _.minLedgerTimeAbs),
         paramWithoutValue("commands"),
       )
@@ -609,7 +565,6 @@ object LedgerApiCommands {
     }
 
     final case class Submit(
-        override val ledgerId: LedgerId,
         override val actAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
@@ -642,7 +597,6 @@ object LedgerApiCommands {
     }
 
     final case class SubmitAndWaitTransactionTree(
-        override val ledgerId: LedgerId,
         override val actAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
@@ -676,7 +630,6 @@ object LedgerApiCommands {
     }
 
     final case class SubmitAndWaitTransaction(
-        override val ledgerId: LedgerId,
         override val actAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
@@ -714,7 +667,6 @@ object LedgerApiCommands {
     }
 
     final case class GetActiveContracts(
-        ledgerId: LedgerId,
         parties: Set[LfPartyId],
         limit: Option[Int] = None,
         templateFilter: Seq[P.TemplateId[_]] = Seq.empty,
@@ -735,7 +687,6 @@ object LedgerApiCommands {
           } else Filters.defaultInstance
         Right(
           GetActiveContractsRequest(
-            ledgerId = ledgerId,
             filter = Some(TransactionFilter(parties.map((_, filter)).toMap)),
             verbose = verbose,
           )
@@ -751,6 +702,7 @@ object LedgerApiCommands {
         val observer =
           new RecordingStreamObserver[GetActiveContractsResponse](limit.getOrElse(Int.MaxValue)) {
             override def onCompleted(): Unit = promise.success(this.responses)
+            override def onError(t: Throwable): Unit = promise.tryFailure(t).discard
           }
 
         service.getActiveContracts(

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.data.{NonEmptyList, NonEmptySet}
+import cats.data.NonEmptySet
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
@@ -57,10 +58,9 @@ class PartitionedTimestampGeneratorTest extends BaseTestWordSpec {
     }
 
     withClue("should increase") {
-      NonEmptyList.fromListUnsafe(timestamps.toList).reduceLeft[CantonTimestamp] {
-        case (first, second) =>
-          first shouldBe <(second)
-          second
+      NonEmptyUtil.fromUnsafe(timestamps).reduceLeft[CantonTimestamp] { case (first, second) =>
+        first shouldBe <(second)
+        second
       }
     }
   }

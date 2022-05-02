@@ -63,7 +63,8 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     val source = new InMemoryTopologyStore(loggerFactory)
     val target = new InMemoryTopologyStore(loggerFactory)
     val manager = new ParticipantTopologyManager(clock, source, crypto, timeouts, loggerFactory)
-    val dispatcher = new ParticipantTopologyDispatcher(manager, timeouts, loggerFactory)
+    val dispatcher =
+      new ParticipantTopologyDispatcher(manager, timeouts, loggerFactory)
     val handle = new MockHandle(expect, store = target)
     val client = mock[DomainTopologyClientWithInit]
     (source, target, manager, dispatcher, handle, client)
@@ -124,13 +125,24 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       .sequentialTraverse(transactions)(x => manager.authorize(x, Some(publicKey.fingerprint)))
       .value
 
+  private def dispatcherConnected(
+      dispatcher: ParticipantTopologyDispatcher,
+      handle: RegisterTopologyTransactionHandle,
+      client: DomainTopologyClientWithInit,
+      target: TopologyStore,
+  ): Future[Unit] = dispatcher
+    .domainConnected(domain, domainId, handle, client, target)
+    .value
+    .map(_ => ())
+    .onShutdown(())
+
   "dispatcher" should {
 
     "dispatch transaction on new connect" in {
       val (_source, target, manager, dispatcher, handle, client) = mk(transactions.length)
       for {
         res <- push(manager, transactions)
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
       } yield {
         res.value shouldBe a[Seq[_]]
@@ -141,7 +153,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     "dispatch transaction on existing connections" in {
       val (_, target, manager, dispatcher, handle, client) = mk(transactions.length)
       for {
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         res <- push(manager, transactions)
         _ <- handle.allObserved()
       } yield {
@@ -154,7 +166,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       val (_, target, manager, dispatcher, handle, client) = mk(slice1.length)
       for {
         _res <- push(manager, slice1)
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
         observed1 = handle.clear(slice2.length)
         _ <- push(manager, slice2)
@@ -168,13 +180,13 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     "not dispatch old data when reconnected" in {
       val (_, target, manager, dispatcher, handle, client) = mk(slice1.length)
       for {
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- push(manager, slice1)
         _ <- handle.allObserved()
         _ = handle.clear(slice2.length)
-        _ <- dispatcher.domainDisconnected(domain)
+        _ = dispatcher.domainDisconnected(domain)
         res2 <- push(manager, slice2)
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
       } yield {
         res2.value shouldBe a[Seq[_]]
@@ -193,10 +205,10 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         )
 
       for {
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- push(manager, transactions)
         _ <- handle.allObserved()
-        _ <- dispatcher.domainDisconnected(domain)
+        _ = dispatcher.domainDisconnected(domain)
         // add a remove and another add
         _ <- push(manager, Seq(midRevert, another))
         // ensure that topology manager properly processed this state
@@ -209,7 +221,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         _ = tis should not contain (another.element)
         // re-connect
         _ = handle.clear(2)
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
         tis <- target.headTransactions.map(_.toIdentityState)
       } yield {
@@ -223,7 +235,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       val midRevert = transactions(2).reverse
       for {
         res <- push(manager, transactions :+ midRevert)
-        _ <- dispatcher.domainConnected(domain, domainId, handle, client, target).onShutdown(fail())
+        _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
       } yield {
         res.value shouldBe a[Seq[_]]

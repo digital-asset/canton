@@ -4,10 +4,11 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.data.{EitherT, NonEmptySet}
+import cats.instances.vector._
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
-import cats.syntax.list._
+import cats.syntax.reducible._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -966,7 +967,7 @@ class DbSequencerStore(
         case (memberId, ts) if !disabledMembers.contains(memberId) => ts
       })
       // just take the lowest
-      .map(_.toList.toNel.map(_.reduceLeft(_ min _)))
+      .map(NonEmpty.from(_).map(_.toNEF.minimum))
   }
 
   override protected[store] def pruneEvents(

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -50,7 +50,7 @@ trait Phase37Processor[RequestBatch] {
 
 /** Request messages, along with the root hash message and the mediator ID that received the root hash message */
 final case class RequestAndRootHashMessage[RequestEnvelope](
-    requestEnvelopes: NonEmptyList[RequestEnvelope],
+    requestEnvelopes: NonEmpty[Seq[RequestEnvelope]],
     rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
     mediatorId: MediatorId,
 )

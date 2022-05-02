@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import cats.data.NonEmptyList
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.SecureRandomness
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
@@ -123,22 +122,18 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       }
 
       "correctly reconstruct the full transaction view trees from the lightweight ones" in {
-        val neAllLightTrees =
-          NonEmptyList.fromList(example.transactionTree.allLightTransactionViewTrees.toList)
-        val neAllTrees =
-          NonEmptyList.fromList(example.transactionTree.allTransactionViewTrees.toList)
+        val neAllLightTrees = NonEmpty.from(example.transactionTree.allLightTransactionViewTrees)
+        val neAllTrees = NonEmpty.from(example.transactionTree.allTransactionViewTrees)
         neAllLightTrees.flatMap(lvts =>
           LightTransactionViewTree.toAllFullViewTrees(lvts).toOption
         ) shouldBe neAllTrees
       }
 
       "correctly reconstruct the top-level transaction view trees from the lightweight ones" in {
-        val allLightTrees = example.transactionTree.allLightTransactionViewTrees.toList
-        val neAllLightTrees = NonEmptyList.fromList(allLightTrees)
+        val allLightTrees = example.transactionTree.allLightTransactionViewTrees
+        val neAllLightTrees = NonEmpty.from(allLightTrees)
         val neAllTrees =
-          NonEmptyList.fromList(
-            example.transactionTree.allTransactionViewTrees.filter(_.isTopLevel).toList
-          )
+          NonEmpty.from(example.transactionTree.allTransactionViewTrees.filter(_.isTopLevel))
 
         neAllLightTrees.flatMap(lvts =>
           LightTransactionViewTree.toToplevelFullViewTrees(lvts).toOption
@@ -168,7 +163,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
             allLightTrees.filter(_._2.flatten.contains(inf)).map(_._1).toList
           val res =
             LightTransactionViewTree
-              .toToplevelFullViewTrees(NonEmptyList.fromListUnsafe(allLightWeightForInf))
+              .toToplevelFullViewTrees(NonEmptyUtil.fromUnsafe(allLightWeightForInf))
               .value
           res.toList shouldBe topLevelForInf
         }

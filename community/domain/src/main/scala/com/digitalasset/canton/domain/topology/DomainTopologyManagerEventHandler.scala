@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
@@ -52,6 +53,9 @@ class DomainTopologyManagerEventHandler(
     with FlagCloseable
     with NamedLogging {
 
+  /** Human-readable name of the application handler for logging and debugging */
+  override def name: String = "domain-topology-manager-event-handler"
+
   override def apply(events: UnsignedEnvelopeBox[DefaultOpenEnvelope]): HandlerResult = {
     val requests: Seq[Traced[RegisterTopologyTransactionRequest]] = events.value.collect {
       case t @ Traced(Deliver(_sc, _ts, _, _, batch)) =>
@@ -63,6 +67,10 @@ class DomainTopologyManagerEventHandler(
       MonadUtil.sequentialTraverseMonoid(requests)(Traced.lift(handle(_)(_)))
     )
   }
+
+  override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
   private def handle(
       request: RegisterTopologyTransactionRequest

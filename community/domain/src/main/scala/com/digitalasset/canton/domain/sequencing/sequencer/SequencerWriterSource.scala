@@ -6,12 +6,13 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Merge, Source}
-import cats.data.{EitherT, NonEmptyList, OptionT, Validated, ValidatedNel}
+import cats.data.{EitherT, OptionT, Validated}
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -247,15 +248,15 @@ class SendEventGenerator(store: SequencerWriterStore, payloadIdGenerator: () => 
         memberIdO = registeredMember.map(_.memberId)
       } yield memberIdO.toRight(member).toValidated
 
-    def validateRecipients: Future[ValidatedNel[Member, Set[SequencerMemberId]]] =
+    def validateRecipients: Future[Validated[NonEmpty[Seq[Member]], Set[SequencerMemberId]]] =
       for {
-        validatedList <- submission.batch.allRecipients.toList
+        validatedSeq <- submission.batch.allRecipients.toSeq
           .traverse(validateRecipient)
-        validated = validatedList.traverse(_.toValidatedNel)
+        validated = validatedSeq.traverse(_.leftMap(NonEmpty(Seq, _)))
       } yield validated.map(_.toSet)
 
     def validateAndGenerateEvent(senderId: SequencerMemberId): Future[StoreEvent[Payload]] = {
-      def deliverError(unknownRecipients: NonEmptyList[Member]): DeliverErrorStoreEvent = {
+      def deliverError(unknownRecipients: NonEmpty[Seq[Member]]): DeliverErrorStoreEvent = {
         val message = String256M.tryCreate(
           s"Unknown recipients: ${unknownRecipients.toList.take(1000).mkString(", ")}"
         )

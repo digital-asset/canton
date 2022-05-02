@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.jce
 
-import cats.data.NonEmptySet
 import cats.syntax.either._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoProvider
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
@@ -203,7 +203,7 @@ class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
             (),
             JavaKeyConversionError.UnsupportedKeyScheme(
               scheme,
-              NonEmptySet.of(SigningKeyScheme.Ed25519),
+              NonEmpty.mk(Set, SigningKeyScheme.Ed25519),
             ),
           )
           _ <- ensureJceSupportedScheme(scheme)

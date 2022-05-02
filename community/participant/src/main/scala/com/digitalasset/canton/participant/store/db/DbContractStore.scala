@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable._
-import cats.syntax.list._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.{LfPartyId, checked}
@@ -343,12 +342,12 @@ class DbContractStore(
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext
   ): EitherT[Future, UnknownContracts, Map[LfContractId, Set[LfPartyId]]] =
-    ids.toList.toNel match {
+    NonEmpty.from(ids) match {
       case None => EitherT.rightT(Map.empty)
 
       case Some(idsNel) =>
         EitherT(
-          idsNel.toList
+          idsNel.forgetNE.toSeq
             .traverse(id => lookupContract(id).toRight(id).value)
             .map(_.collectRight)
             .map { contracts =>

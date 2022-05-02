@@ -32,7 +32,7 @@ object EnvelopeOpener {
   /** Opens the envelopes inside the [[EnvelopeBox]] before handing them to the given application handler. */
   def apply[Box[+_]](hashOps: HashOps)(
       handler: ApplicationHandler[Box, DefaultOpenEnvelope]
-  )(implicit Box: EnvelopeBox[Box]): ApplicationHandler[Box, ClosedEnvelope] = {
+  )(implicit Box: EnvelopeBox[Box]): ApplicationHandler[Box, ClosedEnvelope] = handler.replace {
     val opener = new EnvelopeOpener[Box](hashOps)
 
     closedEvent => handler(opener.open(closedEvent))

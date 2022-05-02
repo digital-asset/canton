@@ -5,8 +5,8 @@ package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.EitherT
 import cats.syntax.either._
-import cats.syntax.list._
 import cats.syntax.option._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -121,11 +121,12 @@ class AuthenticationTokenProvider(
       fingerprintsP: Seq[String],
   ): EitherT[Future, Status, AuthenticationTokenWithExpiry] =
     for {
-      fingerprintsValid <- fingerprintsP.toList
+      fingerprintsValid <- fingerprintsP
         .traverse(Fingerprint.fromProtoPrimitive)
         .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
         .toEitherT[Future]
-      fingerprintsNel <- fingerprintsValid.toNel
+      fingerprintsNel <- NonEmpty
+        .from(fingerprintsValid)
         .toRight(
           Status.INVALID_ARGUMENT
             .withDescription(s"Failed to deserialize fingerprints $fingerprintsP")

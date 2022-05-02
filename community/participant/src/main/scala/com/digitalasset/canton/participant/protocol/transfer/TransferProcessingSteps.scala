@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.option._
+import cats.syntax.traverse._
 import com.daml.lf.engine
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -140,14 +143,14 @@ trait TransferProcessingSteps[
   ]]
 
   override def decryptViews(
-      batch: NonEmptyList[OpenEnvelope[EncryptedViewMessage[RequestViewType]]],
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, DecryptedViews] = {
     val result = for {
-      decryptedEitherList <- batch.traverse(decryptTree(snapshot)(_).value)
-    } yield DecryptedViews(decryptedEitherList.toList)
+      decryptedEitherList <- batch.toNEF.traverse(decryptTree(snapshot)(_).value)
+    } yield DecryptedViews(decryptedEitherList)
     EitherT.right(result)
   }
 
@@ -181,9 +184,9 @@ trait TransferProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId]) =
-    (None, decryptedViews.head.unwrap.rootHash.some)
+    (None, decryptedViews.head1.unwrap.rootHash.some)
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
@@ -261,7 +264,7 @@ object TransferProcessingSteps {
 
   case object ReceivedNoRequests extends TransferProcessorError
 
-  case class ReceivedMultipleRequests[T](transferIds: NonEmptyList[T])
+  case class ReceivedMultipleRequests[T](transferIds: NonEmpty[Seq[T]])
       extends TransferProcessorError
 
   case class ReceivedWrongRootHash(transferOutRootHash: RootHash, rootHashMessageHash: RootHash)

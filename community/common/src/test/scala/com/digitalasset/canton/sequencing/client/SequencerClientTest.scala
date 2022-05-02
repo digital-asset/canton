@@ -99,11 +99,13 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
   )
   lazy val dummyHash: Hash = TestHash.digest(0)
 
-  lazy val alwaysSuccessfulHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] = _ =>
-    HandlerResult.done
+  lazy val alwaysSuccessfulHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
+    ApplicationHandler.success()
   lazy val failureException = new IllegalArgumentException("application handler failed")
-  lazy val alwaysFailingHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] = _ =>
-    HandlerResult.synchronous(FutureUnlessShutdown.failed(failureException))
+  lazy val alwaysFailingHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
+    ApplicationHandler.create("always-fails")(_ =>
+      HandlerResult.synchronous(FutureUnlessShutdown.failed(failureException))
+    )
 
   "subscribe" should {
     "throws if more than one handler is subscribed" in {
@@ -187,7 +189,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )
         _ <- env.subscribeAfter(
           deliver.timestamp,
-          { events =>
+          ApplicationHandler.create("") { events =>
             processed.set(true)
             alwaysSuccessfulHandler(events)
           },
@@ -208,7 +210,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )
         _ <- env.subscribeAfter(
           nextDeliver.timestamp.immediatePredecessor,
-          events => {
+          ApplicationHandler.create("") { events =>
             if (events.value.exists(_.counter == nextDeliver.counter)) {
               triggerNextDeliverHandling.set(true)
             }
@@ -247,7 +249,9 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val error = new RuntimeException("failed handler")
       val syncError = ApplicationHandlerException(error, deliver.counter, deliver.counter)
       val handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
-        _ => FutureUnlessShutdown.failed[AsyncResult](error)
+        ApplicationHandler.create("async-failure")(_ =>
+          FutureUnlessShutdown.failed[AsyncResult](error)
+        )
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(CantonTimestamp.MinValue, handler)
@@ -283,7 +287,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
     "completes the sequencer client if the application handler shuts down synchronously" in {
       val handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
-        _ => FutureUnlessShutdown.abortedDueToShutdown
+        ApplicationHandler.create("shutdown")(_ => FutureUnlessShutdown.abortedDueToShutdown)
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter(eventHandler = handler)
@@ -308,7 +312,9 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val asyncException = ApplicationHandlerException(error, deliver.counter, deliver.counter)
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
-        _ <- env.subscribeAfter(eventHandler = _ => asyncFailure)
+        _ <- env.subscribeAfter(
+          eventHandler = ApplicationHandler.create("async-failure")(_ => asyncFailure)
+        )
         closeReason <- loggerFactory.assertLogs(
           {
             for {
@@ -349,7 +355,10 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val asyncShutdown = HandlerResult.asynchronous(FutureUnlessShutdown.abortedDueToShutdown)
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
-        _ <- env.subscribeAfter(CantonTimestamp.MinValue, _ => asyncShutdown)
+        _ <- env.subscribeAfter(
+          CantonTimestamp.MinValue,
+          ApplicationHandler.create("async-shutdown")(_ => asyncShutdown),
+        )
         closeReason <- {
           for {
             _ <- transport.subscriber.value.sendToHandler(deliver)
@@ -358,7 +367,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
             _ <- transport.subscriber.value.sendToHandler(nextDeliver)
             _ <- client.flush()
             closeReason <- client.completion
-
           } yield closeReason
         }
       } yield {
@@ -375,7 +383,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )
         _ <- env.subscribeAfter(
           deliver.timestamp,
-          events => {
+          ApplicationHandler.create("") { events =>
             events.value.foreach(event => processedEvents.add(event.counter))
             alwaysSuccessfulHandler(events)
           },
@@ -440,7 +448,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
         _ <- client.subscribeTracking(
           sequencerCounterTrackerStore,
-          events => {
+          ApplicationHandler.create("") { events =>
             events.value.foreach(event => processedEvents.add(event.counter))
             alwaysSuccessfulHandler(events)
           },
@@ -467,7 +475,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )
         _ <- client.subscribeTracking(
           sequencerCounterTrackerStore,
-          events => {
+          ApplicationHandler.create("") { events =>
             events.value.foreach(event => processedEvents.add(event.counter))
             alwaysSuccessfulHandler(events)
           },
@@ -519,13 +527,14 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         deliver44.counter -> Promise[UnlessShutdown[Unit]](),
       )
 
-      def handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] = events => {
-        assert(events.value.size == 1)
-        promises.get(events.value(0).counter) match {
-          case None => HandlerResult.done
-          case Some(promise) => HandlerResult.asynchronous(FutureUnlessShutdown(promise.future))
+      def handler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] =
+        ApplicationHandler.create("") { events =>
+          assert(events.value.size == 1)
+          promises.get(events.value(0).counter) match {
+            case None => HandlerResult.done
+            case Some(promise) => HandlerResult.asynchronous(FutureUnlessShutdown(promise.future))
+          }
         }
-      }
 
       for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(

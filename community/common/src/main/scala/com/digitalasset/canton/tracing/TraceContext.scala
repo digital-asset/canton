@@ -4,8 +4,7 @@
 package com.digitalasset.canton.tracing
 
 import cats.Show.Shown
-import cats.data.NonEmptyList
-import cats.syntax.list._
+import com.daml.nonempty.NonEmpty
 import com.daml.{telemetry => damlTelemetry}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -23,6 +22,8 @@ import com.digitalasset.canton.v0
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.{Context => OpenTelemetryContext}
+
+import scala.collection.immutable
 
 /** Container for values tracing operations through canton.
   */
@@ -163,20 +164,21 @@ object TraceContext extends HasVersionedMessageCompanion[TraceContext] {
   /** Where we use batching operations create a separate trace-context but mention this in a debug log statement
     * linking it to the trace ids of the contained items. This will allow manual tracing via logs if ever needed.
     */
-  def ofBatch(items: Iterable[HasTraceContext])(logger: TracedLogger): TraceContext = {
-    val validTracesO = items.map(_.traceContext).filter(_.traceId.isDefined).toList.toNel
+  def ofBatch(items: immutable.Iterable[HasTraceContext])(logger: TracedLogger): TraceContext = {
+    val validTraces = items.map(_.traceContext).filter(_.traceId.isDefined)
 
-    validTracesO match {
+    NonEmpty.from(validTraces) match {
       case None => TraceContext.withNewTraceContext(identity) // just generate new trace context
-      case Some(NonEmptyList(traceContext, Nil)) =>
-        traceContext // there's only a single trace so stick with that
-      case Some(traces) =>
-        withNewTraceContext { implicit traceContext =>
-          // log that we're creating a single traceContext from many trace ids
-          val traceIds = traces.map(_.traceId).collect { case Some(traceId) => traceId }
-          logger.debug(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
-          traceContext
-        }
+      case Some(validTracesNE) =>
+        if (validTracesNE.sizeCompare(1) == 0)
+          validTracesNE.head1 // there's only a single trace so stick with that
+        else
+          withNewTraceContext { implicit traceContext =>
+            // log that we're creating a single traceContext from many trace ids
+            val traceIds = validTracesNE.map(_.traceId).collect { case Some(traceId) => traceId }
+            logger.debug(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
+            traceContext
+          }
     }
   }
 

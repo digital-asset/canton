@@ -24,7 +24,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       prepareO: Option[(CantonTimestamp, NonNegativeFiniteDuration)] = Some(
         (ts.immediatePredecessor, epsilonFD)
       )
-  ) = {
+  ): (TopologyTimestampPlusEpsilonTracker, InMemoryTopologyStore) = {
     val store = new InMemoryTopologyStore(loggerFactory)
     val tracker =
       new TopologyTimestampPlusEpsilonTracker(DefaultProcessingTimeouts.testing, loggerFactory)
@@ -43,8 +43,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       )
       store.updateState(CantonTimestamp.MinValue, Seq(), positive = Seq(tx)).futureValue
       unwrap(
-        TopologyTimestampPlusEpsilonTracker
-          .initialiseFromStore(tracker, store, ts, loggerFactory)
+        TopologyTimestampPlusEpsilonTracker.initializeFromStore(tracker, store, ts)
       ).futureValue
     }
     (tracker, store)

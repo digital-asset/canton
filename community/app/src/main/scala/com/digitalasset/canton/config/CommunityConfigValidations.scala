@@ -3,32 +3,36 @@
 
 package com.digitalasset.canton.config
 
-import cats.data.{Validated, ValidatedNel}
+import cats.data.Validated
 import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.version.ProtocolVersion
 
 private[config] trait ConfigValidations[C <: CantonConfig] {
-  final def validate(config: C): ValidatedNel[String, Unit] = validations.traverse_(_(config))
+  final def validate(config: C): Validated[NonEmpty[Seq[String]], Unit] =
+    validations.traverse_(_(config))
 
-  protected val validations: List[C => ValidatedNel[String, Unit]]
+  protected val validations: List[C => Validated[NonEmpty[Seq[String]], Unit]]
 }
 
 object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfig] {
   case class DbAccess(url: String, user: Option[String])
 
-  private val Valid: ValidatedNel[String, Unit] = Validated.validNel(())
-  type Validation = CantonCommunityConfig => ValidatedNel[String, Unit]
+  private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
+  type Validation = CantonCommunityConfig => Validated[NonEmpty[Seq[String]], Unit]
 
   override protected val validations: List[Validation] =
     List[Validation](noDuplicateStorage, atLeastOneNode) ++ genericValidations[
       CantonCommunityConfig
     ]
 
-  private[config] def genericValidations[C <: CantonConfig]: List[C => ValidatedNel[String, Unit]] =
+  private[config] def genericValidations[C <: CantonConfig]
+      : List[C => Validated[NonEmpty[Seq[String]], Unit]] =
     List(backwardsCompatibleLoggingConfig, developmentProtocolSafetyCheckDomains)
 
   /** Group node configs by db access to find matching db storage configs.
@@ -92,29 +96,33 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
     nodes.map { case (name, config) => s"${config.nodeTypeName} $name" }.mkString(",")
 
   /** Validate the config that the storage configuration is not shared between nodes. */
-  private def noDuplicateStorage(config: CantonCommunityConfig): ValidatedNel[String, Unit] = {
+  private def noDuplicateStorage(
+      config: CantonCommunityConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
     val dbAccessToNodes =
       extractNormalizedDbAccess(config.participantsByString, config.domainsByString)
 
-    dbAccessToNodes.toList
+    dbAccessToNodes.toSeq
       .traverse_ {
         case (dbAccess, nodes) if nodes.lengthCompare(1) > 0 =>
-          Validated.invalidNel(s"Nodes ${formatNodeList(nodes)} share same DB access: $dbAccess")
-        case _ => Validated.validNel(())
+          Validated.invalid(
+            NonEmpty(Seq, s"Nodes ${formatNodeList(nodes)} share same DB access: $dbAccess")
+          )
+        case _ => Validated.valid(())
       }
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   private def atLeastOneNode(
       config: CantonCommunityConfig
-  ): ValidatedNel[String, Unit] = {
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
     val CantonCommunityConfig(domains, participants, remoteDomains, remoteParticipants, _, _, _) =
       config
-    Validated.condNel(
+    Validated.cond(
       Seq(domains, participants, remoteDomains, remoteParticipants)
         .exists(_.nonEmpty),
       (),
-      "At least one node must be defined in the configuration",
+      NonEmpty(Seq, "At least one node must be defined in the configuration"),
     )
 
   }
@@ -122,13 +130,13 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
   /** Check that logging configs are backwards compatible but consistent */
   private def backwardsCompatibleLoggingConfig(
       config: CantonConfig
-  ): ValidatedNel[String, Unit] = {
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
     (config.monitoring.logMessagePayloads, config.monitoring.logging.api.messagePayloads) match {
       case (Some(fst), Some(snd)) =>
-        Validated.condNel(
+        Validated.cond(
           fst == snd,
           (),
-          backwardsCompatibleLoggingConfigErr,
+          NonEmpty(Seq, backwardsCompatibleLoggingConfigErr),
         )
       case _ => Valid
     }
@@ -139,7 +147,7 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
 
   private def developmentProtocolSafetyCheckDomains(
       config: CantonConfig
-  ): ValidatedNel[String, Unit] = {
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
     developmentProtocolSafetyCheck(config.domains.toSeq.map { case (k, v) =>
       (k, v.domainParameters)
     })
@@ -147,21 +155,24 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
 
   private[config] def developmentProtocolSafetyCheck(
       namesAndConfig: Seq[(InstanceName, DomainParametersConfig)]
-  ): ValidatedNel[String, Unit] = {
-    def toNel(
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    def toNe(
         name: String,
         protocolVersion: ProtocolVersion,
         flag: Boolean,
-    ): ValidatedNel[String, Unit] = {
-      Validated.condNel(
+    ): Validated[NonEmpty[Seq[String]], Unit] = {
+      Validated.cond(
         protocolVersion != ProtocolVersion.unstable_development || flag,
         (),
-        s"Protocol ${protocolVersion} for node ${name} requires you to explicitly set ...parameters.will-corrupt-your-system-dev-version-support = yes",
+        NonEmpty(
+          Seq,
+          s"Protocol ${protocolVersion} for node ${name} requires you to explicitly set ...parameters.will-corrupt-your-system-dev-version-support = yes",
+        ),
       )
     }
 
     namesAndConfig.toList.traverse_ { case (name, parameters) =>
-      toNel(
+      toNe(
         name.unwrap,
         parameters.protocolVersion.version,
         parameters.willCorruptYourSystemDevVersionSupport,

@@ -166,11 +166,11 @@ class RecordOrderPublisher(
   def scheduleAcsChangePublication(
       recordSequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-      requestCounterO: Option[RequestCounter],
+      requestCounter: RequestCounter,
       acsChange: AcsChange,
   )(implicit traceContext: TraceContext): Unit = {
     taskScheduler.scheduleTask(
-      AcsChangePublicationTask(recordSequencerCounter, timestamp, requestCounterO)(acsChange)
+      AcsChangePublicationTask(recordSequencerCounter, timestamp, requestCounter.some)(acsChange)
     )
   }
 

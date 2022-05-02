@@ -256,7 +256,7 @@ class TransferOutProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      correctRootHashes: NonEmptyList[WithRecipients[FullTransferOutTree]],
+      correctRootHashes: NonEmpty[Seq[WithRecipients[FullTransferOutTree]]],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       originSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -266,7 +266,7 @@ class TransferOutProcessingSteps(
     for {
       txOutRequestAndRecipients <- EitherT.cond[Future](
         correctRootHashes.toList.sizeCompare(1) == 0,
-        correctRootHashes.head,
+        correctRootHashes.head1,
         ReceivedMultipleRequests(correctRootHashes.map(_.unwrap.viewHash)): TransferProcessorError,
       )
       WithRecipients(txOutRequest, recipients) = txOutRequestAndRecipients

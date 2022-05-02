@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.foldable._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.Password
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -170,12 +171,12 @@ object JavaKeyConversionError {
 
   case class UnsupportedKeyScheme(
       scheme: SigningKeyScheme,
-      supportedSchemes: NonEmptySet[SigningKeyScheme],
+      supportedSchemes: NonEmpty[Set[SigningKeyScheme]],
   ) extends JavaKeyConversionError {
     override def pretty: Pretty[UnsupportedKeyScheme] =
       prettyOfClass(
         param("scheme", _.scheme),
-        param("supported schemes", _.supportedSchemes.toSortedSet),
+        param("supported schemes", _.supportedSchemes),
       )
   }
 

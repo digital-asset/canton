@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.NonEmptyList
 import cats.kernel.Monoid
 import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -34,11 +34,16 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * All mediator request related events that can be processed concurrently grouped by requestId.
   */
-case class MediatorEventStage(requests: Map[RequestId, Seq[Traced[MediatorEvent]]]) {
+case class MediatorEventStage(
+    requests: NonEmpty[Map[RequestId, NonEmpty[Seq[Traced[MediatorEvent]]]]]
+) {
   def mergeNewEvents(newEvents: MediatorEventStage): MediatorEventStage = {
     val mergedRequests = newEvents.requests.foldLeft(requests) {
       case (oldRequests, (requestId, newRequests)) =>
-        oldRequests + (requestId -> (requests.getOrElse(requestId, Seq.empty) ++ newRequests))
+        oldRequests.updated(
+          requestId,
+          requests.get(requestId).fold(newRequests)(old => old ++ newRequests),
+        )
     }
     copy(
       requests = mergedRequests
@@ -49,9 +54,9 @@ case class MediatorEventStage(requests: Map[RequestId, Seq[Traced[MediatorEvent]
 object MediatorEventStage {
 
   def apply(
-      events: NonEmptyList[MediatorEvent]
+      events: NonEmpty[Seq[MediatorEvent]]
   )(implicit traceContext: TraceContext): MediatorEventStage = {
-    val eventsByRequestId = events.map(Traced(_)).toList.groupBy(_.value.requestId)
+    val eventsByRequestId = events.map(Traced(_)).groupBy(_.value.requestId)
     MediatorEventStage(eventsByRequestId)
   }
 
@@ -95,12 +100,12 @@ class MediatorEventsProcessor(
   def handle(events: Seq[OrdinaryProtocolEvent])(implicit
       traceContext: TraceContext
   ): HandlerResult =
-    NonEmptyList.fromList(events.toList).fold(HandlerResult.done)(handle)
+    NonEmpty.from(events).fold(HandlerResult.done)(handle)
 
   private def handle(
-      events: NonEmptyList[OrdinaryProtocolEvent]
+      events: NonEmpty[Seq[OrdinaryProtocolEvent]]
   )(implicit traceContext: TraceContext): HandlerResult = {
-    val identityF = StripSignature(identityClientEventHandler)(Traced(events.toList))
+    val identityF = StripSignature(identityClientEventHandler)(Traced(events))
     for {
       determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(events))
       (hasIdentityUpdates, stages) = determinedStages
@@ -119,7 +124,7 @@ class MediatorEventsProcessor(
 
   private def executeStage()(stage: MediatorEventStage): HandlerResult = {
     for {
-      result <- stage.requests.toList traverse { case (requestId, events) =>
+      result <- stage.requests.forgetNE.toSeq.traverse { case (requestId, events) =>
         handleMediatorEvents(requestId, events)
       } map Monoid[AsyncResult].combineAll
     } yield result
@@ -195,7 +200,7 @@ class MediatorEventsProcessor(
         }
         .map(_.separate)
         .map { case (stillPendingRequests, timedOutRequests) =>
-          NonEmptyList.fromList(timedOutRequests).fold(this) { timedOutRequests =>
+          NonEmpty.from(timedOutRequests).fold(this) { timedOutRequests =>
             val timeoutEvents = timedOutRequests
               .map(requestId => MediatorEvent.Timeout(counter, timestamp, requestId))
 
@@ -207,11 +212,11 @@ class MediatorEventsProcessor(
   }
 
   private[mediator] def determineStages(
-      events: NonEmptyList[OrdinaryProtocolEvent]
+      events: NonEmpty[Seq[OrdinaryProtocolEvent]]
   ): Future[(Boolean, List[MediatorEventStage])] = {
     // work out requests that will timeout during this range of events
     // (keep in mind that they may receive a result during this time, in which case the timeout will be ignored)
-    val lastEventTimestamp = events.last.timestamp
+    val lastEventTimestamp = events.last1.timestamp
     val unfinalized = state.pendingRequestIdsBefore(lastEventTimestamp)
 
     val stagesF = events.foldLeft(Future.successful(EventProcessingStages(unfinalized))) {
@@ -276,7 +281,7 @@ class MediatorEventsProcessor(
       responses.map(res => MediatorEvent.Response(counter, timestamp, res.protocolMessage))
     } else Seq.empty
 
-    NonEmptyList.fromList(events.toList).map(MediatorEventStage(_))
+    NonEmpty.from(events).map(MediatorEventStage(_))
   }
 
 }

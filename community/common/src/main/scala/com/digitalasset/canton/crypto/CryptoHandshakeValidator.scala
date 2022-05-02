@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.NonEmptySet
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.crypto.CryptoFactory.CryptoScheme
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -11,7 +11,7 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 object CryptoHandshakeValidator {
 
   private def validateScheme[S](
-      required: NonEmptySet[S],
+      required: NonEmpty[Set[S]],
       schemeE: Either[String, CryptoScheme[S]],
   ): Either[String, Unit] =
     for {

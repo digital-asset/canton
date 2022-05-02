@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, NonEmptyChain, NonEmptyList}
+import cats.data.{EitherT, NonEmptyChain}
 import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
-import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.ledger.api.DeduplicationPeriod
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
@@ -598,8 +598,8 @@ abstract class ProtocolProcessor[
             logger.warn(s"Request $rc: Found malformed payload: $mp")
           }
 
-          _ <- correctRootHashes.toList match {
-            case Nil =>
+          _ <- NonEmpty.from(correctRootHashes) match {
+            case None =>
               val pendingDataAndResponseArgsE =
                 steps.pendingDataAndResponseArgsForMalformedPayloads(
                   ts,
@@ -618,10 +618,9 @@ abstract class ProtocolProcessor[
                   trackAndSendResponses(snapshot, contractsAndContinue)
               }
 
-            case head :: tail =>
-              val goodViews = NonEmptyList(head, tail)
+            case Some(goodViews) =>
               // All views with the same correct root hash declare the same mediator, so it's enough to look at the head
-              val declaredMediator = head.unwrap.mediatorId
+              val declaredMediator = goodViews.head1.unwrap.mediatorId
               if (declaredMediator == mediatorId) {
                 // Check whether the declared mediator is still an active mediator.
                 EitherT.right(snapshot.ipsSnapshot.isMediatorActive(mediatorId)).flatMap {
@@ -911,7 +910,7 @@ abstract class ProtocolProcessor[
           _ = ephemeral.recordOrderPublisher.scheduleAcsChangePublication(
             requestSequencerCounter,
             requestId.unwrap,
-            requestCounter.some,
+            requestCounter,
             AcsChange.fromCommitSet(commitSet),
           )
           requestTimestamp = requestId.unwrap

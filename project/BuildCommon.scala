@@ -5,7 +5,7 @@ import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.headerSources
 import org.scalafmt.sbt.ScalafmtPlugin
 import sbt.Keys._
 import sbt.internal.util.ManagedLogger
-import sbt.{Def, _}
+import sbt._
 import sbt.nio.Keys._
 import sbtassembly.AssemblyKeys._
 import sbtassembly.AssemblyPlugin.autoImport.assembly
@@ -52,7 +52,7 @@ object BuildCommon {
       Seq(
         organization := "com.digitalasset.canton",
         scalaVersion := scala_version,
-        resolvers ++= Seq(sys.env.contains("DAML_SNAPSHOT")).collect { case true =>
+        resolvers ++= Seq(Dependencies.use_custom_daml_version).collect { case true =>
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
         },
         // , scalacOptions += "-Ystatistics" // re-enable if you need to debug compile times
@@ -150,18 +150,21 @@ object BuildCommon {
     ).value
   }
 
-  def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): Unit = {
+  def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String = {
     import scala.sys.process.Process
     val processLogger = new DamlPlugin.BufferedLogger
     log.debug(s"Running ${command}")
     val exitCode = Process(command) ! processLogger
+    val output = processLogger.output()
     if (exitCode != 0) {
-      log.error(processLogger.output())
-      throw new IllegalStateException(
-        optError.getOrElse(s"A problem occurred when executing command `$command` in `build.sbt`.")
-      )
+      val errorMsg = s"A problem occurred when executing command `$command` in `build.sbt`: ${System
+        .lineSeparator()} $output"
+      log.error(errorMsg)
+      if (optError.isDefined) log.error(optError.getOrElse(""))
+      throw new IllegalStateException(errorMsg)
     }
-    println(processLogger.output())
+    if (output != "") log.info(processLogger.output())
+    output
   }
 
   def formatCoverageExcludes(excludes: String): String =

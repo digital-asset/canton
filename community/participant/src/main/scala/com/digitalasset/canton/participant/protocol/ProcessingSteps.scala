@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative._
 import com.daml.ledger.api.DeduplicationPeriod
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
@@ -296,7 +297,7 @@ trait ProcessingSteps[
     * @return The decrypted views and the errors encountered during decryption
     */
   def decryptViews(
-      batch: NonEmptyList[OpenEnvelope[EncryptedViewMessage[RequestViewType]]],
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
@@ -339,7 +340,7 @@ trait ProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
       malformedPayloads: Seq[MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -373,7 +374,7 @@ trait ProcessingSteps[
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId])
 
   /** Phase 3, step 2 (submission where the chosen mediator is inactive)

@@ -237,14 +237,18 @@ class SequencedEventValidator(
       case (true, _) | (_, None) =>
         // TODO(i4933) once we have topology data on the sequencer api, we might fetch the domain keys
         //  and use the domain keys to validate anything here if we are unauthenticated
+        logger.debug(
+          s"Skipping sequenced event validation for counter ${event.counter} and timestamp ${event.timestamp}"
+        )
         EitherT.pure(())
       case (_, Some(previousTs)) =>
         val topologyStateKnownUntil = syncCryptoApi.topologyKnownUntilTimestamp
-        import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax.EitherTOnShutdownSyntax
+        import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 
         def performValidation(
             timestamp: CantonTimestamp
         ): EitherT[FutureUnlessShutdown, SequencedEventValidationError, Unit] = {
+          logger.debug(s"Wait for topology snapshot at $timestamp")
           for {
             snapshot <- EitherT.right(
               timely.supervisedUS(
@@ -283,9 +287,12 @@ class SequencedEventValidator(
           // this will be correct also during replays where we already know the topology state of the future
           // in most cases, this should work directly, as the "topology state" is known ahead, so we don't need
           // to wait until previous processing has finished before we can check the signatures here
-          if (evaluationTs <= topologyStateKnownUntil)
+          if (evaluationTs <= topologyStateKnownUntil) {
+            logger.debug(
+              s"Evaluation timestamp $evaluationTs is before or at known timestamp $topologyStateKnownUntil"
+            )
             FutureUnlessShutdown.pure(evaluationTs)
-          else {
+          } else {
             // the evaluationTs is newer than we know. this can be due to three reasons:
             // (1) we do not have a last update
             // (2) the last update has been before (timestamp - epsilon)
@@ -303,6 +310,9 @@ class SequencedEventValidator(
               s"searching for topology-change-delay at ts $previousTs for event at ${event.timestamp}(tsOfSign=${event.signedEvent.timestampOfSigningKey}) with previous=$previousTsO and known=$topologyStateKnownUntil",
             ).map { topologyChangeDelay =>
               val thresholdTs = previousTs.plus(topologyChangeDelay)
+              logger.debug(
+                s"Found topology change delay $topologyChangeDelay for $previousTs. Threshold timestamp for event validation is $thresholdTs."
+              )
               if (evaluationTs > thresholdTs)
                 thresholdTs.immediateSuccessor
               else

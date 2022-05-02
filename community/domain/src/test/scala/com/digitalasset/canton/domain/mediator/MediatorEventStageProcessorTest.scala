@@ -19,6 +19,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.sequencing.{
+  ApplicationHandler,
   HandlerResult,
   OrdinaryProtocolEvent,
   RawProtocolEvent,
@@ -68,7 +69,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       dynamicDomainParameters: List[DynamicDomainParameters.WithValidity] =
         defaultDynamicDomainParameters
   ) {
-    val identityClientEventHandler: UnsignedProtocolEventHandler = _ => HandlerResult.done
+    val identityClientEventHandler: UnsignedProtocolEventHandler = ApplicationHandler.success()
     val receivedEvents = mutable.Buffer[(RequestId, Seq[Traced[MediatorEvent]])]()
 
     val state = new MediatorState(

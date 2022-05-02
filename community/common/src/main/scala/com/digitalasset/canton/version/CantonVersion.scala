@@ -23,7 +23,7 @@ import scala.annotation.tailrec
 import scala.util.Try
 
 /** Trait that represents how a version in Canton is modelled. */
-trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
+sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
 
   def major: Int
   def minor: Int
@@ -139,7 +139,7 @@ object CantonVersion {
 
 }
 
-trait CompanionTrait {
+sealed trait CompanionTrait {
   protected def createInternal(
       rawVersion: String
   ): Either[String, (Int, Int, Int, Option[String])] = {
@@ -317,7 +317,8 @@ object ProtocolVersion extends CompanionTrait {
 sealed trait HandshakeError {
   def description: String
 }
-case class MinProtocolError(
+
+final case class MinProtocolError(
     server: ProtocolVersion,
     clientMinimumProtocolVersion: Option[ProtocolVersion],
     clientSupportsRequiredVersion: Boolean,
@@ -329,7 +330,7 @@ case class MinProtocolError(
       s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the domain and would be able to connect to the domain if the minimum required version is configured to be lower."} "
 }
 
-case class VersionNotSupportedError(
+final case class VersionNotSupportedError(
     server: ProtocolVersion,
     clientSupportedVersions: Seq[ProtocolVersion],
 ) extends HandshakeError {

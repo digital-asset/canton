@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
 import cats.instances.future._
 import cats.syntax.either._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
   CryptoConfig,
   CryptoProvider,
@@ -34,7 +35,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 object CryptoFactory {
 
-  case class CryptoScheme[S](default: S, allowed: NonEmptySet[S])
+  case class CryptoScheme[S](default: S, allowed: NonEmpty[Set[S]])
 
   def selectSchemes[S](
       configured: CryptoSchemeConfig[S],
@@ -59,22 +60,22 @@ object CryptoFactory {
 
   def selectAllowedSymmetricKeySchemes(
       config: CryptoConfig
-  ): Either[String, NonEmptySet[SymmetricKeyScheme]] =
+  ): Either[String, NonEmpty[Set[SymmetricKeyScheme]]] =
     selectSchemes(config.symmetric, config.provider.symmetric).map(_.allowed)
 
   def selectAllowedHashAlgorithms(
       config: CryptoConfig
-  ): Either[String, NonEmptySet[HashAlgorithm]] =
+  ): Either[String, NonEmpty[Set[HashAlgorithm]]] =
     selectSchemes(config.hash, config.provider.hash).map(_.allowed)
 
   def selectAllowedSigningKeyScheme(
       config: CryptoConfig
-  ): Either[String, NonEmptySet[SigningKeyScheme]] =
+  ): Either[String, NonEmpty[Set[SigningKeyScheme]]] =
     selectSchemes(config.signing, config.provider.signing).map(_.allowed)
 
   def selectAllowedEncryptionKeyScheme(
       config: CryptoConfig
-  ): Either[String, NonEmptySet[EncryptionKeyScheme]] =
+  ): Either[String, NonEmpty[Set[EncryptionKeyScheme]]] =
     selectSchemes(config.encryption, config.provider.encryption).map(_.allowed)
 
   def create(

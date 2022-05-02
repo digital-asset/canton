@@ -26,11 +26,8 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
   SyncDomainPersistentStateFactory,
 }
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
-import com.digitalasset.canton.participant.topology.{
-  ParticipantTopologyDispatcher,
-  ParticipantTopologyManagerError,
-}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
@@ -70,7 +67,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
   )(
       nodeId: NodeId,
-      identityPusher: ParticipantTopologyDispatcher,
+      authorizedStore: TopologyStore,
       cryptoApiProvider: SyncCryptoApiProvider,
       cryptoConfig: CryptoConfig,
       topologyStoreFactory: TopologyStoreFactory,
@@ -160,7 +157,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
               domainId,
               targetDomainStore,
               Map(),
-              None,
               packageDependencies,
               participantNodeParameters.cachingConfigs,
               timeouts,
@@ -258,7 +254,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
               clock,
               config.timeTracker,
               participantNodeParameters.processingTimeouts,
-              identityPusher,
+              authorizedStore,
               targetDomainStore,
               topologyClient,
               loggerFactory,
@@ -275,11 +271,12 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
           } yield ()
         }
 
-      sequencerClient <- sequencerClientFactory(
-        participantId,
-        persistentState.sequencedEventStore,
-        persistentState.sendTrackerStore,
-      )
+      sequencerClient <- sequencerClientFactory
+        .create(
+          participantId,
+          persistentState.sequencedEventStore,
+          persistentState.sendTrackerStore,
+        )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
         )

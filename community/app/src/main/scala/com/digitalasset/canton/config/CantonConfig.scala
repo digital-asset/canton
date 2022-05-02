@@ -4,9 +4,11 @@
 package com.digitalasset.canton.config
 
 import cats.Order
-import cats.data.{NonEmptyList, ValidatedNel}
+import cats.data.Validated
 import cats.syntax.either._
 import cats.syntax.functor._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
@@ -315,7 +317,7 @@ trait CantonConfig {
   def dumpString: String
 
   /** run a validation on the current config and return possible warning messages */
-  def validate: ValidatedNel[String, Unit]
+  def validate: Validated[NonEmpty[Seq[String]], Unit]
 
   private lazy val domainNodeParameters_ : Map[InstanceName, DomainNodeParameters] = domains.fmap {
     domainConfig =>
@@ -443,10 +445,10 @@ object CantonConfig {
 
   implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
 
-  import cats.instances.order._
   import pureconfig.ConfigReader
   import pureconfig.generic.semiauto._
   import pureconfig.module.cats._
+  import com.daml.nonempty.NonEmptyUtil.instances._
 
   final case class NonNegativeFiniteDurationError(input: String, reason: String)
       extends FailureReason {
@@ -1218,7 +1220,7 @@ object CantonConfig {
     * @return [[scala.Right]] [[com.typesafe.config.Config]] if parsing was successful.
     */
   def parseAndMergeConfigs(
-      files: NonEmptyList[File]
+      files: NonEmpty[Seq[File]]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, Config] = {
     val baseConfig = ConfigFactory.load()
     for {
@@ -1236,7 +1238,7 @@ object CantonConfig {
     * @return [[scala.Right]] [[com.typesafe.config.Config]] if parsing was successful.
     */
   def parseAndMergeJustCLIConfigs(
-      files: NonEmptyList[File]
+      files: NonEmpty[Seq[File]]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, Config] = {
     for {
       verifiedFiles <- verifyThatFilesCanBeRead(files)
@@ -1246,8 +1248,8 @@ object CantonConfig {
   }
 
   private def verifyThatFilesCanBeRead(
-      files: NonEmptyList[File]
-  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, NonEmptyList[File]] = {
+      files: NonEmpty[Seq[File]]
+  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, NonEmpty[Seq[File]]] = {
     val filesThatCannotBeRead = files.filterNot(_.canRead)
     Either.cond(
       filesThatCannotBeRead.isEmpty,
@@ -1257,10 +1259,10 @@ object CantonConfig {
   }
 
   private def parseConfigs(
-      files: NonEmptyList[File]
-  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, NonEmptyList[Config]] = {
+      files: NonEmpty[Seq[File]]
+  )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, NonEmpty[Seq[Config]]] = {
     import cats.implicits._
-    files
+    files.toNEF
       .traverse(f => Either.catchOnly[ConfigException](ConfigFactory.parseFile(f)).toValidatedNec)
       .toEither
       .leftMap(errs => CannotParseFilesError.Error(errs.toList))
@@ -1284,8 +1286,8 @@ object CantonConfig {
   /** Merge a number of [[com.typesafe.config.Config]] instances into a single [[com.typesafe.config.Config]].
     * If the same key is included in multiple configurations, then the last definition has highest precedence.
     */
-  def mergeConfigs(configs: NonEmptyList[Config]): Config =
-    mergeConfigs(configs.head, configs.tail)
+  def mergeConfigs(configs: NonEmpty[Seq[Config]]): Config =
+    mergeConfigs(configs.head1, configs.tail1)
 
   /** Parses the provided files to generate a [[com.typesafe.config.Config]], then attempts to load the
     * [[com.typesafe.config.Config]] based on the given ClassTag. Will return an error (but not log anything) if
@@ -1300,7 +1302,7 @@ object CantonConfig {
       files: Seq[File]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, ConfClass] = {
     for {
-      nonEmpty <- NonEmptyList.fromList(files.toList).toRight(NoConfigFiles.Error())
+      nonEmpty <- NonEmpty.from(files).toRight(NoConfigFiles.Error())
       parsedAndMerged <- parseAndMergeConfigs(nonEmpty)
       loaded <- loadAndValidate[ConfClass](parsedAndMerged)
     } yield loaded

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.NonEmptySet
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.serialization.DeserializationError
@@ -26,12 +25,12 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
   }
 
   def encryptionProvider(
-      supportedEncryptionKeySchemes: NonEmptySet[EncryptionKeyScheme],
-      supportedSymmetricKeySchemes: NonEmptySet[SymmetricKeyScheme],
+      supportedEncryptionKeySchemes: Set[EncryptionKeyScheme],
+      supportedSymmetricKeySchemes: Set[SymmetricKeyScheme],
       newCrypto: => Future[Crypto],
   ): Unit = {
 
-    forAll(supportedSymmetricKeySchemes.toSortedSet) { symmetricKeyScheme =>
+    forAll(supportedSymmetricKeySchemes) { symmetricKeyScheme =>
       s"Symmetric encrypt with $symmetricKeyScheme" should {
 
         def newSymmetricKey(crypto: Crypto): SymmetricKey =
@@ -115,7 +114,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
       }
     }
 
-    forAll(supportedEncryptionKeySchemes.toSortedSet) { encryptionKeyScheme =>
+    forAll(supportedEncryptionKeySchemes) { encryptionKeyScheme =>
       s"Hybrid encrypt with $encryptionKeyScheme" should {
 
         def newPublicKey(crypto: Crypto): Future[EncryptionPublicKey] =

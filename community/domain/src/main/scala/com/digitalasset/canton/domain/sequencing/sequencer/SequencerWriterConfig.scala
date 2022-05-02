@@ -4,24 +4,24 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.syntax.option._
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 
 sealed trait CommitMode {
-  private[sequencer] val postgresSettings: NonEmptyList[String]
+  private[sequencer] val postgresSettings: NonEmpty[Seq[String]]
 }
 
 object CommitMode {
 
   /** Synchronously commit to local and replicas (in psql this means synchronous_commit='on' or 'remote_write' and that synchronous_standby_names have been appropriately set) */
   case object Synchronous extends CommitMode {
-    override private[sequencer] val postgresSettings = NonEmptyList.of("on", "remote_write")
+    override private[sequencer] val postgresSettings = NonEmpty(Seq, "on", "remote_write")
   }
 
   /** Synchronously commit to the local database alone (in psql this means synchronous_commit='local') */
   case object Local extends CommitMode {
-    override private[sequencer] val postgresSettings = NonEmptyList.of("local")
+    override private[sequencer] val postgresSettings = NonEmpty(Seq, "local")
   }
 
   /** The default commit mode we expect a sequencer to be run in. */

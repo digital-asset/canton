@@ -443,6 +443,11 @@ class TestingOwnerWithKeys(
 
   }
 
+  object EncryptionKeys {
+    private implicit val ec = initEc
+    val key1 = genEncKey("enc-key1")
+  }
+
   object TestingTransactions {
     import SigningKeys._
     val namespaceKey = key1

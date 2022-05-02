@@ -3,9 +3,11 @@
 
 package com.digitalasset.canton.networking
 
-import cats.data.NonEmptyList
-import cats.syntax.reducible._
 import cats.syntax.either._
+import cats.syntax.reducible._
+import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.Port
 
 import java.net.URI
@@ -26,12 +28,14 @@ object Endpoint {
     *  whether they all use TLS or all don't. Will return an error if endpoints are not consistent in their usage
     * of TLS.
     */
-  def fromUris(connections: NonEmptyList[URI]): Either[String, (NonEmptyList[Endpoint], Boolean)] =
+  def fromUris(
+      connections: NonEmpty[Seq[URI]]
+  ): Either[String, (NonEmpty[Seq[Endpoint]], Boolean)] =
     for {
-      endpointsWithTlsFlag <- connections.traverse(fromUri)
+      endpointsWithTlsFlag <- connections.toNEF.traverse(fromUri)
       (endpoints, tlsFlags) = (endpointsWithTlsFlag.map(_._1), endpointsWithTlsFlag.map(_._2))
       // check that they all are using TLS, or all aren't
-      useTls <- tlsFlags.reduceLeftM(Right(_): Either[String, Boolean])((a, b) =>
+      useTls <- tlsFlags.toNEF.reduceLeftM(Right(_): Either[String, Boolean])((a, b) =>
         Either.cond[String, Boolean](
           a == b,
           b,

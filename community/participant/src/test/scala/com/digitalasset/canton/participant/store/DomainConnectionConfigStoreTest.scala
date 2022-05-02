@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.data.NonEmptyList
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
@@ -29,10 +29,7 @@ trait DomainConnectionConfigStoreTest {
   private val config = DomainConnectionConfig(
     alias,
     GrpcSequencerConnection(
-      NonEmptyList(
-        Endpoint("host1", Port.tryCreate(500)),
-        List(Endpoint("host2", Port.tryCreate(600))),
-      ),
+      NonEmpty(Seq, Endpoint("host1", Port.tryCreate(500)), Endpoint("host2", Port.tryCreate(600))),
       false,
       Some(ByteString.copyFrom("stuff".getBytes)),
     ),
@@ -84,9 +81,10 @@ trait DomainConnectionConfigStoreTest {
         val secondConfig = DomainConnectionConfig(
           alias,
           GrpcSequencerConnection(
-            NonEmptyList(
+            NonEmpty(
+              Seq,
               Endpoint("newHost1", Port.tryCreate(500)),
-              List(Endpoint("newHost2", Port.tryCreate(600))),
+              Endpoint("newHost2", Port.tryCreate(600)),
             ),
             false,
             None,

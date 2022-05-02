@@ -47,7 +47,7 @@ class GrpcDomainRegistry(
     val participantId: ParticipantId,
     nodeId: NodeId,
     agreementService: AgreementService,
-    identityPusher: ParticipantTopologyDispatcher,
+    topologyDispatcher: ParticipantTopologyDispatcher,
     val aliasManager: DomainAliasManager,
     cryptoApiProvider: SyncCryptoApiProvider,
     cryptoConfig: CryptoConfig,
@@ -92,10 +92,9 @@ class GrpcDomainRegistry(
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
       import TraceContext.Implicits.Empty._
       List[AsyncOrSyncCloseable](
-        AsyncCloseable(
+        SyncCloseable(
           "topologyOutbox",
-          identityPusher.domainDisconnected(domainAlias),
-          timeouts.shutdownNetwork.duration,
+          topologyDispatcher.domainDisconnected(domainAlias),
         ),
         SyncCloseable("agreementService", agreementService.close()),
         SyncCloseable("sequencerClient", sequencerClient.close()),
@@ -129,7 +128,7 @@ class GrpcDomainRegistry(
         syncDomainPersistentStateFactory,
       )(
         nodeId,
-        identityPusher,
+        topologyDispatcher.manager.store,
         cryptoApiProvider,
         cryptoConfig,
         topologyStoreFactory,

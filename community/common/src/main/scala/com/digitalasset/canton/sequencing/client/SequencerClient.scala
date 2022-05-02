@@ -507,11 +507,12 @@ class SequencerClient(
         }
 
         // bulk-feed the event handler with everything that we already have in the SequencedEventStore
-        replayStartTimeExclusive = initialPriorEventO.fold(CantonTimestamp.MinValue)(_.timestamp)
+        replayStartTimeInclusive = initialPriorEventO
+          .fold(CantonTimestamp.MinValue)(_.timestamp)
+          .immediateSuccessor
         _ = logger.info(
-          s"Processing events from the SequencedEventStore from ${replayStartTimeExclusive.immediateSuccessor} on"
+          s"Processing events from the SequencedEventStore from ${replayStartTimeInclusive} on"
         )
-        replayStartTimeInclusive = replayStartTimeExclusive.immediateSuccessor
 
         replayEvents <- sequencedEventStore
           .findRange(
@@ -527,6 +528,23 @@ class SequencerClient(
                 )
               )
           }
+
+        // Bump up the resubscription start to the first event that we find in the store at or after the replay start.
+        // Since the `StoreSequencedEvent` handler transformation stores the sequenced event before it calls the application handler,
+        // we will signal `CantonTimestamp.MinValue` for the start of the resubscription only if
+        // the handler has never been called before.
+        resubscriptionStartsAt = replayEvents.headOption.fold(
+          if (initialPriorEventO.isEmpty) CantonTimestamp.MinValue else replayStartTimeInclusive
+        )(_.timestamp)
+        _ <- eventHandler
+          .resubscriptionStartsAt(resubscriptionStartsAt)
+          .onShutdown(
+            // TODO(#4638) properly propagate the shutdown
+            ErrorUtil.internalError(
+              new IllegalStateException("Shutdown during sequencer subscription.")
+            )
+          )
+
         eventBatches = replayEvents.grouped(config.eventInboxSize.unwrap)
         _ <- MonadUtil
           .sequentialTraverse_(eventBatches)(processEventBatch(eventHandler, _))
@@ -701,6 +719,9 @@ class SequencerClient(
           )
           validationResultOrErrF.value
         } else {
+          logger.debug(
+            s"Validating sequenced event with counter ${serializedEvent.counter} and timestamp ${serializedEvent.timestamp}"
+          )
           (for {
             _unit <- EitherT.liftF(processingDelay.delay(serializedEvent))
             _ <- validationResultOrErrF
@@ -793,9 +814,9 @@ class SequencerClient(
     * or [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]]
     * then [[applicationHandlerFailure]] contains an error.
     */
-  private def processEventBatch[E <: PossiblyIgnoredSequencedEvent[Envelope[_]]](
-      eventHandler: Traced[Seq[E]] => HandlerResult,
-      eventBatch: Seq[E],
+  private def processEventBatch[Box[+X] <: PossiblyIgnoredSequencedEvent[X], Env <: Envelope[_]](
+      eventHandler: ApplicationHandler[Lambda[`+X` => Traced[Seq[Box[X]]]], Env],
+      eventBatch: Seq[Box[Env]],
   ): EitherT[Future, ApplicationHandlerFailure, Unit] =
     eventBatch.lastOption.fold(EitherT.pure[Future, ApplicationHandlerFailure](())) { lastEvent =>
       applicationHandlerFailure.get.fold {
@@ -807,7 +828,9 @@ class SequencerClient(
           )
         val firstSc = firstEvent.counter
 
-        logger.debug(s"Passing ${eventBatch.size} events to the application handler.")
+        logger.debug(
+          s"Passing ${eventBatch.size} events to the application handler ${eventHandler.name}."
+        )
         // Measure only the synchronous part of the application handler so that we see how much the application handler
         // contributes to the sequential processing bottleneck.
         val asyncResultFT =
@@ -970,7 +993,7 @@ class SequencerClient(
 }
 
 trait SequencerClientFactory {
-  def apply(
+  def create(
       member: Member,
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
@@ -1006,7 +1029,7 @@ object SequencerClient {
       minimumProtocolVersion: Option[ProtocolVersion],
   ): SequencerClientFactory =
     new SequencerClientFactory {
-      override def apply(
+      override def create(
           member: Member,
           sequencedEventStore: SequencedEventStore,
           sendTrackerStore: SendTrackerStore,

@@ -243,8 +243,14 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
 
   /** returns transactions that should be dispatched to the domain */
   def findDispatchingTransactionsAfter(
-      timestamp: CantonTimestamp
+      timestampExclusive: CantonTimestamp,
+      limit: Option[Int] = None,
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]]
+
+  /** returns initial set of onboarding transactions that should be dispatched to the domain */
+  def findParticipantOnboardingTransactions(participantId: ParticipantId)(implicit
+      traceContext: TraceContext
+  ): Future[StoredTopologyTransactions[TopologyChangeOp]]
 
   /** returns an descending ordered list of timestamps of when participant state changes occurred before a certain point in time */
   def findTsOfParticipantStateChangesBefore(
@@ -258,7 +264,9 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
       implicit traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]]
 
-  def timestamp(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]]
+  def timestamp(useStateStore: Boolean = false)(implicit
+      traceContext: TraceContext
+  ): Future[Option[CantonTimestamp]]
 
   /** set of topology transactions which are active */
   def headTransactions(implicit
@@ -285,17 +293,16 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
       traceContext: TraceContext
   ): Future[Boolean]
 
-  /** bootstrap a sequencer node state from a topology transaction collection */
+  /** Bootstrap a node state from a topology transaction collection */
   def bootstrap(
       collection: StoredTopologyTransactions[TopologyChangeOp.Positive]
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val groupedByValidFrom = collection.result
+      .groupBy(_.validFrom)
+      .toList
+      .sortBy { case (validFrom, _) => validFrom }
     MonadUtil
-      .sequentialTraverse(
-        collection.result
-          .groupBy(_.validFrom)
-          .toList
-          .sortBy { case (validFrom, _) => validFrom }
-      ) { case (validFrom, transactions) =>
+      .sequentialTraverse_(groupedByValidFrom) { case (validFrom, transactions) =>
         val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
         for {
           _ <- append(validFrom, txs)
@@ -306,7 +313,7 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
           )
         } yield ()
       }
-      .map(_ => ())
+  }
 
   /** add validated topology transaction as is to the topology transaction table */
   def append(timestamp: CantonTimestamp, transactions: Seq[ValidatedTopologyTransaction])(implicit
@@ -577,6 +584,38 @@ object TopologyStore {
         case _ => (false, accumulated)
       }
     }
+  }
+
+  lazy val initialParticipantDispatchingSet = Set(
+    DomainTopologyTransactionType.ParticipantState,
+    DomainTopologyTransactionType.IdentifierDelegation,
+    DomainTopologyTransactionType.NamespaceDelegation,
+    DomainTopologyTransactionType.OwnerToKeyMapping,
+    DomainTopologyTransactionType.SignedLegalIdentityClaim,
+  )
+
+  // TODO(#6300) remove once we have proper authorization data stored
+  def filterInitialParticipantDispatchingTransactions(
+      participantId: ParticipantId,
+      transactions: StoredTopologyTransactions[TopologyChangeOp],
+  ): StoredTopologyTransactions[TopologyChangeOp] = {
+    def includeState(mapping: TopologyStateUpdateMapping): Boolean = mapping match {
+      case NamespaceDelegation(_, _, _) => true
+      case IdentifierDelegation(_, _) => true
+      case OwnerToKeyMapping(pid, _) => pid == participantId
+      case SignedLegalIdentityClaim(uid, _, _) => uid == participantId.uid
+      case ParticipantState(_, _, pid, _, _) => pid == participantId
+      case PartyToParticipant(_, _, _, _) => false
+      case VettedPackages(_, _) => false
+      case MediatorDomainState(_, _, _) => false
+    }
+    def include(mapping: TopologyMapping): Boolean = mapping match {
+      case mapping: TopologyStateUpdateMapping => includeState(mapping)
+      case _ => false
+    }
+    StoredTopologyTransactions(
+      transactions.result.filter(x => include(x.transaction.transaction.element.mapping))
+    )
   }
 
 }

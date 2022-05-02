@@ -56,14 +56,18 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
 import com.digitalasset.canton.sequencing.handlers.{CleanSequencerCounterTracker, EnvelopeOpener}
 import com.digitalasset.canton.sequencing.protocol.Batch
 import com.digitalasset.canton.sequencing.{
+  ApplicationHandler,
   DelayLogger,
   HandlerResult,
   PossiblyIgnoredApplicationHandler,
+  PossiblyIgnoredProtocolEvent,
 }
+import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -517,9 +521,22 @@ class SyncDomain(
         delayLogger,
         loggerFactory,
       )
-      eventHandler = monitor(
-        EnvelopeOpener(domainCrypto.crypto.pureCrypto)(messageDispatcher.handleAll(_))
-      )
+      messageHandler =
+        new ApplicationHandler[
+          Lambda[`+X` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
+          DefaultOpenEnvelope,
+        ] {
+          override def name: String = s"sync-domain-$domainId"
+
+          override def resubscriptionStartsAt(
+              ts: CantonTimestamp
+          )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+            topologyProcessor.resubscriptionStartsAt(ts)(traceContext)
+
+          override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
+            messageDispatcher.handleAll(events)
+        }
+      eventHandler = monitor(EnvelopeOpener(domainCrypto.crypto.pureCrypto)(messageHandler))
 
       cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         persistent.sequencerCounterTrackerStore,
@@ -541,7 +558,7 @@ class SyncDomain(
       // wait for initial topology transactions to be sequenced and received before we start computing pending
       // topology transactions to push for IDM approval
       _ <- waitForParticipantToBeInTopology(initializationTraceContext).onShutdown(Right(()))
-      _ <- EitherT(
+      _ <-
         identityPusher
           .domainConnected(
             domainHandle.domainAlias,
@@ -549,10 +566,9 @@ class SyncDomain(
             registerIdentityTransactionHandle,
             domainHandle.topologyClient,
             domainHandle.topologyStore,
-            pushAndClose = false,
           )(initializationTraceContext)
           .onShutdown(Right(()))
-      ).leftMap[SyncDomainInitializationError](ParticipantTopologyHandshakeError)
+          .leftMap[SyncDomainInitializationError](ParticipantTopologyHandshakeError)
 
     } yield {
       logger.debug(s"Started sync domain for $domainId")(initializationTraceContext)
@@ -771,7 +787,7 @@ object SyncDomain {
 
     def apply[Env](
         handler: PossiblyIgnoredApplicationHandler[Env]
-    ): PossiblyIgnoredApplicationHandler[Env] = { tracedBatch =>
+    ): PossiblyIgnoredApplicationHandler[Env] = handler.replace { tracedBatch =>
       tracedBatch.withTraceContext { implicit batchTraceContext => tracedEvents =>
         tracedEvents.lastOption.fold(HandlerResult.done) { lastEvent =>
           if (lastEvent.counter >= firstUnpersistedSc) {

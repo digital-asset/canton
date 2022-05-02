@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.bifunctor._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOps}
@@ -155,7 +156,7 @@ class TestProcessingSteps(
     ()
 
   override def decryptViews(
-      batch: NonEmptyList[OpenEnvelope[EncryptedViewMessage[TestViewType]]],
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TestViewType]]]],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext): EitherT[Future, TestProcessingError, DecryptedViews] = {
     def treeFor(viewHash: ViewHash, hash: Hash): TestViewTree = {
@@ -183,7 +184,7 @@ class TestProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[TestViewTree]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[TestViewTree]]],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       snapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
@@ -225,7 +226,7 @@ class TestProcessingSteps(
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      decryptedViews: NonEmptyList[WithRecipients[DecryptedView]],
+      decryptedViews: NonEmpty[Seq[WithRecipients[DecryptedView]]],
   )(implicit traceContext: TraceContext): (Option[TimestampedEvent], Option[PendingSubmissionId]) =
     (None, None)
 

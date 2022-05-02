@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.error
 
-import cats.data.NonEmptyList
 import com.daml.error._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.error_details.ErrorInfo
 import io.grpc.{Status, StatusRuntimeException}
@@ -259,12 +259,12 @@ trait CombinedError[+T <: BaseCantonError] {
 
   def loggingContext: ErrorLoggingContext
 
-  def errors: NonEmptyList[T]
+  def errors: NonEmpty[Seq[T]]
 
-  lazy val orderedErrors: NonEmptyList[T] = errors.sortBy(_.code.category.rank)
+  lazy val orderedErrors: NonEmpty[Seq[T]] = errors.sortBy(_.code.category.rank)
 
   override def cause: String = s"A series of ${errors.length} failures occurred"
 
-  override def code: ErrorCode = orderedErrors.head.code
+  override def code: ErrorCode = orderedErrors.head1.code
 
 }

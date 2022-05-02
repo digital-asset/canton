@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import cats.data.{EitherT, NonEmptyList, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
@@ -47,7 +47,6 @@ import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
-import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.{
   CursorPrehead,
   IndexedDomain,
@@ -1216,17 +1215,5 @@ object RepairService {
         )
     }
 
-  }
-
-  private case class DirtyRequestEvent(
-      timestamp: CantonTimestamp,
-      messageId: Option[MessageId],
-      viewHashes: NonEmptyList[ViewHash],
-  ) extends PrettyPrinting {
-    override def pretty: Pretty[DirtyRequestEvent] = prettyOfClass(
-      param("timestamp", _.timestamp),
-      paramIfDefined("message Id", _.messageId),
-      param("view hashes", _.viewHashes.toList),
-    )
   }
 }

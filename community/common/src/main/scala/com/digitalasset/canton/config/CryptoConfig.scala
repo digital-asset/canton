@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.config
 
-import cats.data.NonEmptySet
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{
   CryptoKeyFormat,
   EncryptionKeyScheme,
@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
-case class CryptoProviderScheme[S](default: S, supported: NonEmptySet[S]) {
+case class CryptoProviderScheme[S](default: S, supported: NonEmpty[Set[S]]) {
   require(supported.contains(default))
 }
 
@@ -26,7 +26,7 @@ sealed trait CryptoProvider extends PrettyPrinting {
   def symmetric: CryptoProviderScheme[SymmetricKeyScheme]
   def hash: CryptoProviderScheme[HashAlgorithm]
 
-  def supportedCryptoKeyFormats: NonEmptySet[CryptoKeyFormat]
+  def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]]
 
   override def pretty: Pretty[CryptoProvider.this.type] = prettyOfString(_.name)
 }
@@ -39,7 +39,8 @@ object CryptoProvider {
     override def signing: CryptoProviderScheme[SigningKeyScheme] =
       CryptoProviderScheme(
         SigningKeyScheme.Ed25519,
-        NonEmptySet.of(
+        NonEmpty(
+          Set,
           SigningKeyScheme.Ed25519,
           SigningKeyScheme.EcDsaP256,
           SigningKeyScheme.EcDsaP384,
@@ -49,20 +50,20 @@ object CryptoProvider {
     override def encryption: CryptoProviderScheme[EncryptionKeyScheme] =
       CryptoProviderScheme(
         EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
-        NonEmptySet.of(EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
+        NonEmpty.mk(Set, EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
       )
 
     override def symmetric: CryptoProviderScheme[SymmetricKeyScheme] =
       CryptoProviderScheme(
         SymmetricKeyScheme.Aes128Gcm,
-        NonEmptySet.of(SymmetricKeyScheme.Aes128Gcm),
+        NonEmpty.mk(Set, SymmetricKeyScheme.Aes128Gcm),
       )
 
     override def hash: CryptoProviderScheme[HashAlgorithm] =
-      CryptoProviderScheme(HashAlgorithm.Sha256, NonEmptySet.of(HashAlgorithm.Sha256))
+      CryptoProviderScheme(HashAlgorithm.Sha256, NonEmpty.mk(Set, HashAlgorithm.Sha256))
 
-    override def supportedCryptoKeyFormats: NonEmptySet[CryptoKeyFormat] =
-      NonEmptySet.of(CryptoKeyFormat.Tink)
+    override def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]] =
+      NonEmpty.mk(Set, CryptoKeyFormat.Tink)
   }
 
   case object Jce extends CryptoProvider {
@@ -71,7 +72,8 @@ object CryptoProvider {
     override def signing: CryptoProviderScheme[SigningKeyScheme] =
       CryptoProviderScheme(
         SigningKeyScheme.Ed25519,
-        NonEmptySet.of(
+        NonEmpty(
+          Set,
           SigningKeyScheme.Ed25519,
           SigningKeyScheme.EcDsaP256,
           SigningKeyScheme.EcDsaP384,
@@ -82,20 +84,20 @@ object CryptoProvider {
     override def encryption: CryptoProviderScheme[EncryptionKeyScheme] =
       CryptoProviderScheme(
         EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm,
-        NonEmptySet.of(EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
+        NonEmpty.mk(Set, EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm),
       )
 
     override def symmetric: CryptoProviderScheme[SymmetricKeyScheme] =
       CryptoProviderScheme(
         SymmetricKeyScheme.Aes128Gcm,
-        NonEmptySet.of(SymmetricKeyScheme.Aes128Gcm),
+        NonEmpty.mk(Set, SymmetricKeyScheme.Aes128Gcm),
       )
 
     override def hash: CryptoProviderScheme[HashAlgorithm] =
-      CryptoProviderScheme(HashAlgorithm.Sha256, NonEmptySet.of(HashAlgorithm.Sha256))
+      CryptoProviderScheme(HashAlgorithm.Sha256, NonEmpty.mk(Set, HashAlgorithm.Sha256))
 
-    override def supportedCryptoKeyFormats: NonEmptySet[CryptoKeyFormat] =
-      NonEmptySet.of(CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
+    override def supportedCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]] =
+      NonEmpty(Set, CryptoKeyFormat.Raw, CryptoKeyFormat.Der)
   }
 }
 
@@ -104,7 +106,10 @@ object CryptoProvider {
   * @param default The optional scheme to use. If none is specified, use the provider's default scheme of kind S.
   * @param allowed The optional allowed schemes to use. If none is specified, all the provider's supported schemes of kind S are allowed.
   */
-case class CryptoSchemeConfig[S](default: Option[S] = None, allowed: Option[NonEmptySet[S]] = None)
+case class CryptoSchemeConfig[S](
+    default: Option[S] = None,
+    allowed: Option[NonEmpty[Set[S]]] = None,
+)
 
 /** Cryptography configuration.
   *

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.NonEmptySet
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.SignatureCheckError.{InvalidSignature, SignatureWithWrongKey}
 import com.digitalasset.canton.crypto.SigningError.UnknownSigningKey
@@ -17,11 +16,11 @@ trait SigningTest extends BaseTest {
   this: AsyncWordSpecLike =>
 
   def signingProvider(
-      supportedSigningKeySchemes: NonEmptySet[SigningKeyScheme],
+      supportedSigningKeySchemes: Set[SigningKeyScheme],
       newCrypto: => Future[Crypto],
   ): Unit = {
 
-    forAll(supportedSigningKeySchemes.toSortedSet) { signingKeyScheme =>
+    forAll(supportedSigningKeySchemes) { signingKeyScheme =>
       s"Sign with $signingKeyScheme" should {
 
         def newPublicKey(crypto: Crypto): Future[SigningPublicKey] =

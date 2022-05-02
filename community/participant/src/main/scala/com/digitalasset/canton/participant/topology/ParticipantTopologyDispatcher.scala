@@ -3,18 +3,22 @@
 
 package com.digitalasset.canton.participant.topology
 
-import cats.syntax.either._
+import cats.data.EitherT
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  Lifecycle,
+  RunOnShutdown,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
 import com.digitalasset.canton.topology.transaction.{
@@ -23,18 +27,17 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
 }
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, retry}
-import com.digitalasset.canton.DomainAlias
-
-import java.util.concurrent.atomic.AtomicBoolean
-import scala.collection.concurrent.TrieMap
-import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
-import scala.util.{Failure, Success}
 import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
+import com.digitalasset.canton.util.{DelayUtil, ErrorUtil, FutureUtil, retry}
+import com.digitalasset.canton.{DiscardOps, DomainAlias}
+
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Future}
 
 sealed trait ParticipantIdentityDispatcherError
 
@@ -50,7 +53,7 @@ trait RegisterTopologyTransactionHandle extends FlagCloseable {
   * new topology transactions added to the manager to all connected domains.
   */
 class ParticipantTopologyDispatcher(
-    manager: ParticipantTopologyManager,
+    val manager: ParticipantTopologyManager,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -74,35 +77,31 @@ class ParticipantTopologyDispatcher(
         timestamp: CantonTimestamp,
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-      val mapped = transactions.map(tx => StoredTopologyTransaction(timestamp, None, tx))
-      domains.values.toList.traverse(_.enqueue(mapped)).map(_ => ())
+      val num = transactions.size
+      domains.values.toList
+        .traverse(_.newTransactionsAddedToAuthorizedStore(timestamp, num))
+        .map(_ => ())
     }
   })
 
   private val domains = new TrieMap[DomainAlias, DomainOutbox]()
 
-  def domainDisconnected(domain: DomainAlias)(implicit traceContext: TraceContext): Future[Unit] = {
-    def run(): Future[Unit] = {
-      domains.remove(domain) match {
-        case Some(outbox) =>
-          // close handle before outbox so handle can immediately stop waiting for responses
-          // and frees outbox to also complete closing itself
-          outbox.handle.close()
-          outbox.close()
-        case None =>
-      }
-      Future.unit
+  def domainDisconnected(domain: DomainAlias)(implicit traceContext: TraceContext): Unit = {
+    domains.remove(domain) match {
+      case Some(outbox) =>
+        outbox.close()
+      case None =>
+        logger.debug(s"Topology pusher already disconnected from $domain")
     }
-    // running synchronized to ensure we don't race with subsequent additions
-    manager.sequentialStoreRead(run(), s"disconnect from $domain")
   }
 
-  /** signal domain connection
+  /** Signal domain connection such that we resume topology transaction dispatching
     *
-    * @param pushAndClose if set to true, we will push the current state to the domain but
-    *                     immediately afterwards disconnect again.
-    *                     this is used to avoid race conditions between connect / disconnect
-    *                     during initial onboarding
+    * When connecting / reconnecting to a domain, we will first attempt to push out all
+    * pending topology transactions until we have caught up with the authorized store.
+    *
+    * This will guarantee that all parties known on this participant are active once the domain
+    * is marked as ready to process transactions.
     */
   def domainConnected(
       domain: DomainAlias,
@@ -110,254 +109,376 @@ class ParticipantTopologyDispatcher(
       handle: RegisterTopologyTransactionHandle,
       client: DomainTopologyClientWithInit,
       targetStore: TopologyStore,
-      pushAndClose: Boolean = false,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Either[DomainRegistryError, Unit]] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
 
-    val promise = Promise[UnlessShutdown[Either[DomainRegistryError, Unit]]]()
-
-    def notifyDomainHandshake(dispatcher: FutureUnlessShutdown[Unit]): Unit =
-      FutureUtil.doNotAwait(
-        dispatcher.unwrap.transform { result =>
-          promise.trySuccess(
-            result.sequence
-              .map(
-                _.toEither
-                  .leftMap(
-                    DomainRegistryError.DomainRegistryInternalError.TopologyHandshakeError(_)
-                  )
-              )
-          )
-          Success(())
-        },
-        "Notify domain handshake failed",
-      )
-
-    // sending the current snapshot is necessary as the domain handshake requires the topology transactions
-    // to be registered with the domain before proceeding
-    lazy val run = performUnlessClosingF {
-      if (!domains.contains(domain)) {
-        val outbox = new DomainOutbox(
-          domain,
-          domainId,
-          handle,
-          client,
-          manager.store,
-          targetStore,
-          timeouts,
-          loggerFactory.appendUnnamedKey("domain outbox", domain.unwrap),
-        )
-        // register new outbox if this isn't just push and close
-        if (!pushAndClose) {
-          domains += domain -> outbox
-        } else {
-          // otherwise ensure we close this outbox after succeeding
-          promise.future.thereafter { _ =>
-            outbox.handle.close()
-            outbox.close()
-          }
-        }
-        outbox.recomputeQueue.map { _ =>
-          // start the pushing. this will first copy and clear the queue
-          val resF = outbox.flush()
-          notifyDomainHandshake(resF)
-          // now that the queue is copied / cleared, we vacate the sequential read thread
-        }
-      } else {
-        Future.unit
-      }
-    }.onShutdown(())
-    // running this on the managers sequential processing queue to avoid race conditions
-    FutureUtil.doNotAwait(
-      manager
-        .sequentialStoreRead(run, s"connect to $domain")
-        .transform(
-          identity,
-          ex => {
-            promise.tryFailure(ex)
-            ex
-          },
-        ),
-      "sequential operation on topology manager failed",
+    val outbox = new DomainOutbox(
+      domain,
+      domainId,
+      handle,
+      client,
+      manager.store,
+      targetStore,
+      timeouts,
+      loggerFactory.appendUnnamedKey("domain", domain.unwrap),
     )
-    FutureUnlessShutdown(promise.future)
+    ErrorUtil.requireState(!domains.contains(domain), s"topology pusher for $domain already exists")
+    domains += domain -> outbox
+    outbox.startup()
+
   }
 
 }
 
 private class DomainOutbox(
     domain: DomainAlias,
-    domainId: DomainId,
+    val domainId: DomainId,
     val handle: RegisterTopologyTransactionHandle,
     val targetClient: DomainTopologyClientWithInit,
-    source: TopologyStore,
-    target: TopologyStore,
+    authorizedStore: TopologyStore,
+    val targetStore: TopologyStore,
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
+    // TODO(#9270) clean up how we parameterize our nodes
+    batchSize: Int = 100,
 )(implicit val ec: ExecutionContext)
-    extends FlagCloseable
-    with NamedLogging {
+    extends DomainOutboxDispatch {
 
-  private val queue = ListBuffer[StoredTopologyTransaction[TopologyChangeOp]]()
-  private val lock = new Object()
-  private val running = new AtomicBoolean(false)
+  private case class Watermarks(
+      queuedApprox: Int,
+      running: Boolean,
+      authorized: CantonTimestamp,
+      dispatched: CantonTimestamp,
+  ) {
+    def updateAuthorized(updated: CantonTimestamp, queuedNum: Int): Watermarks =
+      copy(
+        authorized = CantonTimestamp.max(authorized, updated),
+        queuedApprox = queuedApprox + queuedNum,
+      )
 
-  def queueSize: Int = blocking(lock.synchronized {
-    queue.size + (if (running.get()) 1 else 0)
-  })
+    def hasPending: Boolean = authorized != dispatched
 
-  def enqueue(
-      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = performUnlessClosingF {
-    onlyApplicable(transactions).map { filtered =>
-      blocking(lock.synchronized {
-        queue ++= filtered
-        kickOffFlush()
-      })
+  }
+
+  private val watermarks =
+    new AtomicReference[Watermarks](
+      Watermarks(0, false, CantonTimestamp.MinValue, CantonTimestamp.MinValue)
+    )
+  private val initialized = new AtomicBoolean(false)
+
+  def queueSize: Int = watermarks.get().queuedApprox
+
+  def newTransactionsAddedToAuthorizedStore(
+      asOf: CantonTimestamp,
+      num: Int,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    watermarks.updateAndGet(_.updateAuthorized(asOf, num)).discard
+
+    kickOffFlush()
+    FutureUnlessShutdown.unit
+  }
+
+  def startup()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
+    val loadWatermarksF = performUnlessClosingF(for {
+      // find the current target watermark
+      watermarkTsO <- targetStore.currentDispatchingWatermark
+      watermarkTs = watermarkTsO.getOrElse(CantonTimestamp.MinValue)
+      authorizedTsO <- authorizedStore.timestamp()
+      authorizedTs = authorizedTsO.getOrElse(CantonTimestamp.MinValue)
+      // update cached watermark
+    } yield {
+      val cur = watermarks.updateAndGet { c =>
+        val newAuthorized = CantonTimestamp.max(c.authorized, authorizedTs)
+        val newDispatched = CantonTimestamp.max(c.dispatched, watermarkTs)
+        c.copy(
+          // queuing statistics during startup will be a bit off, we just ensure that we signal that we have something in our queue
+          // we might improve by querying the store, checking for the number of pending tx
+          queuedApprox = c.queuedApprox + (if (newAuthorized != newDispatched) 1 else 0),
+          authorized = newAuthorized,
+          dispatched = newDispatched,
+        )
+      }
+      logger.debug(
+        s"Resuming dispatching, pending=${cur.hasPending}, authorized=${cur.authorized}, dispatched=${cur.dispatched}"
+      )
+      ()
+    })
+    for {
+      // load current authorized timestamp and watermark
+      _ <- EitherT.right(loadWatermarksF)
+      // run initial flush
+      _ <- flush(initialize = true).leftMap[DomainRegistryError](
+        DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(
+          _
+        )
+      )
+
+    } yield ()
+  }
+
+  private def kickOffFlush()(implicit traceContext: TraceContext): Unit = {
+    // It's fine to ignore shutdown because we do not await the future anyway.
+    if (initialized.get()) {
+      FutureUtil.doNotAwait(flush().value.unwrap, "domain outbox flusher")
     }
   }
 
-  private def onlyApplicable(
+  private def flush(initialize: Boolean = false)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    def markDone(delayRetry: Boolean = false): Unit = {
+      val updated = watermarks.getAndUpdate(_.copy(running = false))
+      // if anything has been pushed in the meantime, we need to kick off a new flush
+      if (updated.hasPending) {
+        if (delayRetry) {
+          // kick off new flush in the background
+          DelayUtil.delay(10.seconds, this).map(_ => kickOffFlush()).discard
+        } else {
+          kickOffFlush()
+        }
+      }
+    }
+
+    def findPendingTransactions(
+        watermarks: Watermarks
+    ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+      authorizedStore
+        .findDispatchingTransactionsAfter(
+          timestampExclusive = watermarks.dispatched,
+          limit = Some(batchSize),
+        )
+        .map(_.result)
+
+    val cur = watermarks.getAndUpdate(_.copy(running = true))
+    // only flush if we are not running yet
+    if (cur.running) {
+      EitherT.rightT(())
+    } else {
+      // mark as initialised (it's safe now for a concurrent thread to invoke flush as well)
+      if (initialize)
+        initialized.set(true)
+      if (cur.hasPending) {
+        val pendingAndApplicableF = performUnlessClosingF(for {
+          // find pending transactions
+          pending <- findPendingTransactions(cur)
+          // filter out applicable
+          applicablePotentiallyPresent <- onlyApplicable(pending)
+          // not already present
+          applicable <- notAlreadyPresent(applicablePotentiallyPresent)
+        } yield (pending, applicable))
+        val ret = for {
+          pendingAndApplicable <- EitherT.right(pendingAndApplicableF)
+          (pending, applicable) = pendingAndApplicable
+          // dispatch to domain
+          responses <- dispatch(domain, handle, transactions = applicable)
+          // update watermark according to responses
+          _ <- EitherT.right[String](updateWatermark(cur, pending, applicable, responses))
+        } yield ()
+        ret.transform {
+          case x @ Left(_) =>
+            markDone(delayRetry = true)
+            x
+          case x @ Right(_) =>
+            markDone()
+            x
+        }
+      } else {
+        markDone()
+        EitherT.rightT(())
+      }
+    }
+  }
+
+  private def updateWatermark(
+      current: Watermarks,
+      found: Seq[StoredTopologyTransaction[TopologyChangeOp]],
+      applicable: Seq[StoredTopologyTransaction[TopologyChangeOp]],
+      responses: Seq[RegisterTopologyTransactionResponse.Result],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val valid = applicable.zipWithIndex.zip(responses).foldLeft(true) {
+      case (valid, ((item, idx), response)) =>
+        if (item.transaction.uniquePath.toProtoPrimitive != response.uniquePath) {
+          logger.error(
+            s"Error at ${idx}: Invalid response ${response} for transaction ${item.transaction}"
+          )
+          false
+        } else valid
+    }
+    if (valid) {
+      val newWatermark = found.map(_.validFrom).foldLeft(current.dispatched) { case (a, b) =>
+        CantonTimestamp.max(a, b)
+      }
+      watermarks.updateAndGet { c =>
+        c.copy(
+          // this will ensure that we have a queue count of at least 1 during catchup
+          queuedApprox =
+            if (c.authorized != newWatermark) Math.max(c.queuedApprox - found.length, 1) else 0,
+          dispatched = newWatermark,
+        )
+      }.discard
+      performUnlessClosingF(targetStore.updateDispatchingWatermark(newWatermark))
+    } else {
+      FutureUnlessShutdown.unit
+    }
+  }
+}
+
+/** Utility class to dispatch the initial set of onboarding transactions to a domain
+  *
+  * Generally, when we onboard to a new domain, we only want to onboard with the minimal set of
+  * topology transactions that are required to join a domain. Otherwise, if we e.g. have
+  * registered one million parties and then subsequently roll a key, we'd send an enormous
+  * amount of unnecessary topology transactions.
+  */
+private class DomainOnboardingOutbox(
+    domain: DomainAlias,
+    val domainId: DomainId,
+    participantId: ParticipantId,
+    val handle: RegisterTopologyTransactionHandle,
+    authorizedStore: TopologyStore,
+    val targetStore: TopologyStore,
+    val timeouts: ProcessingTimeout,
+    val loggerFactory: NamedLoggerFactory,
+) extends DomainOutboxDispatch {
+
+  private def run()(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] = (for {
+    initialTransactions <- loadInitialTransactionsFromStore()
+    _ = logger.debug(
+      s"Sending ${initialTransactions.length} onboarding transactions to ${domain}"
+    )
+    _ <- dispatch(domain, handle, initialTransactions)
+  } yield ()).thereafter { _ =>
+    close()
+  }
+
+  private def loadInitialTransactionsFromStore()(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+    for {
+      candidates <- EitherT.right(
+        performUnlessClosingF(
+          authorizedStore.findParticipantOnboardingTransactions(participantId)
+        )
+      )
+      applicablePossiblyPresent <- EitherT.right(
+        performUnlessClosingF(onlyApplicable(candidates.result))
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicablePossiblyPresent))
+      applicable <- EitherT.right(
+        performUnlessClosingF(notAlreadyPresent(applicablePossiblyPresent))
+      )
+    } yield applicable
+
+  private def initializedWith(
+      initial: Seq[StoredTopologyTransaction[TopologyChangeOp]]
+  ): Either[String, Unit] = {
+    val (haveEncryptionKey, haveSigningKey) =
+      initial.map(_.transaction.transaction.element.mapping).foldLeft((false, false)) {
+        case ((haveEncryptionKey, haveSigningKey), OwnerToKeyMapping(`participantId`, key)) =>
+          (haveEncryptionKey || !key.isSigning, haveSigningKey || key.isSigning)
+        case (acc, _) => acc
+      }
+    if (!haveEncryptionKey) {
+      Left("Can not onboard as local participant doesn't have a valid encryption key")
+    } else if (!haveSigningKey) {
+      Left("Can not onboard as local participant doesn't have a valid signing key")
+    } else Right(())
+  }
+
+}
+
+object DomainOnboardingOutbox {
+  def initiateOnboarding(
+      domain: DomainAlias,
+      domainId: DomainId,
+      participantId: ParticipantId,
+      handle: RegisterTopologyTransactionHandle,
+      authorizedStore: TopologyStore,
+      targetStore: TopologyStore,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val outbox = new DomainOnboardingOutbox(
+      domain,
+      domainId,
+      participantId,
+      handle,
+      authorizedStore,
+      targetStore,
+      timeouts,
+      loggerFactory.append("domain", domain.unwrap),
+    )
+    outbox.run().transform { res =>
+      outbox.close()
+      res
+    }
+  }
+}
+
+private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
+
+  protected def domainId: DomainId
+  protected def targetStore: TopologyStore
+  protected def handle: RegisterTopologyTransactionHandle
+
+  // register handle close task
+  // this will ensure that the handle is closed before the outbox, aborting any retries
+  runOnShutdown(new RunOnShutdown {
+    override def name: String = "close-handle"
+    override def done: Boolean = handle.isClosing
+    override def run(): Unit = Lifecycle.close(handle)(logger)
+  })(TraceContext.empty)
+
+  protected def notAlreadyPresent(
       transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
   )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+    transactions.toList.traverseFilter(stored =>
+      targetStore.exists(stored.transaction).map(exists => Option.when(!exists)(stored))
+    )
+
+  protected def onlyApplicable(
+      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
   ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] = {
     def notAlien(mapping: TopologyMapping): Boolean = mapping match {
       case OwnerToKeyMapping(_: ParticipantId, _) => true
       case OwnerToKeyMapping(owner, _) => owner.uid == domainId.unwrap
       case _ => true
     }
-    def filter(
-        stored: StoredTopologyTransaction[TopologyChangeOp]
-    ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] = {
-      // ensure we only forward transactions suitable to this domain
-      val include = stored.transaction.restrictedToDomain.forall(_ == domainId) &&
-        // ensure that we don't try to register alien domain entities
-        notAlien(stored.transaction.transaction.element.mapping)
-      if (!include)
-        Future.successful(None)
-      else
-        target.exists(stored.transaction).map(exists => Option.when(!exists)(stored))
-    }
-    transactions.toList.traverseFilter(filter)
-  }
-
-  private def kickOffFlush()(implicit traceContext: TraceContext): Unit = {
-    // It's fine to ignore shutdown because we do not await the future anyway.
-    FutureUtil.doNotAwait(flush().unwrap, "domain outbox flusher")
-  }
-
-  def recomputeQueue(implicit traceContext: TraceContext): Future[Unit] = {
-    blocking(lock.synchronized {
-      queue.clear()
-    })
-    for {
-      // find the current target watermark
-      watermarkTsO <- target.currentDispatchingWatermark
-      watermarkTs = watermarkTsO.getOrElse(CantonTimestamp.MinValue)
-      // fetch all transactions in the authorized store that have not yet been dispatched
-      dispatchingCandidates <- source.findDispatchingTransactionsAfter(watermarkTs)
-      // filter candidates for domain
-      filtered <- onlyApplicable(dispatchingCandidates.result)
-    } yield {
-      blocking(lock.synchronized {
-        ErrorUtil.requireState(queue.isEmpty, s"Queue contains ${queue.size} unexpected elements.")
-        queue.appendAll(filtered)
-      })
-      logger.debug(
-        s"Resuming dispatching with ${filtered.length} transactions after watermark $watermarkTs"
+    Future.successful(
+      transactions.filter(x =>
+        notAlien(
+          x.transaction.transaction.element.mapping
+        ) && x.transaction.transaction.element.mapping.restrictedToDomain.forall(_ == domainId)
       )
-    }
+    )
   }
 
-  def flush()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    performUnlessClosingF {
-      if (!running.getAndSet(true)) {
-        val ret = blocking(lock.synchronized {
-          val ret = queue.result()
-          queue.clear()
-          ret
-        })
-        if (ret.nonEmpty) {
-          val dp = dispatch(domain, handle, transactions = ret)
-          dp.transform {
-            case Failure(exception) =>
-              logger.warn(s"Pushing ${ret.length} transactions to domain failed.", exception)
-              // put stuff back into queue
-              blocking(lock.synchronized {
-                queue.insertAll(0, ret)
-              })
-              running.set(false)
-              kickOffFlush() // kick off new flush in the background
-              Success(())
-            case _ =>
-              running.set(false)
-              kickOffFlush()
-              Success(())
-          }
-        } else {
-          running.set(false)
-          Future.unit
-        }
-      } else {
-        Future.unit
-      }
-    }
-  }
-
-  def updateWatermark(
-      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]],
-      responses: Seq[RegisterTopologyTransactionResponse.Result],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF {
-      val timestampMap =
-        transactions.map(x => (x.transaction.uniquePath.toProtoPrimitive, x.validFrom)).toMap
-      // in theory, we should receive as many responses as we have submitted transactions
-      // but we update the watermark in a way that should work even if there is some issue on the domain
-      val newWatermarkO = responses.foldLeft(None: Option[CantonTimestamp]) { case (acc, elem) =>
-        timestampMap
-          .get(elem.uniquePath)
-          .fold {
-            logger.error(
-              s"Received result for ${elem.uniquePath} but I did not submit this transaction as part of this request"
-            )
-            acc
-          } { ts =>
-            // this should work even if our response is out of order (as long as the ts are unique)
-            Some(acc.fold(ts)(existing => CantonTimestamp.max(existing, ts)))
-          }
-      }
-      newWatermarkO.fold {
-        logger.error(
-          s"Not updating watermark as submitted transactions ${transactions} did not yield a corresponding result $responses"
-        )
-        Future.unit
-      } { newWatermark =>
-        val warnFutureProgrammers = blocking(lock.synchronized {
-          queue.headOption.exists(x => x.validFrom <= newWatermark)
-        })
-        if (warnFutureProgrammers) {
-          // once we add batching on transaction addition to the authorized store, we might get multiple tx with the
-          // same timestamp. then we need to get a bit smarter. leaving this warning here in case we miss fixing this
-          logger.warn(
-            s"Transaction with same or earlier timestamp is still queued. Not updating watermark "
-          )
-          Future.unit
-        } else {
-          // update the watermark. we only use it when we restart the queue (so we don't go back too much in the history)
-          target.updateDispatchingWatermark(newWatermark)
-        }
-      }
-    }
-
-  private def dispatch(
+  protected def dispatch(
       domain: DomainAlias,
       handle: RegisterTopologyTransactionHandle,
       transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): Future[Unit] = {
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Seq[RegisterTopologyTransactionResponse.Result]] = if (
+    transactions.isEmpty
+  ) EitherT.rightT(Seq.empty)
+  else {
     implicit val success = retry.Success.always
-    retry
+    val ret = retry
       .Backoff(
         logger,
         this,
@@ -376,23 +497,20 @@ private class DomainOutbox(
         },
         AllExnRetryable,
       )
-      .flatMap { responses =>
-        val (failedResponses, otherResponses) =
-          responses.partition(
+      .map { responses =>
+        logger.debug(
+          s"$domain responded the following for the given topology transactions: $responses"
+        )
+        val failedResponses =
+          responses.filter(
             _.state == v0.RegisterTopologyTransactionResponse.Result.State.FAILED
           )
-
-        if (failedResponses.nonEmpty)
-          logger.error(
-            s"$domain responded with failure for the given topology transactions: $failedResponses"
-          )
-
-        if (otherResponses.nonEmpty)
-          logger.debug(
-            s"$domain responded the following for the given topology transactions: $otherResponses"
-          )
-        updateWatermark(transactions, responses)
+        Either.cond(
+          failedResponses.isEmpty,
+          responses,
+          s"The domain $domain failed the following topology transactions: $failedResponses",
+        )
       }
-      .onShutdown(())
+    EitherT(ret)
   }
 }

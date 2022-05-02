@@ -112,6 +112,15 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       }
     }
 
+    @Help.Summary("Wait until all topology changes have been effected on all accessible nodes")
+    def synchronize_topology(
+        timeoutO: Option[TimeoutDuration] = None
+    )(implicit env: ConsoleEnvironment): Unit = {
+      ConsoleMacros.utils.retry_until_true(timeoutO.getOrElse(env.commandTimeouts.bounded)) {
+        env.nodes.all.forall(_.topology.synchronisation.is_idle())
+      }
+    }
+
     @Help.Summary("Create a navigator ui-backend.conf for a participant")
     def generate_navigator_conf(
         participant: LocalParticipantReference,
