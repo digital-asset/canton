@@ -25,6 +25,7 @@ import com.digitalasset.canton.tracing.TraceContext.withTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 import io.grpc.Context.CancellableContext
 import io.grpc.Status.Code.CANCELLED
 import io.grpc.stub.StreamObserver
@@ -132,7 +133,7 @@ class GrpcSequencerSubscription[E] private[transports] (
         logger.debug("Received a message from the sequencer.")
 
         val current = Promise[Unit]()
-        val closeReasonOO = performUnlessClosing {
+        val closeReasonOO = performUnlessClosing(functionFullName) {
           try {
             appendToCurrentProcessing(_ => current.future)
 

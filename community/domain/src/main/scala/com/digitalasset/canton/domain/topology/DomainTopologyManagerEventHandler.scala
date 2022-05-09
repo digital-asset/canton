@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
@@ -24,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.sequencing.{
   AsyncResult,
   HandlerResult,
+  ResubscriptionStart,
   UnsignedEnvelopeBox,
   UnsignedProtocolEventHandler,
 }
@@ -68,7 +68,7 @@ class DomainTopologyManagerEventHandler(
     )
   }
 
-  override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+  override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 

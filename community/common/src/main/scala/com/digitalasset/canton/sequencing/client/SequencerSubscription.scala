@@ -30,6 +30,12 @@ object SubscriptionCloseReason {
     */
   trait PermissionDeniedError extends SubscriptionCloseReason[Nothing]
 
+  /** The sequencer connection details are being updated, so the subscription is being closed so another one
+    * is created with the updated transport.
+    * This is not an error and also not a reason to close the sequencer client.
+    */
+  case object TransportChange extends SubscriptionCloseReason[Nothing]
+
   /** The subscription was closed by the client. */
   case object Closed extends SubscriptionCloseReason[Nothing]
 }
@@ -56,8 +62,10 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
 
     Seq(
       AsyncCloseable(
-        "sequencer-subscription",
-        closeReasonPromise.success(SubscriptionCloseReason.Closed).future,
+        "sequencer-subscription", {
+          closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed)
+          closeReasonPromise.future
+        },
         timeouts.shutdownNetwork.duration,
       )
     )

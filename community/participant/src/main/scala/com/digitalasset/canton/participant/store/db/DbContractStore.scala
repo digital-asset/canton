@@ -122,7 +122,7 @@ class DbContractStore(
       id: LfContractId
   )(implicit traceContext: TraceContext): OptionT[Future, StoredContract] = {
     def get(): Future[Option[StoredContract]] =
-      performUnlessClosingF(batchAggragator.run(id))
+      performUnlessClosingF(functionFullName)(batchAggragator.run(id))
         .onShutdown(
           throw DbContractStore.AbortedDueToShutdownException(
             s"Shutdown in progress, unable to fetch contract $id"

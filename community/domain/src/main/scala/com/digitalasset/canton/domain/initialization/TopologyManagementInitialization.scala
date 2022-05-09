@@ -43,15 +43,9 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TopologyStore}
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp
-import com.digitalasset.canton.topology.{
-  DomainId,
-  DomainMember,
-  DomainTopologyManagerId,
-  KeyOwner,
-  NodeId,
-}
+import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 
@@ -60,6 +54,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 case class TopologyManagementComponents(
     client: DomainTopologyClientWithInit,
+    sequencerClient: SequencerClient,
     processor: TopologyTransactionProcessor,
     dispatcher: DomainTopologyDispatcher,
     timeouts: ProcessingTimeout,
@@ -76,7 +71,7 @@ object TopologyManagementInitialization {
   def sequenceInitialTopology(
       id: DomainId,
       client: SequencerClient,
-      authorizedTopologySnapshot: StoredTopologyTransactions[TopologyChangeOp],
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       domainMembers: Set[DomainMember],
       recentSnapshot: DomainSnapshotSyncCryptoApi,
       loggerFactory: NamedLoggerFactory,
@@ -88,7 +83,7 @@ object TopologyManagementInitialization {
     val logger = loggerFactory.getLogger(getClass)
     for {
       content <- DomainTopologyTransactionMessage
-        .tryCreate(authorizedTopologySnapshot.result.map(_.transaction).toList, recentSnapshot, id)
+        .tryCreate(transactions.toList, recentSnapshot, id)
       batch = domainMembers.map(member => OpenEnvelope(content, Recipients.cc(member)))
       _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient.sendWithRetries(
@@ -210,7 +205,7 @@ object TopologyManagementInitialization {
             _ <- sequenceInitialTopology(
               id,
               newClient,
-              authorizedTopologySnapshot,
+              authorizedTopologySnapshot.result.map(_.transaction),
               DomainMember.list(id, addressSequencerAsDomainMember),
               syncCrypto.currentSnapshotApproximation,
               loggerFactory,
@@ -230,6 +225,7 @@ object TopologyManagementInitialization {
           id,
           domainTopologyManager,
           topologyClient,
+          topologyProcessor,
           initialKeys,
           sequencedTopologyStore,
           newClient,
@@ -243,6 +239,7 @@ object TopologyManagementInitialization {
       )
     } yield TopologyManagementComponents(
       topologyClient,
+      newClient,
       topologyProcessor,
       dispatcher,
       parameters.processingTimeouts,

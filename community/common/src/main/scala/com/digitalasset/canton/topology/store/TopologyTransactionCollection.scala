@@ -10,7 +10,11 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction
+import com.digitalasset.canton.topology.processing.{
+  AuthorizedTopologyTransaction,
+  EffectiveTime,
+  SequencedTime,
+}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Add,
   Positive,
@@ -18,13 +22,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Replace,
 }
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
-  ProtocolVersion,
-  VersionedMessage,
-}
+import com.digitalasset.canton.version._
 
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[StoredTopologyTransaction[Op]]
@@ -45,6 +43,7 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
   override def toProtoV0: v0.TopologyTransactions = v0.TopologyTransactions(
     items = result.map { item =>
       v0.TopologyTransactions.Item(
+        sequenced = Some(item.sequenced.toProtoPrimitive),
         validFrom = Some(item.validFrom.toProtoPrimitive),
         validUntil = item.validUntil.map(_.toProtoPrimitive),
         // these transactions are serialized as versioned topology transactions
@@ -134,7 +133,7 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
       .lastOption
       .getOrElse(DynamicDomainParameters.topologyChangeDelayIfAbsent)
     val timestamp = result
-      .map(_.validFrom)
+      .map(_.validFrom.value)
       .maxOption
     timestamp.map(_.minus(epsilon.duration))
   }
@@ -154,11 +153,6 @@ object StoredTopologyTransactions
     0 -> supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0)
   )
 
-  case class CertsAndRest[+Op <: TopologyChangeOp](
-      certs: Seq[StoredTopologyTransaction[Op]],
-      rest: Seq[StoredTopologyTransaction[Op]],
-  )
-
   def fromProtoV0(
       value: v0.TopologyTransactions
   ): ParsingResult[StoredTopologyTransactions[TopologyChangeOp]] = {
@@ -166,16 +160,34 @@ object StoredTopologyTransactions
         item: v0.TopologyTransactions.Item
     ): ParsingResult[StoredTopologyTransaction[TopologyChangeOp]] = {
       for {
-        validFromP <- ProtoConverter.required("valid_from", item.validFrom)
-        validFrom <- CantonTimestamp.fromProtoPrimitive(validFromP)
-        validUntil <- item.validFrom.traverse(CantonTimestamp.fromProtoPrimitive)
+        sequenced <- ProtoConverter.parseRequired(
+          SequencedTime.fromProtoPrimitive,
+          "sequenced",
+          item.sequenced,
+        )
+        validFrom <- ProtoConverter.parseRequired(
+          EffectiveTime.fromProtoPrimitive,
+          "valid_from",
+          item.validFrom,
+        )
+        validUntil <- item.validFrom.traverse(EffectiveTime.fromProtoPrimitive)
         transaction <- SignedTopologyTransaction.fromByteString(item.transaction)
-      } yield StoredTopologyTransaction(validFrom, validUntil, transaction)
+      } yield StoredTopologyTransaction(
+        sequenced,
+        validFrom,
+        validUntil,
+        transaction,
+      )
     }
     value.items
       .traverse(parseItem)
       .map(StoredTopologyTransactions(_))
   }
+
+  case class CertsAndRest[+Op <: TopologyChangeOp](
+      certs: Seq[StoredTopologyTransaction[Op]],
+      rest: Seq[StoredTopologyTransaction[Op]],
+  )
 
   def empty[Op <: TopologyChangeOp]: StoredTopologyTransactions[Op] =
     StoredTopologyTransactions(Seq())
@@ -227,6 +239,14 @@ final case class SignedTopologyTransactions[+Op <: TopologyChangeOp](
       SignedTopologyTransactions(removes),
       SignedTopologyTransactions(replaces),
     )
+  }
+
+  def splitForStateUpdate
+      : (Seq[UniquePath], Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]]) = {
+    val (adds, removes, replaces) = split
+    val deactivate = removes.result.map(_.uniquePath) ++ replaces.result.map(_.uniquePath)
+    val positive = adds.result ++ replaces.result
+    (deactivate, positive)
   }
 
   def filter(predicate: SignedTopologyTransaction[Op] => Boolean): SignedTopologyTransactions[Op] =

@@ -29,6 +29,7 @@ import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
+import io.functionmeta.functionFullName
 
 import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.file.Path
@@ -242,7 +243,7 @@ class ReplayingSendsSequencerClientTransport(
     private val idleP = Promise[EventsReceivedReport]()
 
     private def scheduleCheck(): Unit = {
-      performUnlessClosing {
+      performUnlessClosing(functionFullName) {
         val elapsed = lastDeliverRef
           .get()
           .map(_.lastEventAt.toInstant)

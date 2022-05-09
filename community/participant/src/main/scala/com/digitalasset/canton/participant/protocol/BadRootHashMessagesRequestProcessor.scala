@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
+import io.functionmeta.functionFullName
 
 import scala.concurrent.ExecutionContext
 
@@ -45,7 +46,7 @@ class BadRootHashMessagesRequestProcessor(
       timestamp: CantonTimestamp,
       mediatorId: MediatorId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       crypto.awaitIpsSnapshot(timestamp).flatMap(_.isMediatorActive(mediatorId)).flatMap {
         case true =>
           prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)
@@ -68,7 +69,7 @@ class BadRootHashMessagesRequestProcessor(
       mediatorId: MediatorId,
       rejectionReason: String,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       val domainId = sequencerClient.domainId
       for {
         _ <- prepareForMediatorResultOfBadRequest(requestCounter, sequencerCounter, timestamp)

@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.Order._
 import cats.Show
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
@@ -115,13 +115,13 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
 case class DeliverStoreEvent[P](
     sender: SequencerMemberId,
     messageId: MessageId,
-    members: NonEmptySet[SequencerMemberId],
+    members: NonEmpty[SortedSet[SequencerMemberId]],
     payload: P,
     signingTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
 ) extends StoreEvent[P] {
   def mapPayload[Q](map: P => Q): DeliverStoreEvent[Q] = copy(payload = map(payload))
-  override lazy val notifies: WriteNotification = WriteNotification.Members(members.toSortedSet)
+  override lazy val notifies: WriteNotification = WriteNotification.Members(members)
 
   override val description: String = show"deliver[message-id:$messageId]"
 }
@@ -141,7 +141,7 @@ object DeliverStoreEvent {
       signingTimestampO: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): DeliverStoreEvent[Payload] = {
     // ensure that sender is a recipient
-    val recipientsWithSender = NonEmptySet(sender, members.to(SortedSet))
+    val recipientsWithSender = NonEmpty(SortedSet, sender, members.toSeq: _*)
     DeliverStoreEvent(
       sender,
       messageId,

@@ -19,9 +19,9 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, Sequ
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel

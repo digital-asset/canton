@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
 import cats.instances.vector._
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.reducible._
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
@@ -69,16 +69,13 @@ class DbSequencerStore(
   import storage.api._
   import storage.converters._
 
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private implicit val setRecipientsArrayOParameter
-      : SetParameter[Option[NonEmptySet[SequencerMemberId]]] = (v, pp) => {
+      : SetParameter[Option[NonEmpty[SortedSet[SequencerMemberId]]]] = (v, pp) => {
     storage.profile match {
       case _: Oracle =>
         val OracleIntegerArray = "INTEGER_ARRAY"
 
-        val maybeArray: Option[Array[Int]] = v
-          .map(_.toSortedSet.map(_.unwrap).toArray)
-          .map(_.map(_.asInstanceOf[Int]))
+        val maybeArray: Option[Array[Int]] = v.map(_.toArray.map(_.unwrap))
 
         // make sure we do the right thing whether we are using a connection pooled connection or not
         val jdbcArray = maybeArray.map {
@@ -108,8 +105,7 @@ class DbSequencerStore(
 
       case _ =>
         val jdbcArray = v
-          .map(_.toSortedSet.map(_.unwrap).toArray)
-          .map(_.map(_.asInstanceOf[AnyRef]))
+          .map(_.toArray.map(id => Int.box(id.unwrap): AnyRef))
           .map(pp.ps.getConnection.createArrayOf("integer", _))
 
         pp.setObjectOption(jdbcArray, JDBCType.ARRAY.getVendorTypeNumber)
@@ -119,7 +115,7 @@ class DbSequencerStore(
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf", "org.wartremover.warts.Null"))
   private implicit val getRecipientsArrayOResults
-      : GetResult[Option[NonEmptySet[SequencerMemberId]]] = {
+      : GetResult[Option[NonEmpty[SortedSet[SequencerMemberId]]]] = {
 
     def toInt(a: AnyRef) = a match {
       case s: String => s.toInt
@@ -136,17 +132,17 @@ class DbSequencerStore(
         GetResult(r => Option(r.rs.getArray(r.skip.currentPos)))
           .andThen(_.map(_.asInstanceOf[OracleArray].getIntArray))
           .andThen(_.map(_.map(SequencerMemberId(_))))
-          .andThen(_.map(arr => NonEmptySet.fromSetUnsafe(SortedSet(arr.toSeq: _*))))
+          .andThen(_.map(arr => NonEmptyUtil.fromUnsafe(SortedSet(arr.toSeq: _*))))
       case _: H2 =>
         GetResult(r => Option(r.rs.getArray(r.skip.currentPos)))
           .andThen(_.map(_.getArray.asInstanceOf[Array[AnyRef]].map(toInt)))
           .andThen(_.map(_.map(SequencerMemberId(_))))
-          .andThen(_.map(arr => NonEmptySet.fromSetUnsafe(SortedSet(arr.toSeq: _*))))
+          .andThen(_.map(arr => NonEmptyUtil.fromUnsafe(SortedSet(arr.toSeq: _*))))
       case _: Postgres =>
         GetResult(r => Option(r.rs.getArray(r.skip.currentPos)))
           .andThen(_.map(_.getArray.asInstanceOf[Array[AnyRef]].map(Int.unbox)))
           .andThen(_.map(_.map(SequencerMemberId(_))))
-          .andThen(_.map(arr => NonEmptySet.fromSetUnsafe(SortedSet(arr.toSeq: _*))))
+          .andThen(_.map(arr => NonEmptyUtil.fromUnsafe(SortedSet(arr.toSeq: _*))))
     }
   }
 
@@ -188,7 +184,7 @@ class DbSequencerStore(
       eventType: EventTypeDiscriminator,
       messageIdO: Option[MessageId] = None,
       senderO: Option[SequencerMemberId] = None,
-      recipientsO: Option[NonEmptySet[SequencerMemberId]] = None,
+      recipientsO: Option[NonEmpty[SortedSet[SequencerMemberId]]] = None,
       payloadO: Option[P] = None,
       signingTimestampO: Option[CantonTimestamp] = None,
       errorMessageO: Option[String256M] = None,
@@ -258,7 +254,8 @@ class DbSequencerStore(
             EventTypeDiscriminator.Error,
             messageIdO = Some(messageId),
             senderO = Some(sender),
-            recipientsO = Some(NonEmptySet.of(sender)), // must be set for sender to receive value
+            recipientsO =
+              Some(NonEmpty(SortedSet, sender)), // must be set for sender to receive value
             errorMessageO = Some(message),
             traceContext = traceContext,
           )
@@ -285,7 +282,7 @@ class DbSequencerStore(
     val discriminatorGetter = implicitly[GetResult[EventTypeDiscriminator]]
     val messageIdGetter = implicitly[GetResult[Option[MessageId]]]
     val memberIdGetter = implicitly[GetResult[Option[SequencerMemberId]]]
-    val memberIdNesGetter = implicitly[GetResult[Option[NonEmptySet[SequencerMemberId]]]]
+    val memberIdNesGetter = implicitly[GetResult[Option[NonEmpty[SortedSet[SequencerMemberId]]]]]
     val payloadGetter = implicitly[GetResult[Option[Payload]]]
     val errorMessageGetter = implicitly[GetResult[Option[String256M]]]
     val traceContextGetter = implicitly[GetResult[TraceContext]]

@@ -126,7 +126,9 @@ object KeyOwner {
   * sequencer is not a member, as he is one level below, dealing with
   * messages.
   */
-sealed trait Member extends KeyOwner with Product with Serializable
+sealed trait Member extends KeyOwner with Product with Serializable {
+  def isAuthenticated: Boolean
+}
 
 object Member {
 
@@ -171,12 +173,14 @@ object Member {
 
 sealed trait AuthenticatedMember extends Member {
   override def code: AuthenticatedMemberCode
+  override def isAuthenticated: Boolean = true
 }
 
 sealed trait AuthenticatedMemberCode extends KeyOwnerCode
 
 case class UnauthenticatedMemberId(uid: UniqueIdentifier) extends Member {
   override def code: KeyOwnerCode = UnauthenticatedMemberId.Code
+  override def isAuthenticated: Boolean = false
 }
 
 object UnauthenticatedMemberId {

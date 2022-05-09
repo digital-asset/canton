@@ -36,6 +36,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -213,7 +214,7 @@ class LedgerServerPartyNotifier(
       targetParticipantId: ParticipantId,
   )(implicit traceContext: TraceContext): Unit = {
     val notifyF = sequentialQueue.execute(
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         logger.debug(show"Pushing ${metadata.partyId} on ${targetParticipantId} to ledger server")
         val event = LedgerSyncEvent.PartyAddedToParticipant(
           metadata.partyId.toLf,
@@ -247,7 +248,7 @@ class LedgerServerPartyNotifier(
       // note, that if this fails, we have an issue as ledger server will not have
       // received the event. this is generally an issue with everything we send to the
       // index server
-      performUnlessClosingF(
+      performUnlessClosingF(functionFullName)(
         FutureUtil.logOnFailure(
           sequentialQueue.execute(
             updateAndNotify(

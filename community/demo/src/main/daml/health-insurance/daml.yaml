@@ -1,10 +1,10 @@
-sdk-version: 2.2.0-snapshot.20220427.9808.0.f0303b69
+sdk-version: 2.2.0-snapshot.20220504.9851.0.4c8e027d
 name: health-insurance
 exposed-modules: 
 - HealthInsurance
 source: HealthInsurance.daml
 init-script: HealthInsurance:setup
-version: 2.2.0
+version: 2.3.0
 dependencies: 
 - daml-prim
 - daml-stdlib

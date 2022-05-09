@@ -92,7 +92,7 @@ private[service] class GrpcManagedSubscription(
           signedSequencedEvent = Some(event.signedEvent.toProtoV0),
           Some(event.traceContext.toProtoV0),
         )
-      Right(performUnlessClosing {
+      Right(performUnlessClosing("grpc-managed-subscription-handler") {
         observer.onNext(response)
       }.onShutdown(()))
     }.recover { case NonFatal(e) =>
@@ -107,7 +107,7 @@ private[service] class GrpcManagedSubscription(
 
   // TODO(#5705) Redo this when revisiting the subscription pool
   withNewTraceContext { implicit traceContext =>
-    val shouldClose = performUnlessClosing {
+    val shouldClose = performUnlessClosing("grpc-managed-subscription-handler") {
       val createSub = Try({
         val subscription = createSubscription(handler)
         timeouts.unbounded.await(s"Creation of subscription handler")(subscription.value)

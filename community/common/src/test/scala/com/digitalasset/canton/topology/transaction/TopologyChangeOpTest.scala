@@ -21,8 +21,13 @@ class TopologyChangeOpTest extends AnyWordSpec with BaseTest with HasExecutionCo
     factory.mkAdd(IdentifierDelegation(uid, factory.SigningKeys.key1))
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  private lazy val removeSignedTx: SignedTopologyTransaction[Remove] =
-    addSignedTx.reverse.asInstanceOf[SignedTopologyTransaction[Remove]]
+  private lazy val removeSignedTx: SignedTopologyTransaction[Remove] = {
+    val reversedTx = addSignedTx.transaction.reverse
+
+    addSignedTx
+      .copy(transaction = reversedTx)(addSignedTx.representativeProtocolVersion, None)
+      .asInstanceOf[SignedTopologyTransaction[Remove]]
+  }
 
   private lazy val replaceSignedTx: SignedTopologyTransaction[Replace] = factory.mkDmGov(
     DomainParametersChange(

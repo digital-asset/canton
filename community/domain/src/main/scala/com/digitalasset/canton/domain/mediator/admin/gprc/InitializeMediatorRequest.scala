@@ -7,11 +7,11 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
 import com.digitalasset.canton.version.HasProtoV0
 

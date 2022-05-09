@@ -97,6 +97,7 @@ object EmbeddedMediatorInitialization {
           topologyClient,
           crypto,
           cantonParameterConfig.cachingConfigs,
+          timeouts,
           loggerFactory,
         )
 

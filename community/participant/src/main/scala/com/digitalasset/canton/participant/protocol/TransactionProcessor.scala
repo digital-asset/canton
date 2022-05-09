@@ -43,7 +43,9 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.event.Level
 
+import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
+import com.digitalasset.canton.util.ShowUtil._
 
 class TransactionProcessor(
     participantId: ParticipantId,
@@ -180,13 +182,32 @@ object TransactionProcessor {
     @Resolution("Wait a bit and retry, preferably with some backoff factor.")
     object DomainBackpressure
         extends ErrorCode(id = "DOMAIN_BACKPRESSURE", ErrorCategory.ContentionOnSharedResources) {
-      override def logLevel: Level = Level.WARN
+      override def logLevel: Level = Level.INFO
 
       case class Rejection(reason: String)
           extends TransactionErrorImpl(
             cause = "The domain is overloaded.",
             // Only reported asynchronously, so covered by submission rank guarantee
             definiteAnswer = true,
+          )
+    }
+
+    @Explanation(
+      """The participant has rejected all incoming commands during a configurable grace period."""
+    )
+    @Resolution("""Configure more restrictive resource limits (enterprise only). 
+        |Change applications to submit commands at a lower rate.
+        |Configure a higher value for `myParticipant.parameters.warnIfOverloadedFor`.""")
+    object ParticipantOverloaded
+        extends ErrorCode(
+          id = "PARTICIPANT_OVERLOADED",
+          ErrorCategory.ContentionOnSharedResources,
+        ) {
+      override def logLevel: Level = Level.WARN
+
+      case class Rejection(duration: Duration)
+          extends TransactionErrorImpl(
+            cause = show"The participant has been overloaded for $duration."
           )
     }
 

@@ -362,16 +362,11 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       def expectOverloaded(): Future[Assertion] = {
-        loggerFactory.assertLogs(
-          {
-            sendAndCheckError(
-              defaultRequest.toProtoV0(ProtocolVersion.latestForTest),
-              { case SendAsyncError.Overloaded(message) =>
-                message should endWith("Submission rate exceeds rate limit of 5/s.")
-              },
-            )
+        sendAndCheckError(
+          defaultRequest.toProtoV0(ProtocolVersion.latestForTest),
+          { case SendAsyncError.Overloaded(message) =>
+            message should endWith("Submission rate exceeds rate limit of 5/s.")
           },
-          _.warningMessage should include("refused: Submission rate exceeds rate limit of 5/s."),
         )
       }
 
@@ -458,6 +453,55 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           }
         }
       } yield succeed
+    }
+
+    "reject requests from unauthenticated senders with a signing key timestamp" in { _ =>
+      val request = defaultRequest
+        .focus(_.sender)
+        .replace(unauthenticatedMember)
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.Epoch))
+        .focus(_.batch)
+        .replace(
+          Batch(List(ClosedEnvelope(content, Recipients.cc(DefaultTestIdentities.domainManager))))
+        )
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(
+          request.toProtoV0(ProtocolVersion.latestForTest),
+          { case SendAsyncError.RequestRefused(message) =>
+            message should include(
+              "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+            )
+          },
+          authenticated = false,
+        )(new Environment(unauthenticatedMember)),
+        _.warningMessage should include(
+          "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+        ),
+      )
+    }
+
+    "reject requests to unauthenticated members with a signing key timestamps" in { implicit env =>
+      val request = defaultRequest
+        .focus(_.timestampOfSigningKey)
+        .replace(Some(CantonTimestamp.ofEpochSecond(1)))
+        .focus(_.batch)
+        .replace(Batch(List(ClosedEnvelope(content, Recipients.cc(unauthenticatedMember)))))
+
+      loggerFactory.assertLogs(
+        sendAndCheckError(
+          request.toProtoV0(ProtocolVersion.latestForTest),
+          { case SendAsyncError.RequestRefused(message) =>
+            message should include(
+              "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+            )
+          },
+        ),
+        _.warningMessage should include(
+          "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key"
+        ),
+      )
     }
   }
 

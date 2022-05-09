@@ -12,8 +12,8 @@ import com.digitalasset.canton.domain.initialization.TopologyManagementInitializ
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.topology.{DomainId, DomainMember}
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
+import com.digitalasset.canton.topology.{DomainId, DomainMember}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.google.protobuf.empty.Empty
@@ -69,7 +69,7 @@ class GrpcSequencerTopologyBootstrapService(
                     .sequenceInitialTopology(
                       id,
                       client,
-                      topologySnapshot,
+                      topologySnapshot.result.map(_.transaction),
                       DomainMember.listAll(id),
                       syncCrypto.headSnapshot,
                       loggerFactory,

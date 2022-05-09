@@ -56,6 +56,7 @@ import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -586,7 +587,7 @@ abstract class ProtocolProcessor[
       )
     } else {
       logger.info(show"Processing ${steps.requestKind.unquoted} request at $requestId.")
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         val resultF = for {
           snapshot <- EitherT.right(
             futureSupervisor.supervised(s"await crypto snapshot $ts")(crypto.awaitSnapshot(ts))
@@ -692,7 +693,7 @@ abstract class ProtocolProcessor[
       sequencerCounter: SequencerCounter,
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       val malformedMediatorRequestEnvelopes = signedResultBatch.content.batch.envelopes
         .mapFilter(ProtocolMessage.select[SignedProtocolMessage[MalformedMediatorRequestResult]])
       require(
@@ -721,7 +722,7 @@ abstract class ProtocolProcessor[
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       val resultEnvelopes =
         signedResultBatch.content.batch.envelopes
           .mapFilter(ProtocolMessage.select[SignedProtocolMessage[Result]])

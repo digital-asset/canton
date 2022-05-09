@@ -13,7 +13,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import scala.collection.immutable.MultiSet
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
@@ -44,12 +45,17 @@ trait FlagCloseable extends AutoCloseable {
 
   private val closingFlag = new AtomicBoolean(false)
 
+  case class ReaderState(count: Int, readers: MultiSet[String])
+  object ReaderState {
+    def empty: ReaderState = ReaderState(0, MultiSet.empty)
+  }
+
   // Poor man's read-write lock; stores the number of tasks holding the read lock. If a write lock is held, this
   // goes to -1. Not using Java's ReadWriteLocks since they are about thread synchronization, and since we can't
   // count on acquires and releases happening on the same thread, since we support the synchronization of futures.
-  private val readerCount = new AtomicInteger(0)
+  private val readerState = new AtomicReference(ReaderState.empty)
 
-  private val runOnShutdownTasks =
+  private val onShutdownTasks =
     new AtomicReference[List[RunOnShutdown]](List())
 
   protected def logger: TracedLogger
@@ -64,12 +70,19 @@ trait FlagCloseable extends AutoCloseable {
   def runOnShutdown[T](
       task: RunOnShutdown
   )(implicit traceContext: TraceContext): Unit = {
-    performUnlessClosing {
-      runOnShutdownTasks.updateAndGet { seq =>
-        seq.filterNot(_.done) :+ task
-      }.discard
-    }.onShutdown {
-      task.run()
+    onShutdownTasks.updateAndGet { seq => seq.filterNot(_.done) :+ task }.discard
+
+    if (isClosing) runOnShutdownTasks()
+  }
+
+  private def runOnShutdownTasks()(implicit traceContext: TraceContext): Unit = {
+    val tasks = onShutdownTasks.getAndSet(List())
+    tasks.foreach { task =>
+      if (!task.done) {
+        Try { task.run() }.recover { t =>
+          logger.warn(s"Task ${task.name} failed on shutdown!", t)
+        }
+      }
     }
   }
 
@@ -89,15 +102,17 @@ trait FlagCloseable extends AutoCloseable {
     * @param f The task to perform
     * @return [[scala.None$]] if a shutdown has been initiated. Otherwise the result of the task.
     */
-  def performUnlessClosing[A](f: => A)(implicit traceContext: TraceContext): UnlessShutdown[A] = {
-    if (isClosing || !addReader()) {
-      logger.debug("Won't schedule the task as this object is closing")
+  def performUnlessClosing[A](
+      name: String
+  )(f: => A)(implicit traceContext: TraceContext): UnlessShutdown[A] = {
+    if (isClosing || !addReader(name)) {
+      logger.debug(s"Won't schedule the task '$name' as this object is closing")
       UnlessShutdown.AbortedDueToShutdown
     } else
       try {
         UnlessShutdown.Outcome(f)
       } finally {
-        removeReader()
+        removeReader(name)
       }
   }
 
@@ -113,20 +128,20 @@ trait FlagCloseable extends AutoCloseable {
     *         a shutdown has been initiated.
     *         Otherwise the result of the task wrapped in [[com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome]].
     */
-  def performUnlessClosingF[A](
+  def performUnlessClosingF[A](name: String)(
       f: => Future[A]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): FutureUnlessShutdown[A] =
-    FutureUnlessShutdown(internalPerformUnlessClosingF(f).sequence)
+    FutureUnlessShutdown(internalPerformUnlessClosingF(name)(f).sequence)
 
-  protected def internalPerformUnlessClosingF[A](
+  protected def internalPerformUnlessClosingF[A](name: String)(
       f: => Future[A]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): UnlessShutdown[Future[A]] = {
-    if (isClosing || !addReader()) {
-      logger.debug("Won't schedule the future as this object is closing")
+    if (isClosing || !addReader(name)) {
+      logger.debug(s"Won't schedule the future '$name' as this object is closing")
       UnlessShutdown.AbortedDueToShutdown
     } else {
       val fut = Try(f).fold(Future.failed, x => x).thereafter { _ =>
-        removeReader()
+        removeReader(name)
       }
       trackFuture(fut)
       UnlessShutdown.Outcome(fut)
@@ -143,17 +158,17 @@ trait FlagCloseable extends AutoCloseable {
     *
     * @param etf The task to perform
     */
-  def performUnlessClosingEitherT[E, R](onClosing: => E)(
+  def performUnlessClosingEitherT[E, R](name: String, onClosing: => E)(
       etf: => EitherT[Future, E, R]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, E, R] = {
-    EitherT(performUnlessClosingF(etf.value).unwrap.map(_.onShutdown(Left(onClosing))))
+    EitherT(performUnlessClosingF(name)(etf.value).unwrap.map(_.onShutdown(Left(onClosing))))
   }
 
-  def performUnlessClosingEitherTF[E, R](onClosing: => E)(
+  def performUnlessClosingEitherTF[E, R](name: String, onClosing: => E)(
       etf: => EitherT[Future, E, Future[R]]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, E, Future[R]] = {
-    if (isClosing || !addReader()) {
-      logger.debug("Won't schedule the future as this object is closing")
+    if (isClosing || !addReader(name)) {
+      logger.debug(s"Won't schedule the future '$name' as this object is closing")
       EitherT.leftT(onClosing)
     } else {
       val res = Try(etf.value).fold(Future.failed, x => x)
@@ -164,7 +179,7 @@ trait FlagCloseable extends AutoCloseable {
           case Right(value) => value.map(_ => ())
         }
         .thereafter { _ =>
-          removeReader()
+          removeReader(name)
         }
       EitherT(res)
     }
@@ -211,26 +226,27 @@ trait FlagCloseable extends AutoCloseable {
     if (firstCallToClose) {
       // First run onShutdown tasks.
       // Important to run them in the beginning as they may be used to cancel long-running tasks.
-      val tasks = runOnShutdownTasks.getAndSet(List())
-      tasks.foreach { task =>
-        if (!task.done) {
-          Try { task.run() }.recover { t =>
-            logger.warn(s"Task ${task.name} failed on shutdown!", t)
-          }
-        }
-      }
+      runOnShutdownTasks()
 
       // Poll for tasks to finish. Inefficient, but we're only doing this during shutdown.
       val deadline = closingTimeout.fromNow
       var sleepMillis = 1L
-      while (!readerCount.compareAndSet(0, -1) && deadline.hasTimeLeft()) {
-        val nrActive = readerCount.get()
-        logger.debug(s"$nrActive active tasks preventing closing; sleeping for ${sleepMillis}ms")
+      while (
+        (readerState.getAndUpdate { current =>
+          if (current == ReaderState.empty) {
+            current.copy(count = -1)
+          } else current
+        }.count != 0) && deadline.hasTimeLeft()
+      ) {
+        val readers = readerState.get()
+        logger.debug(
+          s"${readers.count} active tasks (${readers.readers.mkString(",")}) preventing closing; sleeping for ${sleepMillis}ms"
+        )
         runStateChanged(true)
         Threading.sleep(sleepMillis)
         sleepMillis = (sleepMillis * 2) min maxSleepMillis min deadline.timeLeft.toMillis
       }
-      if (readerCount.get >= 0) {
+      if (readerState.get.count >= 0) {
         logger.warn(
           s"Timeout ${closingTimeout} expired, but tasks still running. ${forceShutdownStr}"
         )
@@ -245,20 +261,20 @@ trait FlagCloseable extends AutoCloseable {
     }
   }
 
-  private def addReader(): Boolean =
-    (readerCount.updateAndGet { cnt: Int =>
+  private def addReader(reader: String): Boolean =
+    (readerState.updateAndGet { case state @ ReaderState(cnt, readers) =>
       if (cnt == Int.MaxValue)
         throw new IllegalStateException("Overflow on active reader locks")
       if (cnt >= 0) {
-        cnt + 1
-      } else cnt
-    }) > 0
+        ReaderState(cnt + 1, readers + reader)
+      } else state
+    }).count > 0
 
-  private def removeReader(): Unit = {
-    val _ = readerCount.updateAndGet { cnt =>
+  private def removeReader(reader: String): Unit = {
+    val _ = readerState.updateAndGet { case ReaderState(cnt, readers) =>
       if (cnt <= 0)
         throw new IllegalStateException("No active readers, but still trying to deactivate one")
-      cnt - 1
+      ReaderState(cnt - 1, readers - reader)
     }
   }
 }

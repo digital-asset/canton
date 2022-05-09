@@ -14,7 +14,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.DomainTopologyClient.Subscriber
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction._
@@ -124,8 +123,6 @@ class CachingDomainTopologyClient(
   }
 
   override def domainId: DomainId = parent.domainId
-  override def subscribe(subscriber: Subscriber): Unit = parent.subscribe(subscriber)
-  override def unsubscribe(subscriber: Subscriber): Unit = parent.unsubscribe(subscriber)
 
   override def snapshotAvailable(timestamp: CantonTimestamp): Boolean =
     parent.snapshotAvailable(timestamp)

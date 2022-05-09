@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.traverse._
 import cats.syntax.functorFilter._
+import cats.syntax.traverse._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,13 +16,12 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
-  SequencedTime,
   TopologyTransactionProcessingSubscriber,
 }
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, checked}
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap
@@ -38,6 +37,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class IdentityProvidingServiceClient {
 
   private val domains = TrieMap.empty[DomainId, DomainTopologyClient]
+
   def add(domainClient: DomainTopologyClient): IdentityProvidingServiceClient = {
     domains += (domainClient.domainId -> domainClient)
     this
@@ -142,12 +142,6 @@ trait TopologyClientApi[T] {
   */
 trait DomainTopologyClient extends TopologyClientApi[TopologySnapshot] with AutoCloseable {
 
-  /** Subscribe to topology information updates */
-  def subscribe(subscriber: DomainTopologyClient.Subscriber): Unit
-
-  /** Remove observer from topology information updates */
-  def unsubscribe(subscriber: DomainTopologyClient.Subscriber): Unit
-
   /** Wait for a condition to become true according to the current snapshot approximation
     *
     * @return true if the condition became true, false if it timed out
@@ -155,37 +149,6 @@ trait DomainTopologyClient extends TopologyClientApi[TopologySnapshot] with Auto
   def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
-}
-
-object DomainTopologyClient {
-
-  trait Subscriber {
-
-    /** Inform the subscriber about the processed transactions */
-    def observed(
-        sequencedTimestamp: SequencedTime,
-        effectiveTimestamp: EffectiveTime,
-        sequencerCounter: SequencerCounter,
-        transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): Unit
-
-  }
-
-  trait TransactionSubscriber extends Subscriber {
-
-    def observedTransaction(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
-        traceContext: TraceContext
-    ): Unit
-
-    final override def observed(
-        sequencedTimestamp: SequencedTime,
-        effectiveTimestamp: EffectiveTime,
-        sequencerCounter: SequencerCounter,
-        transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): Unit =
-      transactions.foreach(observedTransaction)
-
-  }
 
 }
 

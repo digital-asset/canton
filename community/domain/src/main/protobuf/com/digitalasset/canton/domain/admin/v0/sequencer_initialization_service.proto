@@ -8,7 +8,7 @@ package com.digitalasset.canton.domain.admin.v0;
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
-import "com/digitalasset/canton/protocol/v0/topology.proto";
+import "com/digitalasset/canton/topology/admin/v0/topology_ext.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "com/digitalasset/canton/domain/admin/v0/sequencer_administration_service.proto";
 

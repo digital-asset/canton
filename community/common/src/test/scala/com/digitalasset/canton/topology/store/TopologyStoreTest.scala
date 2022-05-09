@@ -17,6 +17,7 @@ import org.scalatest.{Assertion, BeforeAndAfterAll}
 import scala.annotation.nowarn
 import scala.concurrent.Future
 import cats.syntax.contravariantSemigroupal._
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Replace}
 
 trait TopologyStoreTest
@@ -143,8 +144,8 @@ trait TopologyStoreTest
     import factory.TestingTransactions._
 
     implicit val toValidated
-        : SignedTopologyTransaction[TopologyChangeOp] => ValidatedTopologyTransaction = x =>
-      ValidatedTopologyTransaction(x, None)
+        : SignedTopologyTransaction[TopologyChangeOp] => ValidatedTopologyTransaction =
+      x => ValidatedTopologyTransaction(x, None)
 
     def findTransactionsForTesting(
         store: TopologyStore,
@@ -155,7 +156,8 @@ trait TopologyStoreTest
       store.allTransactions.map(
         _.result
           .filter(x =>
-            x.validFrom == from && x.validUntil == until && x.transaction.operation == op
+            x.validFrom.value == from && x.validUntil
+              .map(_.value) == until && x.transaction.operation == op
           )
           .map(_.transaction)
       )
@@ -250,6 +252,31 @@ trait TopologyStoreTest
       }
     }
 
+    def append(
+        store: TopologyStore,
+        ts: CantonTimestamp,
+        items: List[ValidatedTopologyTransaction],
+    ): Future[Unit] = {
+      store.append(SequencedTime(ts), EffectiveTime(ts), items)
+    }
+
+    def doAppend(
+        store: TopologyStore,
+        ts: CantonTimestamp,
+        items: List[ValidatedTopologyTransaction],
+    ): Future[Unit] = {
+      store.doAppend(SequencedTime(ts), EffectiveTime(ts), items)
+    }
+
+    def updateState(
+        store: TopologyStore,
+        ts: CantonTimestamp,
+        deactivate: Seq[UniquePath],
+        positive: Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]],
+    ): Future[Unit] = {
+      store.updateState(SequencedTime(ts), EffectiveTime(ts), deactivate, positive)
+    }
+
     "topology store" should {
 
       "deal with authorized" when {
@@ -257,11 +284,11 @@ trait TopologyStoreTest
         "don't panic on simple operations" in {
           val store = mk()
           for {
-            _ <- store.append(ts, List())
-            _ <- store.append(ts.plusSeconds(1), List(okm1))
-            _ <- store.append(ts.plusSeconds(2), List(rokm1))
-            _ <- store.append(ts.plusSeconds(3), List(ps1))
-            _ <- store.append(ts.plusSeconds(4), List(ps2))
+            _ <- append(store, ts, List())
+            _ <- append(store, ts.plusSeconds(1), List(okm1))
+            _ <- append(store, ts.plusSeconds(2), List(rokm1))
+            _ <- append(store, ts.plusSeconds(3), List(ps1))
+            _ <- append(store, ts.plusSeconds(4), List(ps2))
           } yield {
             assert(true)
           }
@@ -269,15 +296,17 @@ trait TopologyStoreTest
 
         "bootstrap correctly updates timestamp" in {
           val store = mk()
+          def gen(ts: CantonTimestamp, tx: SignedTopologyTransaction[TopologyChangeOp.Positive]) =
+            StoredTopologyTransaction(SequencedTime(ts), EffectiveTime(ts), None, tx)
           for {
             _ <- store.bootstrap(
               StoredTopologyTransactions(
                 Seq(
-                  StoredTopologyTransaction(ts.plusSeconds(1), None, okm1),
-                  StoredTopologyTransaction(ts.plusSeconds(2), None, ps1),
-                  StoredTopologyTransaction(ts.plusSeconds(3), None, ps2),
-                  StoredTopologyTransaction(ts.plusSeconds(4), None, ps3),
-                  StoredTopologyTransaction(ts.plusSeconds(5), None, p2p1),
+                  gen(ts.plusSeconds(1), okm1),
+                  gen(ts.plusSeconds(2), ps1),
+                  gen(ts.plusSeconds(3), ps2),
+                  gen(ts.plusSeconds(4), ps3),
+                  gen(ts.plusSeconds(5), p2p1),
                 )
               )
             )
@@ -288,7 +317,7 @@ trait TopologyStoreTest
         "successfully append new items" in {
           val store = mk()
           for {
-            _ <- store.append(ts, List(ns1k1, okm1, okm2, ps1, dpc1, dpc2))
+            _ <- append(store, ts, List(ns1k1, okm1, okm2, ps1, dpc1, dpc2))
             adds <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Add)
             rems <- findTransactionsForTesting(store, ts, Some(ts), TopologyChangeOp.Remove)
             replaces <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Replace)
@@ -302,7 +331,7 @@ trait TopologyStoreTest
         "deal with transient appends" in {
           val store = mk()
           for {
-            _ <- store.append(ts, List(ns1k1, okm1, rokm1, ps1, rps1, ps2))
+            _ <- append(store, ts, List(ns1k1, okm1, rokm1, ps1, rps1, ps2))
             transientAdd <- findTransactionsForTesting(store, ts, Some(ts), TopologyChangeOp.Add)
             added <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Add)
             revocations <- findTransactionsForTesting(store, ts, Some(ts), TopologyChangeOp.Remove)
@@ -319,8 +348,8 @@ trait TopologyStoreTest
           val store = mk()
 
           for {
-            _ <- store.append(ts, List(ns1k1, okm1, ps1))
-            _ <- store.append(ts1, List(rokm1, rps1, ps2, ps3))
+            _ <- append(store, ts, List(ns1k1, okm1, ps1))
+            _ <- append(store, ts1, List(rokm1, rps1, ps2, ps3))
             updated <- findTransactionsForTesting(store, ts, Some(ts1), TopologyChangeOp.Add)
             addedPrev <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Add)
             added <- findTransactionsForTesting(store, ts1, None, TopologyChangeOp.Add)
@@ -335,7 +364,7 @@ trait TopologyStoreTest
           val store = mk()
           for {
             _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-              store.append(ts, List(ns1k1, ns1k1, ns1k1, okm1, okm1, okm1, ps1, ps1, rps1, ps2)),
+              append(store, ts, List(ns1k1, ns1k1, ns1k1, okm1, okm1, okm1, ps1, ps1, rps1, ps2)),
               seq => {
                 seq.foreach(x => x.warningMessage should include("Discarding duplicate Add"))
                 seq should have length (5)
@@ -351,7 +380,7 @@ trait TopologyStoreTest
           val store = mk()
           for {
             _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
-              store.append(ts, List(ns1k1, dpc1, dpc1Updated)),
+              append(store, ts, List(ns1k1, dpc1, dpc1Updated)),
               seq => {
                 seq.foreach(x => x.warningMessage should include("Discarding duplicate Replace"))
                 seq should have length (1)
@@ -372,14 +401,14 @@ trait TopologyStoreTest
           val snd = List[ValidatedTopologyTransaction](rokm1, ps2, rps1, dpc1Updated)
 
           for {
-            _ <- store.doAppend(ts, first)
-            _ <- store.doAppend(ts, first)
+            _ <- doAppend(store, ts, first)
+            _ <- doAppend(store, ts, first)
             initialAdds <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Add)
             initialReplaces <- findTransactionsForTesting(store, ts, None, TopologyChangeOp.Replace)
-            _ <- store.doAppend(ts1, snd)
-            _ <- store.doAppend(ts1, snd)
-            _ <- store.doAppend(ts, first)
-            _ <- store.doAppend(ts1, snd)
+            _ <- doAppend(store, ts1, snd)
+            _ <- doAppend(store, ts1, snd)
+            _ <- doAppend(store, ts, first)
+            _ <- doAppend(store, ts1, snd)
             expiredAdds <- findTransactionsForTesting(store, ts, Some(ts1), TopologyChangeOp.Add)
             expiredReplaces <- findTransactionsForTesting(
               store,
@@ -506,8 +535,8 @@ trait TopologyStoreTest
           }
 
           for {
-            _ <- store.append(ts, first)
-            _ <- store.append(ts1, snd)
+            _ <- append(store, ts, first)
+            _ <- append(store, ts1, snd)
             maxTimestamp <- store.timestamp()
             all <- store.allTransactions
             headState <- store.headTransactions
@@ -558,7 +587,7 @@ trait TopologyStoreTest
             txs.combine.result.map(_.transaction.transaction.element.mapping).toSet
 
           for {
-            _ <- store.append(ts, first)
+            _ <- append(store, ts, first)
             nsQ <- store.findPositiveTransactions(
               ts1,
               asOfInclusive = false,
@@ -612,8 +641,8 @@ trait TopologyStoreTest
           ) = findPositiveTx(store, ts, types, uidsO, None).map(_.toIdentityState)
 
           for {
-            _ <- store.append(ts, first)
-            _ <- store.append(ts1, snd)
+            _ <- append(store, ts, first)
+            _ <- append(store, ts1, snd)
 
             empty1 <- findPositiveTopologyStateElements(
               ts,
@@ -681,7 +710,7 @@ trait TopologyStoreTest
           val trans = List[ValidatedTopologyTransaction](okm1, okm2, okm3)
           val tp = Seq(DomainTopologyTransactionType.OwnerToKeyMapping)
           for {
-            _ <- store.append(ts, trans)
+            _ <- append(store, ts, trans)
             empty1 <- findPositiveTx(store, ts1, tp, Some(Seq(pid(ns4).uid)), None)
               .map(_.toIdentityState)
             all <- findPositiveTx(store, ts1, tp, None, None).map(_.toIdentityState)
@@ -718,9 +747,9 @@ trait TopologyStoreTest
             }
             .map(toValidated)
           for {
-            _ <- store.append(ts, first)
-            _ <- store.append(ts1, dummy)
-            _ <- store.append(ts1.plusSeconds(1), snd)
+            _ <- append(store, ts, first)
+            _ <- append(store, ts1, dummy.toList)
+            _ <- append(store, ts1.plusSeconds(1), snd)
             initial <- store.findInitialState(domainManager.uid)
           } yield {
             initial shouldBe Map[KeyOwner, Seq[PublicKey]](
@@ -752,7 +781,7 @@ trait TopologyStoreTest
 
           val first = List[ValidatedTopologyTransaction](ns1k1, p2p1, p2p2, okmS, okmE, crtE)
           for {
-            _ <- store.append(ts, first)
+            _ <- append(store, ts, first)
             bootstrap <- store.findParticipantOnboardingTransactions(participant1)
             empty1 <- store.findParticipantOnboardingTransactions(participant2)
           } yield {
@@ -778,8 +807,8 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.append(ts, first)
-            _ <- store.append(ts1, List[ValidatedTopologyTransaction](factory.revert(ns1k1)))
+            _ <- append(store, ts, first)
+            _ <- append(store, ts1, List[ValidatedTopologyTransaction](factory.revert(ns1k1)))
             res <- checkAsOf(fetch)
           } yield res
         }
@@ -804,7 +833,7 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.append(ts, tmp.transactions.map(toValidated))
+            _ <- append(store, ts, tmp.transactions.map(toValidated))
             res <- tmp.check(fetch)
           } yield {
             res
@@ -827,7 +856,7 @@ trait TopologyStoreTest
             )
 
             for {
-              _ <- store.append(ts, unauthorizedTransactions)
+              _ <- append(store, ts, unauthorizedTransactions)
               flt <- store.findPositiveTransactions(
                 ts,
                 asOfInclusive = true,
@@ -853,8 +882,8 @@ trait TopologyStoreTest
             )
 
             for {
-              _ <- store.append(ts, List(ValidatedTopologyTransaction(ns1k1, None)))
-              _ <- store.append(ts1, unauthorizedRemoves)
+              _ <- append(store, ts, List(ValidatedTopologyTransaction(ns1k1, None)))
+              _ <- append(store, ts1, unauthorizedRemoves)
               flt <- store.findPositiveTransactions(
                 ts1,
                 asOfInclusive = true,
@@ -878,9 +907,14 @@ trait TopologyStoreTest
           val store = mk()
           for {
             // empty change
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq())
+            _ <- updateState(store, ts, deactivate = Seq(), positive = Seq())
             // add a few items
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq(ns1k1, id2k2, okm1, dpc1))
+            _ <- updateState(
+              store,
+              ts,
+              deactivate = Seq(),
+              positive = Seq(ns1k1, id2k2, okm1, dpc1),
+            )
             // should not mix with normal state txs
             empty1 <- store
               .findPositiveTransactions(
@@ -904,7 +938,8 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
             // update and add
-            _ <- store.updateState(
+            _ <- updateState(
+              store,
               ts1,
               deactivate = Seq(id2k2.uniquePath, dpc1.uniquePath),
               positive = Seq(okm2, dpc1Updated),
@@ -953,12 +988,22 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq(ns1k1, id2k2, okm1, dpc1))
-            _ <- store.updateState(ts1, deactivate = Seq(id2k2.uniquePath), positive = Seq(okm2))
+            _ <- updateState(
+              store,
+              ts,
+              deactivate = Seq(),
+              positive = Seq(ns1k1, id2k2, okm1, dpc1),
+            )
+            _ <- updateState(store, ts1, deactivate = Seq(id2k2.uniquePath), positive = Seq(okm2))
             st1 <- fetch()
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq(ns1k1, id2k2, okm1, dpc1))
+            _ <- updateState(
+              store,
+              ts,
+              deactivate = Seq(),
+              positive = Seq(ns1k1, id2k2, okm1, dpc1),
+            )
             st2 <- fetch()
-            _ <- store.updateState(ts1, deactivate = Seq(id2k2.uniquePath), positive = Seq(okm2))
+            _ <- updateState(store, ts1, deactivate = Seq(id2k2.uniquePath), positive = Seq(okm2))
             st3 <- fetch()
           } yield {
             st1 shouldBe List(ns1k1, okm1, okm2, dpc1).map(_.transaction.element)
@@ -982,7 +1027,12 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq(ns1k1, id2k2, okm1, dpc1))
+            _ <- updateState(
+              store,
+              ts,
+              deactivate = Seq(),
+              positive = Seq(ns1k1, id2k2, okm1, dpc1),
+            )
             empty1 <- fetch(Some(Seq()), None)
             empty2 <- fetch(None, Some(Seq()))
             empty3 <- fetch(Some(Seq(fakeUid)), None)
@@ -1013,8 +1063,8 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.updateState(ts, deactivate = Seq(), positive = Seq(ns1k1))
-            _ <- store.updateState(ts1, deactivate = Seq(ns1k1.uniquePath), positive = Seq())
+            _ <- updateState(store, ts, deactivate = Seq(), positive = Seq(ns1k1))
+            _ <- updateState(store, ts1, deactivate = Seq(ns1k1.uniquePath), positive = Seq())
             res <- checkAsOf(fetch)
           } yield res
         }
@@ -1040,7 +1090,7 @@ trait TopologyStoreTest
               )
               .map(_.toIdentityState)
           for {
-            _ <- store.updateState(ts, deactivate = Seq(), positive = transactions)
+            _ <- updateState(store, ts, deactivate = Seq(), positive = transactions)
             res <- tmp.check(fetch)
           } yield res
         }
@@ -1049,7 +1099,7 @@ trait TopologyStoreTest
           val store = mk()
           val ts = CantonTimestamp.Epoch
           for {
-            _ <- store.updateState(ts, deactivate = Seq(), positive = List(ps1, p2p1, p2p2))
+            _ <- updateState(store, ts, deactivate = Seq(), positive = List(ps1, p2p1, p2p2))
             res <- store.inspectKnownParties(ts.immediateSuccessor, "one", "", 100)
             res2 <- store.inspectKnownParties(ts.immediateSuccessor, "", "", 1)
             empty1 <- store.inspectKnownParties(ts.immediateSuccessor, "three", "", 100)
@@ -1085,10 +1135,10 @@ trait TopologyStoreTest
           def fetch(timestamp: CantonTimestamp) =
             store.findDispatchingTransactionsAfter(timestamp).map(_.toDomainTopologyTransactions)
           for {
-            _ <- store.append(ts, List(ns1k1, okm1))
+            _ <- append(store, ts, List(ns1k1, okm1))
             state1 <- fetch(CantonTimestamp.MinValue)
             empty1 <- fetch(ts)
-            _ <- store.append(ts1, List(rokm1, okm2))
+            _ <- append(store, ts1, List(rokm1, okm2))
             state2 <- fetch(CantonTimestamp.MinValue)
             sub2 <- fetch(ts)
             empty2 <- fetch(ts1)

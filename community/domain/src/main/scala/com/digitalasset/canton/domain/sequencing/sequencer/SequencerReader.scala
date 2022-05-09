@@ -28,6 +28,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.{SequencerCounter, checked}
+import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -140,7 +141,7 @@ class SequencerReader(
         .throttle(1, config.checkpointInterval.toScala)
         .drop(1) // it's pointless writing the first checkpoint as this was likely the starting point we've just read
         .mapAsync(1) { checkpoint =>
-          performUnlessClosingF {
+          performUnlessClosingF(functionFullName) {
             saveCounterCheckpoint(member, registeredMember.memberId, checkpoint)
           }.onShutdown {
             logger.info("Skip saving the counter checkpoint due to shutdown")
@@ -153,7 +154,10 @@ class SequencerReader(
         .wireTap(recordCheckpointSink) // setup a separate sink to periodically record checkpoints
     }
 
-    performUnlessClosingEitherT(CreateSubscriptionError.ShutdownError: CreateSubscriptionError) {
+    performUnlessClosingEitherT(
+      functionFullName,
+      CreateSubscriptionError.ShutdownError: CreateSubscriptionError,
+    ) {
       for {
         registeredMember <- EitherT
           .fromOptionF(store.lookupMember(member), CreateSubscriptionError.UnknownMember(member))

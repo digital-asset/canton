@@ -6,14 +6,14 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverseFilter._
-import com.digitalasset.canton.config.{CacheConfig, CachingConfigs}
+import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SignatureCheckError.{
   SignatureWithWrongKey,
   SignerHasNoValidKeys,
 }
 import com.digitalasset.canton.crypto.SyncCryptoError.{KeyNotAvailable, SyncCryptoEncryptionError}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology._
@@ -41,6 +41,7 @@ class SyncCryptoApiProvider(
     val ips: IdentityProvidingServiceClient,
     val crypto: Crypto,
     cachingConfigs: CachingConfigs,
+    timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext) {
 
@@ -55,13 +56,22 @@ class SyncCryptoApiProvider(
       ips.tryForDomain(domain),
       crypto,
       cachingConfigs,
+      timeouts,
       alias.fold(loggerFactory)(alias => loggerFactory.append("domain", alias.unwrap)),
     )
 
   def forDomain(domain: DomainId): Option[DomainSyncCryptoClient] =
     for {
       dips <- ips.forDomain(domain)
-    } yield new DomainSyncCryptoClient(owner, domain, dips, crypto, cachingConfigs, loggerFactory)
+    } yield new DomainSyncCryptoClient(
+      owner,
+      domain,
+      dips,
+      crypto,
+      cachingConfigs,
+      timeouts,
+      loggerFactory,
+    )
 }
 
 trait SyncCryptoClient extends TopologyClientApi[SyncCryptoApi] {
@@ -97,10 +107,12 @@ class DomainSyncCryptoClient(
     val ips: DomainTopologyClient,
     val crypto: Crypto,
     cacheConfigs: CachingConfigs,
+    override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends SyncCryptoClient
-    with NamedLogging {
+    with NamedLogging
+    with FlagCloseable {
 
   override def pureCrypto: CryptoPureApi = crypto.pureCrypto
 
@@ -202,6 +214,7 @@ class DomainSyncCryptoClient(
 
   override def approximateTimestamp: CantonTimestamp = ips.approximateTimestamp
 
+  override def onClosed(): Unit = Lifecycle.close(ips)(logger)
 }
 
 /** crypto operations for a (domain,timestamp) */

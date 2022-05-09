@@ -41,7 +41,14 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
         ),
         crypto.SigningKeys.key1,
       )
-      store.updateState(CantonTimestamp.MinValue, Seq(), positive = Seq(tx)).futureValue
+      store
+        .updateState(
+          SequencedTime(CantonTimestamp.MinValue),
+          EffectiveTime(CantonTimestamp.MinValue),
+          Seq(),
+          positive = Seq(tx),
+        )
+        .futureValue
       unwrap(
         TopologyTimestampPlusEpsilonTracker.initializeFromStore(tracker, store, ts)
       ).futureValue

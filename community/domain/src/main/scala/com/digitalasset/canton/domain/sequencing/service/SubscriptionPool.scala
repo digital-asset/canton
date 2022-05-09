@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import io.functionmeta.functionFullName
 
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
@@ -52,7 +53,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
   def create(createSubscription: () => Subscription, member: Member)(implicit
       traceContext: TraceContext
   ): Either[RegistrationError, Subscription] =
-    performUnlessClosing {
+    performUnlessClosing(functionFullName) {
       blocking {
         synchronized {
           logger.debug(s"Creating subscription for $member")

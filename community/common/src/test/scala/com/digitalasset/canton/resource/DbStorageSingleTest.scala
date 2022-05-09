@@ -4,15 +4,12 @@
 package com.digitalasset.canton.resource
 
 import com.digitalasset.canton.config.CommunityDbConfig.Postgres
-import com.digitalasset.canton.config.{DbConfig, DefaultProcessingTimeouts}
+import com.digitalasset.canton.config.{CommunityDbConfig, DbConfig, DefaultProcessingTimeouts}
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.store.db.{DbStorageSetup, MigrationMode}
-import com.digitalasset.canton.store.db.DbStorageSetup.Config.PostgresBasicConfig
+import com.digitalasset.canton.store.db.DbStorageSetup
+import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.{BaseTest, CloseableTest}
-import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AsyncWordSpec
-
-import scala.jdk.CollectionConverters._
 
 trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest {
 
@@ -96,21 +93,10 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
 
 class DbStorageSingleTestPostgres extends DbStorageSingleTest {
 
-  private lazy val setup =
-    DbStorageSetup.postgresFunctionalTestSetup(
-      loggerFactory,
-      migrationMode = MigrationMode.Standard,
-    )
+  private lazy val setup = DbStorageSetup.postgres(loggerFactory)
 
-  private def modifyConfig(config: PostgresBasicConfig): Postgres = {
-    val defaultConfig = DbStorageSetup.Config.pgConfig(config)
-    // Disable connection pooling to speed up detection of invalid DB configuration
-    defaultConfig.copy(
-      config = ConfigFactory
-        .parseMap(Map("connectionPool" -> "disabled").asJava)
-        .withFallback(defaultConfig.config)
-    )
-  }
+  private def modifyConfig(config: DbBasicConfig): Postgres =
+    CommunityDbConfig.Postgres(config.toPostgresConfig)
 
   def baseConfig: Postgres = modifyConfig(setup.basicConfig)
 

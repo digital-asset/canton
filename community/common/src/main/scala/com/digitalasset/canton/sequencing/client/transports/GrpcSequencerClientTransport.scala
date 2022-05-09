@@ -58,7 +58,10 @@ class GrpcSequencerClientTransport(
           err match {
             case _: GrpcClientGaveUp | _: GrpcServerError =>
               // avoid logging client errors that typically happen during shutdown (such as grpc context cancelled)
-              val _ = performUnlessClosing(err.log(logger)(traceContext))(traceContext)
+              val _ =
+                performUnlessClosing("grpc-client-transport-log")(err.log(logger)(traceContext))(
+                  traceContext
+                )
             case _ => err.log(logger)(traceContext)
           }
 

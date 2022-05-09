@@ -200,7 +200,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false),
       syncDomainStateFactory,
       new SimClock(loggerFactory = loggerFactory),
-      new ResourceManagementService.CommunityResourceManagementService,
+      new ResourceManagementService.CommunityResourceManagementService(None),
       LocalNodeParameters,
       SyncDomain.DefaultFactory,
       indexedStringStore,

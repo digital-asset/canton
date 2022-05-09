@@ -33,7 +33,13 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
-import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.processing.{
+  ApproximateTime,
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionProcessingSubscriber,
+  TopologyTransactionProcessor,
+}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
@@ -44,6 +50,7 @@ import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.collection.mutable
@@ -81,7 +88,7 @@ import scala.util.{Failure, Success}
 class DomainTopologyDispatcher(
     domainId: DomainId,
     authorizedStore: TopologyStore,
-    targetClient: DomainTopologyClientWithInit,
+    processor: TopologyTransactionProcessor,
     initialKeys: Map[KeyOwner, Seq[PublicKey]],
     targetStore: TopologyStore,
     crypto: Crypto,
@@ -116,6 +123,7 @@ class DomainTopologyDispatcher(
     topologyClient,
     crypto,
     parameters.cachingConfigs,
+    timeouts,
     loggerFactory,
   )
   private val staticDomainMembers = DomainMember.list(domainId, addressSequencerAsDomainMember)
@@ -148,7 +156,7 @@ class DomainTopologyDispatcher(
       queue.appendAll(actuallyPending)
       actuallyPending.lastOption match {
         case Some(ts) =>
-          updateTopologyClientTs(ts.value.validFrom)
+          updateTopologyClientTs(ts.value.validFrom.value)
           logger.info(
             show"Resuming topology dispatching with ${actuallyPending.length} transactions: ${actuallyPending
               .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
@@ -162,7 +170,7 @@ class DomainTopologyDispatcher(
   override def addedSignedTopologyTransaction(
       timestamp: CantonTimestamp,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): Unit = performUnlessClosing {
+  )(implicit traceContext: TraceContext): Unit = performUnlessClosing(functionFullName) {
     val last = lastTs.getAndSet(timestamp)
     // we assume that we get txs in strict ascending timestamp order
     ErrorUtil.requireArgument(
@@ -187,7 +195,9 @@ class DomainTopologyDispatcher(
     blocking {
       lock.synchronized {
         queue ++= transactions.iterator.map(x =>
-          Traced(StoredTopologyTransaction(timestamp, None, x))
+          Traced(
+            StoredTopologyTransaction(SequencedTime(timestamp), EffectiveTime(timestamp), None, x)
+          )
         )
         flush()
       }
@@ -195,13 +205,13 @@ class DomainTopologyDispatcher(
   }.discard
 
   // subscribe to target
-  targetClient.subscribe(new DomainTopologyClient.Subscriber {
+  processor.subscribe(new TopologyTransactionProcessingSubscriber {
     override def observed(
         sequencedTimestamp: SequencedTime,
         effectiveTimestamp: EffectiveTime,
         sc: SequencerCounter,
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): Unit = {
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
       transactions.foreach { tx =>
         logger.debug(
           show"Sequenced topology transaction ${tx.transaction.op} ${tx.transaction.element.mapping}"
@@ -212,6 +222,11 @@ class DomainTopologyDispatcher(
       // the queue stats are correct, while just on startup, they might be a bit too low
       inflight.updateAndGet(x => Math.max(0, x - transactions.size)).discard
     }
+    override def updateHead(
+        effectiveTimestamp: EffectiveTime,
+        approximateTimestamp: ApproximateTime,
+        potentialTopologyChange: Boolean,
+    )(implicit traceContext: TraceContext): Unit = {}
   })
 
   private def updateTopologyClientTs(timestamp: CantonTimestamp)(implicit
@@ -268,8 +283,8 @@ class DomainTopologyDispatcher(
         case mapping: DomainParametersChange =>
           EitherT
             .right(
-              performUnlessClosingF(
-                authorizedStoreSnapshot(txs.last1.validFrom).findDynamicDomainParameters
+              performUnlessClosingF(functionFullName)(
+                authorizedStoreSnapshot(txs.last1.validFrom.value).findDynamicDomainParameters
               )
             )
             .flatMap(_.fold(empty) { param =>
@@ -291,7 +306,7 @@ class DomainTopologyDispatcher(
   def flush()(implicit traceContext: TraceContext): Unit = {
     if (!flushing.getAndSet(true)) {
       val ret = for {
-        pending <- EitherT.right(performUnlessClosingF(Future {
+        pending <- EitherT.right(performUnlessClosingF(functionFullName)(Future {
           blocking {
             lock.synchronized {
               val tmp = determineBatchFromQueue()
@@ -363,11 +378,11 @@ class DomainTopologyDispatcher(
           case ParticipantState(_, _, participant, _, _) =>
             for {
               catchupForParticipant <- EitherT.right(
-                performUnlessClosingF(
+                performUnlessClosingF(functionFullName)(
                   catchup
                     .determineCatchupForParticipant(
-                      transactions.head1.validFrom,
-                      transactions.last1.validFrom,
+                      transactions.head1.validFrom.value,
+                      transactions.last1.validFrom.value,
                       participant,
                     )
                 )
@@ -380,7 +395,7 @@ class DomainTopologyDispatcher(
               _ <- catchupForParticipant.fold(EitherT.rightT[FutureUnlessShutdown, String](())) {
                 txs =>
                   sender.sendTransactions(
-                    authorizedCryptoSnapshot(transactions.head1.validFrom),
+                    authorizedCryptoSnapshot(transactions.head1.validFrom.value),
                     txs.toDomainTopologyTransactions,
                     Set(participant),
                   )
@@ -395,8 +410,8 @@ class DomainTopologyDispatcher(
         // update watermark, which we can as we successfully registered all transactions with the domain
         // we don't need to wait until they are processed
         _ <- EitherT.right(
-          performUnlessClosingF(
-            targetStore.updateDispatchingWatermark(transactions.last1.validFrom)
+          performUnlessClosingF(functionFullName)(
+            targetStore.updateDispatchingWatermark(transactions.last1.validFrom.value)
           )
         )
       } yield ()
@@ -407,20 +422,20 @@ class DomainTopologyDispatcher(
       transactions: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]],
       add: Option[ParticipantId],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val headSnapshot = authorizedStoreSnapshot(transactions.head1.validFrom)
-    val receivingParticipantsF = performUnlessClosingF(
+    val headSnapshot = authorizedStoreSnapshot(transactions.head1.validFrom.value)
+    val receivingParticipantsF = performUnlessClosingF(functionFullName)(
       headSnapshot
         .participants()
         .map(_.collect {
           case (participantId, perm) if perm.isActive => participantId
         })
     )
-    val mediatorsF = performUnlessClosingF(headSnapshot.mediators())
+    val mediatorsF = performUnlessClosingF(functionFullName)(headSnapshot.mediators())
     for {
       receivingParticipants <- EitherT.right(receivingParticipantsF)
       mediators <- EitherT.right(mediatorsF)
       _ <- sender.sendTransactions(
-        authorizedCryptoSnapshot(transactions.head1.validFrom),
+        authorizedCryptoSnapshot(transactions.head1.validFrom.value),
         transactions.map(_.transaction).toList,
         (receivingParticipants ++ staticDomainMembers ++ mediators ++ add.toList).toSet,
       )
@@ -437,6 +452,7 @@ object DomainTopologyDispatcher {
       domainId: DomainId,
       domainTopologyManager: DomainTopologyManager,
       targetClient: DomainTopologyClientWithInit,
+      processor: TopologyTransactionProcessor,
       initialKeys: Map[KeyOwner, Seq[PublicKey]],
       targetStore: TopologyStore,
       client: SequencerClient,
@@ -467,7 +483,7 @@ object DomainTopologyDispatcher {
     val dispatcher = new DomainTopologyDispatcher(
       domainId,
       domainTopologyManager.store,
-      targetClient,
+      processor,
       initialKeys,
       targetStore,
       crypto,
@@ -603,7 +619,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Either[SendAsyncClientError, Unit]] =
-      performUnlessClosingF(
+      performUnlessClosingF(functionFullName)(
         client
           .sendAsync(batch, SendType.Other, callback = callback)
           .value

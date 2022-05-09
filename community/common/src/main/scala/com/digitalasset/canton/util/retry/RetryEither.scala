@@ -59,33 +59,35 @@ object RetryEither {
   ): EitherT[UnlessShutdown, A, B] = {
     maxRetries.tailRecM { retryCount =>
       EitherT {
-        closeContext.flagCloseable.performUnlessClosing(body)(loggingContext.traceContext).flatMap {
-          _.value.map {
-            _.map(Right(_))
-              .leftFlatMap { err =>
-                if (stopOnLeft.exists(fn => fn(err))) {
-                  // Stop the retry attempts on this particular Left if stopOnLeft is true
-                  Left(err)
-                } else if (retryCount <= 0) {
-                  // Stop the recursion with the error if we exhausted the max retries
-                  LoggerUtil.logAtLevel(
-                    failLogLevel,
-                    s"Operation $operationName failed, exhausted retries: $err",
-                  )
-                  Left(err)
-                } else {
-                  // Retry the operation if it failed but we have retries left
-                  LoggerUtil.logAtLevel(
-                    retryLogLevel,
-                    s"Operation $operationName failed, retrying in ${waitInMs}ms: $err",
-                  )
-                  Threading.sleep(waitInMs)
-                  val nextRetry = if (retryCount == Int.MaxValue) Int.MaxValue else retryCount - 1
-                  Right(Left(nextRetry))
+        closeContext.flagCloseable
+          .performUnlessClosing(operationName)(body)(loggingContext.traceContext)
+          .flatMap {
+            _.value.map {
+              _.map(Right(_))
+                .leftFlatMap { err =>
+                  if (stopOnLeft.exists(fn => fn(err))) {
+                    // Stop the retry attempts on this particular Left if stopOnLeft is true
+                    Left(err)
+                  } else if (retryCount <= 0) {
+                    // Stop the recursion with the error if we exhausted the max retries
+                    LoggerUtil.logAtLevel(
+                      failLogLevel,
+                      s"Operation $operationName failed, exhausted retries: $err",
+                    )
+                    Left(err)
+                  } else {
+                    // Retry the operation if it failed but we have retries left
+                    LoggerUtil.logAtLevel(
+                      retryLogLevel,
+                      s"Operation $operationName failed, retrying in ${waitInMs}ms: $err",
+                    )
+                    Threading.sleep(waitInMs)
+                    val nextRetry = if (retryCount == Int.MaxValue) Int.MaxValue else retryCount - 1
+                    Right(Left(nextRetry))
+                  }
                 }
-              }
+            }
           }
-        }
       }
     }
   }

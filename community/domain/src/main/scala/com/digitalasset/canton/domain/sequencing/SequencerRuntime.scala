@@ -39,7 +39,7 @@ import com.digitalasset.canton.domain.sequencing.service._
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
-import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
+import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -91,6 +91,7 @@ object SequencerAuthenticationConfig {
 
 /** Run a sequencer and its supporting services.
   * @param authenticationConfig Authentication setup if supported, otherwise none.
+  * @param sharedTopologyProcessor If true, the topology processor is shared and the subscriptions will be handled outside. If false, the sequencer must setup the connection and close
   */
 class SequencerRuntime(
     sequencerFactory: SequencerFactory,
@@ -102,13 +103,14 @@ class SequencerRuntime(
     val domainId: DomainId,
     crypto: Crypto,
     sequencedTopologyStore: TopologyStore,
-    val topologyClient: DomainTopologyClientWithInit,
+    topologyClient: DomainTopologyClientWithInit,
+    topologyProcessor: TopologyTransactionProcessor,
+    sharedTopologyProcessor: Boolean,
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
     snapshot: Option[SequencerSnapshot],
     authenticationConfig: SequencerAuthenticationConfig,
-    topologyProcessorO: Option[TopologyTransactionProcessor],
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -129,6 +131,7 @@ class SequencerRuntime(
       topologyClient,
       crypto,
       localNodeParameters.cachingConfigs,
+      timeouts,
       loggerFactory,
     )
 
@@ -199,7 +202,7 @@ class SequencerRuntime(
    */
   val sequencerNodeComponentsO
       : Option[(SequencerClient, DomainTimeTracker, Future[DomainInitializationObserver])] =
-    topologyProcessorO map { topologyProcessor =>
+    if (!sharedTopologyProcessor) {
       withNewTraceContext { implicit traceContext =>
         logger.debug(s"Creating sequencer client for ${clientDiscriminator}")
         val sequencedEventStore =
@@ -219,7 +222,6 @@ class SequencerRuntime(
           localNodeParameters.processingTimeouts,
           _ => _ => EitherT.rightT(()),
           clock,
-          crypto.pureCrypto,
           sequencedEventStore,
           new SendTracker(Map(), SendTrackerStore(storage), metrics.sequencerClient, loggerFactory),
           metrics.sequencerClient,
@@ -256,9 +258,9 @@ class SequencerRuntime(
             localNodeParameters.processingTimeouts,
             loggerFactory,
           )
-        (client, timeTracker, initializationObserver)
+        Some((client, timeTracker, initializationObserver))
       }
-    }
+    } else None
 
   private val timeoutScheduler: ScheduledExecutorService =
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
@@ -310,7 +312,7 @@ class SequencerRuntime(
       loggerFactory,
       auditLogger,
     )
-    topologyClient.subscribe(authenticationService)
+    topologyProcessor.subscribe(authenticationService)
 
     val sequencerAuthenticationService =
       new GrpcSequencerAuthenticationService(
@@ -330,6 +332,12 @@ class SequencerRuntime(
   }
 
   def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = sequencer.health
+
+  def topologyQueue: TopologyQueueStatus = TopologyQueueStatus(
+    manager = 0,
+    dispatcher = 0,
+    clients = topologyClient.numPendingChanges,
+  )
 
   def fetchActiveMembers(): Future[Seq[Member]] =
     Future.successful(sequencerService.membersWithActiveSubscriptions)
@@ -442,11 +450,10 @@ class SequencerRuntime(
           Lifecycle.close(timeTracker, client)(logger)
         },
       () =>
-        topologyProcessorO.foreach { processor =>
-          // if this component has a topology processor, we need to close it together with
-          // the client
+        if (!sharedTopologyProcessor) {
+          // if this component has a topology processor, we need to close it together with the client
           topologyClient.close()
-          processor.close()
+          topologyProcessor.close()
         },
       sequencerService,
       authenticationServices.memberAuthenticationService,

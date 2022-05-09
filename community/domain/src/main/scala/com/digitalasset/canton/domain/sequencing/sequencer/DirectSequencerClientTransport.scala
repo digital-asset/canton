@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
@@ -86,7 +87,7 @@ class DirectSequencerClientTransport(
         case Success(Right(subscription)) =>
           closeReasonPromise.completeWith(subscription.closeReason)
 
-          performUnlessClosing {
+          performUnlessClosing(functionFullName) {
             subscriptionRef.set(Some(subscription))
           } onShutdown {
             subscription.close()

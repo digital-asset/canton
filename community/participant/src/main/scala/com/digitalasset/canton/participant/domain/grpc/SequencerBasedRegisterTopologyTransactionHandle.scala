@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Memb
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
+import io.functionmeta.functionFullName
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -98,7 +99,9 @@ private[grpc] class ParticipantDomainTopologyService(
     fromGrpcContext { implicit traceContext =>
       val responseF = getResponse(request)
       for {
-        _ <- performUnlessClosingF(EitherTUtil.toFuture(mapErr(sendRequest(request))))
+        _ <- performUnlessClosingF(functionFullName)(
+          EitherTUtil.toFuture(mapErr(sendRequest(request)))
+        )
         response <- responseF
       } yield response
     }
@@ -144,7 +147,7 @@ private[grpc] class ParticipantDomainTopologyService(
 
   private[grpc] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
     envs.withTraceContext { implicit traceContext => envs =>
-      HandlerResult.asynchronous(performUnlessClosingF {
+      HandlerResult.asynchronous(performUnlessClosingF(s"${getClass.getSimpleName}-processor") {
         Future {
           envs.foreach { env =>
             env.protocolMessage match {

@@ -11,23 +11,17 @@ import com.digitalasset.canton.config.RequireTypes.{
   String255,
 }
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.serialization.MemoizedEvidence
-import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
-  HasProtoV0,
-  HasVersionedWrapper,
-  ProtocolVersion,
-  VersionedMessage,
-}
-import com.google.protobuf.ByteString
-import slick.jdbc.SetParameter
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.protocol.v0.TopologyTransaction.Transaction
+import com.digitalasset.canton.serialization.MemoizedEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
+import com.digitalasset.canton.version._
+import com.google.protobuf.ByteString
+import slick.jdbc.SetParameter
 
 /** Add, Remove, Replace */
 sealed trait TopologyChangeOp extends Product with Serializable with PrettyPrinting {
@@ -231,6 +225,29 @@ object TopologyTransaction
   val supportedProtoVersions: Map[Int, Parser] = Map(
     0 -> supportedProtoVersionMemoized(v0.TopologyTransaction)(fromProtoV0)
   )
+
+  /** returns true if two transactions are equivalent */
+  def equivalent(
+      first: TopologyTransaction[TopologyChangeOp],
+      second: TopologyTransaction[TopologyChangeOp],
+  ): Boolean =
+    (first, second) match {
+      case (
+            TopologyStateUpdate(firstOp, TopologyStateUpdateElement(_id, firstMapping)),
+            TopologyStateUpdate(secondOp, TopologyStateUpdateElement(_id2, secondMapping)),
+          ) =>
+        firstOp == secondOp && firstMapping == secondMapping
+
+      case (
+            DomainGovernanceTransaction(DomainGovernanceElement(firstMapping)),
+            DomainGovernanceTransaction(DomainGovernanceElement(secondMapping)),
+          ) =>
+        firstMapping == secondMapping
+
+      case (_: TopologyStateUpdate[_], _: DomainGovernanceTransaction) => false
+
+      case (_: DomainGovernanceTransaction, _: TopologyStateUpdate[_]) => false
+    }
 
   def fromProtoV0(transactionP: v0.TopologyTransaction)(
       bytes: ByteString

@@ -22,7 +22,12 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
+import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
+import com.digitalasset.canton.sequencing.client.{
+  SequencerClient,
+  SequencerClientFactory,
+  SequencerClientTransportFactory,
+}
 import com.digitalasset.canton.store.{SendTrackerStore, SequencedEventStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -46,7 +51,9 @@ class DomainNodeSequencerClientFactory(
     futureSupervisor: FutureSupervisor,
     override val loggerFactory: NamedLoggerFactory,
 ) extends SequencerClientFactory
+    with SequencerClientTransportFactory
     with NamedLogging {
+
   override def create(
       member: Member,
       sequencedEventStore: SequencedEventStore,
@@ -56,7 +63,19 @@ class DomainNodeSequencerClientFactory(
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
-  ): EitherT[Future, String, SequencerClient] = {
+  ): EitherT[Future, String, SequencerClient] =
+    factory(member).create(member, sequencedEventStore, sendTrackerStore)
+
+  override def makeTransport(connection: SequencerConnection, member: Member)(implicit
+      executionContext: ExecutionContextExecutor,
+      materializer: Materializer,
+      traceContext: TraceContext,
+  ): EitherT[Future, String, SequencerClientTransport] =
+    factory(member).makeTransport(connection, member)
+
+  private def factory(member: Member)(implicit
+      executionContext: ExecutionContextExecutor
+  ): SequencerClientFactory with SequencerClientTransportFactory = {
     val (clientMetrics, clientName) = member match {
       case MediatorId(_) => (metrics.mediator.sequencerClient, "mediator")
       case DomainTopologyManagerId(_) =>
@@ -75,6 +94,7 @@ class DomainNodeSequencerClientFactory(
         topologyClient,
         crypto,
         cantonParameterConfig.cachingConfigs,
+        cantonParameterConfig.processingTimeouts,
         loggerFactory,
       )
 
@@ -105,6 +125,6 @@ class DomainNodeSequencerClientFactory(
       supportedProtocolVersions =
         ProtocolVersion.supportedProtocolsDomain(cantonParameterConfig.devVersionSupport),
       minimumProtocolVersion = None,
-    ).create(member, sequencedEventStore, sendTrackerStore)
+    )
   }
 }

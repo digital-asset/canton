@@ -30,6 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -123,7 +124,7 @@ abstract class AbstractMessageProcessor(
 
         def onTimeout: Future[Unit] = {
           logger.debug(s"Bad request $requestCounter: Timed out without a mediator result message.")
-          performUnlessClosingF {
+          performUnlessClosingF(functionFullName) {
             terminateRequest(requestCounter, sequencerCounter, timestamp, decisionTime)
           }.onShutdown {
             logger.info(s"Ignoring timeout of bad request $requestCounter due to shutdown")

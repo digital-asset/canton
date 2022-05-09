@@ -21,20 +21,23 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class StoredTopologyTransaction[+Op <: TopologyChangeOp](
-    validFrom: CantonTimestamp,
-    validUntil: Option[CantonTimestamp],
+    sequenced: SequencedTime,
+    validFrom: EffectiveTime,
+    validUntil: Option[EffectiveTime],
     transaction: SignedTopologyTransaction[Op],
 ) extends PrettyPrinting {
   override def pretty: Pretty[StoredTopologyTransaction.this.type] =
     prettyOfClass(
-      param("validFrom", _.validFrom),
-      param("validUntil", _.validUntil),
+      param("sequenced", _.sequenced.value),
+      param("validFrom", _.validFrom.value),
+      paramIfDefined("validUntil", _.validUntil.map(_.value)),
       param("op", _.transaction.transaction.op),
       param("mapping", _.transaction.transaction.element.mapping),
     )
@@ -297,39 +300,46 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
   def bootstrap(
       collection: StoredTopologyTransactions[TopologyChangeOp.Positive]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val groupedByValidFrom = collection.result
-      .groupBy(_.validFrom)
+    val groupedBySequencedAndValidFrom = collection.result
+      .groupBy(x => (x.sequenced, x.validFrom))
       .toList
-      .sortBy { case (validFrom, _) => validFrom }
+      .sortBy { case ((_, validFrom), _) => validFrom }
     MonadUtil
-      .sequentialTraverse_(groupedByValidFrom) { case (validFrom, transactions) =>
-        val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
-        for {
-          _ <- append(validFrom, txs)
-          _ <- updateState(
-            validFrom,
-            deactivate = Seq.empty,
-            positive = transactions.map(_.transaction),
-          )
-        } yield ()
+      .sequentialTraverse_(groupedBySequencedAndValidFrom) {
+        case ((sequenced, effective), transactions) =>
+          val txs = transactions.map(tx => ValidatedTopologyTransaction(tx.transaction, None))
+          for {
+            _ <- doAppend(sequenced, effective, txs)
+            _ <- updateState(
+              sequenced,
+              effective,
+              deactivate = Seq.empty,
+              positive = transactions.map(_.transaction),
+            )
+          } yield ()
       }
   }
 
   /** add validated topology transaction as is to the topology transaction table */
-  def append(timestamp: CantonTimestamp, transactions: Seq[ValidatedTopologyTransaction])(implicit
+  def append(
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
+      transactions: Seq[ValidatedTopologyTransaction],
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] = {
-    monotonicityTimeCheckUpdate(timestamp).foreach { prev =>
+    monotonicityTimeCheckUpdate(effective.value).foreach { prev =>
       ErrorUtil.requireState(
-        prev < timestamp,
-        s"Append is not monotonically increasing. However, the topology store is based on this assumption. Previous: $prev, Next: $timestamp",
+        prev < effective.value,
+        s"Append is not monotonically increasing. However, the topology store is based on this assumption. Previous: $prev, Next: $effective",
       )
     }
-    doAppend(timestamp, transactions)
+    doAppend(sequenced, effective, transactions)
   }
 
   private[topology] def doAppend(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       transactions: Seq[ValidatedTopologyTransaction],
   )(implicit traceContext: TraceContext): Future[Unit]
 
@@ -365,7 +375,8 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
     * active means that for the key authorizing the transaction, there is a connected path to reach the root certificate
     */
   def updateState(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       deactivate: Seq[UniquePath],
       positive: Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]],
   )(implicit traceContext: TraceContext): Future[Unit]

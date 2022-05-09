@@ -16,6 +16,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -278,7 +279,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     }
     pollAll()
 
-    val _ = performUnlessClosing {
+    val _ = performUnlessClosing(functionFullName) {
       val observedTime = latestPolledTimestamp.get
       completeBarriersUpTo(observedTime)
       performActionsUpto(observedTime)

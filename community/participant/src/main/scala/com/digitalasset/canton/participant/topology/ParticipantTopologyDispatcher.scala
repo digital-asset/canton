@@ -33,6 +33,7 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{DelayUtil, ErrorUtil, FutureUtil, retry}
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
@@ -182,7 +183,7 @@ private class DomainOutbox(
   def startup()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
-    val loadWatermarksF = performUnlessClosingF(for {
+    val loadWatermarksF = performUnlessClosingF(functionFullName)(for {
       // find the current target watermark
       watermarkTsO <- targetStore.currentDispatchingWatermark
       watermarkTs = watermarkTsO.getOrElse(CantonTimestamp.MinValue)
@@ -235,7 +236,7 @@ private class DomainOutbox(
       if (updated.hasPending) {
         if (delayRetry) {
           // kick off new flush in the background
-          DelayUtil.delay(10.seconds, this).map(_ => kickOffFlush()).discard
+          DelayUtil.delay(functionFullName, 10.seconds, this).map(_ => kickOffFlush()).discard
         } else {
           kickOffFlush()
         }
@@ -261,7 +262,7 @@ private class DomainOutbox(
       if (initialize)
         initialized.set(true)
       if (cur.hasPending) {
-        val pendingAndApplicableF = performUnlessClosingF(for {
+        val pendingAndApplicableF = performUnlessClosingF(functionFullName)(for {
           // find pending transactions
           pending <- findPendingTransactions(cur)
           // filter out applicable
@@ -308,7 +309,7 @@ private class DomainOutbox(
         } else valid
     }
     if (valid) {
-      val newWatermark = found.map(_.validFrom).foldLeft(current.dispatched) { case (a, b) =>
+      val newWatermark = found.map(_.validFrom.value).foldLeft(current.dispatched) { case (a, b) =>
         CantonTimestamp.max(a, b)
       }
       watermarks.updateAndGet { c =>
@@ -319,7 +320,7 @@ private class DomainOutbox(
           dispatched = newWatermark,
         )
       }.discard
-      performUnlessClosingF(targetStore.updateDispatchingWatermark(newWatermark))
+      performUnlessClosingF(functionFullName)(targetStore.updateDispatchingWatermark(newWatermark))
     } else {
       FutureUnlessShutdown.unit
     }
@@ -363,16 +364,16 @@ private class DomainOnboardingOutbox(
   ): EitherT[FutureUnlessShutdown, String, Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
     for {
       candidates <- EitherT.right(
-        performUnlessClosingF(
+        performUnlessClosingF(functionFullName)(
           authorizedStore.findParticipantOnboardingTransactions(participantId)
         )
       )
       applicablePossiblyPresent <- EitherT.right(
-        performUnlessClosingF(onlyApplicable(candidates.result))
+        performUnlessClosingF(functionFullName)(onlyApplicable(candidates.result))
       )
       _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicablePossiblyPresent))
       applicable <- EitherT.right(
-        performUnlessClosingF(notAlreadyPresent(applicablePossiblyPresent))
+        performUnlessClosingF(functionFullName)(notAlreadyPresent(applicablePossiblyPresent))
       )
     } yield applicable
 

@@ -6,6 +6,7 @@ package com.digitalasset.canton.lifecycle
 import com.digitalasset.canton.lifecycle.StartAndCloseable.StartAfterClose
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SingleUseCell
+import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
@@ -30,7 +31,7 @@ trait StartAndCloseable[A] extends FlagCloseableAsync {
     * If close is called concurrently, it will delay the close until the start has succeeded.
     */
   final def start()(implicit ec: ExecutionContext, traceContext: TraceContext): Future[A] = {
-    val outcomeF = internalPerformUnlessClosingF[A] {
+    val outcomeF = internalPerformUnlessClosingF[A](functionFullName) {
       val promise = Promise[A]()
       val future = promise.future
       val previous = startF.putIfAbsent(future)

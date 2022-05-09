@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing
 import cats.Monoid
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -17,14 +18,8 @@ trait ApplicationHandler[-Box[+_], -Env] extends (BoxedEnvelope[Box, Env] => Han
   /** Human-readable name of the application handler for logging and debugging */
   def name: String
 
-  /** Called by the [[com.digitalasset.canton.sequencing.client.SequencerClient]] before the start of a subscription.
-    *
-    * @param ts The timestamp of the [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]]
-    *           where the resubscription starts.
-    *           [[com.digitalasset.canton.data.CantonTimestamp.MinValue]] if the subscription starts at the beginning
-    *           and the handler has not been called before with a `BoxedEnvelope`.
-    */
-  def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+  /** Called by the [[com.digitalasset.canton.sequencing.client.SequencerClient]] before the start of a subscription. */
+  def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -37,10 +32,10 @@ trait ApplicationHandler[-Box[+_], -Env] extends (BoxedEnvelope[Box, Env] => Han
 
     override def name: String = ApplicationHandler.this.name
 
-    override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+    override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit] =
-      ApplicationHandler.this.resubscriptionStartsAt(ts)
+      ApplicationHandler.this.resubscriptionStartsAt(start)
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): HandlerResult =
       f(boxedEnvelope)
@@ -55,11 +50,11 @@ trait ApplicationHandler[-Box[+_], -Env] extends (BoxedEnvelope[Box, Env] => Han
       s"${ApplicationHandler.this.name}+${other.name}"
 
     override def resubscriptionStartsAt(
-        ts: CantonTimestamp
+        start: ResubscriptionStart
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
       for {
-        _ <- ApplicationHandler.this.resubscriptionStartsAt(ts)
-        _ <- other.resubscriptionStartsAt(ts)
+        _ <- ApplicationHandler.this.resubscriptionStartsAt(start)
+        _ <- other.resubscriptionStartsAt(start)
       } yield ()
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): HandlerResult = {
@@ -84,7 +79,7 @@ object ApplicationHandler {
 
       override val name: String = handlerName
 
-      override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+      override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
           traceContext: TraceContext
       ): FutureUnlessShutdown[Unit] =
         FutureUnlessShutdown.unit
@@ -97,4 +92,51 @@ object ApplicationHandler {
   @VisibleForTesting
   def success[Box[+_], Env](name: String = "success"): ApplicationHandler[Box, Env] =
     ApplicationHandler.create(name)(_ => HandlerResult.done)
+}
+
+/** Information passed by the [[com.digitalasset.canton.sequencing.client.SequencerClient]]
+  * to the [[ApplicationHandler]] where the resubscription (= processing of events) starts.
+  * The [[ApplicationHandler]] can then initialize itself appropriately.
+  */
+sealed trait ResubscriptionStart extends Product with Serializable with PrettyPrinting
+
+object ResubscriptionStart {
+
+  /** The subscription is created for the first time.
+    * The application handler has never been called with an event.
+    */
+  case object FreshSubscription extends ResubscriptionStart {
+    override def pretty: Pretty[FreshSubscription] = prettyOfObject[FreshSubscription]
+  }
+  type FreshSubscription = FreshSubscription.type
+
+  /** The first processed event is at some timestamp after the `cleanPrehead`.
+    * All events up to `cleanPrehead` inclusive have previously been processed completely.
+    * The application handler has never been called with an event with a higher timestamp.
+    */
+  final case class CleanHeadResubscriptionStart(cleanPrehead: CantonTimestamp)
+      extends ResubscriptionStart {
+
+    override def pretty: Pretty[CleanHeadResubscriptionStart] = prettyOfClass(
+      param("clean prehead", _.cleanPrehead)
+    )
+  }
+
+  /** The first processed event will be `firstReplayed`.
+    *
+    * @param cleanPreheadO The timestamp of the last event known to be clean.
+    *                      If set, this may be before, at, or after `firstReplayed`.
+    *                      If it is before `firstReplayed`,
+    *                      then `firstReplayed` is the timestamp of the first event after `cleanPreheadO`.
+    */
+  final case class ReplayResubscriptionStart(
+      firstReplayed: CantonTimestamp,
+      cleanPreheadO: Option[CantonTimestamp],
+  ) extends ResubscriptionStart {
+    override def pretty: Pretty[ReplayResubscriptionStart] = prettyOfClass(
+      param("first replayed", _.firstReplayed),
+      paramIfDefined("clean prehead", _.cleanPreheadO),
+    )
+  }
+
 }

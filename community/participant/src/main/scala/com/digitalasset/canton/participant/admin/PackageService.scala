@@ -39,6 +39,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PathUtils
 import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
+import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
 import java.io._
@@ -368,10 +369,12 @@ class PackageService(
       for {
         directDependenciesByPackage <- packageIds.traverse { packageId =>
           for {
-            pckg <- OptionT(performUnlessClosingF(packagesDarsStore.getPackage(packageId)))
+            pckg <- OptionT(
+              performUnlessClosingF(functionFullName)(packagesDarsStore.getPackage(packageId))
+            )
               .toRight(packageId)
             directDependencies <- EitherT(
-              performUnlessClosingF(
+              performUnlessClosingF(functionFullName)(
                 Future(
                   Either
                     .catchOnly[Exception](

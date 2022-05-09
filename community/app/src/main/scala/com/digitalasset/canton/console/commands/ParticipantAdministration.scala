@@ -7,6 +7,7 @@ import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Resources.{
   GetResourceLimits,
   SetResourceLimits,
@@ -64,7 +65,6 @@ import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteD
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.DomainAlias
 
 import java.time.Instant
 import scala.concurrent.TimeoutException
@@ -679,11 +679,16 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       FeatureFlag.Preview,
     )
     @Help.Description(
-      """Can be used to remove a DAR from the participant, when:
-        | - The main package of the DAR is unused
-        | - Other packages in the DAR are either unused or found in another DAR
-        | - The main package of the DAR can be automatically un-vetted (or is already not vetted)  
-        | """
+      """Can be used to remove a DAR from the participant, if the following conditions are satisfied:
+        |1. The main package of the DAR must be unused -- there should be no active contract from this package
+        |
+        |2. All package dependencies of the DAR should either be unused or contained in another of the participant node's uploaded DARs. Canton uses this restriction to ensure that the package dependencies of the DAR don't become "stranded" if they're in use.
+        |
+        |3. The main package of the dar should not be vetted. If it is vetted, Canton will try to automatically
+        |   revoke the vetting for the main package of the DAR, but this automatic vetting revocation will only succeed if the
+        |   main package vetting originates from a standard ``dars.upload``. Even if the automatic revocation fails, you can
+        |   always manually revoke the package vetting.
+        |"""
     )
     def remove(darHash: String): Unit = {
       check(FeatureFlag.Preview)(consoleEnvironment.run {
@@ -972,26 +977,46 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary(
-      "Test whether a participant is connected to and permissioned on a domain where we have a healthy subscription."
+      "Test whether a participant is connected to and permissioned on a domain."
     )
-    def active(domain: DomainAlias): Boolean =
-      list_connected().find(_.domainAlias == domain) match {
-        case Some(item) if item.healthy =>
-          topology.participant_domain_states.active(item.domainId, id)
-        case _ => false
-      }
+    @Help.Description(
+      """Yields false, if the domain is not connected or not healthy. 
+        |Yields false, if the domain is configured in the Canton configuration and 
+        |the participant is not active from the perspective of the domain."""
+    )
+    def active(domainAlias: DomainAlias): Boolean = {
+      list_connected().exists(r => {
+        val domainReferenceO = consoleEnvironment.nodes.all
+          .collectFirst {
+            case d: DomainAdministration
+                if d.health.status.successOption.exists(_.uid == r.domainId.unwrap) =>
+              d
+          }
+
+        r.domainAlias == domainAlias &&
+        r.healthy &&
+        topology.participant_domain_states.active(r.domainId, id) &&
+        domainReferenceO.forall(_.participants.active(id))
+      })
+    }
 
     @Help.Summary(
-      "Test whether a participant is connected to and permissioned on a domain reference"
+      "Test whether a participant is connected to and permissioned on a domain reference, both from the perspective of the participant and the domain."
+    )
+    @Help.Description(
+      "Yields false, if the domain has not been initialized, is not connected or is not healthy."
     )
     def active(reference: DomainAdministration): Boolean = {
-      val domainId = reference.id
-      list_connected().find(_.domainId == domainId) match {
-        case None => false
-        case Some(item) =>
-          active(item.domainAlias) && reference.participants.active(id)
-      }
+      val domainUidO = reference.health.status.successOption.map(_.uid)
+      list_connected()
+        .exists(r =>
+          domainUidO.contains(r.domainId.unwrap) &&
+            r.healthy &&
+            topology.participant_domain_states.active(r.domainId, id) &&
+            reference.participants.active(id)
+        )
     }
+
     @Help.Summary(
       "Test whether a participant is connected to a domain reference"
     )

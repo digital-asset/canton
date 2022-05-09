@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.store.db
 
+import com.digitalasset.canton.config.CommunityDbConfig.Postgres
 import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import io.functionmeta.functionFullName
 import org.scalatest.{Assertion, BeforeAndAfterAll}
@@ -26,7 +28,7 @@ trait DatabaseDeadlockTest
   val batchSize = 100
   val roundsNegative = 10
   val roundsPositive = 1
-  val maxRetries = 2
+  val maxRetries = 3
 
   def createTableAction: SqlAction[Int, NoStream, Effect.Write]
 
@@ -149,11 +151,11 @@ trait DatabaseDeadlockTest
   def dbCanDeadlock: Boolean = true
 
   def assertSQLException(body: => Try[_]): Assertion = {
-    // TODO(i9169): Test that at least one round ends with a deadlock
-    forAll(0 until roundsNegative) { _ =>
-      inside(body) {
-        case Success(_) => succeed
-        case Failure(e: SQLException) => assertDeadlock(e)
+    forAtLeast(1, 0 until roundsNegative) { _ =>
+      // Note that we can also hit spurious constraint violation errors here, as the query may be MERGE (see UpsertTestOracle).
+      // This is no problem as long as there is at least one deadlock.
+      inside(body) { case Failure(e: SQLException) =>
+        assertDeadlock(e)
       }
     }
   }
@@ -208,6 +210,12 @@ class DatabaseDeadlockTestH2 extends DatabaseDeadlockTest with H2Test {
 
 class DatabaseDeadlockTestPostgres extends DatabaseDeadlockTest with PostgresTest {
   import rawStorage.api._
+
+  override def mkDbConfig(basicConfig: DbBasicConfig): Postgres = {
+    // Enforce 8 connections. If there is only one connection, the test will fail to produce deadlocks.
+    val defaultDbConfig = super.mkDbConfig(basicConfig)
+    defaultDbConfig.copy(maxConnections = Some(8))
+  }
 
   override lazy val createTableAction: SqlAction[Int, NoStream, Effect.Write] =
     sqlu"create table database_deadlock_test(id bigint primary key, v bigint not null)"

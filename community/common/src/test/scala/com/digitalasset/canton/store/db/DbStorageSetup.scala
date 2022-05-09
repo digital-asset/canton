@@ -3,42 +3,103 @@
 
 package com.digitalasset.canton.store.db
 
+import com.digitalasset.canton.config.CommunityDbConfig.{H2, Postgres}
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.resource.{CommunityDbMigrationsFactory, DbStorage, DbStorageSingle}
-import com.digitalasset.canton.store.db.DbStorageSetup.Config.{DbBasicConfig, PostgresBasicConfig}
-import com.digitalasset.canton.store.db.PostgresCISetup.env
+import com.digitalasset.canton.resource.DbStorage.RetryConfig
+import com.digitalasset.canton.resource.{
+  CommunityDbMigrationsFactory,
+  DbMigrationsFactory,
+  DbStorage,
+  DbStorageSingle,
+}
+import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.util.ShowUtil._
 import com.typesafe.config.{Config, ConfigFactory}
 import io.functionmeta.functionFullName
+import org.scalatest.Assertions.fail
 import org.testcontainers.containers.PostgreSQLContainer
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
 /** Provide a storage backend for tests.
-  * Description is used by DbStorageTest to name tests.
   */
-trait DbStorageSetup[C <: DbConfig] extends FlagCloseable with HasCloseContext {
-  val storage: DbStorage
+trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLogging {
+  type C <: DbConfig
 
-  def config: C
+  protected implicit def executionContext: ExecutionContext
 
-  override def onClosed(): Unit = storage.close()
+  def basicConfig: DbBasicConfig
+
+  def mkDbConfig: DbBasicConfig => C
+
+  /** Used when creating the storage */
+  def retryConfig: DbStorage.RetryConfig
+
+  protected def prepareDatabase(): Unit
+
+  protected def migrationsFactory: DbMigrationsFactory
+
+  def migrationMode: MigrationMode
+
+  protected def destroyDatabase(): Unit
 
   override protected val timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
-}
 
-trait DbStorageBasicConfig[BC <: DbBasicConfig[BC]] {
-  def basicConfig: BC
+  // Needs to run first, because test containers need a running db to determine basicConfig.
+  prepareDatabase()
+
+  final lazy val config: C = mkDbConfig(basicConfig)
+
+  final lazy val storage: DbStorage = mkStorage(config)
+
+  /** Will run all setup code of this instance and throw the setup code fails.
+    * If this method is not called up front, the setup code will run (and possibly fail) when a field is accessed.
+    */
+  // We could make `storage` a `val` so that no separate method is needed.
+  // In that case, the initialization code of this trait would invoke code from subtypes through abstract methods.
+  // As a result, it could read uninitialized fields from subtypes, which can lead to annoying bugs.
+  def initialized(): this.type = {
+    storage.discard[DbStorage]
+    this
+  }
+
+  protected final def mkStorage(cfg: DbConfig): DbStorage =
+    DbStorageSingle.tryCreate(
+      cfg,
+      connectionPoolForParticipant =
+        false, // can always be false, because this storage is only used for initialization and unit tests
+      None,
+      CommonMockMetrics.dbStorage,
+      DefaultProcessingTimeouts.testing,
+      loggerFactory,
+      retryConfig,
+    )
+
+  final def migrateDb(): Unit = {
+    val migrationResult =
+      migrationsFactory.create(config, migrationMode == MigrationMode.DevVersion).migrateDatabase()
+    // throw so the first part of the test that attempts to use storage will fail with an exception
+    migrationResult
+      .valueOr(err => fail(s"Failed to migrate database: $err"))
+      .onShutdown(fail("DB migration interrupted due to shutdown"))
+  }
+
+  override final def onClosed(): Unit = {
+    storage.close()
+    destroyDatabase()
+  }
+
+  /** Lookup environment variable and return. Throw [[java.lang.RuntimeException]] if missing. */
+  protected def env(name: String): String =
+    sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
 }
 
 sealed trait MigrationMode extends Product with Serializable
 object MigrationMode {
-  case object NoMigration extends MigrationMode
   case object Standard extends MigrationMode
   case object DevVersion extends MigrationMode
 }
@@ -46,69 +107,18 @@ object MigrationMode {
 /** Postgres database storage setup
   */
 abstract class PostgresDbStorageSetup(
-    override protected val loggerFactory: NamedLoggerFactory,
-    migrationMode: MigrationMode,
-)(implicit ec: ExecutionContext)
-    extends DbStorageSetup[PostgresDbConfig]
-    with DbStorageBasicConfig[PostgresBasicConfig]
+    override protected val loggerFactory: NamedLoggerFactory
+)(implicit override val executionContext: ExecutionContext)
+    extends DbStorageSetup
     with NamedLogging
     with NoTracing {
 
-  protected def createStorage(cfg: DbConfig): DbStorage = {
-    val metrics =
-      CommonMockMetrics.dbStorage // This storage will only be used to setup the DB. Therefore, it is ok to use mock metrics, even in performance tests.
-    DbStorageSingle.tryCreate(
-      cfg,
-      // no need to adjust the connection pool for participants, as we are not yet running the ledger api server
-      connectionPoolForParticipant = false,
-      None,
-      metrics,
-      timeouts,
-      loggerFactory,
-    )
-  }
+  override type C = Postgres
 
-  protected def prepareDatabase(): Unit = {}
+  override lazy val retryConfig: RetryConfig = RetryConfig.failFast
 
-  override lazy val storage: DbStorage = {
-    prepareDatabase()
-    val myConfig = config
-    val s = createStorage(myConfig)
-    migrationMode match {
-      case MigrationMode.NoMigration =>
-      case MigrationMode.DevVersion | MigrationMode.Standard =>
-        val migrationResult =
-          new CommunityDbMigrationsFactory(loggerFactory)
-            .create(myConfig, migrationMode == MigrationMode.DevVersion)
-            .migrateDatabase()
-        // throw so the first part of the test that attempts to use storage will fail with an exception
-        migrationResult
-          .valueOr(err => throw new RuntimeException(show"Failed to migrate database: $err"))
-          .onShutdown(throw new RuntimeException("Migration interrupted due to shutdown"))
-    }
-    s
-  }
-
-}
-
-abstract class PostgresDbStorageFunctionalTestSetup(
-    loggerFactory: NamedLoggerFactory,
-    migrationMode: MigrationMode,
-)(implicit ec: ExecutionContext)
-    extends PostgresDbStorageSetup(
-      loggerFactory,
-      migrationMode,
-    ) {
-
-  override def config: PostgresDbConfig = {
-    val defaultConfig = DbStorageSetup.Config.pgConfig(basicConfig)
-    defaultConfig.copy(
-      config = ConfigFactory
-        .parseMap(Map("connectionPool" -> "disabled").asJava)
-        .withFallback(defaultConfig.config),
-      cleanOnValidationError = true,
-    )
-  }
+  override protected lazy val migrationsFactory: DbMigrationsFactory =
+    new CommunityDbMigrationsFactory(loggerFactory)
 }
 
 /** Assumes Postgres is available on a already running and that connections details are
@@ -116,82 +126,73 @@ abstract class PostgresDbStorageFunctionalTestSetup(
   * In CI this is done by running a Postgres docker container alongside the build.
   */
 class PostgresCISetup(
+    override val migrationMode: MigrationMode,
+    override val mkDbConfig: DbBasicConfig => Postgres,
     loggerFactory: NamedLoggerFactory,
-    migrationMode: MigrationMode,
 )(implicit
-    ec: ExecutionContext
-) extends PostgresDbStorageFunctionalTestSetup(
-      loggerFactory,
-      migrationMode,
-    ) {
+    override val executionContext: ExecutionContext
+) extends PostgresDbStorageSetup(loggerFactory) {
 
   /** name of existing database we can use (either for testing or for setting up new databases) */
-  private val envDb = env("POSTGRES_DB")
+  private lazy val envDb = env("POSTGRES_DB")
 
   /** name of db to use for the tests (avoiding flyway migration conflicts) */
-  private val useDb = envDb + (if (migrationMode == MigrationMode.DevVersion) "_dev" else "")
+  private lazy val useDb = envDb + (if (migrationMode == MigrationMode.DevVersion) "_dev" else "")
 
-  override val basicConfig: PostgresBasicConfig = PostgresBasicConfig(
+  override lazy val basicConfig: DbBasicConfig = DbBasicConfig(
     env("POSTGRES_USER"),
     env("POSTGRES_PASSWORD"),
     useDb,
+    "localhost",
+    5432,
   )
 
   @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
-  protected override def prepareDatabase(): Unit = if (envDb != useDb) {
-    val myConfig = DbStorageSetup.Config.pgConfig(basicConfig.copy(dbName = envDb))
-    val s = createStorage(myConfig)
+  override protected def prepareDatabase(): Unit = if (migrationMode == MigrationMode.DevVersion) {
+    val envDbConfig =
+      CommunityDbConfig.Postgres(basicConfig.copy(dbName = envDb).toPostgresConfig)
+    val envDbStorage = mkStorage(envDbConfig)
     try {
-      import s.api._
-      val genF = s
+      import envDbStorage.api._
+      val genF = envDbStorage
         .query(sql"SELECT 1 FROM pg_database WHERE datname = $useDb".as[Int], functionFullName)
         .flatMap { res =>
           if (res.isEmpty) {
             logger.debug(s"Creating database ${useDb} using connection to ${envDb}")
-            s.update_(sqlu"CREATE DATABASE #${useDb}", functionFullName)
+            envDbStorage.update_(sqlu"CREATE DATABASE #${useDb}", functionFullName)
           } else Future.unit
         }
       DefaultProcessingTimeouts.default.await_(s"creating database $useDb")(genF)
-    } finally {
-      s.close()
-    }
+    } finally envDbStorage.close()
   }
 
-}
-
-object PostgresCISetup {
-
-  private[db] def extraDbName(migrationMode: MigrationMode): Option[String] = migrationMode match {
-    // use separate db
-    case MigrationMode.DevVersion => Some(env("POSTGRES_DB") + "_dev")
-    case _ => None
-  }
-
-  /** Lookup environment variable and return. Throw [[java.lang.RuntimeException]] if missing. */
-  private[db] def env(name: String): String =
-    sys.env.getOrElse(name, sys.error(s"Environment variable not set [$name]"))
-
+  override protected def destroyDatabase(): Unit = ()
 }
 
 /** Use [TestContainers]() to create a Postgres docker container instance to run against.
   * Used for running tests locally.
   */
 class PostgresTestContainerSetup(
+    override val migrationMode: MigrationMode,
+    override val mkDbConfig: DbBasicConfig => Postgres,
     loggerFactory: NamedLoggerFactory,
-    migrationMode: MigrationMode,
 )(implicit
-    ec: ExecutionContext
-) extends PostgresDbStorageFunctionalTestSetup(loggerFactory, migrationMode)
+    override val executionContext: ExecutionContext
+) extends PostgresDbStorageSetup(loggerFactory)
     with NamedLogging {
-  private val postgresContainer = new PostgreSQLContainer(s"${PostgreSQLContainer.IMAGE}:11")
-  // up the connection limit to deal with everyone using connection pools in tests that can run concurrently.
-  // we also have a matching max connections limit set in the CircleCI postgres executor (`.circle/config.yml`)
-  private val command = postgresContainer.getCommandParts.toSeq :+ "-c" :+ "max_connections=500"
-  postgresContainer.setCommandParts(command.toArray)
-  noTracingLogger.debug(s"Starting postgres container with $command")
-  postgresContainer.start()
 
-  override val basicConfig: PostgresBasicConfig = PostgresBasicConfig(
+  private lazy val postgresContainer = new PostgreSQLContainer(s"${PostgreSQLContainer.IMAGE}:11")
+
+  override protected def prepareDatabase(): Unit = {
+    // up the connection limit to deal with everyone using connection pools in tests that can run concurrently.
+    // we also have a matching max connections limit set in the CircleCI postgres executor (`.circle/config.yml`)
+    val command = postgresContainer.getCommandParts.toSeq :+ "-c" :+ "max_connections=500"
+    postgresContainer.setCommandParts(command.toArray)
+    noTracingLogger.debug(s"Starting postgres container with $command")
+    postgresContainer.start()
+  }
+
+  override lazy val basicConfig: DbBasicConfig = DbBasicConfig(
     postgresContainer.getUsername,
     postgresContainer.getPassword,
     postgresContainer.getDatabaseName,
@@ -201,64 +202,30 @@ class PostgresTestContainerSetup(
 
   def getContainerID: String = postgresContainer.getContainerId
 
-  override def onClosed(): Unit = {
-    try super.onClosed()
-    finally postgresContainer.close()
-  }
-}
-
-class PostgresPerformanceTestingSetup(
-    loggerFactory: NamedLoggerFactory,
-    migrationMode: MigrationMode,
-    override val basicConfig: PostgresBasicConfig,
-)(implicit executionContext: ExecutionContext)
-    extends PostgresDbStorageSetup(
-      loggerFactory,
-      migrationMode,
-    ) {
-
-  override def config: PostgresDbConfig = {
-    val defaultConfig = DbStorageSetup.Config.pgConfig(basicConfig)
-    val pgConfigChanges = Map[String, Any]("connectionPool" -> "HikariCP", "registerMbeans" -> true)
-
-    defaultConfig.copy(
-      config = ConfigFactory.parseMap(pgConfigChanges.asJava).withFallback(defaultConfig.config),
-      cleanOnValidationError = true,
-    )
-  }
+  override protected def destroyDatabase(): Unit = postgresContainer.close()
 }
 
 class H2DbStorageSetup(
-    migrationMode: MigrationMode,
+    override val migrationMode: MigrationMode,
+    override val mkDbConfig: DbBasicConfig => H2,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit
-    ec: ExecutionContext
-) extends DbStorageSetup[H2DbConfig]
+    override val executionContext: ExecutionContext
+) extends DbStorageSetup
     with NamedLogging {
-  val config: H2DbConfig = DbStorageSetup.Config.h2Config(
-    "",
-    "",
-    loggerFactory.name, // this will typically be the test name so we end up with isolated databases between tests
-  )
 
-  val storage: DbStorage = DbStorageSingle.tryCreate(
-    config,
-    // no need to adjust the connection pool for participants, as we are not yet running the ledger api server
-    connectionPoolForParticipant = false,
-    None,
-    CommonMockMetrics.dbStorage,
-    timeouts,
-    loggerFactory,
-  )
+  override type C = H2
 
-  private val migrations =
+  override lazy val basicConfig: DbBasicConfig = DbBasicConfig("", "", loggerFactory.name, "", 0)
+
+  override lazy val retryConfig: RetryConfig = RetryConfig.failFast
+
+  override lazy val migrationsFactory: DbMigrationsFactory =
     new CommunityDbMigrationsFactory(loggerFactory)
-      .create(config, migrationMode == MigrationMode.DevVersion)
 
-  migrations
-    .migrateIfFresh()
-    .valueOr(err => throw new RuntimeException(show"Failed to migrate database: $err"))
-    .onShutdown(throw new RuntimeException("Shutdown during migration"))
+  override protected def prepareDatabase(): Unit = ()
+
+  override protected def destroyDatabase(): Unit = ()
 }
 
 object DbStorageSetup {
@@ -266,109 +233,78 @@ object DbStorageSetup {
   /** If we are running in CI on a docker executor opt to use a separate docker setup for testing postgres
     * If we are running in CI on a `machine` use a local [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer]
     * If we are running locally use a local [org.testcontainers.containers.PostgreSQLContainer.PostgreSQLContainer]
-    *
-    * The returned setup is not suitable for performance testing. Use [[PostgresPerformanceTestingSetup]] for that.
     */
-  def postgresFunctionalTestSetup(
+  def postgres(
       loggerFactory: NamedLoggerFactory,
-      migrationMode: MigrationMode,
-  )(implicit ec: ExecutionContext): PostgresDbStorageFunctionalTestSetup = {
+      migrationMode: MigrationMode = MigrationMode.Standard,
+      mkDbConfig: DbBasicConfig => Postgres = _.toPostgresDbConfig,
+  )(implicit ec: ExecutionContext): PostgresDbStorageSetup = {
 
     val isCI = sys.env.contains("CI")
     val isMachine = sys.env.contains("MACHINE")
     val forceTestContainer = sys.env.contains("DB_FORCE_TEST_CONTAINER")
 
     if (!forceTestContainer && (isCI && !isMachine))
-      new PostgresCISetup(loggerFactory, migrationMode)
-    else new PostgresTestContainerSetup(loggerFactory, migrationMode)
+      new PostgresCISetup(migrationMode, mkDbConfig, loggerFactory).initialized()
+    else new PostgresTestContainerSetup(migrationMode, mkDbConfig, loggerFactory).initialized()
   }
 
-  def h2(migrationMode: MigrationMode, loggerFactory: NamedLoggerFactory)(implicit
-      ec: ExecutionContext
-  ): H2DbStorageSetup =
-    new H2DbStorageSetup(migrationMode, loggerFactory)
+  def h2(
+      loggerFactory: NamedLoggerFactory,
+      migrationMode: MigrationMode = MigrationMode.Standard,
+      mkDbConfig: DbBasicConfig => H2 = _.toH2DbConfig,
+  )(implicit ec: ExecutionContext): H2DbStorageSetup =
+    new H2DbStorageSetup(migrationMode, mkDbConfig, loggerFactory).initialized()
 
-  object Config {
-    trait DbBasicConfig[A <: DbBasicConfig[A]] {
-      this: {
-        def copy(
-            username: String,
-            password: String,
-            dbName: String,
-            host: String,
-            port: Int,
-            options: String,
-        ): A
-      } =>
+  case class DbBasicConfig(
+      username: String,
+      password: String,
+      dbName: String,
+      host: String,
+      port: Int,
+      connectionPoolEnabled: Boolean =
+        false, // disable by default, as the config is mainly used for setup / migration
+  ) {
 
-      val username: String
-      val password: String
-      val dbName: String
-      val host: String
-      val port: Int
-
-      /** Comma separated list of driver specific options. E.g. ApplicationName=myApplication for Postgres. */
-      val options: String
-
-      def toConfig: Config
-
-      def modify(
-          username: String = this.username,
-          password: String = this.password,
-          dbName: String = this.dbName,
-          host: String = this.host,
-          port: Int = this.port,
-          options: String = this.options,
-      ): A = copy(username, password, dbName, host, port, options)
-
-    }
-
-    case class PostgresBasicConfig(
-        override val username: String,
-        override val password: String,
-        override val dbName: String,
-        override val host: String = "localhost",
-        override val port: Int = 5432,
-        override val options: String = "",
-    ) extends DbBasicConfig[PostgresBasicConfig] {
-      override def toConfig: Config = {
-        val optionsSuffix = if (options.isEmpty) "" else "?" + options
-        ConfigFactory.parseMap(
-          Map(
-            "url" -> s"${DbConfig.postgresUrl(host, port, dbName)}$optionsSuffix",
-            "user" -> username,
-            "password" -> password,
-            "driver" -> "org.postgresql.Driver",
-          ).asJava
-        )
-      }
-    }
-
-    def h2Config[H2C <: H2DbConfig](
-        username: String,
-        password: String,
-        dbName: String,
-        mkH2Config: Config => H2C,
-    ): H2C =
-      mkH2Config(
-        ConfigFactory.parseMap(
-          Map(
-            "url" -> DbConfig.h2Url(dbName),
-            "user" -> username,
-            "password" -> password,
-            "driver" -> "org.h2.Driver",
-          ).asJava
-        )
+    private def configOfMap(map: Map[String, Object]): Config = {
+      val connectionPoolConfig = ConfigFactory.parseString(
+        if (connectionPoolEnabled) "connectionPool = HikariCP" else "connectionPool = disabled"
       )
+      val config = ConfigFactory.parseMap(map.asJava)
+      connectionPoolConfig.withFallback(config)
+    }
 
-    def h2Config(username: String, password: String, dbName: String): CommunityDbConfig.H2 =
-      h2Config(username, password, dbName, CommunityDbConfig.H2(_))
+    def toPostgresConfig: Config = configOfMap(
+      Map[String, Object](
+        "dataSourceClass" -> "org.postgresql.ds.PGSimpleDataSource",
+        "properties.serverName" -> host,
+        "properties.databaseName" -> dbName,
+        "properties.portNumber" -> (port: Integer),
+        "properties.user" -> username,
+        "properties.password" -> password,
+      )
+    )
 
-    def pgConfig[PC <: PostgresDbConfig](c: PostgresBasicConfig, mkPostgres: Config => PC): PC =
-      mkPostgres(c.toConfig)
+    def toPostgresDbConfig: Postgres = Postgres(toPostgresConfig, cleanOnValidationError = true)
 
-    def pgConfig(c: PostgresBasicConfig): CommunityDbConfig.Postgres =
-      pgConfig(c, CommunityDbConfig.Postgres(_))
+    def toH2Config: Config = configOfMap(
+      Map(
+        "driver" -> "org.h2.Driver",
+        "url" -> DbConfig.h2Url(dbName),
+        "user" -> username,
+        "password" -> password,
+      )
+    )
+
+    def toH2DbConfig: H2 = H2(toH2Config)
+
+    def toOracleConfig: Config = configOfMap(
+      Map(
+        "driver" -> "oracle.jdbc.OracleDriver",
+        "url" -> DbConfig.oracleUrl(host, port, dbName),
+        "user" -> username,
+        "password" -> password,
+      )
+    )
   }
-
 }

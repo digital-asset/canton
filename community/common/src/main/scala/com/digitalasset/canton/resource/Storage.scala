@@ -777,6 +777,11 @@ object DbStorage {
       retryWaitingTime = Duration(300, TimeUnit.MILLISECONDS),
       maxRetries = 3,
     )
+    val failSlow = RetryConfig(
+      retryLogLevel = Level.INFO,
+      retryWaitingTime = 1.second,
+      maxRetries = 30,
+    )
     val forever = RetryConfig(
       retryLogLevel = Level.INFO,
       retryWaitingTime = Duration(1, TimeUnit.SECONDS),

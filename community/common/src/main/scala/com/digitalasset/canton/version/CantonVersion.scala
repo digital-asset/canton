@@ -106,6 +106,8 @@ object CantonVersion {
     ReleaseVersion.v2_1_0_rc1 -> List(v2_0_0),
     ReleaseVersion.v2_1_1_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
+    ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0),
   )
 
   private[version] def getSupportedProtocolsParticipantForRelease(
@@ -196,6 +198,8 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_1_0_rc1: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("rc1"))
   lazy val v2_1_1_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 1, Some("SNAPSHOT"))
   lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
+  lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
+  lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time
@@ -307,6 +311,8 @@ object ProtocolVersion extends CompanionTrait {
   }
 
   lazy val unstable_development: ProtocolVersion = ProtocolVersion(0, 0, 0, Some("DEV"))
+  lazy val minimum_protocol_version: ProtocolVersion =
+    ProtocolVersion(2, 0, 0) // Minimum stable protocol version introduced
   lazy val v2_0_0_snapshot: ProtocolVersion = ProtocolVersion(2, 0, 0, Some("SNAPSHOT"))
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be

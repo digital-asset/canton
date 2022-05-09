@@ -474,6 +474,7 @@ object BuildCommon {
           logback_classic,
           logback_core,
           scala_logging,
+          scala_collection_contrib,
           scalatest % Test,
           scalacheck % Test,
           scalatestScalacheck % Test,

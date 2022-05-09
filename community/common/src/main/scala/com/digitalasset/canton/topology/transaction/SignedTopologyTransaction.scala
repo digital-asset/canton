@@ -8,12 +8,12 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.serialization.{MemoizedEvidenceV2, ProtoConverter}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -36,20 +36,22 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     transaction: TopologyTransaction[Op],
     key: SigningPublicKey,
     signature: Signature,
-)(val deserializedFrom: Option[ByteString] = None)
-    extends HasVersionedWrapper[VersionedMessage[SignedTopologyTransaction[Op]]]
+)(
+    val representativeProtocolVersion: ProtocolVersion,
+    val deserializedFrom: Option[ByteString] = None,
+) extends HasProtocolVersionedWrapper[VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]]]
     with HasProtoV0[v0.SignedTopologyTransaction]
-    with MemoizedEvidence
+    with MemoizedEvidenceV2
     with Product
     with Serializable
     with PrettyPrinting {
 
-  override protected def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[SignedTopologyTransaction[Op]] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
+
+  override protected def toProtoVersioned
+      : VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]] =
+    SignedTopologyTransaction.toProtoVersionedV2(this)
 
   override protected def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(
@@ -71,19 +73,20 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
   def operation: Op = transaction.op
 
   def restrictedToDomain: Option[DomainId] = transaction.element.mapping.restrictedToDomain
-
-  def reverse: SignedTopologyTransaction[TopologyChangeOp] =
-    this.copy(transaction = transaction.reverse)(None)
 }
 
 object SignedTopologyTransaction
-    extends HasMemoizedVersionedMessageCompanion[SignedTopologyTransaction[
+    extends HasMemoizedProtocolVersionedWrapperCompanion[SignedTopologyTransaction[
       TopologyChangeOp
     ]] {
   override val name: String = "SignedTopologyTransaction"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.SignedTopologyTransaction)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.SignedTopologyTransaction)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   import com.digitalasset.canton.resource.DbStorage.Implicits._
@@ -94,10 +97,11 @@ object SignedTopologyTransaction
       signingKey: SigningPublicKey,
       hashOps: HashOps,
       crypto: CryptoPrivateApi,
+      protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext): EitherT[Future, SigningError, SignedTopologyTransaction[Op]] =
     for {
       signature <- crypto.sign(transaction.hashToSign(hashOps), signingKey.id)
-    } yield SignedTopologyTransaction(transaction, signingKey, signature)(None)
+    } yield SignedTopologyTransaction(transaction, signingKey, signature)(protocolVersion, None)
 
   private def fromProtoV0(transactionP: v0.SignedTopologyTransaction)(
       bytes: ByteString
@@ -114,54 +118,23 @@ object SignedTopologyTransaction
         "signature",
         transactionP.signature,
       )
-    } yield SignedTopologyTransaction(transaction, publicKey, signature)(Some(bytes))
+      protocolVersion = supportedProtoVersions.protocolVersionRepresentativeFor(0)
+    } yield SignedTopologyTransaction(transaction, publicKey, signature)(
+      protocolVersion,
+      Some(bytes),
+    )
 
   /** returns true if two transactions are equivalent */
   def equivalent(
       first: SignedTopologyTransaction[TopologyChangeOp],
       second: SignedTopologyTransaction[TopologyChangeOp],
-  ): Boolean =
-    (first, second) match {
-      case (
-            SignedTopologyTransaction(
-              TopologyStateUpdate(firstOp, TopologyStateUpdateElement(_id, firstMapping)),
-              firstKey,
-              _,
-            ),
-            SignedTopologyTransaction(
-              TopologyStateUpdate(secondOp, TopologyStateUpdateElement(_id2, secondMapping)),
-              secondKey,
-              _,
-            ),
-          ) =>
-        firstOp == secondOp && firstKey == secondKey && firstMapping == secondMapping
-
-      case (
-            SignedTopologyTransaction(
-              DomainGovernanceTransaction(DomainGovernanceElement(firstMapping)),
-              firstKey,
-              _,
-            ),
-            SignedTopologyTransaction(
-              DomainGovernanceTransaction(DomainGovernanceElement(secondMapping)),
-              secondKey,
-              _,
-            ),
-          ) =>
-        firstKey == secondKey && firstMapping == secondMapping
-
-      case (
-            SignedTopologyTransaction(_: TopologyStateUpdate[_], _, _),
-            SignedTopologyTransaction(_: DomainGovernanceTransaction, _, _),
-          ) =>
-        false
-
-      case (
-            SignedTopologyTransaction(_: DomainGovernanceTransaction, _, _),
-            SignedTopologyTransaction(_: TopologyStateUpdate[_], _, _),
-          ) =>
-        false
-    }
+  ): Boolean = (first, second) match {
+    case (
+          SignedTopologyTransaction(firstTx, firstKey, _),
+          SignedTopologyTransaction(secondTx, secondKey, _),
+        ) =>
+      TopologyTransaction.equivalent(firstTx, secondTx) && firstKey == secondKey
+  }
 
   def createGetResultDomainTopologyTransaction
       : GetResult[SignedTopologyTransaction[TopologyChangeOp]] =
@@ -176,6 +149,6 @@ object SignedTopologyTransaction
       setParameterByteArray: SetParameter[Array[Byte]]
   ): SetParameter[SignedTopologyTransaction[TopologyChangeOp]] = {
     (d: SignedTopologyTransaction[TopologyChangeOp], pp: PositionedParameters) =>
-      pp >> d.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
+      pp >> d.toByteArray
   }
 }

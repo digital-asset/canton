@@ -8,6 +8,7 @@ import cats.data._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.RequestCounter
@@ -107,7 +108,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
         .updateWithConcurrentlyM_[(Id[Option[StoredContract]], *), LfContractId, PendingContract](
           pendingContracts,
           contractId,
-          None -> PendingContract(contract, creatingTransactionId, NonEmptySet.of(requestCounter)),
+          None -> PendingContract(contract, creatingTransactionId, NonEmpty(Set, requestCounter)),
           {
             case pending @ PendingContract(
                   previousContract,
@@ -117,7 +118,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
               if (
                 previousContract == contract && previousCreatingTransactionId == creatingTransactionId
               ) {
-                val next = pending.copy(requests = requests.add(requestCounter))
+                val next = pending.copy(requests = requests.incl(requestCounter))
                 None -> next
               } else Some(pending.storedContract) -> pending
           },
@@ -144,8 +145,8 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
   ): Future[Unit] = {
 
     def removeRequestFromPendingContract(pending: PendingContract): Id[Option[PendingContract]] =
-      NonEmptySet
-        .fromSet(pending.requests - requestCounter)
+      NonEmpty
+        .from(pending.requests - requestCounter)
         .map(newRequests => pending.copy(requests = newRequests))
 
     def rollback(contractId: LfContractId): Future[Unit] =
@@ -245,10 +246,10 @@ object StoredContractManager {
   case class PendingContract(
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
-      requests: NonEmptySet[RequestCounter],
+      requests: NonEmpty[Set[RequestCounter]],
   ) {
     def storedContract: StoredContract =
-      StoredContract(contract, requests.head, Some(creatingTransactionId))
+      StoredContract(contract, requests.head1, Some(creatingTransactionId))
   }
 
 }

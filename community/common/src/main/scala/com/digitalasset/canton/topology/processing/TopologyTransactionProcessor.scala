@@ -7,6 +7,7 @@ import cats.syntax.functor._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKey}
@@ -20,15 +21,9 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
-import com.digitalasset.canton.sequencing.{
-  AsyncResult,
-  BoxedEnvelope,
-  HandlerResult,
-  UnsignedEnvelopeBox,
-  UnsignedProtocolEventHandler,
-}
+import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{DomainId, KeyOwner}
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   StoreBasedDomainTopologyClient,
@@ -41,10 +36,12 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.{DomainId, KeyOwner}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable.ListBuffer
@@ -52,14 +49,27 @@ import scala.concurrent.{ExecutionContext, Future}
 
 case class EffectiveTime(value: CantonTimestamp) extends AnyVal {
   def toApproximate: ApproximateTime = ApproximateTime(value)
+
+  def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
+
 }
 object EffectiveTime {
   val MinValue: EffectiveTime = EffectiveTime(CantonTimestamp.MinValue)
   def max(ts: EffectiveTime, other: EffectiveTime*): EffectiveTime =
     EffectiveTime(CantonTimestamp.max(ts.value, other.map(_.value): _*))
+  implicit val orderingEffectiveTime: Ordering[EffectiveTime] =
+    Ordering.by[EffectiveTime, CantonTimestamp](_.value)
+  def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[EffectiveTime] =
+    CantonTimestamp.fromProtoPrimitive(ts).map(EffectiveTime(_))
 }
 case class ApproximateTime(value: CantonTimestamp) extends AnyVal
-case class SequencedTime(value: CantonTimestamp) extends AnyVal
+case class SequencedTime(value: CantonTimestamp) extends AnyVal {
+  def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
+}
+object SequencedTime {
+  def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[SequencedTime] =
+    CantonTimestamp.fromProtoPrimitive(ts).map(SequencedTime(_))
+}
 
 trait TopologyTransactionProcessingSubscriber {
 
@@ -124,12 +134,21 @@ class TopologyTransactionProcessor(
   }
 
   private def initialise(
-      resubscriptionTs: CantonTimestamp
+      start: ResubscriptionStart
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     ErrorUtil.requireState(
       !initialised.getAndSet(true),
       "topology processor is already initialised",
     )
+
+    // TODO(#4638) initialize the topology processor and the topology client at the appropriate timestamps
+    val resubscriptionTs = start match {
+      case ResubscriptionStart.FreshSubscription => CantonTimestamp.MinValue
+      case ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, cleanPreheadO) =>
+        firstReplayed
+      case ResubscriptionStart.CleanHeadResubscriptionStart(cleanPrehead) =>
+        cleanPrehead.immediateSuccessor
+    }
 
     def mergeEffectiveTimesWithApproximateTimestamps(
         effectiveTsOfSequencedTs: EffectiveTime,
@@ -146,26 +165,27 @@ class TopologyTransactionProcessor(
 
     for {
       // on startup, we need to figure out up to which point we know the topology state
-      effectiveKnownUntil <-
-        if (resubscriptionTs == CantonTimestamp.MinValue) {
+      effectiveKnownUntil <- start match {
+        case ResubscriptionStart.FreshSubscription =>
           TopologyTimestampPlusEpsilonTracker.initializeOnFirstSubscription(
             timeAdjuster,
             store,
           )
-        } else {
+        case _: ResubscriptionStart.ReplayResubscriptionStart |
+            _: ResubscriptionStart.CleanHeadResubscriptionStart =>
           TopologyTimestampPlusEpsilonTracker.initializeFromStore(
             timeAdjuster,
             store,
             resubscriptionTs,
           )
-        }
+      }
 
       // we need to figure out any future effective time. if we had been running, there would be a clock
       // scheduled to poke the domain client at the given time in order to adjust the approximate timestamp up to the
       // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
       // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
       // anyway).
-      futureEffectiveTimes <- performUnlessClosingF(
+      futureEffectiveTimes <- performUnlessClosingF(functionFullName)(
         store.findEffectiveTimestampsSince(resubscriptionTs)
       )
     } yield {
@@ -202,7 +222,7 @@ class TopologyTransactionProcessor(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     // start validation and change delay advancing
-    val validatedF = performUnlessClosingF(
+    val validatedF = performUnlessClosingF(functionFullName)(
       authValidator.validateAndUpdateHeadAuthState(effectiveTimestamp.value, transactions).map {
         case ret @ (_, validated) =>
           inspectAndAdvanceTopologyTransactionDelay(
@@ -232,7 +252,10 @@ class TopologyTransactionProcessor(
               s"Rejected transaction ${idx + 1}/$ln ${tx.transaction.op} ${tx.transaction.element.mapping} at ts=$effectiveTimestamp (epsilon=${epsilon} ms) due to $r"
             )
         }
-        performUnlessClosingF(store.append(effectiveTimestamp.value, validated))
+
+        performUnlessClosingF(functionFullName)(
+          store.append(sequencingTimestamp, effectiveTimestamp, validated)
+        )
       }
 
     // collect incremental and full updates
@@ -242,14 +265,14 @@ class TopologyTransactionProcessor(
 
     // incremental updates can be written asap
     val incrementalF = collectedF.flatMap { case (_, incremental) =>
-      performIncrementalUpdates(effectiveTimestamp.value, incremental)
+      performIncrementalUpdates(sequencingTimestamp, effectiveTimestamp, incremental)
     }
 
     // cascading updates need to wait until the transactions have been stored
     val cascadingF = collectedF.flatMap { case (cascading, _) =>
       for {
         _ <- storeF
-        _ <- performCascadingUpdates(effectiveTimestamp.value, cascading)
+        _ <- performCascadingUpdates(sequencingTimestamp, effectiveTimestamp, cascading)
       } yield {}
     }
 
@@ -317,7 +340,7 @@ class TopologyTransactionProcessor(
       sequencedTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    this.performUnlessClosingF {
+    this.performUnlessClosingF(functionFullName) {
       Future {
         val approximate = ApproximateTime(sequencedTimestamp.value)
         listenersUpdateHead(effectiveTimestamp, approximate, potentialChanges = false)
@@ -350,17 +373,16 @@ class TopologyTransactionProcessor(
   }
 
   private def performIncrementalUpdates(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    val (adds, removes, replaces) = SignedTopologyTransactions(transactions).split
+    val (deactivate, positive) = SignedTopologyTransactions(transactions).splitForStateUpdate
 
-    val deactivate = removes.result.map(_.uniquePath) ++ replaces.result.map(_.uniquePath)
-    val positive = adds.result ++ replaces.result
-
-    performUnlessClosingF(
+    performUnlessClosingF(functionFullName)(
       store.updateState(
-        timestamp,
+        sequenced,
+        effective,
         deactivate = deactivate,
         positive = positive,
       )
@@ -416,7 +438,8 @@ class TopologyTransactionProcessor(
   }
 
   private def performCascadingUpdates(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       cascadingUpdate: UpdateAggregation,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     if (cascadingUpdate.nothingCascading) FutureUnlessShutdown.unit
@@ -441,9 +464,9 @@ class TopologyTransactionProcessor(
         }
 
       for {
-        target <- performUnlessClosingF(
+        target <- performUnlessClosingF(functionFullName)(
           store.findPositiveTransactions(
-            asOf = timestamp,
+            asOf = effective.value,
             asOfInclusive = true,
             includeSecondary = true,
             types = DomainTopologyTransactionType.all,
@@ -469,10 +492,10 @@ class TopologyTransactionProcessor(
           cascadingFilter(tx) && isAuthorized
         }
 
-        current <- performUnlessClosingF(
+        current <- performUnlessClosingF(functionFullName)(
           store
             .findStateTransactions(
-              asOf = timestamp,
+              asOf = effective.value,
               asOfInclusive = true,
               includeSecondary = true,
               types = DomainTopologyTransactionType.all,
@@ -484,8 +507,9 @@ class TopologyTransactionProcessor(
         currentFiltered = current.signedTransactions.filter(cascadingFilter)
 
         (removes, adds) = determineUpdates(currentFiltered, targetFiltered)
-        _ <- performUnlessClosingF(
-          store.updateState(timestamp, deactivate = removes, positive = adds)
+
+        _ <- performUnlessClosingF(functionFullName)(
+          store.updateState(sequenced, effective, deactivate = removes, positive = adds)
         )
       } yield ()
     }
@@ -498,9 +522,9 @@ class TopologyTransactionProcessor(
       .map(_.protocolMessage)
 
   /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
-  def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+  def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = initialise(ts)
+  ): FutureUnlessShutdown[Unit] = initialise(start)
 
   /** process envelopes mostly asynchronously
     *
@@ -522,7 +546,7 @@ class TopologyTransactionProcessor(
       messages: => List[DomainTopologyTransactionMessage],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val sequencedTime = SequencedTime(ts)
-    val updatesF = performUnlessClosingF(Future { messages })
+    val updatesF = performUnlessClosingF(functionFullName)(Future { messages })
     def computeEffectiveTime(
         updates: List[DomainTopologyTransactionMessage]
     ): FutureUnlessShutdown[EffectiveTime] = {
@@ -620,9 +644,9 @@ class TopologyTransactionProcessor(
       }
 
       override def resubscriptionStartsAt(
-          timestamp: CantonTimestamp
+          start: ResubscriptionStart
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessor.this.resubscriptionStartsAt(timestamp)
+        TopologyTransactionProcessor.this.resubscriptionStartsAt(start)
     }
 
   override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)

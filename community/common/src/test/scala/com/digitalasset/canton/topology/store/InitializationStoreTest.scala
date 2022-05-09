@@ -4,15 +4,14 @@
 package com.digitalasset.canton.topology.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.topology.{NodeId, UniqueIdentifier}
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.store.db.{DbTest, DevDbTest, H2Test, MigrationMode, PostgresTest}
-import org.scalatest.BeforeAndAfterAll
+import com.digitalasset.canton.store.db.{DbTest, H2Test, MigrationMode, PostgresTest}
+import com.digitalasset.canton.topology.{NodeId, UniqueIdentifier}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-trait InitializationStoreTest extends AsyncWordSpec with BaseTest with BeforeAndAfterAll {
+trait InitializationStoreTest extends AsyncWordSpec with BaseTest {
 
   val uid = UniqueIdentifier.tryFromProtoPrimitive("da::default")
   val uid2 = UniqueIdentifier.tryFromProtoPrimitive("two::default")
@@ -46,7 +45,6 @@ trait InitializationStoreTest extends AsyncWordSpec with BaseTest with BeforeAnd
       "support dev version" in {
         val store = mk()
         myMigrationMode match {
-          case MigrationMode.NoMigration => fail("db not initialised")
           case MigrationMode.Standard =>
             // query should fail with an exception
             store.throwIfNotDev.failed.map { _ =>
@@ -82,11 +80,15 @@ trait DbInitializationStoreTest extends InitializationStoreTest {
 
 class DbInitializationStoreTestH2 extends DbInitializationStoreTest with H2Test
 
-class DbInitializationStoreDevTestH2 extends DbInitializationStoreTest with H2Test with DevDbTest
+class DbInitializationStoreDevTestH2 extends DbInitializationStoreTest with H2Test {
+  override val migrationMode: MigrationMode = MigrationMode.DevVersion
+}
 
 class DbInitializationStoreTestPostgres extends DbInitializationStoreTest with PostgresTest
 
-class DbInitializationStoreDevTestPostgres extends DbInitializationStoreTestPostgres with DevDbTest
+class DbInitializationStoreDevTestPostgres extends DbInitializationStoreTestPostgres {
+  override val migrationMode: MigrationMode = MigrationMode.DevVersion
+}
 
 class InitializationStoreTestInMemory extends InitializationStoreTest {
 

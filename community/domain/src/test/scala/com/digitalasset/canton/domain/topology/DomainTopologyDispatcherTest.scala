@@ -40,7 +40,12 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionProcessor,
+}
+import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyTransaction}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
@@ -175,11 +180,12 @@ class DomainTopologyDispatcherTest
 
       override def close(): Unit = {}
     }
+    val processor = mock[TopologyTransactionProcessor]
 
     def mkDispatcher = new DomainTopologyDispatcher(
       domainId,
       sourceStore,
-      topologyClient,
+      processor,
       Map(),
       targetStore,
       this.cryptoApi.crypto,
@@ -205,9 +211,17 @@ class DomainTopologyDispatcherTest
       logger.debug(
         s"Submitting at $ts ${tx.map(x => (x.operation, x.transaction.element.mapping))}"
       )
-      sourceStore.append(ts, tx.map(toValidated)).map { _ =>
+      append(sourceStore, ts, tx).map { _ =>
         d.addedSignedTopologyTransaction(ts, tx)
       }
+    }
+
+    def append(
+        store: TopologyStore,
+        ts: CantonTimestamp,
+        txs: Seq[SignedTopologyTransaction[TopologyChangeOp]],
+    ): Future[Unit] = {
+      store.append(SequencedTime(ts), EffectiveTime(ts), txs.map(toValidated))
     }
 
     def txs = this.TestingTransactions
@@ -348,10 +362,10 @@ class DomainTopologyDispatcherTest
         val flusher = mock[TestFlusher]
         when(flusher.foo).thenReturn(Future.unit)
         for {
-          _ <- f.sourceStore.append(ts0, Seq(txs.ns1k2).map(toValidated))
-          _ <- f.sourceStore.append(ts1, Seq(txs.ns1k1, txs.okm1).map(toValidated))
+          _ <- f.append(sourceStore, ts0, Seq(txs.ns1k2))
+          _ <- f.append(sourceStore, ts1, Seq(txs.ns1k1, txs.okm1))
           _ <- f.targetStore.updateDispatchingWatermark(ts0)
-          _ <- f.targetStore.append(ts1, Seq(txs.ns1k2, txs.ns1k1).map(toValidated))
+          _ <- f.append(targetStore, ts1, Seq(txs.ns1k2, txs.ns1k1))
           _ <- f.dispatcher
             .init(FutureUnlessShutdown.outcomeF(flusher.foo))
             .failOnShutdown("dispatcher initialization")

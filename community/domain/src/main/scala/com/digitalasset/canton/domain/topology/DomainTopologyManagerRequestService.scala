@@ -38,6 +38,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
@@ -270,11 +271,14 @@ object RequestProcessingStrategy {
           alreadyInStore <- store.exists(transaction)
           _ <-
             if (alreadyInStore) Future.unit
-            else
+            else {
+              val tm = clock.uniqueTime()
               store.append(
-                clock.uniqueTime(),
+                SequencedTime(tm),
+                EffectiveTime(tm),
                 List(ValidatedTopologyTransaction(transaction, None)),
               )
+            }
         } yield if (alreadyInStore) Duplicate else Requested
 
       MonadUtil.sequentialTraverse(transactions)(process).map(_.toList)

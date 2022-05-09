@@ -39,7 +39,7 @@ private[service] class DirectSequencerSubscription[E](
     logger.error("Fatally failed to handle event", _),
     source
       .mapAsync(1) { event =>
-        performUnlessClosingF {
+        performUnlessClosingF("direct-sequencer-subscription-handler") {
           handler(event)
         }.onShutdown {
           Right(())
