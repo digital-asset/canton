@@ -17,7 +17,11 @@ import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.processing.IncomingTopologyTransactionAuthorizationValidator
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  IncomingTopologyTransactionAuthorizationValidator,
+  SequencedTime,
+}
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyTransactionRejection,
@@ -27,6 +31,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.slf4j.event.Level
 
 import scala.annotation.nowarn
@@ -192,7 +197,13 @@ abstract class TopologyManager[E <: CantonError](
         .subflatMap(_.toRight(wrapError(TopologyManagerError.PublicKeyNotInStore.Failure(key))))
       // create signed transaction
       signed <- SignedTopologyTransaction
-        .create(transaction, pubkey, crypto.pureCrypto, crypto.privateCrypto)
+        .create(
+          transaction,
+          pubkey,
+          crypto.pureCrypto,
+          crypto.privateCrypto,
+          ProtocolVersion.v2_0_0_Todo_i8793, // TODO(#8973)
+        )
         .leftMap {
           case SigningError.UnknownSigningKey(keyId) =>
             wrapError(TopologyManagerError.SecretKeyNotInStore.Failure(keyId))
@@ -316,7 +327,11 @@ abstract class TopologyManager[E <: CantonError](
         )
         for {
           _ <- EitherT.right(
-            store.append(now, Seq(ValidatedTopologyTransaction.valid(tx)))
+            store.append(
+              SequencedTime(now),
+              EffectiveTime(now),
+              Seq(ValidatedTopologyTransaction.valid(tx)),
+            )
           ): EitherT[Future, E, Unit]
           _ <- EitherT.right(notifyObservers(now, Seq(tx)))
         } yield ()

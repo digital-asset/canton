@@ -221,14 +221,14 @@ abstract class RetryWithDelay(
               }
               flagCloseable.runOnShutdown(abortedOnShutdownTask)
 
-              val delayedF = DelayUtil.delay(delay, flagCloseable)
+              val delayedF = DelayUtil.delay(operationName, delay, flagCloseable)
               flagCloseable
-                .performUnlessClosing {
+                .performUnlessClosing(operationName) {
                   // if delayedF doesn't complete, then we can be sure that the `abortedOnShutdownTask.run` will run due to shutdown
                   delayedF.onComplete {
                     case util.Success(()) =>
                       logOnThrow { // if this one doesn't run, then the `abortedOnShutdownTask` will run
-                        flagCloseable.performUnlessClosing {
+                        flagCloseable.performUnlessClosing(operationName) {
                           val retryP = Promise[RetryOutcome[T]]()
                           // ensure that the abort task doesn't get executed anymore (because we
                           // want to return the "last outcome" and here, we can be sure that `run` will give us a new outcome
@@ -241,7 +241,10 @@ abstract class RetryWithDelay(
                           // `performUnlessClosingF` guards against closing the execution context.
                           val nextRunUnlessShutdown =
                             flagCloseable
-                              .performUnlessClosingF(runTask())(executionContext, traceContext)
+                              .performUnlessClosingF(operationName)(runTask())(
+                                executionContext,
+                                traceContext,
+                              )
                           @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
                           val nextRunF = nextRunUnlessShutdown
                             .onShutdown {

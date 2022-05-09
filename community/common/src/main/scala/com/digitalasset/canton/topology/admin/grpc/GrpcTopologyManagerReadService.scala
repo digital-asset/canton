@@ -14,6 +14,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.admin.{v0 => adminProto}
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
@@ -82,8 +83,9 @@ class GrpcTopologyManagerReadService(
 
   private case class TransactionSearchResult(
       store: TopologyStoreId,
-      validFrom: CantonTimestamp,
-      validUntil: Option[CantonTimestamp],
+      sequenced: SequencedTime,
+      validFrom: EffectiveTime,
+      validUntil: Option[EffectiveTime],
       operation: TopologyChangeOp,
       serialized: ByteString,
       signedBy: Fingerprint,
@@ -101,8 +103,9 @@ class GrpcTopologyManagerReadService(
   private def createBaseResult(context: TransactionSearchResult): adminProto.BaseResult =
     new adminProto.BaseResult(
       store = context.store.filterName,
-      validFrom = Some(context.validFrom.toProtoPrimitive),
-      validUntil = context.validUntil.map(_.toProtoPrimitive),
+      sequenced = Some(context.sequenced.value.toProtoPrimitive),
+      validFrom = Some(context.validFrom.value.toProtoPrimitive),
+      validUntil = context.validUntil.map(_.value.toProtoPrimitive),
       operation = context.operation.toProto,
       serialized = context.serialized,
       signedByFingerprint = context.signedBy.unwrap,
@@ -153,6 +156,7 @@ class GrpcTopologyManagerReadService(
                 if tx.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey) =>
               val result = TransactionSearchResult(
                 storeId,
+                tx.sequenced,
                 tx.validFrom,
                 tx.validUntil,
                 tx.transaction.operation,

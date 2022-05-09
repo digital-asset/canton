@@ -13,11 +13,12 @@ import com.digitalasset.canton.admin.api.client.data.ListParticipantDomainStateR
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
+import com.digitalasset.canton.health.admin.data.NodeStatus
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStoreId}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
+import com.digitalasset.canton.topology.transaction._
 
 trait DomainAdministration {
   this: AdminCommandRunner =>
@@ -26,6 +27,9 @@ trait DomainAdministration {
   def id: DomainId
   def topology: TopologyAdministrationGroup
   protected def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
+
+  type Status <: NodeStatus.Status
+  def health: HealthAdministration[Status]
 
   @Help.Summary("Manage participant permissions")
   @Help.Group("Participants")

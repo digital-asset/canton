@@ -28,6 +28,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration._
@@ -177,6 +179,7 @@ class TestingIdentityFactory(
       ips(),
       newCrypto(owner, hkdfOps = topology.hkdfOps),
       CachingConfigs.testing,
+      DefaultProcessingTimeouts.testing,
       loggerFactory,
     )
   }
@@ -195,8 +198,6 @@ class TestingIdentityFactory(
             implicit traceContext: TraceContext
         ): FutureUnlessShutdown[Boolean] = ???
         override def domainId: DomainId = dId
-        override def subscribe(subscriber: DomainTopologyClient.Subscriber): Unit = ???
-        override def unsubscribe(subscriber: DomainTopologyClient.Subscriber): Unit = ???
         override def trySnapshot(timestamp: CantonTimestamp)(implicit
             traceContext: TraceContext
         ): TopologySnapshot =
@@ -271,7 +272,8 @@ class TestingIdentityFactory(
     )
 
     val updateF = store.updateState(
-      CantonTimestamp.Epoch.immediatePredecessor,
+      SequencedTime(CantonTimestamp.Epoch.immediatePredecessor),
+      EffectiveTime(CantonTimestamp.Epoch.immediatePredecessor),
       deactivate = Seq(),
       positive =
         participantTxs ++ domainMembers ++ mediatorOnboarding ++ partyDataTx ++ domainGovernanceTxs,
@@ -306,7 +308,7 @@ class TestingIdentityFactory(
     )(),
     mock[SigningPublicKey],
     mock[Signature],
-  )(None)
+  )(ProtocolVersion.latestForTest, None)
 
   private def mkAdd(
       mapping: TopologyStateUpdateMapping
@@ -317,7 +319,7 @@ class TestingIdentityFactory(
     )(),
     mock[SigningPublicKey],
     mock[Signature],
-  )(None)
+  )(ProtocolVersion.latestForTest, None)
 
   private def genKeyCollection(
       owner: KeyOwner
@@ -540,7 +542,13 @@ class TestingOwnerWithKeys(
     Await
       .result(
         SignedTopologyTransaction
-          .create(trans, signingKey, cryptoApi.crypto.pureCrypto, cryptoApi.crypto.privateCrypto)
+          .create(
+            trans,
+            signingKey,
+            cryptoApi.crypto.pureCrypto,
+            cryptoApi.crypto.privateCrypto,
+            ProtocolVersion.latestForTest,
+          )
           .value,
         10.seconds,
       )

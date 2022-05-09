@@ -21,7 +21,7 @@ class DbStorageIdempotency(
 )(override protected implicit val ec: ExecutionContext)
     extends DbStorage
     with NamedLogging {
-  override val profile = underlying.profile
+  override val profile: DbStorage.Profile = underlying.profile
   override def metrics: DbStorageMetrics = underlying.metrics
   override val dbConfig: DbConfig = underlying.dbConfig
 

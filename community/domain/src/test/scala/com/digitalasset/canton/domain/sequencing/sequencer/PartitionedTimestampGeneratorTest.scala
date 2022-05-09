@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.data.NonEmptySet
-import com.daml.nonempty.NonEmptyUtil
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
@@ -24,17 +23,17 @@ class PartitionedTimestampGeneratorTest extends BaseTestWordSpec {
     val g1ts2 = generator1.generateNext
     val g2ts2 = generator2.generateNext
     val g3ts2 = generator3.generateNext
-    val firstRound = NonEmptySet.of(g1ts1, g2ts1, g3ts1)
-    val secondRound = NonEmptySet.of(g1ts2, g2ts2, g3ts2)
+    val firstRound = NonEmpty(Set, g1ts1, g2ts1, g3ts1)
+    val secondRound = NonEmpty(Set, g1ts2, g2ts2, g3ts2)
     val allTimestamps = firstRound ++ secondRound
 
     withClue("should all be unique") {
-      allTimestamps.toSortedSet should have size (6)
+      allTimestamps.forgetNE should have size (6)
     }
 
     withClue("first round timestamps should be before second round") {
-      forAll(firstRound.toSortedSet) { ts =>
-        ts shouldBe <(secondRound.head)
+      forAll(firstRound.forgetNE) { ts =>
+        ts shouldBe <(secondRound.head1)
       }
     }
   }

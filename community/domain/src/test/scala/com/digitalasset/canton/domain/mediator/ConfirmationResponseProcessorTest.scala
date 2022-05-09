@@ -260,6 +260,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         domainSyncCryptoApi.ips,
         domainSyncCryptoApi.crypto,
         CachingConfigs.testing,
+        timeouts,
         loggerFactory,
       ) {
         override def awaitSnapshot(timestamp: CantonTimestamp)(implicit

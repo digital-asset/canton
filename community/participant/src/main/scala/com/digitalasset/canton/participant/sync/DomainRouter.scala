@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.data.{EitherT, NonEmptySet, OptionT}
+import cats.data.{EitherT, OptionT}
 import cats.implicits._
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.daml.lf.data.Ref
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -48,7 +49,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
-import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -68,7 +68,7 @@ class DomainRouter(
     domainsOfSubmittersAndInformees: (
         Set[LfPartyId],
         Set[LfPartyId],
-    ) => EitherT[Future, TransactionRoutingError, NonEmptySet[DomainId]],
+    ) => EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]],
     priorityOfDomain: DomainId => Int,
     submit: DomainId => (
         SubmitterInfo,
@@ -569,14 +569,14 @@ class DomainRouter(
       nonEmptyDomainIds <- domainsOfSubmittersAndInformees(submitters, informees): EitherT[
         Future,
         TransactionRoutingError,
-        NonEmptySet[DomainId],
+        NonEmpty[Set[DomainId]],
       ]
       domainId <-
         if (nonEmptyDomainIds.size == 1) {
           EitherT.rightT(nonEmptyDomainIds.head): EitherT[Future, TransactionRoutingError, DomainId]
         } else {
           EitherT.rightT(
-            nonEmptyDomainIds.toSortedSet.maxBy(id => priorityOfDomain(id) -> id.toProtoPrimitive)(
+            nonEmptyDomainIds.maxBy(id => priorityOfDomain(id) -> id.toProtoPrimitive)(
               Ordering
                 .Tuple2(Ordering[Int], Ordering[String].reverse)
             )
@@ -659,7 +659,7 @@ object DomainRouter {
   )(submitters: Set[LfPartyId], informees: Set[LfPartyId])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[Future, TransactionRoutingError, NonEmptySet[DomainId]] = {
+  ): EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]] = {
     val readyDomains = connectedDomains.collect {
       case r @ (_, domain) if domain.readyForSubmission => r
     }
@@ -668,8 +668,8 @@ object DomainRouter {
       submitterDomainIds <- domainsOfSubmitters(localParticipantId, readyDomains, submitters)
       informeeDomainIds <- domainsOfInformees(readyDomains, informees)
       commonDomainIds <- EitherT.fromEither[Future](
-        NonEmptySet
-          .fromSet(submitterDomainIds.intersect(informeeDomainIds).to(SortedSet))
+        NonEmpty
+          .from(submitterDomainIds.intersect(informeeDomainIds))
           .toRight(
             TopologyErrors.NoCommonDomain.Error(submitters, informees): TransactionRoutingError
           )

@@ -31,6 +31,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.Policy
+import io.functionmeta.functionFullName
 
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
@@ -227,7 +228,7 @@ class InFlightSubmissionTracker(
     override def notify(
         published: Seq[MultiDomainEventLog.OnPublish.Publication]
     )(implicit batchTraceContext: TraceContext): Unit = {
-      def performNotification(): Future[Unit] = performUnlessClosingF {
+      def performNotification(): Future[Unit] = performUnlessClosingF(functionFullName) {
         for {
           _ <- deduplicator.processPublications(published)
 

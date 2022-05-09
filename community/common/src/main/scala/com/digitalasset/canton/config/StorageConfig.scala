@@ -213,14 +213,23 @@ object DbConfig extends NoTracing {
   val h2MigrationsPathDev: String = baseH2MigrationsPath + devDir
   val oracleMigrationPathDev: String = baseOracleMigrationPath + devDir
 
-  def postgresUrl(host: String, port: Int, name: String): String =
-    s"jdbc:postgresql://$host:$port/$name"
+  def postgresUrl(host: String, port: Int, dbName: String): String =
+    s"jdbc:postgresql://$host:$port/$dbName"
 
   def h2Url(dbName: String): String =
     s"jdbc:h2:mem:$dbName;MODE=PostgreSQL;LOCK_TIMEOUT=10000;DB_CLOSE_DELAY=-1"
 
-  def oracleUrl(host: String, port: Int, name: String): String =
-    s"jdbc:oracle:thin:@$host:$port/$name"
+  def oracleUrl(host: String, port: Int, dbName: String): String =
+    s"jdbc:oracle:thin:@$host:$port/$dbName"
+
+  def oracleUrl(
+      host: String,
+      port: Int,
+      dbName: String,
+      username: String,
+      password: String,
+  ): String =
+    s"jdbc:oracle:thin:$username/$password@$host:$port/$dbName"
 
   /** Apply default values to the given db config
     */

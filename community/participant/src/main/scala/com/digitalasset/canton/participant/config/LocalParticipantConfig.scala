@@ -15,13 +15,7 @@ import com.daml.platform.configuration.{
 }
 import com.daml.platform.indexer.{IndexerStartupMode, IndexerConfig => DamlIndexerConfig}
 import com.daml.platform.usermanagement.UserManagementConfig
-import com.digitalasset.canton.config.RequireTypes.{
-  ExistingFile,
-  NonEmptyString,
-  NonNegativeInt,
-  Port,
-  PositiveNumeric,
-}
+import com.digitalasset.canton.config.RequireTypes._
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -653,6 +647,7 @@ object TestingTimeServiceConfig {
   * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
+  * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
   */
 case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -667,6 +662,9 @@ case class ParticipantNodeParameterConfig(
     enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,
     willCorruptYourSystemDevVersionSupport: Boolean = false,
+    warnIfOverloadedFor: Option[NonNegativeFiniteDuration] = Some(
+      NonNegativeFiniteDuration.ofSeconds(20)
+    ),
 )
 
 /** Parameters for the participant node's stores

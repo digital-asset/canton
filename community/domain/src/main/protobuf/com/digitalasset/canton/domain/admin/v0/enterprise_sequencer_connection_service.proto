@@ -1,0 +1,26 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.domain.admin.v0;
+
+import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+import "google/protobuf/empty.proto";
+
+// service used by sequencer clients to manage connection to the sequencer
+// used by the mediator and domain manager nodes
+service EnterpriseSequencerConnectionService {
+    rpc GetConnection (GetConnectionRequest) returns (GetConnectionResponse);
+    rpc SetConnection (SetConnectionRequest) returns (google.protobuf.Empty);
+}
+
+message GetConnectionRequest{
+}
+
+message GetConnectionResponse {
+    com.digitalasset.canton.protocol.v0.SequencerConnection sequencer_connection = 1;
+}
+message SetConnectionRequest {
+    com.digitalasset.canton.protocol.v0.SequencerConnection sequencer_connection = 1;
+}

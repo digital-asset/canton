@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
@@ -172,12 +173,16 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "fail to add if the signature is invalid" in {
         val validator = mk()
         import Factory._
-        val invalid = ns1k2_k1.copy(signature = ns1k1_k1.signature)(None)
+        val invalid =
+          ns1k2_k1.copy(signature = ns1k1_k1.signature)(ProtocolVersion.latestForTest, None)
         for {
-          res <- validator.validateAndUpdateHeadAuthState(ts(0), List(ns1k1_k1, invalid))
+          (_, validatedTopologyTransactions) <- validator.validateAndUpdateHeadAuthState(
+            ts(0),
+            List(ns1k1_k1, invalid),
+          )
         } yield {
           check(
-            res._2,
+            validatedTopologyTransactions,
             Seq(
               None,
               Some({
@@ -247,7 +252,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val validator = mk(store)
         import Factory._
         for {
-          _ <- store.append(ts(0), List(ns1k1_k1))
+          _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, ns1k3_k2))
         } yield {
           check(res._2, Seq(None, None))
@@ -328,7 +333,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val validator = mk(store)
         import Factory._
         for {
-          _ <- store.append(ts(0), List(ns1k1_k1, id1ak4_k1))
+          _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1, id1ak4_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, p1p2F_k4, p1p1B_k2))
         } yield {
           check(res._2, Seq(None, None, None))
@@ -375,7 +380,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val validator = mk(store)
         import Factory._
         for {
-          _ <- store.append(ts(0), List(ns6k6_k6))
+          _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns6k6_k6))
           res <- validator.validateAndUpdateHeadAuthState(
             ts(1),
             List(ns1k1_k1, okm1bk5_k1, p1p2T_k6),
@@ -391,7 +396,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         import Factory._
         val Rns1k1_k1 = revert(ns1k1_k1)
         for {
-          _ <- store.append(ts(0), List(ns1k1_k1))
+          _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(Rns1k1_k1, okm1bk5_k1))
         } yield {
           check(res._2, Seq(None, unauthorized))
@@ -405,7 +410,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         import Factory._
         val Rid1ak4_k1 = revert(id1ak4_k1)
         for {
-          _ <- store.append(ts(0), List(ns1k1_k1))
+          _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(id1ak4_k1))
           res2 <- validator.validateAndUpdateHeadAuthState(ts(2), List(Rid1ak4_k1))
         } yield {
@@ -425,7 +430,11 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val Rns1k2_k1 = revert(ns1k2_k1)
         val id6ak7_k6 = mkAdd(IdentifierDelegation(uid6, key7), key6)
         for {
-          _ <- store.append(ts(0), List(ns1k1_k1, ns1k2_k1, id1ak4_k2, ns6k6_k6))
+          _ <- store.append(
+            SequencedTime(ts(0)),
+            EffectiveTime(ts(0)),
+            List(ns1k1_k1, ns1k2_k1, id1ak4_k2, ns6k6_k6),
+          )
           res <- validator.validateAndUpdateHeadAuthState(
             ts(1),
             List(p1p2F_k4, Rns1k2_k1, id6ak7_k6, p1p2F_k4),

@@ -22,8 +22,10 @@ import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyTransaction}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.time.WallClock
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -53,7 +55,13 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
     FutureUtil
       .noisyAwaitResult(
         SignedTopologyTransaction
-          .create(transaction, key, syncCrypto.pureCrypto, syncCrypto.crypto.privateCrypto)
+          .create(
+            transaction,
+            key,
+            syncCrypto.pureCrypto,
+            syncCrypto.crypto.privateCrypto,
+            ProtocolVersion.latestForTest,
+          )
           .value,
         "generate signed",
         10.seconds,
@@ -64,7 +72,12 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       store: TopologyStore,
       transactions: SignedTopologyTransaction[TopologyChangeOp]*
   ): Future[Unit] = {
-    store.append(clock.now, transactions.map(ValidatedTopologyTransaction(_, None)).toList)
+    val ts = clock.now
+    store.append(
+      SequencedTime(ts),
+      EffectiveTime(ts),
+      transactions.map(ValidatedTopologyTransaction(_, None)).toList,
+    )
   }
 
   private val p1Mapping =
@@ -122,7 +135,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
     "reject invalid signatures" in {
       val (manager, store, service) = generate()
       val p2SigKey = TestingIdentityFactory(loggerFactory).newSigningPublicKey(participant2)
-      val faulty = p1Mapping.copy(key = p2SigKey)(None)
+      val faulty = p1Mapping.copy(key = p2SigKey)(ProtocolVersion.latestForTest, None)
       for {
         res <- service.newRequest(List(faulty))
       } yield {

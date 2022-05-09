@@ -7,10 +7,17 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.processing.{
+  ApproximateTime,
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionProcessingSubscriber,
+  TopologyTransactionProcessor,
+}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -22,19 +29,27 @@ class MissingKeysAlerter(
     participantId: ParticipantId,
     domainId: DomainId,
     client: DomainTopologyClient,
+    processor: TopologyTransactionProcessor,
     cryptoPrivateStore: CryptoPrivateStore,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
-  client.subscribe(new DomainTopologyClient.Subscriber {
+  processor.subscribe(new TopologyTransactionProcessingSubscriber {
     override def observed(
         sequencerTimestamp: SequencedTime,
         effectiveTimestamp: EffectiveTime,
         sequencerCounter: SequencerCounter,
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): Unit =
-      processTransactions(effectiveTimestamp.value, transactions)
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+      FutureUnlessShutdown.pure(
+        processTransactions(effectiveTimestamp.value, transactions)
+      )
+    override def updateHead(
+        effectiveTimestamp: EffectiveTime,
+        approximateTimestamp: ApproximateTime,
+        potentialTopologyChange: Boolean,
+    )(implicit traceContext: TraceContext): Unit = {}
   })
 
   def init()(implicit traceContext: TraceContext): Future[Unit] = {

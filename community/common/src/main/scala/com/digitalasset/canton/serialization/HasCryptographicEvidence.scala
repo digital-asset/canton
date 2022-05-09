@@ -73,6 +73,39 @@ trait MemoizedEvidence extends HasCryptographicEvidence {
   }
 }
 
+/** Effectively immutable [[HasCryptographicEvidence]] classes can mix in this trait
+  * to implement the memoization logic.
+  *
+  * Use this class if serialization always succeeds.
+  *
+  * Make sure that `fromByteString(byteString).deserializedFrom` equals `Some(byteString)`.
+  *
+  * Make sure that every public constructor and apply method yields an instance with `deserializedFrom == None`.
+  *
+  * @see MemoizedEvidenceWithFailure if serialization may fail
+  */
+trait MemoizedEvidenceV2 extends HasCryptographicEvidence {
+
+  /** Returns the [[com.google.protobuf.ByteString]] from which this object has been deserialized, if any.
+    * If defined, [[getCryptographicEvidence]] will use this as the serialization.
+    */
+  def deserializedFrom: Option[ByteString]
+
+  /** Computes the serialization of the object as a [[com.google.protobuf.ByteString]].
+    *
+    * Must meet the contract of [[getCryptographicEvidence]]
+    * except that when called several times, different [[com.google.protobuf.ByteString]]s may be returned.
+    */
+  protected[this] def toByteStringUnmemoized: ByteString
+
+  final override lazy val getCryptographicEvidence: ByteString = {
+    deserializedFrom match {
+      case Some(bytes) => bytes
+      case None => toByteStringUnmemoized
+    }
+  }
+}
+
 /** Thrown by [[MemoizedEvidenceWithFailure]] classes during object construction if the serialization fails.
   *
   * @param serializationError The error raised during the serialization

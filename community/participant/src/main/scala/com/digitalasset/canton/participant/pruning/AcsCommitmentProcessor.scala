@@ -43,6 +43,7 @@ import com.digitalasset.canton.util._
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.LfPartyId
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -190,7 +191,7 @@ class AcsCommitmentProcessor(
   private[this] val initFuture: FutureUnlessShutdown[Unit] = {
     import TraceContext.Implicits.Empty._
     val executed = queue.executeUnlessFailed(
-      performUnlessClosingF {
+      performUnlessClosingF("acs-commitment-processor-init") {
         for {
           lastComputed <- store.lastComputedAndSent
           _ = lastComputed.foreach { ts =>
@@ -326,7 +327,7 @@ class AcsCommitmentProcessor(
       }
     }
 
-    def performPublish(): Future[Unit] = performUnlessClosingF {
+    def performPublish(): Future[Unit] = performUnlessClosingF(functionFullName) {
       for {
         snapshot <- runningCommitments
         _ <-
@@ -404,7 +405,7 @@ class AcsCommitmentProcessor(
 
     val future = initFuture.flatMap { case () =>
       batch.traverse_ { envelope =>
-        performUnlessClosingF {
+        performUnlessClosingF(functionFullName) {
           val payload = envelope.protocolMessage.message
 
           val errors = List(
@@ -692,7 +693,7 @@ class AcsCommitmentProcessor(
       batchForm = msgs.toList.map { case (pid, msg) => (msg, Recipients.cc(pid)) }
       batch = Batch.of[ProtocolMessage](batchForm: _*)
       _ = if (batch.envelopes.nonEmpty)
-        performUnlessClosingEitherT(()) {
+        performUnlessClosingEitherT(functionFullName, ()) {
           EitherTUtil
             .logOnError(
               sequencerClient.sendAsync(batch, SendType.Other, None),

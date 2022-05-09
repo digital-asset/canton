@@ -25,6 +25,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.util.ErrorUtil
+import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -135,7 +136,7 @@ class DatabaseSequencer(
 
     def markOffline(): Unit = withNewTraceContext { implicit traceContext =>
       doNotAwait(
-        performUnlessClosingF(markOfflineF().thereafter { _ =>
+        performUnlessClosingF(functionFullName)(markOfflineF().thereafter { _ =>
           // schedule next marking sequencers as offline regardless of outcome
           schedule()
         }).onShutdown {

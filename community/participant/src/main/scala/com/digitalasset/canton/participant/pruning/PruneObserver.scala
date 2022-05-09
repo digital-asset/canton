@@ -14,6 +14,7 @@ import com.digitalasset.canton.util.EitherTUtil
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
+import io.functionmeta.functionFullName
 
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -69,7 +70,7 @@ private[participant] class PruneObserver(
       )
       FutureUnlessShutdown.unit
     } else {
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         for {
           safeToPruneTsO <-
             AcsCommitmentProcessor.safeToPrune(

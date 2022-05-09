@@ -42,14 +42,14 @@ object DelayUtil extends NamedLogging {
     *
     * Try to use `Clock` instead!
     */
-  def delay(delay: FiniteDuration, flagCloseable: FlagCloseable)(implicit
+  def delay(name: String, delay: FiniteDuration, flagCloseable: FlagCloseable)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     this.delay(
       scheduledExecutorService,
       delay,
       { promise =>
-        val _ = flagCloseable.performUnlessClosing(promise.success(()))
+        val _ = flagCloseable.performUnlessClosing(name)(promise.success(()))
       },
     )
 

@@ -7,6 +7,7 @@ package com.digitalasset.canton.topology.admin.v0;
 
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/topology.proto";
+import "com/digitalasset/canton/topology/admin/v0/topology_ext.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
@@ -77,6 +78,8 @@ message BaseQuery {
 
 message BaseResult {
     string store = 1;
+    // TODO(i9014) reorder once we break the admin api
+    google.protobuf.Timestamp sequenced = 7;
     google.protobuf.Timestamp valid_from = 2;
     google.protobuf.Timestamp valid_until = 3;
     com.digitalasset.canton.protocol.v0.TopologyChangeOp operation = 4;

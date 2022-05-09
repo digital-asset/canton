@@ -17,6 +17,7 @@ import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
+import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -69,7 +70,7 @@ class StartableStoppableIndexer(
     */
   def start()(implicit traceContext: TraceContext): Future[Unit] =
     execQueue.execute(
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         indexer.get match {
           case Some(_indexerAlreadyStarted) =>
             val err = s"Attempt to start indexer, but indexer already started"

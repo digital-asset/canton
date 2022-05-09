@@ -186,10 +186,10 @@ class Mediator(
     ] {
       override def name: String = s"mediator-${mediatorId}"
 
-      override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+      override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
           traceContext: TraceContext
       ): FutureUnlessShutdown[Unit] =
-        topologyTransactionProcessor.resubscriptionStartsAt(ts)
+        topologyTransactionProcessor.resubscriptionStartsAt(start)
 
       override def apply(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
         tracedEvents.withTraceContext { implicit traceContext => events =>

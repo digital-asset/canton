@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.concurrent
 
-import cats.syntax.traverse._
+import cats.syntax.foldable._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.util.ResourceUtil
@@ -18,6 +18,8 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
   lazy val expectedNumberOfParallelTasks: Int = Threading.detectNumberOfThreads(logger)
   val expectedNumberOfParallelTasksWrappedInBlocking: Int = 200
   val numberOfTasksToMakeExecutionContextBusy: Int = 200
+
+  val numberOfExtraTasks: Int = 20
 
   "A new execution context" when {
 
@@ -140,10 +142,9 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         ec: ExecutionContext,
     )(
         body: TaskRunner => Unit
-    ): Unit =
-      ResourceUtil.withResource(
-        new TaskRunner(description, numberOfTasksToRun, wrapInBlocking)(ec)
-      )(body)
+    ): Unit = ResourceUtil.withResource(
+      new TaskRunner(description, numberOfTasksToRun, wrapInBlocking)(ec)
+    )(body)
 
     class TaskRunner(
         val description: String,
@@ -157,42 +158,56 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
       private val blocker = new Semaphore(0)
       private val closed = new AtomicBoolean(false)
 
-      private val taskFuture: AtomicReference[Option[Future[List[Unit]]]] =
-        new AtomicReference(None)
+      private val taskFuture: AtomicReference[Option[Future[Unit]]] = new AtomicReference(None)
 
       def startTasks(): Unit = {
         // Reset semaphores to be on the safe side
         blocker.drainPermits()
         running.drainPermits()
 
-        // Start computation, if no computation is running
+        // Start computation
         val idle = taskFuture.compareAndSet(
-          None,
-          Some((0 until numberOfTasksToRun).toList.traverse { i =>
-            Future {
-              logger.debug(s"$description: Starting task $i...")
-              if (closed.get()) {
-                logger.warn(s"$description: Task $i started after closing. Aborting...")
-              } else {
-                // Only do this, if the runner has not been closed.
-                // So that tasks running after close are not counted.
-                running.release()
+          None, {
+            val blockingTasks = (0 until numberOfTasksToRun).toList.traverse_ { i =>
+              Future {
+                logger.debug(s"$description: Starting task $i...")
+                if (closed.get()) {
+                  logger.warn(s"$description: Task $i started after closing. Aborting...")
+                } else {
+                  // Only do this, if the runner has not been closed.
+                  // So that tasks running after close are not counted.
+                  running.release()
 
-                logger.info(
-                  s"$description: Started task $i. (Total: ${running.availablePermits()})\n$ec"
-                )
+                  logger.info(
+                    s"$description: Started task $i. (Total: ${running.availablePermits()})\n$ec"
+                  )
 
-                if (wrapInBlocking)
-                  blocking {
+                  if (wrapInBlocking)
+                    blocking {
+                      blocker.acquire()
+                    }
+                  else
                     blocker.acquire()
-                  }
-                else
-                  blocker.acquire()
 
-                logger.debug(s"$description: Terminated task $i")
+                  logger.debug(s"$description: Terminated task $i")
+                }
               }
             }
-          }),
+
+            logger.info(s"$description: Starting $numberOfExtraTasks extra tasks...")
+
+            // Run some extra tasks to keep submitting to the fork join pool.
+            // This is necessary, because the fork join pool occasionally fails to create a worker thread.
+            // It is ok to do so in this test, because there are plenty of extra tasks in production.
+            val extraTasks = (0 until numberOfExtraTasks).toList.traverse_ { i =>
+              Future { logger.debug(s"$description: Running extra task $i...") }
+            }
+
+            Some(for {
+              r <- blockingTasks
+              _ <- extraTasks
+            } yield r)
+          },
         )
 
         // Fail test, if some computation has already been running

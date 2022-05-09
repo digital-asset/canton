@@ -15,6 +15,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.HasFlushFuture
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.DurationConverters._
@@ -55,7 +56,7 @@ class PeriodicAcknowledgements(
       }
 
       if (isHealthy) {
-        val updateF = performUnlessClosingF {
+        val updateF = performUnlessClosingF(functionFullName) {
           for {
             latestClean <- fetchLatestCleanTimestamp(traceContext)
             _ <- latestClean.fold(Future.unit)(ackIfChanged)
@@ -84,6 +85,7 @@ class PeriodicAcknowledgements(
 
 object PeriodicAcknowledgements {
   type FetchCleanTimestamp = TraceContext => Future[Option[CantonTimestamp]]
+  val noAcknowledgements: FetchCleanTimestamp = _ => Future.successful(None)
 
   def apply(
       member: Member,

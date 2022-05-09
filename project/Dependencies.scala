@@ -35,6 +35,8 @@ object Dependencies {
   lazy val pureconfig = "com.github.pureconfig" %% "pureconfig" % pureconfig_version
   lazy val pureconfig_cats = "com.github.pureconfig" %% "pureconfig-cats" % pureconfig_version
 
+  lazy val scala_collection_contrib =
+    "org.scala-lang.modules" %% "scala-collection-contrib" % "0.2.2"
   lazy val scala_reflect = "org.scala-lang" % "scala-reflect" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % "2.3.6"
 

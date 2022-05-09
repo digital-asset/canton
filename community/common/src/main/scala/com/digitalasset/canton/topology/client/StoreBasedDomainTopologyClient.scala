@@ -16,13 +16,13 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.DomainTopologyClient.Subscriber
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery, TopologyStore}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.SequencerCounter
+import io.functionmeta.functionFullName
 
 import java.time.{Duration => JDuration}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -112,8 +112,6 @@ abstract class BaseDomainTopologyClient
     with TopologyAwaiter
     with TimeAwaiter {
 
-  private val subscribers = new AtomicReference[Seq[DomainTopologyClient.Subscriber]](Seq())
-
   private val pendingChanges = new AtomicInteger(0)
 
   private case class HeadTimestamps(
@@ -168,18 +166,12 @@ abstract class BaseDomainTopologyClient
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     // we update the head timestamp approximation with the current sequenced timestamp, right now
-    // but don't check awaiting conditions until we informed our subscribers
     updateHead(
       effectiveTimestamp,
       ApproximateTime(sequencedTimestamp.value),
       potentialTopologyChange = false,
     )
-    subscribers
-      .get()
-      .foreach(_.observed(sequencedTimestamp, effectiveTimestamp, sequencerCounter, transactions))
-    // now, check awaiting conditions. needs to be done after notifying the observers, as otherwise the topology
-    // dispatcher may subscribe before we start to notify the subscribers. as a result, the topology dispatcher would
-    // be informed about transactions it has not dispatched, and therefore squeek
+    // notify anyone who is waiting on some condition
     checkAwaitingConditions()
     // and we schedule an update to the effective time in due time so that we start using the
     // right keys at the right time.
@@ -206,13 +198,6 @@ abstract class BaseDomainTopologyClient
     FutureUnlessShutdown.unit
   }
 
-  /** Subscribe to topology state change notifications */
-  override def subscribe(subscriber: Subscriber): Unit =
-    subscribers.updateAndGet(_ :+ subscriber).discard
-
-  override def unsubscribe(subscriber: Subscriber): Unit =
-    subscribers.updateAndGet(_.filter(_ != subscriber)).discard
-
   /** Returns whether a snapshot for the given timestamp is available. */
   override def snapshotAvailable(timestamp: CantonTimestamp): Boolean =
     topologyKnownUntilTimestamp >= timestamp
@@ -238,7 +223,7 @@ abstract class BaseDomainTopologyClient
       Some(
         for {
           snapshotAtTs <- awaitSnapshotUS(timestamp)
-          parametersAtTs <- performUnlessClosingF(
+          parametersAtTs <- performUnlessClosingF(functionFullName)(
             snapshotAtTs.findDynamicDomainParametersOrDefault()
           )
           epsilonAtTs = parametersAtTs.topologyChangeDelay
@@ -770,10 +755,10 @@ class StoreBasedTopologySnapshot(
       // We sort the results to be able to pick the most recent one in case
       // several transactions are found.
       val domainParameters =
-        StoredTopologyTransactions(storedTxs.result.sortBy(_.validFrom)).toIdentityState.collect {
-          case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
+        StoredTopologyTransactions(storedTxs.result.sortBy(_.validFrom.value)).toIdentityState
+          .collect { case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
             domainParameters
-        }
+          }
       NonEmpty.from(domainParameters).map { domainParametersNel =>
         if (domainParametersNel.sizeCompare(1) > 0)
           logger.warn(
@@ -798,7 +783,11 @@ class StoreBasedTopologySnapshot(
     .map {
       _.result
         .map(storedTx =>
-          (storedTx.validFrom, storedTx.validUntil, storedTx.transaction.transaction.element)
+          (
+            storedTx.validFrom.value,
+            storedTx.validUntil.map(_.value),
+            storedTx.transaction.transaction.element,
+          )
         )
         .collect {
           case (

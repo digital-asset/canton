@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, NoCopy, SingleUseCell}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import scala.annotation.nowarn
 import scala.collection.concurrent
@@ -216,7 +217,7 @@ class NaiveRequestTracker(
         finalizationResult: Promise[Either[NonEmptyChain[RequestTrackerStoreError], Unit]],
     ): Either[CommitSetError, EitherT[Future, NonEmptyChain[RequestTrackerStoreError], Unit]] = {
       // Complete the promise only if we're not shutting down.
-      performUnlessClosing { commitSetPromise.tryComplete(commitSet) } match {
+      performUnlessClosing(functionFullName) { commitSetPromise.tryComplete(commitSet) } match {
         case UnlessShutdown.AbortedDueToShutdown =>
           // Try to clean up as good as possible even though recovery of the ephemeral state will ultimately
           // take care of the cleaning up.

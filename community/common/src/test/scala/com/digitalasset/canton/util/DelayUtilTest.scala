@@ -43,7 +43,7 @@ class DelayUtilTest extends AnyWordSpec with BaseTest {
         override def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
       }
 
-      val delayedCloseable = DelayUtil.delay(20.millis, flagCloseable)
+      val delayedCloseable = DelayUtil.delay("test", 20.millis, flagCloseable)
       flagCloseable.close()
       Threading.sleep(100)
       assert(!delayedCloseable.isCompleted, "Future completed during shutdown")

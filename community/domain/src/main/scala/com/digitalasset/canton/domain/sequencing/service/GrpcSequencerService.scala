@@ -24,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.RateLimiter
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.empty.Empty
+import io.functionmeta.functionFullName
 import io.grpc.Status
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 
@@ -148,7 +149,7 @@ class GrpcSequencerService(
         sendRequestIfValid(validatedRequestEither)
       }
 
-      val sendUnlessShutdown = performUnlessClosingF(sendF)
+      val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendF)
       sendUnlessShutdown.onShutdown(
         SendAsyncResponse(error =
           Some(SendAsyncError.ShuttingDown())
@@ -180,7 +181,7 @@ class GrpcSequencerService(
         sendRequestIfValid(validatedRequestEither)
       }
 
-      performUnlessClosingF(sendF).onShutdown(
+      performUnlessClosingF(functionFullName)(sendF).onShutdown(
         SendAsyncResponse(error = Some(SendAsyncError.ShuttingDown())).toProtoV0
       )
     }
@@ -251,6 +252,14 @@ class GrpcSequencerService(
         atMostOneMediator(sender, request.batch.envelopes),
         "Batch from participant contains multiple mediators as recipients.",
       )
+      _ <- refuseUnless(sender)(
+        noSigningTimestampIfUnauthenticated(
+          sender,
+          request.timestampOfSigningKey,
+          request.batch.envelopes,
+        ),
+        "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
+      )
     } yield {
       metrics.bytesProcessed.metric.mark(requestSize.toLong)
       metrics.messagesProcessed.metric.mark()
@@ -279,6 +288,19 @@ class GrpcSequencerService(
       case _ => true
     }
   }
+
+  /** Reject requests that involve unauthenticated members and specify the timestamp of the signing key.
+    * This is because the unauthenticated member typically does not know the domain topology state
+    * and therefore cannot validate that the requested timestamp is within the signing tolerance.
+    */
+  private def noSigningTimestampIfUnauthenticated(
+      sender: Member,
+      timestampOfSigningKey: Option[CantonTimestamp],
+      envelopes: Seq[ClosedEnvelope],
+  ): Boolean =
+    timestampOfSigningKey.isEmpty || (sender.isAuthenticated && envelopes.forall(
+      _.recipients.allRecipients.forall(_.isAuthenticated)
+    ))
 
   private def invalid(messageIdP: String, senderPO: String)(
       message: String
@@ -367,7 +389,7 @@ class GrpcSequencerService(
         limiter.checkAndUpdateRate(),
         (), {
           val message = f"Submission rate exceeds rate limit of $maxRatePerParticipant/s."
-          logger.warn(
+          logger.info(
             f"Request '${requestP.messageId}' from '${requestP.sender}' refused: $message"
           )
           SendAsyncError.Overloaded(message)

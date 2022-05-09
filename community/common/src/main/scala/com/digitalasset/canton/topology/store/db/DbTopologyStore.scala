@@ -21,9 +21,12 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
 import com.digitalasset.canton.topology.store._
 import com.digitalasset.canton.topology.transaction._
@@ -237,6 +240,11 @@ class DbTopologyStore(
     SignedTopologyTransaction.createGetResultDomainTopologyTransaction
 
   private val (transactionStoreIdName, stateStoreIdFilterName) = buildTransactionStoreNames(storeId)
+  private val isDomainStore = storeId match {
+    case TopologyStoreId.DomainStore(_, _) => true
+    case TopologyStoreId.AuthorizedStore => false
+    case TopologyStoreId.RequestedStore => false
+  }
 
   private val updatingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("topology-store-update")
@@ -282,23 +290,25 @@ class DbTopologyStore(
   }
 
   override private[topology] def doAppend(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       transactions: Seq[ValidatedTopologyTransaction],
   )(implicit traceContext: TraceContext): Future[Unit] = {
-
-    val (updates, appends) = TopologyStore.appends(timestamp, transactions)
-    updateAndInsert(transactionStoreIdName, timestamp, updates.toSeq, appends)
-
+    val (updates, appends) = TopologyStore.appends(effective.value, transactions)
+    updateAndInsert(transactionStoreIdName, sequenced, effective, updates.toSeq, appends)
   }
 
   @SuppressWarnings(Array("com.digitalasset.canton.SlickString"))
   private def updateAndInsert(
       store: LengthLimitedString,
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       deactivate: Seq[UniquePath],
       add: Seq[InsertTransaction],
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
+    val sequencedTs = sequenced.value
+    val effectiveTs = effective.value
     val updateSeq = deactivate.toList.map(pathQuery)
     val appendSeq = add.toList
       .map { case InsertTransaction(transaction, validUntil, reasonT) =>
@@ -322,28 +332,28 @@ class DbTopologyStore(
         val (secondaryId, secondaryNs) = secondary.unzip
         storage.profile match {
           case _: DbStorage.Profile.Oracle =>
-            sql"SELECT $store, $timestamp, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason FROM dual"
+            sql"SELECT $store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason FROM dual"
           case _ =>
-            sql"($store, $timestamp, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason)"
+            sql"($store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason)"
         }
       }
 
     lazy val updateAction =
-      (sql"UPDATE topology_transactions SET valid_until = $timestamp WHERE store_id = $store AND (" ++
+      (sql"UPDATE topology_transactions SET valid_until = $effectiveTs WHERE store_id = $store AND (" ++
         updateSeq
           .intercalate(
             sql" OR "
-          ) ++ sql") AND valid_until is null AND valid_from < $timestamp").asUpdate
+          ) ++ sql") AND valid_until is null AND valid_from < $effectiveTs").asUpdate
 
     val insertAction = storage.profile match {
       case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
-        (sql"""INSERT INTO topology_transactions (store_id, valid_from, valid_until, transaction_type, namespace, 
+        (sql"""INSERT INTO topology_transactions (store_id, sequenced, valid_from, valid_until, transaction_type, namespace, 
                     identifier, element_id, secondary_namespace, secondary_identifier, operation, instance, ignore_reason) VALUES""" ++
           appendSeq.intercalate(sql", ") ++ sql" ON CONFLICT DO NOTHING").asUpdate
       case _: DbStorage.Profile.Oracle =>
         (sql"""INSERT 
                /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( TOPOLOGY_TRANSACTIONS (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation) ) */ 
-               INTO topology_transactions (store_id, valid_from, valid_until, transaction_type, namespace, identifier, element_id, 
+               INTO topology_transactions (store_id, sequenced, valid_from, valid_until, transaction_type, namespace, identifier, element_id, 
                                            secondary_namespace, secondary_identifier, operation, instance, ignore_reason)
                WITH UPDATES AS (""" ++
           appendSeq.intercalate(sql" UNION ALL ") ++
@@ -372,22 +382,102 @@ class DbTopologyStore(
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
     val query =
-      sql"SELECT instance, valid_from, valid_until FROM topology_transactions WHERE store_id = $store" ++
+      sql"SELECT id, instance, sequenced, valid_from, valid_until FROM topology_transactions WHERE store_id = $store" ++
         subQuery ++ sql" AND ignore_reason IS NULL #${orderBy} #${limit}"
     readTime.metric.event {
       storage
         .query(
           query.as[
-            (SignedTopologyTransaction[TopologyChangeOp], CantonTimestamp, Option[CantonTimestamp])
+            (
+                Long,
+                SignedTopologyTransaction[TopologyChangeOp],
+                Option[CantonTimestamp],
+                CantonTimestamp,
+                Option[CantonTimestamp],
+            )
           ],
           functionFullName,
         )
-        .map(_.map { case (dt, validFrom, validUntil) =>
-          StoredTopologyTransaction(validFrom, validUntil, dt)
+        .flatMap(_.toList.traverse { case (id, dt, sequencedTsO, validFrom, validUntil) =>
+          getOrComputeSequencedTime(store, id, sequencedTsO, validFrom).map { sequencedTs =>
+            StoredTopologyTransaction(
+              SequencedTime(sequencedTs),
+              EffectiveTime(validFrom),
+              validUntil.map(EffectiveTime(_)),
+              dt,
+            )
+          }
         })
         .map(StoredTopologyTransactions(_))
     }
   }
+
+  // TODO(#9014) remove once we move to 3.0
+  /** Backwards compatible computation of sequencing time
+    *
+    * The algorithm works based on the assumption that the topology manager has not sent
+    * an epsilon change that would lead to reordering of topology transactions.
+    *
+    * Let's assume we have parameter changes at (t3,e3), (t2, e2), (t1, e1), default: e0 = 0
+    * with ti being the effective time
+    *
+    * Then, for a t4, we know that if (t4 - t3) > e3, then t4 was sequenced at t4 - e3. Otherwise, we repeat
+    * with checking t4 against t2 and e2 etc.
+    */
+  private def getOrComputeSequencedTime(
+      store: LengthLimitedString,
+      id: Long,
+      sequencedO: Option[CantonTimestamp],
+      validFrom: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[CantonTimestamp] =
+    if (!isDomainStore) Future.successful(validFrom) // only compute for domain stores
+    else {
+      def getParameterChangeBefore(
+          ts: CantonTimestamp
+      ): Future[Option[(CantonTimestamp, NonNegativeFiniteDuration)]] = {
+        val typ = DomainTopologyTransactionType.DomainParameters
+        // this is recursive, but terminates as we descend in time strictly.
+        // It is also stack safe as trampolined by a `Future.flatmap` inside queryForTransactions.
+        queryForTransactions(
+          store,
+          sql" AND transaction_type = ${typ} and valid_from < $ts",
+          limit = storage.limit(1),
+          orderBy = " ORDER BY valid_from DESC",
+        ).map(
+          _.result.map(x => (x.validFrom, x.transaction.transaction.element.mapping)).collectFirst {
+            case (ts, change: DomainParametersChange) =>
+              (ts.value, change.domainParameters.topologyChangeDelay)
+          }
+        )
+      }
+      def go(before: CantonTimestamp): Future[CantonTimestamp] = {
+        getParameterChangeBefore(before).flatMap {
+          case None =>
+            // there is no parameter change before, so we use the default (which is 0)
+            Future.successful(validFrom - DynamicDomainParameters.topologyChangeDelayIfAbsent)
+          case Some((ts, epsilon)) =>
+            val delta = validFrom - ts
+            // check if (teffective - teffchange) > epsilon
+            if (delta.compareTo(epsilon.duration) > 0) {
+              Future.successful(validFrom - epsilon)
+            } else {
+              go(ts)
+            }
+        }
+      }
+      sequencedO.map(Future.successful).getOrElse {
+        go(validFrom).flatMap { sequenced =>
+          logger.info(
+            s"Updating legacy topology transaction id=${id} with effective=${validFrom} to sequenced time=${sequenced}"
+          )
+          val query =
+            sqlu"UPDATE topology_transactions SET sequenced = ${sequenced} WHERE id = $id AND store_id = $store"
+          storage.update_(query, functionFullName).map(_ => sequenced)
+        }
+      }
+    }
 
   private def asOfQuery(asOf: CantonTimestamp, asOfInclusive: Boolean): SQLActionBuilder = {
 
@@ -460,7 +550,7 @@ class DbTopologyStore(
       sql"AND valid_until is NULL AND transaction_type = ${mapping.dbType}" ++ query,
     )
       .map(_.result.collect {
-        case StoredTopologyTransaction(_validFrom, None, tr)
+        case StoredTopologyTransaction(_sequenced, _validFrom, None, tr)
             if tr.transaction.element.mapping == mapping =>
           tr
       })
@@ -763,13 +853,15 @@ class DbTopologyStore(
     )
 
   override def updateState(
-      timestamp: CantonTimestamp,
+      sequenced: SequencedTime,
+      effective: EffectiveTime,
       deactivate: Seq[UniquePath],
       positive: Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]],
   )(implicit traceContext: TraceContext): Future[Unit] =
     updateAndInsert(
       stateStoreIdFilterName,
-      timestamp,
+      sequenced,
+      effective,
       deactivate,
       positive.map { x =>
         InsertTransaction(x, None, None)
@@ -873,7 +965,7 @@ class DbTopologyStore(
       subQuery,
       limit = limitQ,
       orderBy = "ORDER BY valid_from DESC",
-    ).map(_.result.map(_.validFrom))
+    ).map(_.result.map(_.validFrom.value))
   }
 
   override def findTransactionsInRange(

@@ -7,6 +7,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainManager
 import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Add,
   Positive,
@@ -25,30 +26,46 @@ class TopologyTransactionCollectionTest extends AnyWordSpec with BaseTest with H
   private lazy val factory: TestingOwnerWithKeys =
     new TestingOwnerWithKeys(domainManager, loggerFactory, parallelExecutionContext)
 
-  private lazy val addStoredTx: StoredTopologyTransaction[Add] =
+  private lazy val addStoredTx: StoredTopologyTransaction[Add] = {
+    val tm = CantonTimestamp.now()
     StoredTopologyTransaction(
-      CantonTimestamp.now(),
+      SequencedTime(tm),
+      EffectiveTime(tm),
       None,
       factory.mkAdd(IdentifierDelegation(uid1, factory.SigningKeys.key1)),
     )
+  }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  private lazy val removeStoredTx: StoredTopologyTransaction[Remove] =
-    StoredTopologyTransaction(
-      CantonTimestamp.now(),
-      None,
-      addStoredTx.transaction.reverse.asInstanceOf[SignedTopologyTransaction[Remove]],
-    )
+  private lazy val removeStoredTx: StoredTopologyTransaction[Remove] = {
+    val tm = CantonTimestamp.now()
+    val reversedTransaction = addStoredTx.transaction.transaction.reverse
 
-  private def domainParametersChange(domainId: DomainId): StoredTopologyTransaction[Replace] =
     StoredTopologyTransaction(
-      CantonTimestamp.now(),
+      SequencedTime(tm),
+      EffectiveTime(tm),
+      None,
+      addStoredTx.transaction
+        .copy(transaction = reversedTransaction)(
+          addStoredTx.transaction.representativeProtocolVersion,
+          None,
+        )
+        .asInstanceOf[SignedTopologyTransaction[Remove]],
+    )
+  }
+
+  private def domainParametersChange(domainId: DomainId): StoredTopologyTransaction[Replace] = {
+    val tm = CantonTimestamp.now()
+    StoredTopologyTransaction(
+      SequencedTime(tm),
+      EffectiveTime(tm),
       None,
       factory.mkDmGov(
         DomainParametersChange(domainId, TestDomainParameters.defaultDynamic),
         factory.SigningKeys.key1,
       ),
     )
+  }
 
   private lazy val replaceStoredTx1: StoredTopologyTransaction[Replace] = domainParametersChange(
     DomainId(uid1)

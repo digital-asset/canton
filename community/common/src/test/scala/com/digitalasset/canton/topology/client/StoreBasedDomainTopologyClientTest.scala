@@ -142,9 +142,16 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 
         val (adds, removes, _) = SignedTopologyTransactions(transactions).split
 
-        store.updateState(timestamp, removes.result.map(_.uniquePath), adds.result).map { _ =>
-          client.observed(timestamp, timestamp, 1, transactions)
-        }
+        store
+          .updateState(
+            SequencedTime(timestamp),
+            EffectiveTime(timestamp),
+            removes.result.map(_.uniquePath),
+            adds.result,
+          )
+          .map { _ =>
+            client.observed(timestamp, timestamp, 1, transactions)
+          }
       }
 
     }

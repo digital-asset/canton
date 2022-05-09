@@ -289,7 +289,7 @@ class ParticipantNodeBootstrap(
     // Crypto and Identity management
 
     val syncCrypto =
-      new SyncCryptoApiProvider(participantId, ips, crypto, config.caching, loggerFactory)
+      new SyncCryptoApiProvider(participantId, ips, crypto, config.caching, timeouts, loggerFactory)
 
     val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
 
@@ -667,7 +667,10 @@ object ParticipantNodeBootstrap {
             participantMetrics,
             new CommunityStorageFactory(participantConfig.storage),
             _indexer => (),
-            _ => new ResourceManagementService.CommunityResourceManagementService(),
+            _ =>
+              new ResourceManagementService.CommunityResourceManagementService(
+                participantConfig.parameters.warnIfOverloadedFor
+              ),
             _ =>
               StaticGrpcServices
                 .notSupportedByCommunity(

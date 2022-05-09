@@ -5,7 +5,6 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v0;
 
-import "google/protobuf/timestamp.proto";
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 
@@ -164,19 +163,6 @@ message TopologyTransaction {
         TopologyStateUpdate state_update = 1;
         DomainGovernanceTransaction domain_governance = 2;
     }
-}
-
-message TopologyTransactions {
-    message Item {
-        google.protobuf.Timestamp valid_from = 1;
-        google.protobuf.Timestamp valid_until = 2;
-        /** Versioned signed topology transactions serialized as byte-strings. Note that we use here the serialized
-            version that contains the version number. Using the "Versioned" version directly here would create a circular
-            dependency between the proto files. The only proper solution would be to move this into a third separate file
-            with "cross version data files", which we might do at some point. */
-        bytes transaction = 3;
-    }
-    repeated Item items = 1;
 }
 
 message SignedTopologyTransaction {

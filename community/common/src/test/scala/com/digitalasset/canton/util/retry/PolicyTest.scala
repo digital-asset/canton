@@ -13,17 +13,17 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.Jitter.RandomSource
 import com.digitalasset.canton.util.retry.RetryUtil.{AllExnRetryable, DbExceptionRetryable}
-import com.digitalasset.canton.util.{FutureUtil, LoggerUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import org.scalatest.funspec.AsyncFunSpec
 import org.slf4j.event.Level
 
 import java.util.Random
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
-import scala.concurrent.Future
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
@@ -650,13 +650,17 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
         Future.successful(incr)
       }
 
-      policy(closeable)(run(), AllExnRetryable).map { result =>
-        assert(result == retriedUntilClose, "Expected to get last result as result.")
-        assert(
-          retried.get() == retriedUntilClose,
-          s"Expected to increment ${retriedUntilClose} times before failure",
-        )
-      }
+      val result = policy(closeable)(run(), AllExnRetryable)(
+        success,
+        executorService,
+        traceContext,
+      ).futureValue
+
+      assert(result == retriedUntilClose, "Expected to get last result as result.")
+      assert(
+        retried.get() == retriedUntilClose,
+        s"Expected to increment ${retriedUntilClose} times before failure",
+      )
     }
 
     it("should repeat until closed from outside") {
@@ -675,22 +679,16 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
 
       // Wrap the retry in a performUnlessClosing to trigger possible deadlocks.
       val retryUnlessClosingF =
-        closeable.performUnlessClosingF(retryF)(executorService, traceContext)
+        closeable.performUnlessClosingF("test-retry")(retryF)(executorService, traceContext)
 
-      Threading.sleep(100)
+      Threading.sleep(10)
 
-      val deadline = 50.millis.fromNow
       closeable.close()
 
-      retryUnlessClosingF.unwrap
-        .map {
-          case UnlessShutdown.Outcome(_) =>
-            assert(
-              deadline.hasTimeLeft(),
-              s"Shutdown has been delayed by ${LoggerUtil.roundDurationForHumans(-deadline.timeLeft)}",
-            )
-          case UnlessShutdown.AbortedDueToShutdown => fail("Unexpected shutdown.")
-        }
+      inside(Await.result(retryUnlessClosingF.unwrap, 50.millis)) {
+        case UnlessShutdown.Outcome(_) => succeed
+        case UnlessShutdown.AbortedDueToShutdown => fail("Unexpected shutdown.")
+      }
     }
   }
 

@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
@@ -257,7 +258,7 @@ class ParticipantTopologyManager(
       ).map(_ => ())
 
     // check if cert already exists
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       (for {
         have <- alreadyTrusted
         _ <- if (have) EitherT.rightT[Future, ParticipantTopologyManagerError](()) else trustDomain

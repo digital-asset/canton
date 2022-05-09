@@ -27,7 +27,6 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentStateFactory,
 }
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
-import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
@@ -164,16 +163,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
             )
         )
       )
-
-      // turn on missing key alerter such that we get notified if a key is used that we do not have
-      alerter = new MissingKeysAlerter(
-        participantId,
-        domainId,
-        topologyClient,
-        cryptoApiProvider.crypto.cryptoPrivateStore,
-        loggerFactory,
-      )
-      _ <- EitherT.right(FutureUnlessShutdown.outcomeF(alerter.init()))
 
       _ = cryptoApiProvider.ips.add(topologyClient)
 

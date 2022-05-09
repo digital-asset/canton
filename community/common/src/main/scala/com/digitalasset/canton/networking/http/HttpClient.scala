@@ -22,6 +22,7 @@ import com.digitalasset.canton.util.EitherTUtil
 import com.google.protobuf.ByteString
 import io.circe.syntax._
 import io.circe.{Decoder, Encoder}
+import io.functionmeta.functionFullName
 
 import javax.net.ssl._
 import okhttp3.OkHttpClient
@@ -140,7 +141,7 @@ class HttpClient private (
       body <- EitherT.fromEither(response.body.leftMap(err => errHandler(response.code, err)))
     } yield HttpClient.Response(body, response.headers)
 
-    performUnlessClosing(send()).onShutdown {
+    performUnlessClosing(functionFullName)(send()).onShutdown {
       logger.info("Shutdown in progress, not sending request")
       EitherT.leftT(HttpClientError.ShutdownInProgressError)
     }

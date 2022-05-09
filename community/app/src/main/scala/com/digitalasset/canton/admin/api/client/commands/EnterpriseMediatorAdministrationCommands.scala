@@ -16,11 +16,11 @@ import com.digitalasset.canton.domain.mediator.admin.gprc.{
   InitializeMediatorRequest,
   InitializeMediatorResponse,
 }
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
 

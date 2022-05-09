@@ -49,6 +49,7 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainEphemeralState,
   SyncDomainPersistentState,
 }
+import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
   ParticipantTopologyDispatcher,
@@ -66,6 +67,7 @@ import com.digitalasset.canton.sequencing.{
   HandlerResult,
   PossiblyIgnoredApplicationHandler,
   PossiblyIgnoredProtocolEvent,
+  ResubscriptionStart,
 }
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
@@ -80,6 +82,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
+import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -238,6 +241,15 @@ class SyncDomain(
   topologyProcessor.subscribe(domainHandle.topologyClient)
   // subscribe party notifier to topology processor
   topologyProcessor.subscribe(partyNotifier.attachToTopologyProcessor())
+  // turn on missing key alerter such that we get notified if a key is used that we do not have
+  private val missingKeysAlerter = new MissingKeysAlerter(
+    participantId,
+    domainId,
+    topologyClient,
+    topologyProcessor,
+    domainCrypto.crypto.cryptoPrivateStore,
+    loggerFactory,
+  )
 
   private val badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor =
     new BadRootHashMessagesRequestProcessor(
@@ -395,6 +407,9 @@ class SyncDomain(
     val cleanHeadPrets = startingPoints.processing.prenextTimestamp
 
     for {
+      // Prepare missing key alerter
+      _ <- EitherT.right(missingKeysAlerter.init())
+
       // Phase 0: Initialise topology client at current clean head
       _ <- EitherT.right(initialiseClientAtCleanHead())
 
@@ -483,12 +498,11 @@ class SyncDomain(
         .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))(initializationTraceContext)
         .fold(_ => GenesisSequencerCounter, _.counter + 1)
 
+    val sequencerCounterPreheadTsO =
+      ephemeral.startingPoints.rewoundSequencerCounterPrehead.map(_.timestamp)
     val subscriptionPriorTs = {
       val cleanReplayTs = ephemeral.startingPoints.cleanReplay.prenextTimestamp
-      val sequencerCounterPreheadTs =
-        ephemeral.startingPoints.rewoundSequencerCounterPrehead.fold(CantonTimestamp.MinValue)(
-          _.timestamp
-        )
+      val sequencerCounterPreheadTs = sequencerCounterPreheadTsO.getOrElse(CantonTimestamp.MinValue)
       Ordering[CantonTimestamp].min(cleanReplayTs, sequencerCounterPreheadTs)
     }
 
@@ -529,9 +543,9 @@ class SyncDomain(
           override def name: String = s"sync-domain-$domainId"
 
           override def resubscriptionStartsAt(
-              ts: CantonTimestamp
+              start: ResubscriptionStart
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-            topologyProcessor.resubscriptionStartsAt(ts)(traceContext)
+            topologyProcessor.resubscriptionStartsAt(start)(traceContext)
 
           override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
             messageDispatcher.handleAll(events)
@@ -547,9 +561,10 @@ class SyncDomain(
       _ <- EitherT.right[SyncDomainInitializationError](
         sequencerClient.subscribeAfter(
           subscriptionPriorTs,
+          sequencerCounterPreheadTsO,
           trackingHandler,
           ephemeral.timeTracker,
-          fetchCleanTimestamp = PeriodicAcknowledgements.fetchCleanCounterFromStore(
+          PeriodicAcknowledgements.fetchCleanCounterFromStore(
             persistent.sequencerCounterTrackerStore
           ),
         )(initializationTraceContext)
@@ -657,7 +672,7 @@ class SyncDomain(
 
   def readyForSubmission: Boolean = ready && !isDegraded && sequencerClient.subscriptionIsHealthy
 
-  /** @return The outer future completes after the submssion has been registered as in-flight.
+  /** @return The outer future completes after the submission has been registered as in-flight.
     *         The inner future completes after the submission has been sequenced or if it will never be sequenced.
     */
   def submitTransaction(
@@ -668,7 +683,8 @@ class SyncDomain(
       traceContext: TraceContext
   ): EitherT[Future, TransactionSubmissionError, Future[TransactionSubmitted]] =
     performUnlessClosingEitherTF[TransactionSubmissionError, TransactionSubmitted](
-      SubmissionDuringShutdown.Rejection()
+      functionFullName,
+      SubmissionDuringShutdown.Rejection(),
     ) {
       ErrorUtil.requireState(ready, "Cannot submit transaction before recovery")
       transactionProcessor
@@ -686,7 +702,7 @@ class SyncDomain(
     performUnlessClosingEitherT[
       TransferProcessorError,
       TransferOutProcessingSteps.SubmissionResult,
-    ](DomainNotReady(domainId, "The domain is shutting down.")) {
+    ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
       if (!ready)
         EitherT.leftT[Future, TransferInProcessingSteps.SubmissionResult](
           DomainNotReady(domainId, "Cannot submit transfer-out before recovery")
@@ -703,7 +719,8 @@ class SyncDomain(
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] =
     performUnlessClosingEitherT[TransferProcessorError, TransferInProcessingSteps.SubmissionResult](
-      DomainNotReady(domainId, "The domain is shutting down.")
+      functionFullName,
+      DomainNotReady(domainId, "The domain is shutting down."),
     ) {
 
       if (!ready)
@@ -735,12 +752,13 @@ class SyncDomain(
       SyncCloseable(
         "sync-domain",
         Lifecycle.close(
-          // Start with closing the sequencer subscription so that the processors won't receive or handle events when
+          // Close the domain crypto client first to stop waiting for snapshots that may block the sequencer subscription
+          domainCrypto,
+          // Close the sequencer subscription so that the processors won't receive or handle events when
           // their shutdown is initiated.
           () => domainHandle.sequencerClient.closeSubscription(),
           pruneObserver,
           acsCommitmentProcessor,
-          topologyProcessor,
           transactionProcessor,
           transferOutProcessor,
           transferInProcessor,

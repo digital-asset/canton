@@ -252,8 +252,10 @@ class GrpcSequencerIntegrationTest
       // kick of subscription
       val initF = env.client.subscribeAfter(
         CantonTimestamp.MinValue,
+        None,
         ApplicationHandler.success(),
         domainTimeTracker,
+        PeriodicAcknowledgements.noAcknowledgements,
       )
 
       val result = for {

@@ -126,7 +126,7 @@ abstract class CantonNodeBootstrapBase[
       logger.warn("Will not start instance again as it is already initialised")
       EitherT.pure[Future, String](())
     } else {
-      performUnlessClosingEitherT("Aborting startup due to shutdown") {
+      performUnlessClosingEitherT(functionFullName, "Aborting startup due to shutdown") {
         if (starting.compareAndSet(false, true))
           instanceET.map { instance =>
             val previous = ref.getAndSet(Some(instance))

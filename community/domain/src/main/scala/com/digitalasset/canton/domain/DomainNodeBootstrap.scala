@@ -400,6 +400,7 @@ class DomainNodeBootstrap(
             ips,
             crypto,
             parameters.cachingConfigs,
+            timeouts,
             loggerFactory,
           )
             .tryForDomain(domainId)
@@ -419,6 +420,7 @@ class DomainNodeBootstrap(
             crypto,
             sequencedTopologyStore,
             topologyClient,
+            topologyProcessor,
             storage,
             clock,
             config,

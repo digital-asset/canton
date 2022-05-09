@@ -25,6 +25,7 @@ import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.retry.Pause
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
+import io.functionmeta.functionFullName
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -68,7 +69,7 @@ class AuthenticationTokenProvider(
   ): EitherT[Future, Status, AuthenticationTokenWithExpiry] =
     // this should be called by a grpc client interceptor
     fromGrpcContext { implicit traceContext =>
-      performUnlessClosingEitherT(shutdownStatus) {
+      performUnlessClosingEitherT(functionFullName, shutdownStatus) {
         def generateTokenET: Future[Either[Status, AuthenticationTokenWithExpiry]] =
           (for {
             challenge <- getChallenge(authenticationClient)

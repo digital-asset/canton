@@ -32,6 +32,7 @@ import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Pause, Success}
 import com.digitalasset.canton.util.{AkkaUtil, EitherTUtil, FutureUtil, retry}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration._
@@ -184,7 +185,10 @@ class SequencerWriter(
     )
 
   def start()(implicit traceContext: TraceContext): EitherT[Future, WriterStartupError, Unit] =
-    performUnlessClosingEitherT[WriterStartupError, Unit](WriterStartupError.WriterShuttingDown) {
+    performUnlessClosingEitherT[WriterStartupError, Unit](
+      functionFullName,
+      WriterStartupError.WriterShuttingDown,
+    ) {
       def createStoreAndRunCrashRecovery()
           : EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] = {
         // only retry errors that are flagged as retryable
@@ -238,7 +242,7 @@ class SequencerWriter(
           .leftWiden[SendAsyncError]
       )(_.send(submission))
 
-    val sendUnlessShutdown = performUnlessClosingF(sendET.value)
+    val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendET.value)
     EitherT(
       sendUnlessShutdown.onShutdown(Left[SendAsyncError, Unit](SendAsyncError.ShuttingDown()))
     )
@@ -292,7 +296,7 @@ class SequencerWriter(
   private def setupWriterRecovery(doneF: Future[Unit]): Unit =
     doneF.onComplete { result =>
       withNewTraceContext { implicit traceContext =>
-        performUnlessClosing { // close will take care of shutting down a running writer if close is invoked
+        performUnlessClosing(functionFullName) { // close will take care of shutting down a running writer if close is invoked
           // close the running writer and reset the reference
           runningWriterRef.getAndSet(None).foreach(_.close())
 

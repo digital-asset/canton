@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.data.{EitherT, NonEmptySet}
+import cats.data.EitherT
 import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmptyUtil
@@ -28,6 +28,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.annotation.nowarn
+import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
 
 @nowarn("msg=match may not be exhaustive")
@@ -63,7 +64,9 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       def deliverEventWithDefaults(
           ts: CantonTimestamp,
           sender: SequencerMemberId = SequencerMemberId(0),
-      )(recipients: NonEmptySet[SequencerMemberId] = NonEmptySet.of(sender)): Sequenced[PayloadId] =
+      )(
+          recipients: NonEmpty[SortedSet[SequencerMemberId]] = NonEmpty(SortedSet, sender)
+      ): Sequenced[PayloadId] =
         Sequenced(
           ts,
           mockDeliverStoreEvent(
@@ -90,7 +93,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           DeliverStoreEvent(
             senderId,
             messageId,
-            NonEmptySet.of(senderId, recipientIds.toSeq: _*),
+            NonEmpty(SortedSet, senderId, recipientIds.toSeq: _*),
             payloadId,
             None,
             traceContext,
@@ -138,7 +141,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
                 ) =>
               sender shouldBe senderId
               messageId shouldBe expectedMessageId
-              recipients.toSortedSet should contain.only(recipientIds.toSeq: _*)
+              recipients.forgetNE should contain.only(recipientIds.toSeq: _*)
               payload shouldBe expectedPayload
               signingTimestampO shouldBe expectedSigningTimestamp
             case other =>
@@ -580,14 +583,14 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
                 DeliverStoreEvent(
                   aliceId,
                   messageId1,
-                  NonEmptySet.of(aliceId, bobId),
+                  NonEmpty(SortedSet, aliceId, bobId),
                   payload1.id,
                   None,
                   traceContext,
                 ),
               ),
-              deliverEventWithDefaults(ts(5))(recipients = NonEmptySet.of(aliceId, bobId)),
-              deliverEventWithDefaults(ts(6))(recipients = NonEmptySet.of(aliceId, bobId)),
+              deliverEventWithDefaults(ts(5))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
+              deliverEventWithDefaults(ts(6))(recipients = NonEmpty(SortedSet, aliceId, bobId)),
             ),
           )
           // save an earlier counter checkpoint that should be removed

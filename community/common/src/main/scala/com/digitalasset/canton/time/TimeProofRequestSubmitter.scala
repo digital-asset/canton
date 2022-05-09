@@ -18,6 +18,7 @@ import com.digitalasset.canton.util.retry.{Backoff, Success}
 import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, retry}
 import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -124,7 +125,7 @@ private[time] class TimeProofRequestSubmitterImpl(
 
     /* Make the request or short circuit if we're no longer waiting a time event */
     def mkRequest(): Future[Either[SendAsyncClientError, Unit]] =
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         if (stillPending) {
           logger.debug("Sending time request")
           sendRequest(traceContext).value

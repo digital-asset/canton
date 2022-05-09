@@ -27,6 +27,7 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStore
 import io.opentelemetry.api.trace.Tracer
 
@@ -37,7 +38,8 @@ trait SequencerRuntimeFactory {
       domainId: DomainId,
       crypto: Crypto,
       sequencedTopologyStore: TopologyStore,
-      domainClient: DomainTopologyClientWithInit,
+      topologyClient: DomainTopologyClientWithInit,
+      topologyProcessor: TopologyTransactionProcessor,
       storage: Storage,
       clock: Clock,
       domainConfig: DomainConfig,
@@ -65,7 +67,8 @@ object SequencerRuntimeFactory {
         domainId: DomainId,
         crypto: Crypto,
         sequencedTopologyStore: TopologyStore,
-        domainClient: DomainTopologyClientWithInit,
+        topologyClient: DomainTopologyClientWithInit,
+        topologyProcessor: TopologyTransactionProcessor,
         storage: Storage,
         clock: Clock,
         domainConfig: DomainConfig,
@@ -94,7 +97,9 @@ object SequencerRuntimeFactory {
         domainId,
         crypto,
         sequencedTopologyStore,
-        domainClient,
+        topologyClient,
+        topologyProcessor,
+        sharedTopologyProcessor = true,
         storage,
         clock,
         auditLogger,
@@ -104,7 +109,6 @@ object SequencerRuntimeFactory {
           domainConfig.publicApi.nonceExpirationTime,
           domainConfig.publicApi.tokenExpirationTime,
         ),
-        None,
         _ =>
           StaticGrpcServices
             .notSupportedByCommunity(EnterpriseSequencerAdministrationServiceGrpc.SERVICE, logger)

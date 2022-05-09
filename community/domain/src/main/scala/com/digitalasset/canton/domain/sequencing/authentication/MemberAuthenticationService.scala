@@ -14,15 +14,19 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication._
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.sequencing.authentication.{AuthenticationToken, MemberAuthentication}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.processing.{
+  ApproximateTime,
+  EffectiveTime,
+  SequencedTime,
+  TopologyTransactionProcessingSubscriber,
+}
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   ParticipantState,
@@ -31,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
+import io.functionmeta.functionFullName
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -66,7 +71,7 @@ class MemberAuthenticationService(
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
-    with DomainTopologyClient.Subscriber {
+    with TopologyTransactionProcessingSubscriber {
 
   private val tokenCache = new AuthenticationTokenCache(clock, store, loggerFactory)
 
@@ -171,7 +176,7 @@ class MemberAuthenticationService(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Unit = {
     def run(): Unit = FutureUtil.doNotAwait(
-      performUnlessClosingF {
+      performUnlessClosingF(functionFullName) {
         val now = clock.now
         logger.debug(s"Expiring nonces and tokens up to $now")
         store.expireNoncesAndTokens(now)
@@ -233,28 +238,35 @@ class MemberAuthenticationService(
       effectiveTimestamp: EffectiveTime,
       sc: SequencerCounter,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  )(implicit traceContext: TraceContext): Unit = {
-    transactions.map(_.transaction.element.mapping).foreach {
-      case ParticipantState(_, _, participant, ParticipantPermission.Disabled, _) =>
-        def invalidateAndExpire: Future[Unit] = {
-          isParticipantActive(participant).flatMap { isActive =>
-            if (!isActive) {
-              logger.debug(s"Expiring all auth-tokens of ${participant}")
-              tokenCache
-                // first, remove all auth tokens
-                .invalidAllTokensForMember(participant)
-                // second, ensure the sequencer client gets disconnected
-                .map(_ => invalidateMemberCallback(Traced(participant)))
-            } else Future.unit
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    FutureUnlessShutdown.lift(performUnlessClosing(functionFullName) {
+      transactions.map(_.transaction.element.mapping).foreach {
+        case ParticipantState(_, _, participant, ParticipantPermission.Disabled, _) =>
+          def invalidateAndExpire: Future[Unit] = {
+            isParticipantActive(participant).flatMap { isActive =>
+              if (!isActive) {
+                logger.debug(s"Expiring all auth-tokens of ${participant}")
+                tokenCache
+                  // first, remove all auth tokens
+                  .invalidAllTokensForMember(participant)
+                  // second, ensure the sequencer client gets disconnected
+                  .map(_ => invalidateMemberCallback(Traced(participant)))
+              } else Future.unit
+            }
           }
-        }
-        FutureUtil.doNotAwait(
-          invalidateAndExpire,
-          s"Invalidating participant authentication for $participant",
-        )
-      case _ =>
-    }
-  }
+          FutureUtil.doNotAwait(
+            invalidateAndExpire,
+            s"Invalidating participant authentication for $participant",
+          )
+        case _ =>
+      }
+    })
+
+  override def updateHead(
+      effectiveTimestamp: EffectiveTime,
+      approximateTimestamp: ApproximateTime,
+      potentialTopologyChange: Boolean,
+  )(implicit traceContext: TraceContext): Unit = {}
 
   override def onClosed(): Unit = Lifecycle.close(store)(logger)
 }

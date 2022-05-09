@@ -125,7 +125,7 @@ final case class MonitoringConfig(
     delayLoggingThreshold: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(20),
     tracing: TracingConfig = TracingConfig(),
     // TODO(i9014) remove (breaking change)
-    @Deprecated // use logging.api.messagePayloads instead
+    @Deprecated(since = "2.2.0") // use logging.api.messagePayloads instead
     logMessagePayloads: Option[Boolean] = None,
     logQueryCost: Option[QueryCostMonitoringConfig] = None,
     logSlowFutures: Boolean = false,

@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.version.ProtocolVersion
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -39,7 +40,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
     )(None),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
-  )(None)
+  )(ProtocolVersion.latestForTest, None)
   private val request =
     RegisterTopologyTransactionRequest(
       participantId,

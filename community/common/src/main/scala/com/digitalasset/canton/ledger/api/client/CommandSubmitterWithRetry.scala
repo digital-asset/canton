@@ -26,6 +26,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
+import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
@@ -77,7 +78,7 @@ class CommandSubmitterWithRetry(
       queueOfferResult <-
         // The performUnlessClosing has been introduced
         // because we have observed exceptions in case a command was submitted after shutdown.
-        performUnlessClosingF { queue.offer(ctx) }.unwrap
+        performUnlessClosingF(functionFullName) { queue.offer(ctx) }.unwrap
 
       result <- queueOfferResult match {
         case UnlessShutdown.Outcome(Enqueued) => resultPromise.future

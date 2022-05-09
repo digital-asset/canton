@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{AkkaUtil, LoggerUtil}
+import io.functionmeta.functionFullName
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -53,7 +54,7 @@ class LocalSequencerStateEventSignaller(
   override def notifyOfLocalWrite(
       notification: WriteNotification
   )(implicit traceContext: TraceContext): Future[Unit] =
-    performUnlessClosingF {
+    performUnlessClosingF(functionFullName) {
       queueWithLogging("latest-head-state-queue", queue)(notification)
     }.onShutdown {
       logger.info("Dropping local write signal due to shutdown")

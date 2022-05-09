@@ -17,6 +17,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyT
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{
   IdentifierDelegation,
   NamespaceDelegation,
@@ -84,7 +85,12 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         for {
           _ <- MonadUtil.sequentialTraverse(transactions)(x => {
             logger.debug(s"Adding $x")
-            store.append(CantonTimestamp.now(), List(ValidatedTopologyTransaction(x, None)))
+            val ts = CantonTimestamp.now()
+            store.append(
+              SequencedTime(ts),
+              EffectiveTime(ts),
+              List(ValidatedTopologyTransaction(x, None)),
+            )
           })
           _ = if (buffer.length >= expect.get()) {
             promise.get().success(())

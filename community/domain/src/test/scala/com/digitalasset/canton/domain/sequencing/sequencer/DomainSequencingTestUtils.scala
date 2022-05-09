@@ -3,13 +3,15 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.data.NonEmptySet
 import cats.syntax.functorFilter._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+
+import scala.collection.immutable.SortedSet
 
 object DomainSequencingTestUtils {
 
@@ -18,7 +20,7 @@ object DomainSequencingTestUtils {
       payloadId: PayloadId = PayloadId(CantonTimestamp.Epoch),
       traceContext: TraceContext = TraceContext.empty,
   )(
-      recipients: NonEmptySet[SequencerMemberId] = NonEmptySet.of(sender)
+      recipients: NonEmpty[SortedSet[SequencerMemberId]] = NonEmpty(SortedSet, sender)
   ): DeliverStoreEvent[PayloadId] = {
     val messageId = MessageId.tryCreate("mock-deliver")
     val signingTs = None

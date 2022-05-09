@@ -15,17 +15,13 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Hash, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{
-  AsyncOrSyncCloseable,
-  FutureUnlessShutdown,
-  UnlessShutdown,
-}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.GapInSequencerCounter
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
@@ -563,6 +559,82 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     }
   }
 
+  "changeTransport" should {
+
+    "create second subscription from the same counter as the previous one when there are no events" in {
+      val secondTransport = new MockTransport
+      for {
+        env <- Env.create(useParallelExecutionContext = true)
+        _ <- env.subscribeAfter()
+        _ <- env.changeTransport(secondTransport)
+      } yield {
+        val originalSubscriber = env.transport.subscriber.value
+        originalSubscriber.request.counter shouldBe GenesisSequencerCounter
+        originalSubscriber.subscription.isClosing shouldBe true // old subscription gets closed
+        env.transport.isClosing shouldBe true
+
+        val newSubscriber = secondTransport.subscriber.value
+        newSubscriber.request.counter shouldBe GenesisSequencerCounter
+        newSubscriber.subscription.isClosing shouldBe false
+        secondTransport.isClosing shouldBe false
+
+        env.client.completion.isCompleted shouldBe false
+      }
+    }
+
+    "create second subscription from the same counter as the previous one when there are events" in {
+      val secondTransport = new MockTransport
+      for {
+        env <- Env.create(useParallelExecutionContext = true)
+        _ <- env.subscribeAfter()
+
+        _ <- env.transport.subscriber.value.handler(signedDeliver)
+        _ <- env.client.flush()
+
+        _ <- env.changeTransport(secondTransport)
+      } yield {
+        val originalSubscriber = env.transport.subscriber.value
+        originalSubscriber.request.counter shouldBe GenesisSequencerCounter
+
+        val newSubscriber = secondTransport.subscriber.value
+        newSubscriber.request.counter shouldBe deliver.counter
+
+        env.client.completion.isCompleted shouldBe false
+      }
+    }
+
+    "have new transport be used for sends" in {
+      val secondTransport = new MockTransport
+
+      for {
+        env <- Env.create(useParallelExecutionContext = true)
+        _ <- env.changeTransport(secondTransport)
+        _ <- env.sendAsync(Batch.empty)
+      } yield {
+        env.transport.lastSend.get() shouldBe None
+        secondTransport.lastSend.get() should not be None
+
+        env.transport.isClosing shouldBe true
+        secondTransport.isClosing shouldBe false
+      }
+    }
+
+    "have new transport be used for sends when there is subscription" in {
+      val secondTransport = new MockTransport
+
+      for {
+        env <- Env.create(useParallelExecutionContext = true)
+        _ <- env.subscribeAfter()
+        _ <- env.changeTransport(secondTransport)
+        _ <- env.sendAsync(Batch.empty)
+      } yield {
+        env.transport.lastSend.get() shouldBe None
+        secondTransport.lastSend.get() should not be None
+      }
+    }
+
+  }
+
   case class Subscriber[E](
       request: SubscriptionRequest,
       handler: SerializedEventHandler[E],
@@ -593,7 +665,21 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         priorTimestamp: CantonTimestamp = CantonTimestamp.MinValue,
         eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope] = alwaysSuccessfulHandler,
     ): Future[Unit] =
-      client.subscribeAfter(priorTimestamp, eventHandler, timeTracker)
+      client.subscribeAfter(
+        priorTimestamp,
+        None,
+        eventHandler,
+        timeTracker,
+        PeriodicAcknowledgements.noAcknowledgements,
+      )
+
+    def changeTransport(newTransport: SequencerClientTransport): Future[Unit] =
+      client.changeTransport(newTransport)
+
+    def sendAsync(
+        batch: Batch[DefaultOpenEnvelope]
+    )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+      client.sendAsync(batch)
 
   }
 
@@ -604,7 +690,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     def closeSubscription(reason: E): Unit = this.closeReasonPromise.success(HandlerError(reason))
     def closeSubscription(error: Throwable): Unit =
       this.closeReasonPromise.success(HandlerException(error))
-    override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Nil
   }
 
   class MockTransport extends SequencerClientTransport with NamedLogging {
@@ -614,17 +699,23 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     private val subscriberRef = new AtomicReference[Option[Subscriber[_]]](None)
     def subscriber = subscriberRef.get()
 
+    val lastSend = new AtomicReference[Option[SubmissionRequest]](None)
+
     override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): Future[Unit] =
       Future.unit
+
     override def sendAsync(
         request: SubmissionRequest,
         timeout: Duration,
         protocolVersion: ProtocolVersion,
     )(implicit
         traceContext: TraceContext
-    ): EitherT[Future, SendAsyncClientError, Unit] = ???
+    ): EitherT[Future, SendAsyncClientError, Unit] = {
+      lastSend.set(Some(request))
+      EitherT.rightT(())
+    }
 
     override def sendAsyncUnauthenticated(
         request: SubmissionRequest,
@@ -683,7 +774,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         else SequencerClientTest.this.executionContext
       val clock = new SimClock(loggerFactory = loggerFactory)
       val timeouts = DefaultProcessingTimeouts.testing
-      val cryptoPureApi = new SymbolicPureCrypto
       val transport = new MockTransport
       val sendTrackerStore = new InMemorySendTrackerStore()
       val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory)
@@ -709,7 +799,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         timeouts,
         _ => eventValidator,
         clock,
-        cryptoPureApi,
         sequencedEventStore,
         sendTracker,
         CommonMockMetrics.sequencerClient,

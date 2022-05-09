@@ -21,6 +21,7 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
@@ -293,7 +294,7 @@ class DomainTimeTracker(
       latestAndNextRef: AtomicReference[LatestAndNext[A]],
       requiresTimeProof: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[A] =
-    performUnlessClosing {
+    performUnlessClosing(functionFullName) {
       val now = clock.now
       // TODO(error handling): This could underflow and throw an exception if we specify a very large freshness bound duration like 10000 years.
       val receivedWithin = now.minus(freshnessBound.unwrap)
@@ -414,7 +415,7 @@ class DomainTimeTracker(
   private def ensureMinObservationDuration(): Unit = withNewTraceContext { implicit traceContext =>
     val minObservationDuration = config.minObservationDuration.duration
     def performUpdate(expectedUpdateBy: CantonTimestamp): Unit =
-      performUnlessClosing {
+      performUnlessClosing(functionFullName) {
         val lastObserved = timestampRef.get().latest.map(_.receivedAt)
 
         // did we see an event within the observation window
@@ -438,7 +439,7 @@ class DomainTimeTracker(
       }.onShutdown(())
 
     def scheduleNextUpdate(): Unit =
-      performUnlessClosing {
+      performUnlessClosing(functionFullName) {
         val latestTimestamp = timestampRef.get().latest.fold(clock.now)(_.receivedAt)
         val expectUpdateBy = latestTimestamp.add(minObservationDuration).immediateSuccessor
 

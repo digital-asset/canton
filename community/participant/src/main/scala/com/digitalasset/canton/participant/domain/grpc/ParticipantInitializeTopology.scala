@@ -22,6 +22,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
 import com.digitalasset.canton.sequencing.{
   BoxedEnvelope,
   HandlerResult,
+  ResubscriptionStart,
   UnsignedEnvelopeBox,
   UnsignedProtocolEventHandler,
 }
@@ -85,7 +86,7 @@ object ParticipantInitializeTopology {
       val eventHandler = new UnsignedProtocolEventHandler {
         override def name: String = s"participant-initialize-topology-$alias"
 
-        override def resubscriptionStartsAt(ts: CantonTimestamp)(implicit
+        override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
             traceContext: TraceContext
         ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 

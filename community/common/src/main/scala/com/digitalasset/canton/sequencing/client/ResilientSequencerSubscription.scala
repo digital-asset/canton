@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil, LoggerUtil}
+import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration._
@@ -82,7 +83,7 @@ class ResilientSequencerSubscription[HandlerError](
   private def setupNewSubscription(
       delayOnRestart: FiniteDuration = retryDelayRule.initialDelay
   )(implicit traceContext: TraceContext): Unit =
-    performUnlessClosing {
+    performUnlessClosing(functionFullName) {
       def failed(err: SequencerSubscriptionCreationError): Unit = err match {
         case fatal: Fatal =>
           // success as we're shutting down the subscription intentionally
@@ -170,7 +171,7 @@ class ResilientSequencerSubscription[HandlerError](
     // delay and then restart a subscription with an updated delay duration
     // we effectively throwing away the future here so add some logging in case it fails
     FutureUtil.doNotAwait(
-      DelayUtil.delay(newDelay, this) map { _ =>
+      DelayUtil.delay(functionFullName, newDelay, this) map { _ =>
         setupNewSubscription(newDelay)
       },
       "Delaying setup of new sequencer subscription failed",
@@ -212,6 +213,10 @@ class ResilientSequencerSubscription[HandlerError](
       case Success(SubscriptionCloseReason.HandlerError(ApplicationHandlerPassive(reason))) =>
         logger.warn(
           s"Closing resilient sequencer subscription because instance became passive: $reason"
+        )
+      case Success(SubscriptionCloseReason.TransportChange) =>
+        logger.info(
+          "Closing resilient sequencer subscription as part of a sequencer transport change"
         )
       case Success(error) =>
         logger.warn(s"Closing resilient sequencer subscription due to error: $error")
