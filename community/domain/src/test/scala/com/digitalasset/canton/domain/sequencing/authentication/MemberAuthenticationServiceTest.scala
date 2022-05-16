@@ -89,7 +89,9 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest {
       val sut = service(false)
       for {
         generateNonceError <- leftOrFail(sut.generateNonce(p1))("generating nonce")
-        validateSignatureError <- leftOrFail(sut.validateSignature(p1, null, Nonce.generate()))(
+        validateSignatureError <- leftOrFail(
+          sut.validateSignature(p1, null, Nonce.generate(syncCrypto.pureCrypto))
+        )(
           "validateSignature"
         )
         validateTokenError <- leftOrFail(sut.validateToken(domainId, p1, null))(

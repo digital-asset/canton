@@ -197,10 +197,10 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
 
   override def timestamp(
       useStateStore: Boolean
-  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] =
     Future.successful(
-      (if (useStateStore) topologyStateStore else topologyTransactionStore).lastOption.map(
-        _.from.value
+      (if (useStateStore) topologyStateStore else topologyTransactionStore).lastOption.map(x =>
+        (x.sequenced, x.from)
       )
     )
 
@@ -243,15 +243,15 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
         }
     )
 
-  override def findActiveTransactionsForMapping(
+  override def findPositiveTransactionsForMapping(
       mapping: TopologyMapping
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[Add]]] =
+  ): Future[Seq[SignedTopologyTransaction[Positive]]] =
     Future.successful(
       blocking(synchronized(topologyTransactionStore.toSeq))
         .collect { case entry if entry.until.isEmpty => entry.transaction }
-        .mapFilter(TopologyChangeOp.select[Add])
+        .mapFilter(TopologyChangeOp.select[Positive])
         .collect {
           case sit if sit.transaction.element.mapping == mapping => sit
         }
@@ -507,15 +507,15 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
     )
   }
 
-  override def findEffectiveTimestampsSince(timestamp: CantonTimestamp)(implicit
+  override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Seq[CantonTimestamp]] =
+  ): Future[Seq[TopologyStore.Change]] =
     Future.successful(
-      blocking(synchronized(topologyTransactionStore.toSeq))
-        .map(_.from.value)
-        .filter(_ > timestamp)
-        .sorted
-        .distinct
+      TopologyStore.Change.accumulateUpcomingEffectiveChanges(
+        blocking(synchronized(topologyTransactionStore.toSeq))
+          .filter(_.from.value >= asOfInclusive)
+          .map(_.toStoredTransaction)
+      )
     )
 
   private val watermark = new AtomicReference[Option[CantonTimestamp]](None)

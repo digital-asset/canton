@@ -8,14 +8,13 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.store.CryptoPublicStore
 import com.digitalasset.canton.crypto.{KeyName, KeyPurpose, PublicKey}
-import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.domain.sequencing.admin.client.SequencerAdminClient
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
-import com.digitalasset.canton.topology.transaction.{OwnerToKeyMapping, TopologyStateUpdate}
-import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
+import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.topology.transaction.{OwnerToKeyMapping, TopologyStateUpdateMapping}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -33,7 +32,7 @@ object SequencerInitialization {
       config: SequencerClientConfig,
       devVersionSupport: Boolean,
       sequencerAdminClient: SequencerAdminClient,
-      topologyManager: DomainTopologyManager,
+      authorizeStateUpdate: TopologyStateUpdateMapping => EitherT[Future, String, Unit],
       cryptoPublicStore: CryptoPublicStore,
       initRequest: InitRequest,
       timeouts: ProcessingTimeout,
@@ -62,18 +61,15 @@ object SequencerInitialization {
       exists <- cryptoPublicStore
         .existsPublicKey(response.publicKey.fingerprint, KeyPurpose.Signing)
         .leftMap(_.toString)
-      _ = if (!exists)
-        cryptoPublicStore.storePublicKey(
-          response.publicKey,
-          Some(KeyName.tryCreate(s"$domainName-signing")),
-        )
-      else ()
-      _ <- topologyManager
-        .authorize(
-          TopologyStateUpdate.createAdd(mapping),
-          Some(initRequest.domainId.unwrap.namespace.fingerprint),
-          force = false,
-        )
-        .leftMap(_.toString)
+      _ <-
+        if (!exists)
+          cryptoPublicStore
+            .storePublicKey(
+              response.publicKey,
+              Some(KeyName.tryCreate(s"$domainName-signing")),
+            )
+            .leftMap(_.toString)
+        else EitherT.rightT[Future, String](())
+      _ <- authorizeStateUpdate(mapping)
     } yield response.publicKey
 }

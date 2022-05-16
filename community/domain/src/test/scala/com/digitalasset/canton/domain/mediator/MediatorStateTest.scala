@@ -30,7 +30,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
       val hashOps: HashOps = new SymbolicPureCrypto
       val h: Int => Hash = TestHash.digest
-      val s: Int => Salt = TestSalt.generate
+      val s: Int => Salt = TestSalt.generateSalt
       def rh(index: Int): RootHash = RootHash(h(index))
       val viewCommonData =
         ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(2), s(999))

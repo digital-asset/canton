@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.integration
 
-import java.util.concurrent.Semaphore
+import com.typesafe.scalalogging.LazyLogging
 
+import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicReference
 import scala.util.control.NonFatal
 
 /** Although our integration tests are designed not to conflict with one another when running concurrently,
@@ -22,7 +24,15 @@ import scala.util.control.NonFatal
   * This may well activate a slow poke notification in ScalaTest, however these are left in place to support discovery
   * of any tests that fail to halt entirely or run for an abnormally long amount of time.
   */
-object ConcurrentEnvironmentLimiter {
+object ConcurrentEnvironmentLimiter extends LazyLogging {
+
+  private sealed trait State
+  private object New extends State
+  private object Queued extends State
+  private object Running extends State
+  private object Failed extends State
+  private object Done extends State
+
   val IntegrationTestConcurrencyLimit = "canton-test.integration.concurrency"
 
   private val concurrencyLimit: Int = System.getProperty(IntegrationTestConcurrencyLimit, "1").toInt
@@ -30,23 +40,44 @@ object ConcurrentEnvironmentLimiter {
   /** Configured to be fair so earlier started tests will be first to get environments */
   private val semaphore = new Semaphore(concurrencyLimit, true)
 
+  /** contains a map from test name to state (queue, run) */
+  private val active = new AtomicReference[Map[String, State]](Map.empty)
+
+  private def change(name: String, state: State, purge: Boolean = false): Unit = {
+    val current = active
+      .getAndUpdate { cur =>
+        if (purge) cur.removed(name)
+        else cur.updated(name, state)
+      }
+    val currentState = current.getOrElse(name, New)
+    val currentSet = current.keys.toSet
+    val numSet = if (purge) (currentSet - name) else (currentSet + name)
+    logger.debug(s"${name}: $currentState => $state (${numSet.size} pending)")
+  }
+
   /** Block an environment creation until a permit is available. */
-  def create[A](block: => A): A = {
+  def create[A](name: String)(block: => A): A = {
+    change(name, Queued)
     scala.concurrent.blocking {
       semaphore.acquire()
     }
+    change(name, Running)
     try block
     catch {
       // creations can easily fail and throw
       // capture these and immediately release the permit as the destroy method will not be called
       case NonFatal(e) =>
         semaphore.release()
+        change(name, Failed, purge = true)
         throw e
     }
   }
 
   /** Attempt to destroy an environment and ensure that the permit is released */
-  def destroy[A](block: => A): A =
+  def destroy[A](name: String)(block: => A): A =
     try block
-    finally semaphore.release()
+    finally {
+      semaphore.release()
+      change(name, Done, purge = true)
+    }
 }

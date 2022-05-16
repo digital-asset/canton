@@ -92,7 +92,7 @@ class MemberAuthenticationService(
             .toRight(NoKeysRegistered(member): AuthenticationError)
         }
       )
-      nonce = Nonce.generate()
+      nonce = Nonce.generate(cryptoApi.pureCrypto)
       storedNonce = StoredNonce(member, nonce, clock.now, nonceExpirationTime)
       _ <- EitherT.right(store.saveNonce(storedNonce))
     } yield {
@@ -142,7 +142,7 @@ class MemberAuthenticationService(
       _ <- agreementManager.fold(EitherT.rightT[Future, AuthenticationError](())) { manager =>
         storeAcceptedAgreement(member, manager, manager.agreement.id, signature, generatedAt)
       }
-      token = AuthenticationToken.generate()
+      token = AuthenticationToken.generate(cryptoApi.pureCrypto)
       tokenExpiry = clock.now.add(tokenExpirationTime)
       storedToken = StoredAuthenticationToken(member, tokenExpiry, token)
       _ <- EitherT.right(tokenCache.saveToken(storedToken))

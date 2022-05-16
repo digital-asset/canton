@@ -22,7 +22,7 @@ object EncryptedViewMessageFactory {
   def create[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
-      version: ProtocolVersion,
+      protocolVersion: ProtocolVersion,
       optRandomness: Option[SecureRandomness] = None,
   )(implicit
       traceContext: TraceContext,
@@ -34,7 +34,7 @@ object EncryptedViewMessageFactory {
     val keyLength = EncryptedViewMessage.computeKeyLength(cryptoSnapshot)
     val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoSnapshot)
     val randomness: SecureRandomness =
-      optRandomness.getOrElse(SecureRandomness.secureRandomness(randomnessLength))
+      optRandomness.getOrElse(cryptoPureApi.generateSecureRandomness(randomnessLength))
 
     val informeeParties = viewTree.informees.map(_.party).toList
     def eitherT[B](
@@ -44,17 +44,24 @@ object EncryptedViewMessageFactory {
 
     for {
       symmetricViewKey <- eitherT(
-        cryptoPureApi.hkdfExpand(randomness, keyLength, HkdfInfo.ViewKey).leftMap(FailedToExpandKey)
+        ProtocolCryptoApi
+          .hkdf(cryptoPureApi, protocolVersion)(randomness, keyLength, HkdfInfo.ViewKey)
+          .leftMap(FailedToExpandKey)
       )
       informeeParticipants <- cryptoSnapshot.ipsSnapshot
         .activeParticipantsOfAll(informeeParties)
         .leftMap(UnableToDetermineParticipant(_, cryptoSnapshot.domainId))
-      keyMap <- createKeyMap(informeeParticipants.to(LazyList), randomness, cryptoSnapshot, version)
+      keyMap <- createKeyMap(
+        informeeParticipants.to(LazyList),
+        randomness,
+        cryptoSnapshot,
+        protocolVersion,
+      )
       signature <- viewTree.toBeSigned
         .traverse(rootHash => cryptoSnapshot.sign(rootHash.unwrap).leftMap(FailedToSignViewMessage))
       encryptedView <- eitherT(
         EncryptedView
-          .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, version)(viewTree)
+          .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, protocolVersion)(viewTree)
           .leftMap(FailedToEncryptViewMessage)
       )
     } yield EncryptedViewMessage[VT](

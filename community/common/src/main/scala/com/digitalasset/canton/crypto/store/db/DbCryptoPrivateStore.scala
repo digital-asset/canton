@@ -11,10 +11,10 @@ import com.digitalasset.canton.crypto.store._
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
+import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.EitherTUtil
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -35,23 +35,6 @@ class DbCryptoPrivateStore(
     storage.metrics.loadGaugeM("crypto-private-store-insert")
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
-
-  private val queryHmacSecret =
-    sql"select data from crypto_hmac_secret".as[HmacSecret].headOption
-
-  private def insertHmacSecret(hmacSecret: HmacSecret): DbAction.WriteOnly[Int] =
-    storage.profile match {
-      case _: Profile.Oracle | _: Profile.H2 =>
-        sqlu"""merge into crypto_hmac_secret using dual on (hmac_secret_id = 1)
-               when matched then update set data = $hmacSecret
-               when not matched then insert (data) values ($hmacSecret)"""
-
-      case _: Profile.Postgres =>
-        sqlu"""insert into crypto_hmac_secret(data)
-             values ($hmacSecret)
-             on conflict (hmac_secret_id)
-             do update set data = $hmacSecret"""
-    }
 
   private def queryKeys[K: GetResult](purpose: KeyPurpose): DbAction.ReadOnly[Set[K]] =
     sql"select data, name from crypto_private_keys where purpose = $purpose"
@@ -148,41 +131,6 @@ class DbCryptoPrivateStore(
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     insertKey[EncryptionPrivateKey, EncryptionPrivateKeyWithName](key, name)
 
-  override protected def writeHmacSecret(
-      hmacSecret: HmacSecret
-  )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit] = {
-
-    for {
-      nrRows <- EitherTUtil.fromFuture(
-        insertTime.metric.event(storage.update(insertHmacSecret(hmacSecret), functionFullName)),
-        err => CryptoPrivateStoreError.FailedToInsertHmacSecret(err.toString),
-      )
-      _ <- nrRows match {
-        case 1 => EitherTUtil.unit[CryptoPrivateStoreError]
-        case 0 =>
-          for {
-            existingHmacSecret <- loadHmacSecret().map(
-              _.getOrElse(
-                ErrorUtil.internalError(
-                  new IllegalStateException("No existing HMAC secret found but failed to insert")
-                )
-              )
-            )
-            _ <- EitherTUtil
-              .condUnitET[Future](
-                existingHmacSecret == hmacSecret,
-                CryptoPrivateStoreError.HmacSecretAlreadyExists,
-              )
-              .leftWiden[CryptoPrivateStoreError]
-          } yield ()
-        case _ =>
-          ErrorUtil.internalError(
-            new IllegalStateException(s"Updated more than 1 row for HMAC secrets: $nrRows")
-          )
-      }
-    } yield ()
-  }
-
   override private[store] def listSigningKeys(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[SigningPrivateKeyWithName]] =
@@ -203,14 +151,6 @@ class DbCryptoPrivateStore(
           .query(queryKeys[EncryptionPrivateKeyWithName](KeyPurpose.Encryption), functionFullName)
       ),
       err => CryptoPrivateStoreError.FailedToListKeys(err.toString),
-    )
-
-  override private[store] def loadHmacSecret()(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[HmacSecret]] =
-    EitherTUtil.fromFuture(
-      queryTime.metric.event(storage.query(queryHmacSecret, functionFullName)),
-      err => CryptoPrivateStoreError.FailedToLoadHmacSecret(err.toString),
     )
 
   override protected def deletePrivateKey(keyId: Fingerprint)(implicit

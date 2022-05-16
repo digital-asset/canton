@@ -218,18 +218,18 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         // add a remove and another add
         _ <- push(manager, Seq(midRevert, another))
         // ensure that topology manager properly processed this state
-        ais <- source.headTransactions.map(_.toIdentityState)
+        ais <- source.headTransactions.map(_.toTopologyState)
         _ = ais should not contain (midRevert.element)
         _ = ais should contain(another.element)
         // and ensure both are not in the new store
-        tis <- target.headTransactions.map(_.toIdentityState)
+        tis <- target.headTransactions.map(_.toTopologyState)
         _ = tis should contain(midRevert.element)
         _ = tis should not contain (another.element)
         // re-connect
         _ = handle.clear(2)
         _ <- dispatcherConnected(dispatcher, handle, client, target)
         _ <- handle.allObserved()
-        tis <- target.headTransactions.map(_.toIdentityState)
+        tis <- target.headTransactions.map(_.toTopologyState)
       } yield {
         tis should not contain (midRevert.element)
         tis should contain(another.element)

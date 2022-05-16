@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId, topology}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -24,6 +25,7 @@ class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptograph
     Some(RootHash(TestHash.digest("txid1"))),
     Set(LfPartyId.assertFromString("p1"), LfPartyId.assertFromString("p2")),
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
+    ProtocolVersion.latestForTest,
   )
   val response2: MediatorResponse = MediatorResponse.tryCreate(
     RequestId(CantonTimestamp.now()),
@@ -33,6 +35,7 @@ class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptograph
     Some(RootHash(TestHash.digest("txid3"))),
     Set.empty,
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
+    ProtocolVersion.latestForTest,
   )
 
   def fromByteString(bytes: ByteString): MediatorResponse = {

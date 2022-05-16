@@ -5,13 +5,15 @@ package com.digitalasset.canton.participant.domain.grpc
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
+import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
@@ -19,22 +21,13 @@ import com.digitalasset.canton.sequencing.handlers.{
   StripSignature,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
-import com.digitalasset.canton.sequencing.{
-  BoxedEnvelope,
-  HandlerResult,
-  ResubscriptionStart,
-  UnsignedEnvelopeBox,
-  UnsignedProtocolEventHandler,
-}
+import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.TopologyStore
-import com.digitalasset.canton.topology.{DomainId, NodeId, ParticipantId, UnauthenticatedMemberId}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor
@@ -50,16 +43,14 @@ object ParticipantInitializeTopology {
       domainId: DomainId,
       alias: DomainAlias,
       participantId: ParticipantId,
-      nodeId: NodeId,
       clock: Clock,
       timeTracker: DomainTimeTrackerConfig,
       processingTimeout: ProcessingTimeout,
       authorizedStore: TopologyStore,
       targetDomainStore: TopologyStore,
-      topologyClient: DomainTopologyClientWithInit,
       loggerFactory: NamedLoggerFactory,
       sequencerClientFactory: SequencerClientFactory,
-      hashOps: HashOps,
+      cryptoOps: HashOps with RandomOps,
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
@@ -67,7 +58,8 @@ object ParticipantInitializeTopology {
       traceContext: TraceContext,
       loggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
-    val unauthenticatedMember = UnauthenticatedMemberId.tryCreate(participantId.uid.namespace)
+    val unauthenticatedMember =
+      UnauthenticatedMemberId.tryCreate(participantId.uid.namespace)(cryptoOps)
 
     loggingContext.logger.debug(
       s"Unauthenticated member $unauthenticatedMember will register initial topology transactions on behalf of participant $participantId"
@@ -108,7 +100,7 @@ object ParticipantInitializeTopology {
           FutureUnlessShutdown.outcomeF(
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
-              DiscardIgnoredEvents { StripSignature { EnvelopeOpener(hashOps)(eventHandler) } },
+              DiscardIgnoredEvents { StripSignature { EnvelopeOpener(cryptoOps)(eventHandler) } },
               domainTimeTracker,
             )
           )

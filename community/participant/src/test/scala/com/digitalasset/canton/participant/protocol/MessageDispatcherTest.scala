@@ -14,13 +14,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.protocol.MessageDispatcher.{
-  DoNotExpectMediatorResult,
-  ExpectMalformedMediatorRequestResult,
-  MalformedMediatorRequestMessage,
-  SendMalformedAndExpectMediatorResult,
-  _,
-}
+import com.digitalasset.canton.participant.protocol.MessageDispatcher._
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
@@ -355,6 +349,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           domainId,
           TestViewType,
           reject,
+          ProtocolVersion.latestForTest,
         ),
         dummySignature,
       )
@@ -1003,6 +998,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                 domainId,
                 viewType,
                 reject,
+                ProtocolVersion.latestForTest,
               ),
               dummySignature,
             )
@@ -1105,8 +1101,7 @@ object MessageDispatcherTest {
       )
     override def hashPurpose: HashPurpose = HashPurposeTest.testHashPurpose
     override def deserializedFrom: Option[ByteString] = None
-    override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-      ByteString.EMPTY
+    override protected[this] def toByteStringUnmemoized: ByteString = ByteString.EMPTY
   }
 }
 

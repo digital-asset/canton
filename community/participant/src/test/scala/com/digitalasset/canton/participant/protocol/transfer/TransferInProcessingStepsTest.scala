@@ -115,7 +115,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private val vault = crypto.privateCrypto
 
   val hash = TestHash.digest("123")
-  private val seedGenerator = new SeedGenerator(vault, pureCrypto)
+  private val seedGenerator = new SeedGenerator(pureCrypto)
   val globalTracker = new GlobalCausalOrderer(
     participant,
     _ => true,
@@ -218,23 +218,21 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
       )
       val uuid = new UUID(1L, 2L)
+      val seed = seedGenerator.generateSaltSeed()
+      val transferData2 = {
+        val fullTransferOutTree =
+          transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+        TransferData(
+          transferId.requestTimestamp,
+          0L,
+          fullTransferOutTree,
+          CantonTimestamp.ofEpochSecond(10),
+          contract,
+          transactionId1,
+          None,
+        )
+      }
       for {
-        seed <- seedGenerator
-          .generateSeedForTransferOut(transferOutRequest, uuid)
-          .valueOrFail("generate seed")
-        transferData2 = {
-          val fullTransferOutTree =
-            transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
-          TransferData(
-            transferId.requestTimestamp,
-            0L,
-            fullTransferOutTree,
-            CantonTimestamp.ofEpochSecond(10),
-            contract,
-            transactionId1,
-            None,
-          )
-        }
         deps <- statefulDependencies
         (persistentState, state) = deps
         _ <- setUpOrFail(transferData2, transferOutResult, persistentState)
@@ -369,7 +367,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pureCrypto,
         submitterParticipant,
       )
-    val inTreeF =
+    val inTree =
       makeFullTransferInTree(
         party1,
         Set(party1),
@@ -380,7 +378,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         transferOutResult,
       )
     val inRequestF = for {
-      inTree <- inTreeF
       inRequest <- encryptFullTransferInTree(inTree)
     } yield inRequest
 
@@ -400,7 +397,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "succeed without errors" in {
       for {
-        inTree <- inTreeF
         inRequest <- inRequestF
         envelopes = NonEmpty(Seq, OpenEnvelope(inRequest, RecipientsTest.testInstance))
         decrypted <- valueOrFail(transferInProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
@@ -423,16 +419,16 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     }
 
     "fail when target domain is not current domain" in {
+      val inTree2 = makeFullTransferInTree(
+        party1,
+        Set(party1),
+        contract,
+        transactionId1,
+        anotherDomain,
+        anotherMediator,
+        transferOutResult,
+      )
       for {
-        inTree2 <- makeFullTransferInTree(
-          party1,
-          Set(party1),
-          contract,
-          transactionId1,
-          anotherDomain,
-          anotherMediator,
-          transferOutResult,
-        )
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
@@ -456,7 +452,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail when multiple requests are present" in {
       // Send the same transfer-in request twice
       for {
-        inTree <- inTreeF
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
@@ -510,7 +505,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         (persistentState, ephemeralState) = deps
 
         // party2 is incorrectly registered as a stakeholder
-        fullTransferInTree2 <- makeFullTransferInTree(
+        fullTransferInTree2 = makeFullTransferInTree(
           party1,
           stakeholders = Set(party1, party2),
           contract,
@@ -559,7 +554,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         transferLookup = ephemeralState.transferCache
         contractLookup = ephemeralState.contractLookup
 
-        fullTransferInTree <- makeFullTransferInTree(
+        fullTransferInTree = makeFullTransferInTree(
           party1,
           Set(party1),
           contract,
@@ -616,7 +611,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pureCrypto,
         submitterParticipant,
       )
-    val inRequestF =
+    val inRequest =
       makeFullTransferInTree(
         party1,
         Set(party1),
@@ -629,7 +624,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "succeed without errors in the basic case" in {
       for {
-        inRequest <- inRequestF
         result <- valueOrFail(
           transferInProcessingSteps
             .validateTransferInRequest(
@@ -657,13 +651,10 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
     )
     val uuid = new UUID(3L, 4L)
-    val transferDataF = for {
-      seed <- seedGenerator
-        .generateSeedForTransferOut(transferOutRequest, uuid)
-        .valueOrFail("generate seed")
-    } yield {
-      val fullTransferOutTree =
-        transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+    val seed = seedGenerator.generateSaltSeed()
+    val fullTransferOutTree =
+      transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+    val transferData =
       TransferData(
         CantonTimestamp.Epoch,
         1L,
@@ -673,12 +664,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         transactionId1,
         Some(transferOutResult),
       )
-    }
 
     "succeed without errors when transfer data is valid" in {
       for {
-        inRequest <- inRequestF
-        transferData <- transferDataF
         result <- valueOrFail(
           transferInProcessingSteps
             .validateTransferInRequest(
@@ -709,26 +697,23 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           Some(promise.future), // Topology state is not available
         )
 
+      val inValidated = transferInProcessingSteps2
+        .validateTransferInRequest(
+          CantonTimestamp.Epoch,
+          inRequest,
+          Some(transferData),
+          cryptoSnapshot,
+          transferringParticipant = false,
+        )
+        .value
+
+      always() {
+        inValidated.isCompleted shouldBe false
+      }
+
+      promise.completeWith(Future.unit)
       for {
-        inRequest <- inRequestF
-        transferData <- transferDataF
-        inValidated = transferInProcessingSteps2
-          .validateTransferInRequest(
-            CantonTimestamp.Epoch,
-            inRequest,
-            Some(transferData),
-            cryptoSnapshot,
-            transferringParticipant = false,
-          )
-          .value
-
-        _ = always() {
-          inValidated.isCompleted shouldBe false
-        }
-
-        _ = promise.completeWith(Future.unit)
         completed <- inValidated
-
       } yield { succeed }
     }
   }
@@ -810,7 +795,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         EitherT.pure[Future, Error](ContractMetadata.tryCreate(signatories, stakeholders, None))
       }
     }
-    val seedGenerator = new SeedGenerator(vault, pureCrypto)
+    val seedGenerator = new SeedGenerator(pureCrypto)
 
     new TransferInProcessingSteps(
       domainId,
@@ -839,12 +824,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       uuid: UUID = new UUID(4L, 5L),
-  ): Future[FullTransferInTree] =
-    for {
-      seed <- seedGenerator
-        .generateSeedForTransferIn(contract.contractId, transferOutResult, targetDomain, uuid)
-        .valueOrFail("generate seed")
-    } yield TransferInProcessingSteps.makeFullTransferInTree(
+  ): FullTransferInTree = {
+    val seed = seedGenerator.generateSaltSeed()
+    TransferInProcessingSteps.makeFullTransferInTree(
       pureCrypto,
       seed,
       submitter,
@@ -856,6 +838,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       transferOutResult,
       uuid,
     )
+  }
 
   def encryptFullTransferInTree(
       tree: FullTransferInTree
@@ -875,19 +858,21 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetDomain: DomainId,
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
-  ): Future[EncryptedViewMessage[TransferInViewType]] =
+  ): Future[EncryptedViewMessage[TransferInViewType]] = {
+    val tree = makeFullTransferInTree(
+      submitter,
+      stakeholders,
+      contract,
+      creatingTransactionId,
+      targetDomain,
+      targetMediator,
+      transferOutResult,
+    )
+
     for {
-      tree <- makeFullTransferInTree(
-        submitter,
-        stakeholders,
-        contract,
-        creatingTransactionId,
-        targetDomain,
-        targetMediator,
-        transferOutResult,
-      )
       request <- encryptFullTransferInTree(tree)
     } yield request
+  }
 
   def makeRootHashMessage(
       tree: FullTransferInTree
@@ -923,6 +908,7 @@ object TransferInProcessingStepsTest {
         Set(),
         TransferOutDomainId(originDomain),
         Verdict.Approve,
+        ProtocolVersion.latestForTest,
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
       Await.result(SignedProtocolMessage.tryCreate(result, cryptoSnapshot, hashOps), 10.seconds)
@@ -950,12 +936,11 @@ object TransferInProcessingStepsTest {
     transferOutResult
   }
 
-  def transferInResult(targetDomain: DomainId): TransferInResult = {
-    TransferResult.create(
-      RequestId(CantonTimestamp.Epoch),
-      Set(),
-      TransferInDomainId(targetDomain),
-      Verdict.Approve,
-    )
-  }
+  def transferInResult(targetDomain: DomainId): TransferInResult = TransferResult.create(
+    RequestId(CantonTimestamp.Epoch),
+    Set(),
+    TransferInDomainId(targetDomain),
+    Verdict.Approve,
+    ProtocolVersion.latestForTest,
+  )
 }

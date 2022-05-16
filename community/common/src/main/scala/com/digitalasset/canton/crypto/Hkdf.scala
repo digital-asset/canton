@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.syntax.either._
-import cats.syntax.foldable._
+import com.digitalasset.canton.crypto.HkdfError.HkdfKeyTooShort
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.google.common.annotations.VisibleForTesting
@@ -16,9 +15,42 @@ import com.google.protobuf.ByteString
 trait HkdfOps {
   this: HmacOps =>
 
-  import HkdfError._
+  /** Sanity check the parameters to the HKDF before calling the internal implementations. */
+  private def checkParameters(
+      outputBytes: Int,
+      algorithm: HmacAlgorithm = defaultHmacAlgorithm,
+  ): Either[HkdfError, Unit] = {
+    import HkdfError._
 
-  /** Produce a new secret from the given secret and purpose
+    for {
+      _ <- Either.cond(outputBytes >= 0, (), HkdfOutputNegative(outputBytes))
+      hashBytes = algorithm.hashAlgorithm.length
+      nrChunks = scala.math.ceil(outputBytes.toDouble / hashBytes).toInt
+      _ <- Either
+        .cond[HkdfError, Unit](
+          nrChunks <= 255,
+          (),
+          HkdfOutputTooLong(length = outputBytes, maximum = hashBytes * 255),
+        )
+    } yield ()
+  }
+
+  protected def hkdfExpandInternal(
+      keyMaterial: SecureRandomness,
+      outputBytes: Int,
+      info: HkdfInfo,
+      algorithm: HmacAlgorithm = defaultHmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness]
+
+  protected def computeHkdfInternal(
+      keyMaterial: ByteString,
+      outputBytes: Int,
+      info: HkdfInfo,
+      salt: ByteString = ByteString.EMPTY,
+      algorithm: HmacAlgorithm = defaultHmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness]
+
+  /** Produce a new secret from the given secret and purpose. Only performs the expand step of the HKDF from RFC 5869.
     *
     * @param keyMaterial Cryptographically secure, uniformly random initial key material. Must be at least as long as
     *                    the length of the hash function chosen for the HMAC scheme.
@@ -28,39 +60,44 @@ trait HkdfOps {
     * @param info        Specify the purpose of the derived key (optional). Note that you can derive multiple
     *                    independent keys from the same key material by varying the purpose.
     * @param algorithm   The hash algorithm to be used for the HKDF construction
-    * @return
     */
   def hkdfExpand(
       keyMaterial: SecureRandomness,
       outputBytes: Int,
       info: HkdfInfo,
       algorithm: HmacAlgorithm = defaultHmacAlgorithm,
-  ): Either[HkdfError, SecureRandomness] = {
-    for {
-      _ <- Either.cond(outputBytes >= 0, (), HkdfOutputNegative(outputBytes))
-      hashBytes = algorithm.hashAlgorithm.length
-      _ <- Either.cond[HkdfError, Unit](
-        keyMaterial.unwrap.size >= hashBytes,
-        (),
-        HkdfKeyTooShort(length = keyMaterial.unwrap.size, needed = hashBytes),
-      )
-      prk <- HmacSecret.create(keyMaterial.unwrap).leftMap(HkdfHmacError)
-      nrChunks = scala.math.ceil(outputBytes.toDouble / hashBytes).toInt
-      _ <- Either
-        .cond[HkdfError, Unit](
-          nrChunks <= 255,
-          (),
-          HkdfOutputTooLong(length = outputBytes, maximum = hashBytes * 255),
-        )
-      outputAndLast <- (1 to nrChunks).toList
-        .foldM(ByteString.EMPTY -> ByteString.EMPTY) { case ((out, last), chunk) =>
-          val chunkByte = ByteString.copyFrom(Array[Byte](chunk.toByte))
-          hmacWithSecret(prk, last.concat(info.bytes).concat(chunkByte), algorithm)
-            .bimap(HkdfHmacError, hmac => out.concat(hmac.unwrap) -> hmac.unwrap)
-        }
-      (out, _last) = outputAndLast
-    } yield SecureRandomness(out.substring(0, outputBytes))
-  }
+  ): Either[HkdfError, SecureRandomness] = for {
+    _ <- checkParameters(outputBytes, algorithm)
+    hashBytes = algorithm.hashAlgorithm.length
+    _ <- Either.cond[HkdfError, Unit](
+      keyMaterial.unwrap.size >= hashBytes,
+      (),
+      HkdfKeyTooShort(length = keyMaterial.unwrap.size, needed = hashBytes),
+    )
+    expansion <- hkdfExpandInternal(keyMaterial, outputBytes, info, algorithm)
+  } yield expansion
+
+  /** Produce a new secret from the given key material using the HKDF from RFC 5869 with both extract and expand phases.
+    *
+    * @param keyMaterial Input key material from which to derive another key.
+    * @param outputBytes The length of the produced secret. May be at most 255 times the size of the output of the
+    *                    selected hashing algorithm. If you need to derive multiple keys, set the `info` parameter
+    *                    to different values, for each key that you need.
+    * @param info        Specify the purpose of the derived key (optional). Note that you can derive multiple
+    *                    independent keys from the same key material by varying the purpose.
+    * @param salt        Optional salt. Should be set if the input key material is not cryptographically secure, uniformly random.
+    * @param algorithm   The hash algorithm to be used for the HKDF construction
+    */
+  def computeHkdf(
+      keyMaterial: ByteString,
+      outputBytes: Int,
+      info: HkdfInfo,
+      salt: ByteString = ByteString.EMPTY,
+      algorithm: HmacAlgorithm = defaultHmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] = for {
+    _ <- checkParameters(outputBytes, algorithm)
+    expansion <- computeHkdfInternal(keyMaterial, outputBytes, info, salt, algorithm)
+  } yield expansion
 
 }
 
@@ -112,6 +149,10 @@ object HkdfError {
     override def pretty: Pretty[HkdfHmacError] = prettyOfClass(
       unnamedParam(_.error)
     )
+  }
+
+  case class HkdfInternalError(error: String) extends HkdfError {
+    override def pretty: Pretty[HkdfInternalError] = prettyOfClass(unnamedParam(_.error.unquoted))
   }
 
 }

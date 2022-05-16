@@ -10,9 +10,10 @@ import com.digitalasset.canton.serialization.{DeserializationError, Deterministi
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
-class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi {
+class SymbolicPureCrypto() extends CryptoPureApi {
 
   private val symmetricKeyCounter = new AtomicInteger
+  private val randomnessCounter = new AtomicInteger
 
   // NOTE: The scheme is not really used by Symbolic crypto
   override val defaultSymmetricKeyScheme: SymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm
@@ -214,14 +215,49 @@ class SymbolicPureCrypto(hkdfOps: Option[HkdfOps] = None) extends CryptoPureApi 
     )(deserialize)
   }
 
+  override protected def computeHkdfInternal(
+      keyMaterial: ByteString,
+      outputBytes: Int,
+      info: HkdfInfo,
+      salt: ByteString,
+      algorithm: HmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] =
+    Right(SecureRandomness(keyMaterial.concat(salt).concat(info.bytes)))
+
+  override protected def hkdfExpandInternal(
+      keyMaterial: SecureRandomness,
+      outputBytes: Int,
+      info: HkdfInfo,
+      algorithm: HmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] =
+    Right(SecureRandomness(keyMaterial.unwrap.concat(info.bytes)))
+
   override def hkdfExpand(
       keyMaterial: SecureRandomness,
       outputBytes: Int,
       info: HkdfInfo,
       algorithm: HmacAlgorithm,
   ): Either[HkdfError, SecureRandomness] =
-    hkdfOps.fold(super.hkdfExpand(keyMaterial, outputBytes, info, algorithm))(
-      _.hkdfExpand(keyMaterial, outputBytes, info, algorithm)
-    )
+    hkdfExpandInternal(keyMaterial, outputBytes, info, algorithm)
 
+  override def computeHkdf(
+      keyMaterial: ByteString,
+      outputBytes: Int,
+      info: HkdfInfo,
+      salt: ByteString,
+      algorithm: HmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] =
+    computeHkdfInternal(keyMaterial, outputBytes, info, salt, algorithm)
+
+  override protected def generateRandomBytes(length: Int): Array[Byte] = {
+    // Not really random
+    val random =
+      DeterministicEncoding.encodeInt(randomnessCounter.getAndIncrement()).toByteArray.take(length)
+
+    // Pad the rest of the request bytes with 0 if necessary
+    if (random.length < length)
+      random.concat(new Array[Byte](length - random.length))
+    else
+      random
+  }
 }

@@ -198,19 +198,13 @@ object CachingDomainTopologyClient {
         loggerFactory,
       )
 
-    val initF =
-      // ts is "effective time", but during startup if we don't have an processed timestamp, we can use this one
-      store.timestamp(useStateStore = true).map { tsO =>
-        tsO.map(ts => (ApproximateTime(ts), EffectiveTime(ts)))
-      }
-
-    initF.map { initWithTsO =>
-      initWithTsO.foreach { case (sequencedTs, effectiveTs) =>
-        caching.updateHead(effectiveTs, sequencedTs, potentialTopologyChange = true)
+    store.timestamp(useStateStore = true).map { x =>
+      x.foreach { case (sequenced, effective) =>
+        caching
+          .updateHead(effective, ApproximateTime(sequenced.value), potentialTopologyChange = true)
       }
       caching
     }
-
   }
 }
 

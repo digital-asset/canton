@@ -100,7 +100,6 @@ object TopologyManagementInitialization {
   def apply(
       config: DomainBaseConfig,
       id: DomainId,
-      nodeId: NodeId,
       storage: Storage,
       clock: Clock,
       crypto: Crypto,

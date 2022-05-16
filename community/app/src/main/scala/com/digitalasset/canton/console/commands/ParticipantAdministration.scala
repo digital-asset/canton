@@ -63,6 +63,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
+import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
 
@@ -306,7 +307,8 @@ class LocalParticipantTestingGroup(
     consoleEnvironment: ConsoleEnvironment,
     loggerFactory: NamedLoggerFactory,
 ) extends ParticipantTestingGroup(participantRef, consoleEnvironment, loggerFactory)
-    with FeatureFlagFilter {
+    with FeatureFlagFilter
+    with NoTracing {
 
   import participantRef._
   @Help.Summary("Lookup contracts in the Private Contract Store", FeatureFlag.Testing)
@@ -557,7 +559,8 @@ class LocalParticipantPruningAdministrationGroup(
     runner: AdminCommandRunner with LedgerApiCommandRunner with BaseInspection[ParticipantNode],
     consoleEnvironment: ConsoleEnvironment,
     loggerFactory: NamedLoggerFactory,
-) extends ParticipantPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory) {
+) extends ParticipantPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory)
+    with NoTracing {
 
   import runner._
 
@@ -579,7 +582,8 @@ class LocalCommitmentsAdministrationGroup(
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends FeatureFlagFilter
-    with Helpful {
+    with Helpful
+    with NoTracing {
 
   import runner._
 

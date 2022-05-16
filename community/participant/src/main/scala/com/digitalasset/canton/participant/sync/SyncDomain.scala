@@ -134,7 +134,7 @@ class SyncDomain(
   val staticDomainParameters: StaticDomainParameters = domainHandle.staticParameters
 
   private val seedGenerator =
-    new SeedGenerator(domainCrypto.crypto.privateCrypto, domainCrypto.crypto.pureCrypto)
+    new SeedGenerator(domainCrypto.crypto.pureCrypto)
 
   private val requestGenerator =
     ConfirmationRequestFactory(participantId, domainId)(
@@ -220,13 +220,13 @@ class SyncDomain(
       pruneObserver.observer(_, _),
       killSwitch = selfKillSwitch,
       pruningMetrics,
+      staticDomainParameters.protocolVersion,
       timeouts,
       loggerFactory,
     )
     ephemeral.recordOrderPublisher.setAcsChangeListener(listener)
     listener
   }
-
   val topologyProcessor = new TopologyTransactionProcessor(
     domainId,
     domainCrypto.pureCrypto,
@@ -257,6 +257,7 @@ class SyncDomain(
       domainCrypto,
       sequencerClient,
       participantId,
+      staticDomainParameters.protocolVersion,
       timeouts,
       loggerFactory,
     )
@@ -343,12 +344,12 @@ class SyncDomain(
         timestamp: CantonTimestamp
     ): EitherT[Future, SyncDomainInitializationError, Unit] = {
       val store = domainHandle.topologyStore
-      EitherT.right(store.findEffectiveTimestampsSince(timestamp).map { timestamps =>
-        timestamps.headOption.foreach { head =>
+      EitherT.right(store.findUpcomingEffectiveChanges(timestamp).map { changes =>
+        changes.headOption.foreach { head =>
           logger.debug(
-            s"Initialising the acs commitment processor with ${timestamps.length} effective times starting from: $head"
+            s"Initialising the acs commitment processor with ${changes.length} effective times starting from: ${head.effective}"
           )
-          acsCommitmentProcessor.initializeTicksOnStartup(timestamps.toList)
+          acsCommitmentProcessor.initializeTicksOnStartup(changes.map(_.effective.value).toList)
         }
       })
     }

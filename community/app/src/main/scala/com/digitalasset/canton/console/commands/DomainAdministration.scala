@@ -19,6 +19,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction._
+import com.google.protobuf.ByteString
 
 trait DomainAdministration {
   this: AdminCommandRunner =>
@@ -117,8 +118,8 @@ trait DomainAdministration {
       )
 
     @Help.Summary("Set the Dynamic Domain Parameters configured for the domain")
-    def set_dynamic_domain_parameters(dynamicDomainParameters: DynamicDomainParameters) =
-      topology.domain_parameters_changes.authorize(id, dynamicDomainParameters).discard
+    def set_dynamic_domain_parameters(dynamicDomainParameters: DynamicDomainParameters): Unit =
+      topology.domain_parameters_changes.authorize(id, dynamicDomainParameters).discard[ByteString]
 
     @Help.Summary("Update the Dynamic Domain Parameters for the domain")
     def update_dynamic_parameters(

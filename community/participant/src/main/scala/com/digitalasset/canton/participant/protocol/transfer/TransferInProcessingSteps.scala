@@ -72,7 +72,7 @@ class TransferInProcessingSteps(
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
     causalityTracking: Boolean,
-    version: ProtocolVersion,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -161,14 +161,7 @@ class TransferInProcessingSteps(
       )
 
       transferInUuid = seedGenerator.generateUuid()
-      seed <- seedGenerator
-        .generateSeedForTransferIn(
-          transferData.contract.contractId,
-          transferOutResult,
-          targetDomain,
-          transferInUuid,
-        )
-        .leftMap(SeedGeneratorError)
+      seed = seedGenerator.generateSaltSeed()
       fullTree = makeFullTransferInTree(
         pureCrypto,
         seed,
@@ -196,7 +189,7 @@ class TransferInProcessingSteps(
       )
 
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferInViewType)(fullTree, recentSnapshot, version)
+        .create(TransferInViewType)(fullTree, recentSnapshot, protocolVersion)
         .leftMap[TransferProcessorError](EncryptionError)
     } yield {
       val rootHashMessage =
@@ -251,7 +244,7 @@ class TransferInProcessingSteps(
     FullTransferInTree
   ]] =
     EncryptedViewMessage
-      .decryptFor(snapshot, envelope.protocolMessage, participantId) { bytes =>
+      .decryptFor(snapshot, envelope.protocolMessage, participantId, protocolVersion) { bytes =>
         FullTransferInTree
           .fromByteString(snapshot.pureCrypto)(bytes)
           .leftMap(e => DeserializationError(e.toString, bytes))
@@ -504,6 +497,7 @@ class TransferInProcessingSteps(
                   txInRequest.toBeSigned,
                   validationResult.confirmingParties,
                   domainId,
+                  protocolVersion,
                 )
                 .leftMap(e => FailedToCreateResponse(e): TransferProcessorError)
             )
@@ -807,7 +801,7 @@ object TransferInProcessingSteps {
 
   def makeFullTransferInTree(
       pureCrypto: CryptoPureApi,
-      seed: Salt,
+      seed: SaltSeed,
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
       contract: SerializableContract,

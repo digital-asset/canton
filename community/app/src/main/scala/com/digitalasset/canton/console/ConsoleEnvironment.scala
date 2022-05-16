@@ -7,7 +7,7 @@ import ammonite.util.Bind
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
 import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
-import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{ConsoleCommandTimeout, ProcessingTimeout, TimeoutDuration}
 import com.digitalasset.canton.console.CommandErrors.{
   CantonCommandError,
   CommandInternalError,
@@ -17,6 +17,7 @@ import com.digitalasset.canton.console.Help.{Description, Summary, Topic}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.environment.Environment
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
@@ -38,7 +39,7 @@ case class NodeReferences[A, R <: A, L <: A](local: Seq[L], remote: Seq[R]) {
 /** The environment in which console commands are evaluated.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Any")) // required for `Binding[_]` usage
-trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing {
+trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing {
   type Env <: Environment
   type DomainLocalRef <: LocalDomainReference
   type DomainRemoteRef <: RemoteDomainReference
@@ -128,6 +129,8 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
     lazy val all = filteredHelpItems :+ participantHelperItems :+ domainHelperItems
 
   }
+
+  protected def timeouts: ProcessingTimeout = environment.config.parameters.timeouts.processing
 
   /** @return maximum runtime of a console command
     */
@@ -441,10 +444,8 @@ trait ConsoleEnvironment extends NamedLogging with AutoCloseable with NoTracing 
     */
   protected def selfAlias(): Bind[_] = Bind(ConsoleEnvironmentBinding.BindingName, this)
 
-  override def close(): Unit = {
-    grpcAdminCommandRunner.close()
-    environment.close()
-    tracerProvider.close()
+  override def onClosed(): Unit = {
+    Lifecycle.close(grpcAdminCommandRunner, environment, tracerProvider)(logger)
   }
 
   def startAll(): Unit = {

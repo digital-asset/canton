@@ -76,7 +76,6 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       .withReversedTopology(map)
       .withDomains(domain)
       .withKeyPurposes(keyPurposes)
-      .withHkdfOps(Some(new TestHkdf))
       .build(loggerFactory)
       .forOwnerAndDomain(submitterParticipant, domain)
       .currentSnapshotApproximation
@@ -100,12 +99,12 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       .build()
       .forOwnerAndDomain(submitterParticipant, domain)
       .currentSnapshotApproximation
-  val hashOps: HashOps = new SymbolicPureCrypto
+  val randomOps: RandomOps = new SymbolicPureCrypto
 
   val transactionUuid: UUID = new UUID(10L, 20L)
 
   val seedGenerator: SeedGenerator =
-    new SeedGenerator(privateCryptoApi.crypto.privateCrypto, hashOps) {
+    new SeedGenerator(randomOps) {
       override def generateUuid(): UUID = transactionUuid
     }
 
@@ -121,7 +120,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           _confirmationPolicy: ConfirmationPolicy,
           _workflowId: Option[WorkflowId],
           _mediatorId: MediatorId,
-          transactionSeed: Salt,
+          transactionSeed: SaltSeed,
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: SerializableContractOfId,
@@ -140,15 +139,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           fail(
             s"Wrong transaction UUID $transactionUuid. Expected ${ConfirmationRequestFactoryTest.this.transactionUuid}"
           )
-        EitherT(for {
-          expected <- seedGenerator
-            .generateSeedForTransaction(submitterInfo.changeId, domain, ledgerTime, transactionUuid)
-            .valueOrFail("generate expected seed")
-        } yield {
-          if (transactionSeed != expected)
-            fail(s"""Wrong transaction seed $transactionSeed. Expected $expected""".stripMargin)
-          transactionTreeFactoryResult
-        })
+        transactionTreeFactoryResult.toEitherT
       }
 
       override def tryReconstruct(
@@ -211,8 +202,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           } else None
 
         val keySeed = tree.viewPosition.position.foldRight(testKeySeed) { case (pos, seed) =>
-          cryptoPureApi
-            .hkdfExpand(
+          ProtocolCryptoApi
+            .hkdf(cryptoPureApi, ProtocolVersion.latestForTest)(
               seed,
               cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes,
               HkdfInfo.subview(pos),
@@ -220,9 +211,12 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             .valueOr(e => throw new IllegalStateException(s"Failed to derive key: $e"))
         }
 
-        val keyLength = cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes
-        val symmetricKey = cryptoPureApi
-          .hkdfExpand(keySeed, keyLength, HkdfInfo.ViewKey)
+        val symmetricKey = ProtocolCryptoApi
+          .hkdf(cryptoPureApi, ProtocolVersion.latestForTest)(
+            keySeed,
+            cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes,
+            HkdfInfo.ViewKey,
+          )
           .valueOr(e => fail(s"Failed to derive key: $e"))
 
         val participants = tree.informees
@@ -266,7 +260,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
     )
   }
 
-  val testKeySeed = SecureRandomness.secureRandomness(0)
+  val testKeySeed = randomOps.generateSecureRandomness(0)
 
   def randomnessMap(
       randomness: SecureRandomness,

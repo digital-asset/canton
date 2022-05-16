@@ -49,13 +49,20 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
   ): MediatorResult with SignedProtocolMessageContent = {
     val informees = commonData.stakeholders
     require(
       recipientParties.subsetOf(informees),
       "Recipient parties of the transfer-in result must be stakeholders.",
     )
-    TransferResult.create(requestId, informees, TransferInDomainId(domainId), verdict)
+    TransferResult.create(
+      requestId,
+      informees,
+      TransferInDomainId(domainId),
+      verdict,
+      protocolVersion,
+    )
   }
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =

@@ -72,7 +72,7 @@ object HasProtocolVersionedWrapperTest {
   )(
       val deserializedFrom: Option[ByteString] = None
   ) extends HasProtocolVersionedWrapper[VersionedMessage[Message]] {
-    override def toProtoVersioned: VersionedMessage[Message] = Message.toProtoVersionedV2(this)
+    override def toProtoVersioned: VersionedMessage[Message] = Message.toProtoVersioned(this)
     override def getCryptographicEvidence: ByteString =
       super[HasProtocolVersionedWrapper].toByteString
 

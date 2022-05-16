@@ -27,7 +27,6 @@ import com.digitalasset.canton.crypto.provider.tink.{
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.tracing.TraceContext
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 
 import java.security.Security
@@ -84,8 +83,7 @@ object CryptoFactory {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
+      ec: ExecutionContext
   ): EitherT[Future, String, Crypto] = {
     val cryptoPrivateStore = CryptoPrivateStore.create(storage, timeouts, loggerFactory)
     val cryptoPublicStore = CryptoPublicStore.create(storage, timeouts, loggerFactory)
@@ -132,7 +130,7 @@ object CryptoFactory {
               encryptionKeyScheme,
               cryptoPrivateStore,
             )
-          EitherT.rightT(
+          EitherT.rightT[Future, String](
             new Crypto(
               pureCrypto,
               privateCrypto,
@@ -144,13 +142,6 @@ object CryptoFactory {
             )
           )
       }
-      // Initialize the HMAC secret for an active replica
-      _ <-
-        if (storage.isActive)
-          crypto.privateCrypto
-            .initializeHmacSecret()
-            .leftMap(err => s"Failed to initialize HMAC secret: $err")
-        else EitherT.rightT[Future, String](())
     } yield crypto
   }
 

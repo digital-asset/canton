@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.authentication.grpc
 import cats.data.EitherT
 import cats.implicits._
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencing.authentication.{
@@ -28,8 +29,9 @@ object AuthenticationTokenManagerTest extends org.mockito.MockitoSugar with Argu
 
 class AuthenticationTokenManagerTest extends AsyncWordSpec with BaseTest {
 
-  val token1: AuthenticationToken = AuthenticationToken.generate()
-  val token2: AuthenticationToken = AuthenticationToken.generate()
+  val crypto = new SymbolicPureCrypto
+  val token1: AuthenticationToken = AuthenticationToken.generate(crypto)
+  val token2: AuthenticationToken = AuthenticationToken.generate(crypto)
   val now = CantonTimestamp.Epoch
 
   "first call to getToken will obtain it" in {

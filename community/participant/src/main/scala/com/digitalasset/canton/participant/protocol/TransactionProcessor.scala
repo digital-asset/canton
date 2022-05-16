@@ -73,7 +73,12 @@ class TransactionProcessor(
         domainId,
         participantId,
         confirmationRequestFactory,
-        new ConfirmationResponseFactory(participantId, domainId, loggerFactory),
+        new ConfirmationResponseFactory(
+          participantId,
+          domainId,
+          staticDomainParameters.protocolVersion,
+          loggerFactory,
+        ),
         ModelConformanceChecker(
           damle,
           confirmationRequestFactory.transactionTreeFactory,

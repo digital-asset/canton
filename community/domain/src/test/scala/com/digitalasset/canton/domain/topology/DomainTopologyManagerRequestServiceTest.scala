@@ -266,7 +266,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       when(manager.store).thenReturn(store)
       for {
         res <- service.newRequest(List(p1Mapping, p1MappingEnc, trustCert))
-        dis <- store.headTransactions.map(_.toIdentityState)
+        dis <- store.headTransactions.map(_.toTopologyState)
       } yield {
         res.map(_.state) shouldBe Seq(Accepted, Accepted, Accepted)
         dis should have length (4)

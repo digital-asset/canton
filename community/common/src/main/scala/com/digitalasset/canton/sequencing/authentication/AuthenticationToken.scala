@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.authentication
 import cats.syntax.either._
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String300
-import com.digitalasset.canton.crypto.SecureRandomness
+import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.util.{HexString, NoCopy}
@@ -36,8 +36,8 @@ object AuthenticationToken {
   private[this] def apply(bytes: ByteString): AuthenticationToken =
     throw new UnsupportedOperationException("Use the generate methods instead")
 
-  def generate(): AuthenticationToken = {
-    new AuthenticationToken(SecureRandomness.randomByteString(length))
+  def generate(randomOps: RandomOps): AuthenticationToken = {
+    new AuthenticationToken(randomOps.generateRandomByteString(length))
   }
 
   def fromProtoPrimitive(bytes: ByteString): Either[DeserializationError, AuthenticationToken] =

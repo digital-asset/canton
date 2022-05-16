@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration
 
+import com.digitalasset.canton.CloseableTest
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.logging.NamedLogging
 import org.scalatest.{BeforeAndAfterAll, Suite}
@@ -97,25 +98,27 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
   }
 
   protected def createEnvironment(): TCE =
-    ConcurrentEnvironmentLimiter.create(manualCreateEnvironment())
+    ConcurrentEnvironmentLimiter.create(getClass.getName)(manualCreateEnvironment())
 
-  protected def destroyEnvironment(environment: TCE): Unit = ConcurrentEnvironmentLimiter.destroy {
-    val config = environment.actualConfig
-    plugins.foreach(_.beforeEnvironmentDestroyed(config, environment))
-    try {
-      environment.close()
-    } finally {
-      envDef.teardown(())
-      plugins.foreach(_.afterEnvironmentDestroyed(config))
+  protected def destroyEnvironment(environment: TCE): Unit =
+    ConcurrentEnvironmentLimiter.destroy(getClass.getName) {
+      val config = environment.actualConfig
+      plugins.foreach(_.beforeEnvironmentDestroyed(config, environment))
+      try {
+        environment.close()
+      } finally {
+        envDef.teardown(())
+        plugins.foreach(_.afterEnvironmentDestroyed(config))
+      }
     }
-  }
 }
 
 /** Starts an environment in a beforeAll test and uses it for all tests.
   * Destroys it in an afterAll hook.
   */
 trait SharedEnvironment[E <: Environment, TCE <: TestConsoleEnvironment[E]]
-    extends EnvironmentSetup[E, TCE] {
+    extends EnvironmentSetup[E, TCE]
+    with CloseableTest {
   this: Suite with HasEnvironmentDefinition[E, TCE] with NamedLogging =>
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

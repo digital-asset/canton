@@ -614,6 +614,8 @@ object BuildCommon {
           daml_lf_archive_reader,
           daml_lf_dev_archive_java_proto,
           daml_lf_engine,
+          daml_ledger_api_auth_client,
+          daml_participant_integration_api,
           logback_classic % Runtime,
           logback_core % Runtime,
           akka_stream,
@@ -706,23 +708,7 @@ object BuildCommon {
       .disablePlugins(WartRemover) // to accommodate different daml repo coding style
       .settings(
         sharedSettings,
-        libraryDependencies ++= Seq(
-          log4j_core,
-          log4j_api,
-          logback_classic,
-          logback_core,
-          daml_participant_integration_api excludeAll (ExclusionRule(
-            "org.apache.logging.log4j" // as a way to get all third party dependencies conveniently plus code not copied
-          ),
-          ExclusionRule(
-            "ch.qos.logback" // do not bring in older transient dependency)
-          )),
-          daml_contextualized_logging,
-          daml_error,
-          daml_metrics,
-          daml_ledger_api_scalapb,
-          scalapb_runtime,
-        ),
+        libraryDependencies ++= Seq(),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage =

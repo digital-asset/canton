@@ -42,11 +42,13 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
   ): TransactionResultMessage =
     TransactionResultMessage(
       requestId,
       verdict,
       fullInformeeTree.informeeTreeUnblindedFor(recipientParties),
+      protocolVersion,
     )
 
   // Implementing a `toProto<version>` method allows us to compose serializable classes.

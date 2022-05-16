@@ -13,10 +13,11 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.ContractMetadata
+import com.digitalasset.canton.protocol.{ContractMetadata, TestDomainParameters}
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -31,8 +32,10 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
 
   val symbolicVault =
     SymbolicCrypto
-      .tryCreate(Seq(Fingerprint.tryCreate("test")), Seq(), None, timeouts, loggerFactory)
+      .tryCreate(Seq(Fingerprint.tryCreate("test")), Seq(), timeouts, loggerFactory)
       .privateCrypto
+
+  protected val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
 
   val localId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain"))
   val remoteId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant::domain"))
@@ -72,7 +75,14 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
     .valueOrFail("failed to create dummy signature")
 
   val dummyCommitmentMsg =
-    AcsCommitment.create(domainId, remoteId, localId, period(0, 1), dummyCommitment)
+    AcsCommitment.create(
+      domainId,
+      remoteId,
+      localId,
+      period(0, 1),
+      dummyCommitment,
+      protocolVersion,
+    )
   val dummySigned = SignedProtocolMessage(dummyCommitmentMsg, dummySignature)
 
   val alice: LfPartyId = LfPartyId.assertFromString("Alice")
@@ -275,11 +285,23 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
     "correctly search stored remote commitment messages" in {
       val store = mk()
 
-      val dummyMsg2 =
-        AcsCommitment.create(domainId, remoteId, localId, period(2, 3), dummyCommitment)
+      val dummyMsg2 = AcsCommitment.create(
+        domainId,
+        remoteId,
+        localId,
+        period(2, 3),
+        dummyCommitment,
+        protocolVersion,
+      )
       val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature)
-      val dummyMsg3 =
-        AcsCommitment.create(domainId, remoteId2, localId, period(0, 1), dummyCommitment)
+      val dummyMsg3 = AcsCommitment.create(
+        domainId,
+        remoteId2,
+        localId,
+        period(0, 1),
+        dummyCommitment,
+        protocolVersion,
+      )
       val dummySigned3 = SignedProtocolMessage(dummyMsg3, dummySignature)
 
       for {
@@ -297,8 +319,14 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
     "allow storing different remote commitment messages for the same period" in {
       val store = mk()
 
-      val dummyMsg2 =
-        AcsCommitment.create(domainId, remoteId, localId, period(0, 1), dummyCommitment2)
+      val dummyMsg2 = AcsCommitment.create(
+        domainId,
+        remoteId,
+        localId,
+        period(0, 1),
+        dummyCommitment2,
+        protocolVersion,
+      )
       val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature)
 
       for {
@@ -498,7 +526,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         localId,
         CommitmentPeriod(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
         cmt,
-      )(None)
+      )(ProtocolVersion.latestForTest, None)
 
     "work sensibly in a basic scenario" in {
       val queue = mk()

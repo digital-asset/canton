@@ -9,31 +9,42 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.topology.transaction.DomainParametersChange
+import com.digitalasset.canton.topology.transaction.{
+  DomainParametersChange,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingOwnerWithKeys}
-import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import org.scalatest.Outcome
+import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import scala.concurrent.Future
 
-class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasExecutionContext {
+class TopologyTimestampPlusEpsilonTrackerTest
+    extends FixtureAnyWordSpec
+    with BaseTest
+    with HasExecutionContext {
 
   import com.digitalasset.canton.topology.client.EffectiveTimeTestHelpers._
 
-  private def setup(
-      prepareO: Option[(CantonTimestamp, NonNegativeFiniteDuration)] = Some(
-        (ts.immediatePredecessor, epsilonFD)
-      )
-  ): (TopologyTimestampPlusEpsilonTracker, InMemoryTopologyStore) = {
+  protected class Fixture {
+    val crypto = new TestingOwnerWithKeys(
+      DefaultTestIdentities.domainManager,
+      loggerFactory,
+      parallelExecutionContext,
+    )
     val store = new InMemoryTopologyStore(loggerFactory)
     val tracker =
       new TopologyTimestampPlusEpsilonTracker(DefaultProcessingTimeouts.testing, loggerFactory)
-    prepareO.foreach { case (ts, topologyChangeDelay) =>
-      val crypto = new TestingOwnerWithKeys(
-        DefaultTestIdentities.domainManager,
-        loggerFactory,
-        parallelExecutionContext,
-      )
+
+    def appendEps(
+        sequenced: SequencedTime,
+        effective: EffectiveTime,
+        topologyChangeDelay: NonNegativeFiniteDuration,
+    ): Unit = {
       val tx = crypto.mkDmGov(
         DomainParametersChange(
           DefaultTestIdentities.domainId,
@@ -41,19 +52,44 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
         ),
         crypto.SigningKeys.key1,
       )
+      append(sequenced, effective, tx)
+    }
+
+    def append(
+        sequenced: SequencedTime,
+        effective: EffectiveTime,
+        txs: SignedTopologyTransaction[TopologyChangeOp]*
+    ): Unit = {
+      logger.debug(s"Storing $sequenced $effective $txs")
       store
-        .updateState(
-          SequencedTime(CantonTimestamp.MinValue),
-          EffectiveTime(CantonTimestamp.MinValue),
-          Seq(),
-          positive = Seq(tx),
+        .append(
+          sequenced,
+          effective,
+          txs.map(ValidatedTopologyTransaction(_, None)).toList,
         )
         .futureValue
-      unwrap(
-        TopologyTimestampPlusEpsilonTracker.initializeFromStore(tracker, store, ts)
-      ).futureValue
     }
-    (tracker, store)
+
+    def initTracker(ts: CantonTimestamp): Unit = {
+      unwrap(TopologyTimestampPlusEpsilonTracker.initialize(tracker, store, ts)).futureValue
+    }
+
+    def init(): Unit = {
+      val myTs = ts.immediatePredecessor
+      val topologyChangeDelay = epsilonFD
+      appendEps(
+        SequencedTime(myTs),
+        EffectiveTime(myTs),
+        topologyChangeDelay,
+      )
+      initTracker(myTs)
+    }
+  }
+
+  type FixtureParam = Fixture
+
+  override protected def withFixture(test: OneArgTest): Outcome = {
+    test(new Fixture)
   }
 
   private def unwrap[T](fut: FutureUnlessShutdown[T]): Future[T] =
@@ -80,6 +116,7 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
 
     val adjustedTs = unwrap(tracker.adjustTimestampForUpdate(ts)).futureValue
     tracker.adjustEpsilon(adjustedTs, ts, newEpsilon)
+    tracker.effectiveTimeProcessed(adjustedTs)
 
     // until adjustedTs, we should still get the old epsilon
     forAll(Seq(1L, 100L, 250L)) { delta =>
@@ -91,9 +128,9 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
 
   "timestamp plus epsilon" should {
 
-    "epsilon is constant properly project the timestamp" in {
-      val (tracker, _) = setup()
-
+    "epsilon is constant properly project the timestamp" in { f =>
+      import f._
+      init()
       assertEffectiveTimeForUpdate(tracker, ts, ts.plus(epsilon))
       assertEffectiveTimeForUpdate(tracker, ts.plusSeconds(5), ts.plusSeconds(5).plus(epsilon))
       unwrap(
@@ -103,8 +140,9 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
 
     }
 
-    "properly project during epsilon increase" in {
-      val (tracker, _) = setup()
+    "properly project during epsilon increase" in { f =>
+      import f._
+      init()
       val newEpsilon = NonNegativeFiniteDuration.ofSeconds(1)
       adjustEpsilon(tracker, newEpsilon)
       // after adjusted ts, we should get the new epsilon
@@ -114,8 +152,9 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       }
     }
 
-    "properly deal with epsilon decrease" in {
-      val (tracker, _) = setup()
+    "properly deal with epsilon decrease" in { f =>
+      import f._
+      init()
       val newEpsilon = NonNegativeFiniteDuration.ofMillis(100)
       adjustEpsilon(tracker, newEpsilon)
 
@@ -126,9 +165,39 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       }
     }
 
-    "gracefully deal with epsilon decrease on a buggy domain" in {
+    "correctly initialise with pending changes" in { f =>
+      import f._
 
-      val (tracker, _) = setup()
+      val eS1 = NonNegativeFiniteDuration.ofMillis(100)
+      val tsS1 = ts.minusSeconds(1)
+      appendEps(SequencedTime(tsS1), EffectiveTime(tsS1), eS1)
+
+      val eM100 = NonNegativeFiniteDuration.ofMillis(100)
+      val tsM100 = ts.minusMillis(100)
+
+      appendEps(SequencedTime(tsM100), EffectiveTime(ts), eM100)
+
+      val tsM75 = ts.minusMillis(75)
+      append(
+        SequencedTime(ts),
+        EffectiveTime(tsM75.plusMillis(100)),
+        f.crypto.TestingTransactions.ns1k2,
+        f.crypto.TestingTransactions.p2p1,
+      )
+
+      val eM50 = NonNegativeFiniteDuration.ofMillis(200)
+      val tsM50 = ts.minusMillis(50)
+      appendEps(SequencedTime(tsM50), EffectiveTime(tsM50.plusMillis(100)), eM50)
+
+      f.initTracker(ts)
+
+      assertEffectiveTimeForUpdate(tracker, ts.plusMillis(10), ts.plusMillis(110))
+
+    }
+
+    "gracefully deal with epsilon decrease on a buggy domain" in { f =>
+      import f._
+      init()
       val newEpsilon = NonNegativeFiniteDuration.ofMillis(100)
       adjustEpsilon(tracker, newEpsilon)
 
@@ -155,13 +224,17 @@ class TopologyTimestampPlusEpsilonTrackerTest extends BaseTestWordSpec with HasE
       }
     }
 
-    "block until we are in sync again" in {
-      val (tracker, _) = setup()
+    "block until we are in sync again" in { f =>
+      import f._
+      init()
       val eps3 = epsilon.dividedBy(3)
       val eps2 = epsilon.dividedBy(2)
       epsilon.toMillis shouldBe 250 // this test assumes this
-      // first, we'll kick off the computation
+      // first, we'll kick off the computation at ts (note epsilon is active for ts on)
       val fut1 = unwrap(tracker.adjustTimestampForUpdate(ts)).futureValue
+      // now, we need to confirm this effective time, which will "unlock" the any sequenced event update
+      // within ts + eps
+      tracker.effectiveTimeProcessed(fut1)
       // then, we tick another update with a third and with half epsilon
       val fut2 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(eps3))).futureValue
       val fut3 = unwrap(tracker.adjustTimestampForUpdate(ts.plus(eps2))).futureValue

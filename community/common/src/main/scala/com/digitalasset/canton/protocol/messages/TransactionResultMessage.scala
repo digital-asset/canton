@@ -15,9 +15,9 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageWithContextCompanion,
+  HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -35,10 +35,10 @@ case class TransactionResultMessage private (
     override val requestId: RequestId,
     override val verdict: Verdict,
     notificationTree: InformeeTree,
-)(val deserializedFrom: Option[ByteString])
+)(val representativeProtocolVersion: ProtocolVersion, val deserializedFrom: Option[ByteString])
     extends RegularMediatorResult
     with NoCopy
-    with HasVersionedWrapper[VersionedMessage[TransactionResultMessage]]
+    with HasProtocolVersionedWrapper[VersionedMessage[TransactionResultMessage]]
     with HasProtoV0[v0.TransactionResultMessage]
     with PrettyPrinting {
 
@@ -53,12 +53,11 @@ case class TransactionResultMessage private (
     * Must meet the contract of [[com.digitalasset.canton.serialization.HasCryptographicEvidence.getCryptographicEvidence]]
     * except that when called several times, different [[com.google.protobuf.ByteString]]s may be returned.
     */
-  override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[TransactionResultMessage] = VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[TransactionResultMessage] =
+    TransactionResultMessage.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.TransactionResultMessage =
     v0.TransactionResultMessage(
@@ -83,20 +82,25 @@ case class TransactionResultMessage private (
 }
 
 object TransactionResultMessage
-    extends HasMemoizedVersionedMessageWithContextCompanion[
+    extends HasMemoizedProtocolVersionedWithContextCompanion[
       TransactionResultMessage,
       HashOps,
     ] {
   override val name: String = "TransactionResultMessage"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.TransactionResultMessage) { case (hashOps, proto) =>
-      fromProtoV0(proto, hashOps)
-    }
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.TransactionResultMessage) { case (hashOps, proto) =>
+        fromProtoV0(proto, hashOps)
+      },
+      _.toProtoV0.toByteString,
+    )
   )
 
   private[this] def apply(requestId: RequestId, verdict: Verdict, notificationTree: InformeeTree)(
-      deseializedFrom: Option[ByteString]
+      representativeProtocolVersion: ProtocolVersion,
+      deseializedFrom: Option[ByteString],
   ): TransactionResultMessage =
     throw new UnsupportedOperationException("Use the public apply method instead")
 
@@ -104,8 +108,12 @@ object TransactionResultMessage
       requestId: RequestId,
       verdict: Verdict,
       notificationTree: InformeeTree,
+      protocolVersion: ProtocolVersion,
   ): TransactionResultMessage =
-    new TransactionResultMessage(requestId, verdict, notificationTree)(None)
+    new TransactionResultMessage(requestId, verdict, notificationTree)(
+      protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    )
 
   private def fromProtoV0(protoResultMessage: v0.TransactionResultMessage, hashOps: HashOps)(
       bytes: ByteString
@@ -123,7 +131,8 @@ object TransactionResultMessage
         .leftWiden[ProtoDeserializationError]
       notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
     } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
-      Some(bytes)
+      protocolVersionRepresentativeFor(0),
+      Some(bytes),
     )
 
   implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] = {

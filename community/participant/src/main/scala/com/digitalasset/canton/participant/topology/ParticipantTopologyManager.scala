@@ -279,7 +279,7 @@ class ParticipantTopologyManager(
         filterNamespace = None,
       )
       .map { current =>
-        current.adds.toIdentityState
+        current.adds.toTopologyState
           .foldLeft(packages) {
             case (acc, TopologyStateUpdateElement(_, vs: VettedPackages)) =>
               acc -- vs.packageIds

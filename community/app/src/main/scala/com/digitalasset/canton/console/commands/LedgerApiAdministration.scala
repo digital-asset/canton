@@ -54,6 +54,7 @@ import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
+import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{LedgerTransactionId, LfPartyId}
 import io.grpc.StatusRuntimeException
@@ -64,7 +65,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Await
 
-trait BaseLedgerApiAdministration {
+trait BaseLedgerApiAdministration extends NoTracing {
 
   this: LedgerApiCommandRunner with NamedLogging with FeatureFlagFilter =>
   implicit protected val consoleEnvironment: ConsoleEnvironment

@@ -42,6 +42,7 @@ import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -134,6 +135,7 @@ class AcsCommitmentProcessor(
     commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
     killSwitch: => Unit,
     metrics: PruningMetrics,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -642,7 +644,14 @@ class AcsCommitmentProcessor(
       cmt: AcsCommitment.CommitmentType,
       period: CommitmentPeriod,
   )(implicit traceContext: TraceContext): Future[SignedProtocolMessage[AcsCommitment]] = {
-    val payload = AcsCommitment.create(domainId, participantId, counterParticipant, period, cmt)
+    val payload = AcsCommitment.create(
+      domainId,
+      participantId,
+      counterParticipant,
+      period,
+      cmt,
+      protocolVersion,
+    )
     SignedProtocolMessage.tryCreate(payload, crypto, domainCrypto.pureCrypto)
   }
 

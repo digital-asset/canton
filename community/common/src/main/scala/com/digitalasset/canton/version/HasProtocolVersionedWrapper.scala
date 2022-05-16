@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.version
 
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
 
-import scala.collection.SortedMap
+import scala.collection.immutable
 
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
@@ -55,7 +55,7 @@ trait HasProtocolVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage] {
   def getCryptographicEvidence: ByteString
 }
 
-trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVersionedWrapper[
+trait GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVersionedWrapper[
   VersionedMessage[ValueClass]
 ]] {
 
@@ -66,9 +66,15 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
   type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message
 
   // Deserializer: (Proto => ValueClass)
-  type Deserializer = (OriginalByteString, DataByteString) => ParsingResult[ValueClass]
+  type Deserializer
   // Serializer: (ValueClass => Proto)
   type Serializer = ValueClass => ByteString
+
+  def protocolVersionRepresentativeFor(protocolVersion: ProtocolVersion): ProtocolVersion =
+    supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion)
+
+  def protocolVersionRepresentativeFor(protoVersion: Int): ProtocolVersion =
+    supportedProtoVersions.protocolVersionRepresentativeFor(protoVersion)
 
   /** Supported protobuf version
     * @param fromInclusive The protocol version when this protobuf version was introduced
@@ -81,15 +87,11 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
       serializer: Serializer,
   )
 
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
   sealed abstract case class SupportedProtoVersions(
-      converters: SortedMap[Int, VersionedProtoConverter] // Sorted with descending order
+      // Sorted with descending order
+      converters: NonEmpty[immutable.SortedMap[Int, VersionedProtoConverter]]
   ) {
-    require(
-      converters.nonEmpty,
-      "List of converters should not be empty",
-    ) // Prevented by factory method below
-    val (higherProtoVersion, higherConverter) = converters.head
+    val (higherProtoVersion, higherConverter) = converters.head1
 
     def deserializerFor(protoVersion: Int): Deserializer =
       converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
@@ -101,7 +103,7 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
         .getOrElse(higherConverter.fromInclusive)
 
     def protocolVersionRepresentativeFor(protocolVersion: ProtocolVersion): ProtocolVersion =
-      supportedProtoVersions.converters
+      converters
         .collectFirst {
           case (_, supportedVersion) if protocolVersion >= supportedVersion.fromInclusive =>
             supportedVersion.fromInclusive
@@ -114,19 +116,21 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
         head: (Int, VersionedProtoConverter),
         tail: (Int, VersionedProtoConverter)*
     ): SupportedProtoVersions = SupportedProtoVersions(
-      NonEmpty.mk(Seq, head, tail: _*).toMap
+      NonEmpty.mk(Seq, head, tail: _*)
     )
 
-    @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
-    def apply(converters: NonEmpty[Map[Int, VersionedProtoConverter]]): SupportedProtoVersions = {
-
-      val sortedConverters = SortedMap.from(converters)(implicitly[Ordering[Int]].reverse)
-      val (_, lowestProtocolVersion) = sortedConverters.last
-
-      if (lowestProtocolVersion.fromInclusive != ProtocolVersion.minimum_protocol_version)
-        throw new IllegalArgumentException(
-          s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum_protocol_version}, found $lowestProtocolVersion"
+    def apply(converters: NonEmpty[Seq[(Int, VersionedProtoConverter)]]): SupportedProtoVersions = {
+      val sortedConverters = checked(
+        NonEmptyUtil.fromUnsafe(
+          immutable.SortedMap.from(converters)(implicitly[Ordering[Int]].reverse)
         )
+      )
+      val (_, lowestProtocolVersion) = sortedConverters.last1
+
+      require(
+        lowestProtocolVersion.fromInclusive == ProtocolVersion.minimum_protocol_version,
+        s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum_protocol_version}, found $lowestProtocolVersion",
+      )
 
       new SupportedProtoVersions(sortedConverters) {}
     }
@@ -137,15 +141,7 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
     */
   def supportedProtoVersions: SupportedProtoVersions
 
-  protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
-      p: scalapb.GeneratedMessageCompanion[Proto]
-  )(
-      fromProto: Proto => (OriginalByteString => ParsingResult[ValueClass])
-  ): Deserializer =
-    (original: OriginalByteString, data: DataByteString) =>
-      ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
-
-  def toProtoVersionedV2(v: ValueClass): VersionedMessage[ValueClass] =
+  def toProtoVersioned(v: ValueClass): VersionedMessage[ValueClass] =
     supportedProtoVersions.converters
       .collectFirst {
         case (protoVersion, supportedVersion)
@@ -158,10 +154,46 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
           supportedProtoVersions.higherProtoVersion,
         )
       }
+}
+
+trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVersionedWrapper[
+  VersionedMessage[ValueClass]
+]] extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
+  // Deserializer: (Proto => ValueClass)
+  type Deserializer = (OriginalByteString, DataByteString) => ParsingResult[ValueClass]
+
+  protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
+      p: scalapb.GeneratedMessageCompanion[Proto]
+  )(
+      fromProto: Proto => (OriginalByteString => ParsingResult[ValueClass])
+  ): Deserializer =
+    (original: OriginalByteString, data: DataByteString) =>
+      ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
 
   def fromByteString(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
     valueClass <- supportedProtoVersions.deserializerFor(proto.version)(bytes, data)
+  } yield valueClass
+}
+
+trait HasMemoizedProtocolVersionedWithContextCompanion[ValueClass <: HasProtocolVersionedWrapper[
+  VersionedMessage[ValueClass]
+], Context]
+    extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
+  type Deserializer = (Context, OriginalByteString, DataByteString) => ParsingResult[ValueClass]
+
+  protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
+      p: scalapb.GeneratedMessageCompanion[Proto]
+  )(
+      fromProto: (Context, Proto) => (OriginalByteString => ParsingResult[ValueClass])
+  ): Deserializer =
+    (ctx: Context, original: OriginalByteString, data: DataByteString) =>
+      ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(ctx, _)(original))
+
+  def fromByteString(context: Context)(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
+    proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
+    data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
+    valueClass <- supportedProtoVersions.deserializerFor(proto.version)(context, bytes, data)
   } yield valueClass
 }

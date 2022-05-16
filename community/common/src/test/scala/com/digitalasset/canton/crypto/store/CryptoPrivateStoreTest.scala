@@ -12,9 +12,6 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
 
   def cryptoPrivateStore(newStore: => CryptoPrivateStore): Unit = {
 
-    val secret1: HmacSecret = TestHmacSecret.generate()
-    val secret2: HmacSecret = TestHmacSecret.generate()
-
     val sigKey1: SigningPrivateKey = SymbolicCrypto.signingPrivateKey("sigKey1")
     val sigKey1WithName: SigningPrivateKeyWithName =
       SigningPrivateKeyWithName(sigKey1, Some(KeyName.tryCreate("sigKey1")))
@@ -26,18 +23,6 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       EncryptionPrivateKeyWithName(encKey1, Some(KeyName.tryCreate("encKey1")))
     val encKey2: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey("encKey2")
     val encKey2WithName: EncryptionPrivateKeyWithName = EncryptionPrivateKeyWithName(encKey2, None)
-
-    "store and retrieve HMAC secrets" in {
-      val store = newStore
-      for {
-        _ <- store.storeHmacSecret(secret1).valueOrFail("store hmac secret")
-        secret <- store.loadHmacSecret().valueOrFail("load hmac secret")
-        result <- store.hmacSecret.valueOrFail("retrieve hmac secret")
-      } yield {
-        secret shouldBe Some(secret1)
-        result shouldBe Some(secret1)
-      }
-    }
 
     "store encryption keys correctly when added incrementally" in {
       val store = newStore
@@ -123,15 +108,6 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       res.valueOr(err => fail(err.toString))
     }
 
-    "rotate the HMAC secret" in {
-      val store = newStore
-      for {
-        _ <- store.storeHmacSecret(secret1).valueOrFail("store first hmac secret")
-        _ <- store.storeHmacSecret(secret2).valueOrFail("store second hmac secret")
-      } yield {
-        succeed
-      }
-    }
   }
 
 }

@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.authentication
 import cats.syntax.traverse._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.resource.DbStorage
@@ -17,10 +18,11 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.concurrent.Future
 
 trait MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
-  val participant1 = DefaultTestIdentities.participant1
-  val participant2 = DefaultTestIdentities.participant2
-  val participant3 = DefaultTestIdentities.participant3
-  val defaultExpiry = CantonTimestamp.Epoch.plusSeconds(120)
+  lazy val participant1 = DefaultTestIdentities.participant1
+  lazy val participant2 = DefaultTestIdentities.participant2
+  lazy val participant3 = DefaultTestIdentities.participant3
+  lazy val defaultExpiry = CantonTimestamp.Epoch.plusSeconds(120)
+  lazy val crypto = new SymbolicPureCrypto
 
   def memberAuthenticationStore(mk: () => MemberAuthenticationStore): Unit = {
     "invalid member" should {
@@ -129,9 +131,9 @@ trait MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
       member: Member,
       expiry: CantonTimestamp = defaultExpiry,
   ): StoredAuthenticationToken =
-    StoredAuthenticationToken(member, expiry, AuthenticationToken.generate())
+    StoredAuthenticationToken(member, expiry, AuthenticationToken.generate(crypto))
   def generateNonce(member: Member, expiry: CantonTimestamp = defaultExpiry): StoredNonce =
-    StoredNonce(member, Nonce.generate(), CantonTimestamp.Epoch, expiry)
+    StoredNonce(member, Nonce.generate(crypto), CantonTimestamp.Epoch, expiry)
 }
 
 class MemberAuthenticationStoreTestInMemory extends MemberAuthenticationStoreTest {

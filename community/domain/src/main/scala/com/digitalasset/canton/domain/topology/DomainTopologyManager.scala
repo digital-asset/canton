@@ -198,7 +198,7 @@ class DomainTopologyManager(
             filterNamespace = None,
           )
         )
-        keys = txs.adds.toIdentityState
+        keys = txs.adds.toTopologyState
           .map(_.mapping)
           .collect { case OwnerToKeyMapping(`participantId`, key) =>
             key

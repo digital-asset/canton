@@ -3,3 +3,6 @@
 
 -- TODO(#9014) migrate to non null
 ALTER TABLE topology_transactions ADD sequenced bigint null;
+
+-- A stored HMAC secret is not used anymore
+DROP TABLE crypto_hmac_secret;

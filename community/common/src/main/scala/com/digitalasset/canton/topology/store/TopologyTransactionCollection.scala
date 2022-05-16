@@ -34,7 +34,7 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     _.result
   )
 
-  def toIdentityState: List[TopologyStateElement[TopologyMapping]] =
+  def toTopologyState: List[TopologyStateElement[TopologyMapping]] =
     result.map(_.transaction.transaction.element).toList
 
   def toDomainTopologyTransactions: Seq[SignedTopologyTransaction[Op]] =
@@ -200,7 +200,7 @@ final case class PositiveStoredTopologyTransactions(
     replaces: StoredTopologyTransactions[Replace],
 ) {
   def toIdentityState: List[TopologyStateElement[TopologyMapping]] =
-    adds.toIdentityState ++ replaces.toIdentityState
+    adds.toTopologyState ++ replaces.toTopologyState
 
   def combine: StoredTopologyTransactions[Positive] = StoredTopologyTransactions(
     adds.result ++ replaces.result

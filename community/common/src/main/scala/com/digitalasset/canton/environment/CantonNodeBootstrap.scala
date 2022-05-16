@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.{LocalNodeConfig, LocalNodeParameters, Pro
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
+import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
@@ -41,7 +42,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreFactory,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.{TopologyTransaction, _}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.retry
@@ -349,7 +350,7 @@ abstract class CantonNodeBootstrapBase[
     } yield ()
   }
 
-  final def storeId(id: NodeId): EitherT[Future, String, Unit] =
+  final protected def storeId(id: NodeId): EitherT[Future, String, Unit] =
     for {
       previous <- EitherT.right(initializationStore.id)
       result <- previous match {
@@ -394,25 +395,92 @@ abstract class CantonNodeBootstrapBase[
   // utility functions used by automatic initialization of domain and participant
   protected def authorizeStateUpdate[E <: CantonError](
       manager: TopologyManager[E],
-      key: PublicKey,
+      key: SigningPublicKey,
       mapping: TopologyStateUpdateMapping,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, SignedTopologyTransaction[TopologyChangeOp.Add]] =
-    manager
-      .authorize(TopologyStateUpdate.createAdd(mapping), Some(key.fingerprint), false)
-      .leftMap(_.toString)
+  ): EitherT[Future, String, Unit] =
+    authorizeIfNew(manager, TopologyStateUpdate.createAdd(mapping), key)
+
+  private def authorizeIfNew[E <: CantonError, Op <: TopologyChangeOp](
+      manager: TopologyManager[E],
+      transaction: TopologyTransaction[Op],
+      signingKey: SigningPublicKey,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, Unit] = for {
+    exists <- EitherT.right(
+      manager.signedMappingAlreadyExists(transaction.element.mapping, signingKey.fingerprint)
+    )
+    res <-
+      if (exists) {
+        logger.debug(s"Skipping existing ${transaction.element.mapping}")
+        EitherT.rightT[Future, String](())
+      } else
+        manager
+          .authorize(transaction, Some(signingKey.fingerprint), false)
+          .leftMap(_.toString)
+          .map(_ => ())
+  } yield res
 
   protected def authorizeDomainGovernance[E <: CantonError](
       manager: TopologyManager[E],
-      key: PublicKey,
+      key: SigningPublicKey,
       mapping: DomainGovernanceMapping,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, SignedTopologyTransaction[TopologyChangeOp.Replace]] =
-    manager
-      .authorize(DomainGovernanceTransaction(mapping), Some(key.fingerprint), false)
-      .leftMap(_.toString)
+  ): EitherT[Future, String, Unit] =
+    authorizeIfNew(manager, DomainGovernanceTransaction(mapping), key)
+
+  protected def getOrCreateSigningKey(
+      name: String
+  )(implicit traceContext: TraceContext): EitherT[Future, String, SigningPublicKey] =
+    getOrCreateKey(
+      "signing",
+      crypto.cryptoPublicStore.findSigningKeyIdByName,
+      name => crypto.generateSigningKey(name = name).leftMap(_.toString),
+      crypto.cryptoPrivateStore.existsSigningKey,
+      name,
+    )
+
+  protected def getOrCreateEncryptionKey(
+      name: String
+  )(implicit traceContext: TraceContext): EitherT[Future, String, EncryptionPublicKey] =
+    getOrCreateKey(
+      "encryption",
+      crypto.cryptoPublicStore.findEncryptionKeyIdByName,
+      name => crypto.generateEncryptionKey(name = name).leftMap(_.toString),
+      crypto.cryptoPrivateStore.existsPrivateKey,
+      name,
+    )
+
+  private def getOrCreateKey[P <: PublicKey](
+      typ: String,
+      findPubKeyIdByName: KeyName => EitherT[Future, CryptoPublicStoreError, Option[P]],
+      generateKey: Option[KeyName] => EitherT[Future, String, P],
+      existPrivateKeyByFp: Fingerprint => EitherT[Future, CryptoPrivateStoreError, Boolean],
+      name: String,
+  ): EitherT[Future, String, P] = for {
+    keyName <- EitherT.fromEither[Future](KeyName.create(name))
+    keyIdO <- findPubKeyIdByName(keyName)
+      .leftMap(err => s"Failure while looking for $typ key $name in public store: ${err}")
+    pubKey <- keyIdO.fold(
+      generateKey(Some(keyName))
+        .leftMap(err => s"Failure while generating $typ key for $name: $err")
+    ) { keyWithName =>
+      val fingerprint = keyWithName.fingerprint
+      existPrivateKeyByFp(fingerprint)
+        .leftMap(err =>
+          s"Failure while looking for $typ key $fingerprint of $name in private key store: $err"
+        )
+        .transform {
+          case Right(true) => Right(keyWithName)
+          case Right(false) =>
+            Left(s"Broken private key store: Could not find $typ key $fingerprint of $name")
+          case Left(err) => Left(err)
+        }
+    }
+  } yield pubKey
 
   /** Poll the datastore to see if the id has been initialized in case a replica initializes the node */
   private def waitForReplicaInitialization(): Unit = blocking {

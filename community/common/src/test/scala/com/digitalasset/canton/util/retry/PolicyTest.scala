@@ -668,7 +668,9 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
       val retried = new AtomicInteger()
 
       def run(): Future[Int] = Future.successful {
-        retried.incrementAndGet()
+        val num = retried.incrementAndGet()
+        logger.debug(s"Increment retried is ${num}, closeable is ${closeable.isClosing}")
+        num
       }
 
       val retryF =
@@ -677,15 +679,15 @@ class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
             logger.debug(s"Stopped retry after $count")
           }(executorService)
 
+      logger.debug("Wrapping")
       // Wrap the retry in a performUnlessClosing to trigger possible deadlocks.
       val retryUnlessClosingF =
         closeable.performUnlessClosingF("test-retry")(retryF)(executorService, traceContext)
 
       Threading.sleep(10)
-
       closeable.close()
 
-      inside(Await.result(retryUnlessClosingF.unwrap, 50.millis)) {
+      inside(Await.result(retryUnlessClosingF.unwrap, 100.millis)) {
         case UnlessShutdown.Outcome(_) => succeed
         case UnlessShutdown.AbortedDueToShutdown => fail("Unexpected shutdown.")
       }

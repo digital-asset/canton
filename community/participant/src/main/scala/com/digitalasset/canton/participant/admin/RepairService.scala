@@ -24,7 +24,7 @@ import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapperCompanion,
   String255,
 }
-import com.digitalasset.canton.crypto.{HashPurpose, SecureRandomness, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -1035,7 +1035,7 @@ class RepairService(
     // We take as much entropy as for a random UUID.
     // This should be enough to guard against clashes between the repair requests executed on a single participant.
     // We don't have to worry about clashes with ordinary transaction IDs as the hash purpose is different.
-    val randomness = SecureRandomness.randomByteString(16)
+    val randomness = syncCrypto.pureCrypto.generateRandomByteString(16)
     val hash = syncCrypto.pureCrypto.digest(HashPurpose.RepairTransactionId, randomness)
     TransactionId(hash)
   }

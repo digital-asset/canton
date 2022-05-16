@@ -84,7 +84,7 @@ abstract class TopologyManager[E <: CantonError](
     else {
       for {
         active <- EitherT.right(
-          store.findActiveTransactionsForMapping(transaction.transaction.element.mapping)
+          store.findPositiveTransactionsForMapping(transaction.transaction.element.mapping)
         )
         filtered = active.find(sit => sit.transaction.element == transaction.transaction.element)
         _ <- EitherT.cond[Future](
@@ -148,20 +148,31 @@ abstract class TopologyManager[E <: CantonError](
       }
     }
 
-  protected def checkMappingDoesNotExistYet(
+  def signedMappingAlreadyExists(
+      mapping: TopologyMapping,
+      signingKey: Fingerprint,
+  )(implicit traceContext: TraceContext): Future[Boolean] =
+    for {
+      txs <- store.findPositiveTransactionsForMapping(mapping)
+      mappings = txs.map(x => (x.transaction.element.mapping, x.key.fingerprint))
+    } yield mappings.contains((mapping, signingKey))
+
+  protected def checkMappingOfTxDoesNotExistYet(
       transaction: SignedTopologyTransaction[TopologyChangeOp],
       allowDuplicateMappings: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] =
-    if (allowDuplicateMappings || transaction.transaction.op == TopologyChangeOp.Remove) {
+    if (allowDuplicateMappings || transaction.transaction.op != TopologyChangeOp.Add) {
       EitherT.rightT(())
     } else {
       (for {
-        txs <- EitherT.right(
-          store.findActiveTransactionsForMapping(transaction.transaction.element.mapping)
+        exists <- EitherT.right(
+          signedMappingAlreadyExists(
+            transaction.transaction.element.mapping,
+            transaction.key.fingerprint,
+          )
         )
-        matching = txs.filter(SignedTopologyTransaction.equivalent(_, transaction))
         _ <- EitherT.cond[Future](
-          matching.isEmpty,
+          !exists,
           (),
           TopologyManagerError.MappingAlreadyExists.Failure(
             transaction.transaction.element,
@@ -350,7 +361,7 @@ abstract class TopologyManager[E <: CantonError](
         if (isUniquenessRequired) checkTransactionNotAddedBefore(transaction).leftMap(wrapError)
         else EitherT.pure[Future, E](())
       _ <- checkRemovalRefersToExisingTx(transaction).leftMap(wrapError)
-      _ <- checkMappingDoesNotExistYet(transaction, allowDuplicateMappings).leftMap(wrapError)
+      _ <- checkMappingOfTxDoesNotExistYet(transaction, allowDuplicateMappings).leftMap(wrapError)
       _ <- transactionIsNotDangerous(transaction, force).leftMap(wrapError)
       _ <- checkNewTransaction(transaction, force) // domain / participant specific checks
       deactivateExisting <- removeExistingTransactions(transaction, replaceExisting)
@@ -455,7 +466,7 @@ abstract class TopologyManager[E <: CantonError](
         for {
           tx <- EitherT(
             store
-              .findActiveTransactionsForMapping(mapping)
+              .findPositiveTransactionsForMapping(mapping)
               .map(
                 _.headOption.toRight[TopologyManagerError](
                   TopologyManagerError.NoCorrespondingActiveTxToRevoke.Mapping(mapping)

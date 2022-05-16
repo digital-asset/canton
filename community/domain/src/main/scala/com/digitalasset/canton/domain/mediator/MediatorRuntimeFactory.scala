@@ -22,6 +22,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
 
@@ -73,6 +74,7 @@ trait MediatorRuntimeFactory {
       topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: LocalNodeParameters,
+      protocolVersion: ProtocolVersion,
       clock: Clock,
       metrics: MediatorMetrics,
       futureSupervisor: FutureSupervisor,
@@ -97,6 +99,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       topologyTransactionProcessor: TopologyTransactionProcessor,
       timeTrackerConfig: DomainTimeTrackerConfig,
       nodeParameters: LocalNodeParameters,
+      protocolVersion: ProtocolVersion,
       clock: Clock,
       metrics: MediatorMetrics,
       futureSupervisor: FutureSupervisor,
@@ -132,6 +135,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
           sequencerCounterTrackerStore,
           sequencedEventStore,
           nodeParameters,
+          protocolVersion,
           clock,
           metrics,
           MediatorReadyCheck(mediatorId, syncCrypto, loggerFactory),

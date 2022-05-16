@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.version.ProtocolVersion
 
 trait MediatorRequest extends ProtocolMessage {
   def requestUuid: UUID
@@ -30,6 +31,7 @@ trait MediatorRequest extends ProtocolMessage {
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
   ): MediatorResult with SignedProtocolMessageContent
 
   def confirmationPolicy: ConfirmationPolicy

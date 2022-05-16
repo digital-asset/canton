@@ -260,6 +260,7 @@ object EncryptedViewMessage {
       snapshot: DomainSnapshotSyncCryptoApi,
       encrypted: EncryptedViewMessage[VT],
       participantId: ParticipantId,
+      protocolVersion: ProtocolVersion,
       optViewRandomness: Option[SecureRandomness] = None,
   )(deserialize: ByteString => Either[DeserializationError, encrypted.encryptedView.viewType.View])(
       implicit ec: ExecutionContext
@@ -280,11 +281,12 @@ object EncryptedViewMessage {
       viewRandomness <- optViewRandomness.fold(
         decryptRandomness(snapshot, encrypted, participantId)
       )(r => EitherT.pure(r))
-      viewKey <- eitherT(
-        pureCrypto
-          .hkdfExpand(viewRandomness, keyLength, HkdfInfo.ViewKey)
-          .leftMap(HkdfExpansionError(_, encrypted))
-      )
+      viewKey <-
+        eitherT(
+          ProtocolCryptoApi
+            .hkdf(pureCrypto, protocolVersion)(viewRandomness, keyLength, HkdfInfo.ViewKey)
+            .leftMap(HkdfExpansionError(_, encrypted))
+        )
       decrypted <- eitherT(
         EncryptedView
           .decrypt(pureCrypto, viewKey, encrypted.encryptedView)(deserialize)

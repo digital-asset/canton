@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.store
 
-import java.util.concurrent.atomic.AtomicReference
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -71,16 +70,12 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
   // Cached values for keys and secret
   protected val signingKeyMap: TrieMap[Fingerprint, SigningPrivateKeyWithName] = TrieMap.empty
   protected val decryptionKeyMap: TrieMap[Fingerprint, EncryptionPrivateKeyWithName] = TrieMap.empty
-  protected val hmacSecretRef: AtomicReference[Option[HmacSecret]] = new AtomicReference(None)
 
   // Write methods that the underlying store has to implement.
   protected def writeSigningKey(key: SigningPrivateKey, name: Option[KeyName])(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit]
   protected def writeDecryptionKey(key: EncryptionPrivateKey, name: Option[KeyName])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit]
-  protected def writeHmacSecret(hmacSecret: HmacSecret)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit]
 
@@ -92,10 +87,6 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
   private[store] def listDecryptionKeys(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[EncryptionPrivateKeyWithName]]
-  @VisibleForTesting
-  private[store] def loadHmacSecret()(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[HmacSecret]]
 
   protected def deletePrivateKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
@@ -188,23 +179,6 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
         val _ = decryptionKeyMap.put(key.id, EncryptionPrivateKeyWithName(key, name))
       }
 
-  private[crypto] def hmacSecret(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[HmacSecret]] =
-    hmacSecretRef.get() match {
-      case hmacSecret @ Some(_) => EitherT.rightT(hmacSecret)
-      case None =>
-        loadHmacSecret().map { result =>
-          hmacSecretRef.set(result)
-          result
-        }
-    }
-
-  def storeHmacSecret(hmacSecret: HmacSecret)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    writeHmacSecret(hmacSecret).map(_ => hmacSecretRef.set(Some(hmacSecret)))
-
   private def retrieveAndUpdateCache[KN <: PrivateKeyWithName](
       cache: TrieMap[Fingerprint, KN],
       readKey: Fingerprint => EitherT[Future, CryptoPrivateStoreError, Option[KN]],
@@ -231,23 +205,6 @@ object CryptoPrivateStore {
 
 sealed trait CryptoPrivateStoreError extends Product with Serializable with PrettyPrinting
 object CryptoPrivateStoreError {
-
-  case class FailedToLoadHmacSecret(reason: String) extends CryptoPrivateStoreError {
-    override def pretty: Pretty[FailedToLoadHmacSecret] = prettyOfClass(
-      unnamedParam(_.reason.unquoted)
-    )
-  }
-
-  case object HmacSecretAlreadyExists extends CryptoPrivateStoreError {
-    override def pretty: Pretty[HmacSecretAlreadyExists.type] =
-      prettyOfObject[HmacSecretAlreadyExists.type]
-  }
-
-  case class FailedToInsertHmacSecret(reason: String) extends CryptoPrivateStoreError {
-    override def pretty: Pretty[FailedToInsertHmacSecret] = prettyOfClass(
-      unnamedParam(_.reason.unquoted)
-    )
-  }
 
   case class FailedToListKeys(reason: String) extends CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToListKeys] = prettyOfClass(unnamedParam(_.reason.unquoted))

@@ -355,9 +355,10 @@ object ExampleTransactionFactory {
   * Also provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
 class ExampleTransactionFactory(
-    val cryptoOps: HashOps with HmacOps with HkdfOps = new SymbolicPureCrypto
+    val cryptoOps: HashOps with HmacOps with HkdfOps with RandomOps = new SymbolicPureCrypto
 )(
-    val transactionSeed: Salt = TestSalt.generate(0),
+    val transactionSalt: Salt = TestSalt.generateSalt(0),
+    val transactionSeed: SaltSeed = TestSalt.generateSeed(0),
     val transactionUuid: UUID = UUID.fromString("11111111-2222-3333-4444-555555555555"),
     val confirmationPolicy: ConfirmationPolicy = ConfirmationPolicy.Signatory,
     val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("example::default")),
@@ -627,7 +628,7 @@ class ExampleTransactionFactory(
 
   case object EmptyTransaction extends ExampleTransaction {
 
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "empty transaction"
 
@@ -663,7 +664,7 @@ class ExampleTransactionFactory(
   }
 
   abstract class SingleNode(val nodeSeed: Option[LfHash]) extends ExampleTransaction {
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     def lfContractId: LfContractId
 
@@ -926,7 +927,7 @@ class ExampleTransactionFactory(
     */
   case object MultipleRoots extends ExampleTransaction {
 
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "multiple roots"
 
@@ -1036,7 +1037,7 @@ class ExampleTransactionFactory(
     */
   case object MultipleRootsAndViewNestings extends ExampleTransaction {
 
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with multiple roots and view nestings"
 
@@ -1479,7 +1480,7 @@ class ExampleTransactionFactory(
     */
   case object ViewInterleavings extends ExampleTransaction {
 
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with subviews and core nodes interleaved"
 
@@ -2019,7 +2020,7 @@ class ExampleTransactionFactory(
     */
   case object TransientContracts extends ExampleTransaction {
 
-    override def hashOps: HashOps = ExampleTransactionFactory.this.cryptoOps
+    override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "transaction with transient contracts"
 

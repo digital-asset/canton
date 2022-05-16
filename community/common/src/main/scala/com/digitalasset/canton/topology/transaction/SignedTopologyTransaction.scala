@@ -8,7 +8,7 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.serialization.{MemoizedEvidenceV2, ProtoConverter}
+import com.digitalasset.canton.serialization.{ProtocolVersionedMemoizedEvidence, ProtoConverter}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
@@ -41,7 +41,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]]]
     with HasProtoV0[v0.SignedTopologyTransaction]
-    with MemoizedEvidenceV2
+    with ProtocolVersionedMemoizedEvidence
     with Product
     with Serializable
     with PrettyPrinting {
@@ -51,7 +51,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
 
   override protected def toProtoVersioned
       : VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]] =
-    SignedTopologyTransaction.toProtoVersionedV2(this)
+    SignedTopologyTransaction.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(

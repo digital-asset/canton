@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.authentication
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
@@ -19,10 +20,11 @@ class AuthenticationTokenCacheTest extends AsyncWordSpec with BaseTest {
     val cache = new AuthenticationTokenCache(clock, storeSpy, loggerFactory)
   }
 
-  val participant1 = DefaultTestIdentities.participant1
-  val participant2 = DefaultTestIdentities.participant2
-  val token1 = AuthenticationToken.generate()
-  val token2 = AuthenticationToken.generate()
+  lazy val participant1 = DefaultTestIdentities.participant1
+  lazy val participant2 = DefaultTestIdentities.participant2
+  lazy val crypto = new SymbolicPureCrypto
+  lazy val token1 = AuthenticationToken.generate(crypto)
+  lazy val token2 = AuthenticationToken.generate(crypto)
   def ts(n: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(n.toLong)
 
   "lookup" should {

@@ -5,6 +5,8 @@ package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
 import cats.implicits._
+import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
@@ -14,7 +16,6 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, UniqueIdentifier}
-import com.digitalasset.canton.BaseTest
 import io.grpc._
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.StreamObserver
@@ -28,8 +29,9 @@ class SequencerClientAuthenticationTest extends FixtureAsyncWordSpec with BaseTe
 
   val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("test::domain"))
   val participantId = DefaultTestIdentities.participant1
-  val token1 = AuthenticationToken.generate()
-  val token2 = AuthenticationToken.generate()
+  val crypto = new SymbolicPureCrypto
+  val token1 = AuthenticationToken.generate(crypto)
+  val token2 = AuthenticationToken.generate(crypto)
 
   require(token1 != token2, "The generated tokens must be different")
 

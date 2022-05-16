@@ -4,18 +4,27 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
-import com.digitalasset.canton.util.NoCopy
 import com.google.protobuf.ByteString
 
 import scala.util.Random
+
+trait RandomOps {
+
+  protected def generateRandomBytes(length: Int): Array[Byte]
+
+  def generateRandomByteString(length: Int): ByteString =
+    ByteString.copyFrom(generateRandomBytes(length))
+
+  def generateSecureRandomness(length: Int): SecureRandomness = SecureRandomness(
+    generateRandomByteString(length)
+  )
+}
 
 /** The class is a tag that denotes a byte string as a securely generated random value.
   *
   * Not an AnyVal as we also want it to be a serializable value such that we can encrypt it.
   */
-case class SecureRandomness private[crypto] (unwrap: ByteString)
-    extends HasCryptographicEvidence
-    with NoCopy {
+sealed abstract case class SecureRandomness(unwrap: ByteString) extends HasCryptographicEvidence {
   override def getCryptographicEvidence: ByteString = unwrap
 }
 
@@ -23,19 +32,7 @@ case class SecureRandomness private[crypto] (unwrap: ByteString)
 object SecureRandomness {
 
   private[crypto] def apply(unwrap: ByteString): SecureRandomness =
-    new SecureRandomness(unwrap)
-
-  private val rand = new java.security.SecureRandom()
-
-  def randomBytes(length: Int): Array[Byte] = {
-    val secretBytes = new Array[Byte](length)
-    rand.nextBytes(secretBytes)
-    secretBytes
-  }
-
-  def randomByteString(length: Int): ByteString = ByteString.copyFrom(randomBytes(length))
-
-  def secureRandomness(length: Int): SecureRandomness = SecureRandomness(randomByteString(length))
+    new SecureRandomness(unwrap) {}
 
   /** Recover secure randomness from a byte string. Use for deserialization only. Fails if the provided byte string
     * is not of the expected length.
@@ -50,7 +47,7 @@ object SecureRandomness {
           bytes,
         )
       )
-    else Right(new SecureRandomness(bytes))
+    else Right(SecureRandomness(bytes))
   }
 }
 

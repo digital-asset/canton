@@ -14,7 +14,7 @@ import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
+import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingEventPublish,
@@ -92,7 +92,7 @@ class InMemoryMultiDomainEventLog(
       )
     )
 
-  private val dispatcher = Dispatcher[GlobalOffset](
+  private val dispatcher: Dispatcher[GlobalOffset] = Dispatcher[GlobalOffset](
     loggerFactory.name,
     ledgerFirstOffset - 1, // start index is exclusive
     ledgerFirstOffset - 1, // end index is inclusive
@@ -387,7 +387,11 @@ class InMemoryMultiDomainEventLog(
     Lifecycle.close(
       executionQueue
         .asCloseable("InMemoryMultiDomainEventLog.executionQueue", timeouts.shutdownShort.duration),
-      dispatcher,
+      AsyncCloseable(
+        s"${this.getClass}: dispatcher",
+        dispatcher.shutdown(),
+        timeouts.shutdownShort.duration,
+      ),
     )(logger)
   }
 

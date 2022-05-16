@@ -38,7 +38,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     val hashOps = new SymbolicPureCrypto
     def h(i: Int): Hash = TestHash.digest(i)
     def rh(index: Int): RootHash = RootHash(h(index))
-    def s(i: Int): Salt = TestSalt.generate(i)
+    def s(i: Int): Salt = TestSalt.generateSalt(i)
     val viewCommonData =
       ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(2), s(999))
     val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)

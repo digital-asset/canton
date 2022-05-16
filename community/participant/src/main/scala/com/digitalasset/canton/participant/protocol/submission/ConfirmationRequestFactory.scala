@@ -74,16 +74,14 @@ class ConfirmationRequestFactory(
 
     val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoSnapshot)
     val keySeed =
-      optKeySeed.getOrElse(SecureRandomness.secureRandomness(randomnessLength))
+      optKeySeed.getOrElse(cryptoSnapshot.pureCrypto.generateSecureRandomness(randomnessLength))
 
     for {
       _ <- assertSubmittersNodeAuthorization(submitterInfo.actAs, cryptoSnapshot.ipsSnapshot)
 
       // Starting with Daml 1.6.0, the daml engine performs authorization validation.
 
-      transactionSeed <- seedGenerator
-        .generateSeedForTransaction(submitterInfo.changeId, domain, ledgerTime, transactionUuid)
-        .leftMap(SeedGeneratorError)
+      transactionSeed = seedGenerator.generateSaltSeed()
 
       transactionTree <- transactionTreeFactory
         .createTransactionTree(
@@ -159,7 +157,7 @@ class ConfirmationRequestFactory(
       transactionTree: GenTransactionTree,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       keySeed: SecureRandomness,
-      version: ProtocolVersion,
+      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, ConfirmationRequestCreationError, List[
     OpenEnvelope[TransactionViewMessage]
   ]] = {
@@ -167,14 +165,14 @@ class ConfirmationRequestFactory(
     for {
       lightTreesWithMetadata <- EitherT.fromEither[Future](
         transactionTree
-          .allLightTransactionViewTreesWithWitnessesAndSeeds(keySeed, pureCrypto)
+          .allLightTransactionViewTreesWithWitnessesAndSeeds(keySeed, pureCrypto, protocolVersion)
           .leftMap(KeySeedError)
       )
       res <- lightTreesWithMetadata.toList
         .traverse { case (vt, witnesses, seed) =>
           for {
             viewMessage <- EncryptedViewMessageFactory
-              .create(TransactionViewType)(vt, cryptoSnapshot, version, Some(seed))
+              .create(TransactionViewType)(vt, cryptoSnapshot, protocolVersion, Some(seed))
               .leftMap(EncryptedViewMessageCreationError)
             recipients <- witnesses
               .toRecipients(cryptoSnapshot.ipsSnapshot)

@@ -3,19 +3,20 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import java.util.concurrent.{CompletableFuture, CompletionStage}
 import com.daml.ledger.api.auth.{AuthService, ClaimSet}
-import com.digitalasset.canton.crypto.SecureRandomness
+import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.util.{HexString, NoCopy}
 import io.grpc.Metadata
+
+import java.util.concurrent.{CompletableFuture, CompletionStage}
 
 case class CantonAdminToken private (secret: String) extends NoCopy
 object CantonAdminToken {
   private[this] def apply(secret: String): CantonAdminToken =
     throw new UnsupportedOperationException("Use the create method instead.")
 
-  def create(): CantonAdminToken = {
-    val secret = HexString.toHexString(SecureRandomness.randomByteString(64))
+  def create(randomOps: RandomOps): CantonAdminToken = {
+    val secret = HexString.toHexString(randomOps.generateRandomByteString(64))
     new CantonAdminToken(secret)
   }
 }
