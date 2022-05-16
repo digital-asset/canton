@@ -309,7 +309,6 @@ object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomai
       case _: RemoteClock | _: SimClock => defaultTopologyChangeDelayNonStandardClock
       case _ => defaultTopologyChangeDelay
     }
-
     initialValues(topologyChangeDelay)
   }
 

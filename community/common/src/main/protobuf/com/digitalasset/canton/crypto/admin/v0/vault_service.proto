@@ -81,11 +81,6 @@ service VaultService {
      */
     rpc ListCertificates(ListCertificateRequest) returns (ListCertificateResponse);
 
-    /**
-     * Rotate the stored HMAC secret.
-     */
-    rpc RotateHmacSecret(RotateHmacSecretRequest) returns (RotateHmacSecretResponse);
-
 }
 
 message GenerateCertificateRequest {
@@ -170,14 +165,4 @@ message GenerateEncryptionKeyRequest {
 
 message GenerateEncryptionKeyResponse {
     com.digitalasset.canton.crypto.v0.EncryptionPublicKey public_key = 1;
-}
-
-message RotateHmacSecretRequest {
-
-    // Length of the HMAC secret. Must be at least 128 bits, but less than the internal block size of the hash function.
-    int32 length = 1;
-}
-
-message RotateHmacSecretResponse {
-
 }

@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.initialization
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.crypto.{KeyName, PublicKey, X509Certificate}
+import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
@@ -16,7 +16,7 @@ import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   OwnerToKeyMapping,
 }
-import com.digitalasset.canton.topology.{DomainId, _}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -30,45 +30,52 @@ trait DomainTopologyManagerIdentityInitialization {
       initialDynamicDomainParameters: DynamicDomainParameters,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, (NodeId, DomainTopologyManager, PublicKey)] =
+  ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] =
     // initialize domain with local keys
     for {
       id <- Identifier.create(name.unwrap).toEitherT[Future]
-      // TODO(i5202) if we crash here, we will like not be able to recover.
-      nsName <- KeyName.create(s"$name-namespace").toEitherT[Future]
-      ns <- crypto
-        .generateSigningKey(name = Some(nsName))
-        .leftMap(err => s"Failed to generate namespace key: $err")
-      idmName <- KeyName.create(s"$name-signing").toEitherT[Future]
-      idmKey <- crypto
-        .generateSigningKey(name = Some(idmName))
-        .leftMap(err => s"Failed to generate identity key: $err")
-      uid = UniqueIdentifier(id, Namespace(ns.fingerprint))
+      // first, we create the namespace key for this node
+      namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
+      // then, we create the topology manager signing key
+      topologyManagerSigningKey <- getOrCreateSigningKey(s"$name-topology-manager-signing")
+      // using the namespace key and the identifier, we create the uid of this node
+      uid = UniqueIdentifier(id, Namespace(namespaceKey.fingerprint))
       nodeId = NodeId(uid)
-      _ <- storeId(nodeId)
-
-      idMgr = initializeIdentityManagerAndServices(nodeId)
-
+      // now, we kick off the topology manager services so we can start building topology transactions
+      topologyManager = initializeIdentityManagerAndServices(nodeId)
+      // first, we issue the root namespace delegation for our namespace
       _ <- authorizeStateUpdate(
-        idMgr,
-        ns,
-        NamespaceDelegation(Namespace(ns.fingerprint), ns, isRootDelegation = true),
+        topologyManager,
+        namespaceKey,
+        NamespaceDelegation(
+          Namespace(namespaceKey.fingerprint),
+          namespaceKey,
+          isRootDelegation = true,
+        ),
       )
-
+      // then, we initialise the domain parameters
       _ <- authorizeDomainGovernance(
-        idMgr,
-        ns,
+        topologyManager,
+        namespaceKey,
         DomainParametersChange(DomainId(uid), initialDynamicDomainParameters),
       )
 
+      // now, we assign the topology manager key with the domain topology manager
       domainTopologyManagerId = DomainTopologyManagerId(uid)
-      _ <- authorizeStateUpdate(idMgr, ns, OwnerToKeyMapping(domainTopologyManagerId, idmKey))
+      _ <- authorizeStateUpdate(
+        topologyManager,
+        namespaceKey,
+        OwnerToKeyMapping(domainTopologyManagerId, topologyManagerSigningKey),
+      )
 
       // Setup the legal identity of the domain nodes
-      domainCert <- new LegalIdentityInit(certificateGenerator, crypto)
-        .generateCertificate(uid, Seq(MediatorId(uid), domainTopologyManagerId))
+      domainCert <- (new LegalIdentityInit(certificateGenerator, crypto)).getOrGenerateCertificate(
+        uid,
+        Seq(MediatorId(uid), domainTopologyManagerId),
+      )
       _ <- legalIdentityHook(domainCert)
-    } yield (nodeId, idMgr, ns)
+
+    } yield (nodeId, topologyManager, namespaceKey)
 
   protected def initializeIdentityManagerAndServices(nodeId: NodeId): DomainTopologyManager
 

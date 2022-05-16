@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 
 import scala.util.hashing.MurmurHash3
@@ -82,7 +82,7 @@ trait InstanceReference
 /** Pointer for a potentially running instance by instance type (domain/participant) and its id.
   * These methods define the REPL interface for these instances (e.g. participant1 start)
   */
-trait LocalInstanceReference extends InstanceReference {
+trait LocalInstanceReference extends InstanceReference with NoTracing {
 
   val name: String
   val consoleEnvironment: ConsoleEnvironment

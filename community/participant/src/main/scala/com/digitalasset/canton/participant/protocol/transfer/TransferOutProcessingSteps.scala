@@ -82,7 +82,7 @@ class TransferOutProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
-    version: ProtocolVersion,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -159,10 +159,7 @@ class TransferOutProcessingSteps(
       (transferOutRequest, recipients) = transferOutRequestAndRecipients
 
       transferOutUuid = seedGenerator.generateUuid()
-      seed <- seedGenerator
-        .generateSeedForTransferOut(transferOutRequest, transferOutUuid)
-        .leftMap(SeedGeneratorError)
-        .mapK(FutureUnlessShutdown.outcomeK)
+      seed = seedGenerator.generateSaltSeed()
       fullTree = transferOutRequest.toFullTransferOutTree(
         pureCrypto,
         pureCrypto,
@@ -172,7 +169,7 @@ class TransferOutProcessingSteps(
       mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferOutViewType)(fullTree, originRecentSnapshot, version)
+        .create(TransferOutViewType)(fullTree, originRecentSnapshot, protocolVersion)
         .leftMap[TransferProcessorError](EncryptionError)
         .mapK(FutureUnlessShutdown.outcomeK)
       maybeRecipients = Recipients.ofSet(recipients)
@@ -244,10 +241,11 @@ class TransferOutProcessingSteps(
     FullTransferOutTree
   ]] = {
     EncryptedViewMessage
-      .decryptFor(originSnapshot, envelope.protocolMessage, participantId) { bytes =>
-        FullTransferOutTree
-          .fromByteString(originSnapshot.pureCrypto)(bytes)
-          .leftMap(e => DeserializationError(e.toString, bytes))
+      .decryptFor(originSnapshot, envelope.protocolMessage, participantId, protocolVersion) {
+        bytes =>
+          FullTransferOutTree
+            .fromByteString(originSnapshot.pureCrypto)(bytes)
+            .leftMap(e => DeserializationError(e.toString, bytes))
       }
       .map(WithRecipients(_, envelope.recipients))
   }
@@ -674,6 +672,7 @@ class TransferOutProcessingSteps(
           Some(rootHash),
           confirmingParties,
           domainId,
+          protocolVersion,
         )
       )
       Some(response)

@@ -5,9 +5,9 @@ package com.digitalasset.canton.protocol.messages
 
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.serialization.MemoizedEvidence
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 
-trait MediatorResult extends MemoizedEvidence with HasDomainId with HasRequestId {
+trait MediatorResult extends ProtocolVersionedMemoizedEvidence with HasDomainId with HasRequestId {
   def verdict: Verdict
 
   def viewType: ViewType

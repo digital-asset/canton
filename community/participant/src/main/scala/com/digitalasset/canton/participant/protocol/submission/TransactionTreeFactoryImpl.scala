@@ -14,7 +14,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.value.{Value, ValueCoder}
 import com.digitalasset.canton._
-import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt}
+import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
@@ -103,7 +103,7 @@ class TransactionTreeFactoryImpl(
 
   private[this] object State {
     def submission(
-        transactionSeed: Salt,
+        transactionSeed: SaltSeed,
         mediatorId: MediatorId,
         transactionUUID: UUID,
         ledgerTime: CantonTimestamp,
@@ -131,7 +131,7 @@ class TransactionTreeFactoryImpl(
       confirmationPolicy: ConfirmationPolicy,
       workflowId: Option[WorkflowId],
       mediatorId: MediatorId,
-      transactionSeed: Salt,
+      transactionSeed: SaltSeed,
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,

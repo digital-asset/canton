@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, Reque
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, checked}
 
 import scala.collection.mutable
@@ -24,6 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class ConfirmationResponseFactory(
     participantId: ParticipantId,
     domainId: DomainId,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
@@ -56,6 +58,7 @@ class ConfirmationResponseFactory(
               None,
               Set.empty,
               domainId,
+              protocolVersion,
             )
         )
       }
@@ -276,6 +279,7 @@ class ConfirmationResponseFactory(
                   rootHash,
                   parties,
                   domainId,
+                  protocolVersion,
                 )
             )
           }

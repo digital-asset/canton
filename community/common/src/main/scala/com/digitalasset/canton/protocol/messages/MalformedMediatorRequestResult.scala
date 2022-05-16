@@ -14,9 +14,9 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -34,10 +34,10 @@ case class MalformedMediatorRequestResult private (
     override val domainId: DomainId,
     override val viewType: ViewType,
     override val verdict: Verdict.MediatorReject,
-)(val deserializedFrom: Option[ByteString])
+)(val representativeProtocolVersion: ProtocolVersion, val deserializedFrom: Option[ByteString])
     extends MediatorResult
     with SignedProtocolMessageContent
-    with HasVersionedWrapper[VersionedMessage[MalformedMediatorRequestResult]]
+    with HasProtocolVersionedWrapper[VersionedMessage[MalformedMediatorRequestResult]]
     with HasProtoV0[v0.MalformedMediatorRequestResult]
     with NoCopy
     with PrettyPrinting {
@@ -50,9 +50,8 @@ case class MalformedMediatorRequestResult private (
       getCryptographicEvidence
     )
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[MalformedMediatorRequestResult] = VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[MalformedMediatorRequestResult] =
+    MalformedMediatorRequestResult.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.MalformedMediatorRequestResult =
     v0.MalformedMediatorRequestResult(
@@ -62,8 +61,8 @@ case class MalformedMediatorRequestResult private (
       rejection = Some(verdict.toProtoMediatorRejectV0),
     )
 
-  override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
   override def pretty: Pretty[MalformedMediatorRequestResult] = prettyOfClass(
     param("request id", _.requestId),
@@ -74,11 +73,15 @@ case class MalformedMediatorRequestResult private (
 }
 
 object MalformedMediatorRequestResult
-    extends HasMemoizedVersionedMessageCompanion[MalformedMediatorRequestResult] {
+    extends HasMemoizedProtocolVersionedWrapperCompanion[MalformedMediatorRequestResult] {
   override val name: String = "MalformedMediatorRequestResult"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.MalformedMediatorRequestResult)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.MalformedMediatorRequestResult)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   private def apply(
@@ -86,7 +89,10 @@ object MalformedMediatorRequestResult
       domainId: DomainId,
       viewType: ViewType,
       verdict: Verdict.MediatorReject,
-  )(deserializedFrom: Option[ByteString]): MalformedMediatorRequestResult =
+  )(
+      representativeProtocolVersion: ProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ): MalformedMediatorRequestResult =
     throw new UnsupportedOperationException("Use the other factory methods instead")
 
   def apply(
@@ -94,8 +100,12 @@ object MalformedMediatorRequestResult
       domainId: DomainId,
       viewType: ViewType,
       verdict: Verdict.MediatorReject,
+      protocolVersion: ProtocolVersion,
   ): MalformedMediatorRequestResult =
-    new MalformedMediatorRequestResult(requestId, domainId, viewType, verdict)(None)
+    new MalformedMediatorRequestResult(requestId, domainId, viewType, verdict)(
+      protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    )
 
   private def fromProtoV0(protoResultMsg: v0.MalformedMediatorRequestResult)(
       bytes: ByteString
@@ -111,7 +121,10 @@ object MalformedMediatorRequestResult
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(MediatorReject.fromProtoV0, "rejection", rejectP)
-    } yield new MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(Some(bytes))
+    } yield new MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
+      protocolVersionRepresentativeFor(0),
+      Some(bytes),
+    )
   }
 
   implicit val malformedMediatorRequestResultCast

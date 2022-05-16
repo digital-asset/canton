@@ -255,6 +255,15 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- TODO(i9172) upstream sequencing actor does throw on shutdown -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.daml.platform.apiserver.services.transaction.ApiTransactionService</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>Unhandled internal error</contains>
+            <exceptionMessage>java.util.concurrent.RejectedExecutionException</exceptionMessage>
+            <testing>true</testing>
+        </rewrite>
+
         <!-- Disable warnings about leaked connections for test containers
              See: https://github.com/testcontainers/testcontainers-java/issues/2209
         -->

@@ -26,6 +26,7 @@ import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.funspec.PathAnyFunSpec
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -38,7 +39,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     def b[A](i: Int): BlindedNode[A] = BlindedNode(RootHash(TestHash.digest(i)))
 
     val hashOps: HashOps = new SymbolicPureCrypto
-    def salt(i: Int): Salt = TestSalt.generate(i)
+    def salt(i: Int): Salt = TestSalt.generateSalt(i)
 
     val domainId = DefaultTestIdentities.domainId
     val mediatorId = DefaultTestIdentities.mediator
@@ -78,6 +79,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         rootHashO,
         confirmingParties,
         domainId,
+        ProtocolVersion.latestForTest,
       )
 
     describe("under the Signatory policy") {
@@ -142,6 +144,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           someOtherRootHash,
           Set(alice.party),
           domainId,
+          ProtocolVersion.latestForTest,
         )
         val result =
           sut
@@ -382,6 +385,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               None,
               Set.empty,
               domainId,
+              ProtocolVersion.latestForTest,
             )
           val result = loggerFactory.assertLogs(
             valueOrFail(sut.progress(changeTs, response, topologySnapshot).value.futureValue)(
@@ -474,7 +478,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       it("should ignore malformed non-VIP responses") {
         val reject = LocalReject.MalformedRejects.Payloads.Reject("malformed request")
         val response =
-          MediatorResponse.tryCreate(requestId, nonVip, None, reject, None, Set.empty, domainId)
+          MediatorResponse.tryCreate(
+            requestId,
+            nonVip,
+            None,
+            reject,
+            None,
+            Set.empty,
+            domainId,
+            ProtocolVersion.latestForTest,
+          )
         val result = loggerFactory.assertLogs(
           valueOrFail(
             sut

@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.functor._
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 
@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, Wit
   */
 trait ExampleTransaction {
 
-  def hashOps: HashOps
+  def cryptoOps: HashOps with RandomOps
 
   /** Set of parties who are informees of an action (root or not) in the transaction */
   def allInformees: Set[LfPartyId] = fullInformeeTree.allInformees

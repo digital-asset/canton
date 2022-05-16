@@ -68,13 +68,18 @@ class Crypto(
   override def onClosed(): Unit = Lifecycle.close(cryptoPrivateStore, cryptoPublicStore)(logger)
 }
 
-trait CryptoPureApi extends EncryptionOps with SigningOps with HmacOps with HkdfOps with HashOps
-trait CryptoPrivateApi extends EncryptionPrivateOps with SigningPrivateOps with HmacPrivateOps
+trait CryptoPureApi
+    extends EncryptionOps
+    with SigningOps
+    with HmacOps
+    with HkdfOps
+    with HashOps
+    with RandomOps
+trait CryptoPrivateApi extends EncryptionPrivateOps with SigningPrivateOps
 trait CryptoPrivateStoreApi
     extends CryptoPrivateApi
     with EncryptionPrivateStoreOps
     with SigningPrivateStoreOps
-    with HmacPrivateStoreOps
 
 sealed trait SyncCryptoError extends Product with Serializable with PrettyPrinting
 object SyncCryptoError {
@@ -84,11 +89,13 @@ object SyncCryptoError {
       owner: KeyOwner,
       keyPurpose: KeyPurpose,
       timestamp: CantonTimestamp,
+      candidates: Seq[Fingerprint],
   ) extends SyncCryptoError {
     override def pretty: Pretty[KeyNotAvailable] = prettyOfClass(
       param("owner", _.owner),
       param("key purpose", _.keyPurpose),
       param("timestamp", _.timestamp),
+      param("candidates", _.candidates),
     )
   }
 

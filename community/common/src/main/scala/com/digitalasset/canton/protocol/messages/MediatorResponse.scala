@@ -16,9 +16,9 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -53,9 +53,11 @@ case class MediatorResponse private (
     rootHash: Option[RootHash],
     confirmingParties: Set[LfPartyId],
     override val domainId: DomainId,
-)(override val deserializedFrom: Option[ByteString])
-    extends SignedProtocolMessageContent
-    with HasVersionedWrapper[VersionedMessage[MediatorResponse]]
+)(
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends SignedProtocolMessageContent
+    with HasProtocolVersionedWrapper[VersionedMessage[MediatorResponse]]
     with HasProtoV0[v0.MediatorResponse]
     with HasDomainId
     with NoCopy {
@@ -77,13 +79,11 @@ case class MediatorResponse private (
         throw InvalidMediatorResponse(show"View mash must not be empty for verdict $localVerdict")
   }
 
-  protected override def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  protected override def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[MediatorResponse] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[MediatorResponse] =
+    MediatorResponse.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.MediatorResponse =
     v0.MediatorResponse(
@@ -103,11 +103,15 @@ case class MediatorResponse private (
   override def hashPurpose: HashPurpose = HashPurpose.MediatorResponseSignature
 }
 
-object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorResponse] {
+object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[MediatorResponse] {
   override val name: String = "MediatorResponse"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.MediatorResponse)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.MediatorResponse)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   case class InvalidMediatorResponse(msg: String) extends RuntimeException(msg)
@@ -122,7 +126,7 @@ object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorRes
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
       domainId: DomainId,
-  )(deserializedFrom: Option[ByteString]) =
+  )(representativeProtocolVersion: ProtocolVersion, deserializedFrom: Option[ByteString]) =
     throw new UnsupportedOperationException("Use the public apply method")
 
   // Variant of "tryCreate" that returns Left(...) instead of throwing an exception.
@@ -137,9 +141,19 @@ object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorRes
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
   ): Either[InvalidMediatorResponse, MediatorResponse] =
     Either.catchOnly[InvalidMediatorResponse](
-      tryCreate(requestId, sender, viewHash, localVerdict, rootHash, confirmingParties, domainId)
+      tryCreate(
+        requestId,
+        sender,
+        viewHash,
+        localVerdict,
+        rootHash,
+        confirmingParties,
+        domainId,
+        protocolVersionRepresentativeFor(protocolVersion),
+      )
     )
 
   // This method is tailored to the case that the caller already knows that the parameters meet the object invariants.
@@ -163,6 +177,7 @@ object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorRes
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
   ): MediatorResponse =
     new MediatorResponse(
       requestId,
@@ -172,7 +187,7 @@ object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorRes
       rootHash,
       confirmingParties,
       domainId,
-    )(None)
+    )(protocolVersionRepresentativeFor(protocolVersion), None)
 
   private def fromProtoV0(mediatorResponseP: v0.MediatorResponse)(
       bytes: ByteString
@@ -210,7 +225,7 @@ object MediatorResponse extends HasMemoizedVersionedMessageCompanion[MediatorRes
             rootHashO,
             confirmingParties.toSet,
             domainId,
-          )(Some(bytes))
+          )(supportedProtoVersions.protocolVersionRepresentativeFor(protoVersion = 0), Some(bytes))
         )
         .leftMap(err => InvariantViolation(err.toString))
     } yield response

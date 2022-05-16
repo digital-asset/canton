@@ -29,7 +29,7 @@ class MerkleTreeTest extends AnyWordSpec with BaseTest {
   val singletonLeaf3: Leaf3 = Leaf3(3)
 
   def singletonLeafHash(index: Int): RootHash = RootHash {
-    val salt = TestSalt.generate(index)
+    val salt = TestSalt.generateSalt(index)
     val data = DeterministicEncoding.encodeInt(index)
     val hashBuilder = TestHash.build
     hashBuilder
@@ -191,7 +191,7 @@ object MerkleTreeTest {
       with HasCryptographicEvidence {
     this: A =>
 
-    override def salt: Salt = TestSalt.generate(index)
+    override def salt: Salt = TestSalt.generateSalt(index)
 
     override def getCryptographicEvidence: ByteString = DeterministicEncoding.encodeInt(index)
 

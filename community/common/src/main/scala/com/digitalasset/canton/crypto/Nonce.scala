@@ -48,7 +48,7 @@ object Nonce {
       .getOrElse(throw new DbSerializationException(s"Could not deserialize nonce from db"))
   }
 
-  def generate(): Nonce = new Nonce(SecureRandomness.randomByteString(length))
+  def generate(randomOps: RandomOps): Nonce = new Nonce(randomOps.generateRandomByteString(length))
 
   def fromProtoPrimitive(bytes: ByteString): ParsingResult[Nonce] =
     Either.cond(

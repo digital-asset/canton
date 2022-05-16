@@ -3,25 +3,29 @@
 
 package com.digitalasset.canton.topology.processing
 
-import cats.data.EitherT
+import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time._
-import com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot
 import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.TopologyStore.Change
+import com.digitalasset.canton.topology.transaction.{
+  DomainParametersChange,
+  DomainTopologyTransactionType,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
-
-import java.util.concurrent.atomic.AtomicReference
-import scala.annotation.tailrec
-import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.{Failure, Success}
-import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.config.ProcessingTimeout
+import io.functionmeta.functionFullName
 
 import java.util.ConcurrentModificationException
+import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.tailrec
+import scala.concurrent.{ExecutionContext, Promise}
+import scala.util.{Failure, Success}
+import com.daml.nonempty.NonEmpty
 
 /** Compute and synchronise the effective timestamps
   *
@@ -146,7 +150,7 @@ class TopologyTimestampPlusEpsilonTracker(
               case None => FutureUnlessShutdown.pure(computeEffective)
               case Some(value) =>
                 logger.debug(
-                  s"Need to wait until topology processing has caught up at $sequencingTime"
+                  s"Need to wait until topology processing has caught up at $sequencingTime (must reach $synchronizeAt with current=${currentKnownTime})"
                 )
                 value.map { _ =>
                   logger.debug(s"Topology processing caught up at $sequencingTime")
@@ -232,103 +236,95 @@ class TopologyTimestampPlusEpsilonTracker(
 
 object TopologyTimestampPlusEpsilonTracker {
 
-  /** This is a new subscription (rather than a resubscription).
-    * Try to figure out whether this node was bootstrapped by checking whether we find something in the store.
-    *
-    * If so, approximate the sequencing time of the topology transactions from the
-    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.WithValidity.validFrom]]
-    * and the new topology change delay.
-    */
-  def initializeOnFirstSubscription(
-      tracker: TopologyTimestampPlusEpsilonTracker,
+  def epsilonForTimestamp(
       store: TopologyStore,
+      asOfExclusive: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[EffectiveTime] = {
-    for {
-      // read the timestamp from the state store so we deal with crashes during startup / bootstrapping
-      // as we write first to the transaction store and then subsequently to the state store,
-      // but when we serve the topology state, then we serve it from the state store.
-      timestampO <- FutureUnlessShutdown.outcomeF(store.timestamp(useStateStore = true))
-      topologyChangeDelay <- FutureUnlessShutdown.outcomeF(
-        determineEpsilonFromStore(
-          timestampO.getOrElse(CantonTimestamp.MinValue),
-          store,
-          tracker.loggerFactory,
-        )
-      )
-      effectiveTime <- adjustEpsilonAndTick(
-        tracker,
-        sequencedTs = timestampO.fold(CantonTimestamp.MinValue) { timestamp =>
-          // Our best guess of when the topology change delay transaction was sequenced.
-          // Unfortunately, we cannot figure out when this change was really sequenced
-          // because the topology snapshot does not store the sequencing time of transactions.
-          // TODO(#1251) Include the original sequencing time of topology transactions during bootstrapping
-          timestamp - topologyChangeDelay
-        },
-        topologyChangeDelay,
-      )
-    } yield effectiveTime
-  }
-
-  /** compute effective time of sequencedTs and populate t+e tracker with the current epsilon */
-  def initializeFromStore(
-      tracker: TopologyTimestampPlusEpsilonTracker,
-      store: TopologyStore,
-      sequencedTs: CantonTimestamp,
-  )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[EffectiveTime] = {
+  ): FutureUnlessShutdown[TopologyStore.Change.TopologyDelay] = {
     FutureUnlessShutdown
-      .outcomeF(determineEpsilonFromStore(sequencedTs, store, tracker.loggerFactory))
-      .flatMap { topologyChangeDelay =>
-        adjustEpsilonAndTick(tracker, sequencedTs, topologyChangeDelay)
+      .outcomeF(
+        store
+          .findPositiveTransactions(
+            asOf = asOfExclusive,
+            asOfInclusive = false,
+            includeSecondary = true,
+            types = Seq(DomainTopologyTransactionType.DomainParameters),
+            filterUid = None,
+            filterNamespace = None,
+          )
+      )
+      .map { txs =>
+        txs.replaces.result
+          .map(x => (x.transaction.transaction.element.mapping, x))
+          .collectFirst { case (change: DomainParametersChange, tx) =>
+            TopologyStore.Change.TopologyDelay(
+              tx.sequenced,
+              tx.validFrom,
+              change.domainParameters.topologyChangeDelay,
+            )
+          }
+          .getOrElse(
+            TopologyStore.Change.TopologyDelay(
+              SequencedTime(CantonTimestamp.MinValue),
+              EffectiveTime(CantonTimestamp.MinValue),
+              DynamicDomainParameters.topologyChangeDelayIfAbsent,
+            )
+          )
       }
   }
 
-  private def adjustEpsilonAndTick(
+  /** Initialize tracker
+    *
+    * @param processorTs Timestamp strictly (just) before the first message that will be passed:
+    *                    No sequenced events may have been passed in earlier crash epochs whose
+    *                    timestamp is strictly between `processorTs` and the first message that
+    *                    will be passed if these events affect the topology change delay.
+    *                    Normally, it's the timestamp of the last message that was successfully
+    *                    processed before the one that will be passed first.
+    */
+  def initialize(
       tracker: TopologyTimestampPlusEpsilonTracker,
-      sequencedTs: CantonTimestamp,
-      topologyChangeDelay: NonNegativeFiniteDuration,
+      store: TopologyStore,
+      processorTs: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[EffectiveTime] = {
-    // we initialize our tracker with the current topology change delay, using the sequenced timestamp
-    // as the effective time. this is fine as we know that if epsilon(sequencedTs) = e, then this e was activated by
-    // some transaction with effective time <= sequencedTs
-    tracker
-      .adjustEpsilon(
-        EffectiveTime(sequencedTs),
-        SequencedTime(CantonTimestamp.MinValue),
-        topologyChangeDelay,
+  ): FutureUnlessShutdown[EffectiveTime] = for {
+    // find the epsilon of a dpc asOf processorTs (which means it is exclusive)
+    epsilonAtProcessorTs <- epsilonForTimestamp(store, processorTs)
+    // find also all upcoming changes which have effective >= processorTs && sequenced <= processorTs
+    // the change that makes up the epsilon at processorTs would be grabbed by the statement above
+    upcoming <- tracker.performUnlessClosingF(functionFullName)(
+      store
+        .findUpcomingEffectiveChanges(processorTs)
+        .map(_.collect {
+          case tdc: Change.TopologyDelay
+              // filter anything out that might be replayed
+              if tdc.sequenced.value <= processorTs =>
+            tdc
+        })
+    )
+    allPending = NonEmpty.mk(Seq, epsilonAtProcessorTs, upcoming: _*).sortBy(_.sequenced)
+    _ = {
+      tracker.logger.debug(
+        s"Initialising with $allPending"
       )
-      .discard[Option[NonNegativeFiniteDuration]]
-    tracker.adjustTimestampForTick(SequencedTime(sequencedTs))
-  }
-
-  private[topology] def determineEpsilonFromStore(
-      asOf: CantonTimestamp,
-      store: TopologyStore,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): Future[NonNegativeFiniteDuration] = {
-    val snapshot =
-      new StoreBasedTopologySnapshot(
-        asOf,
-        store,
-        Map(),
-        useStateTxs = true,
-        packageDependencies = _ => EitherT.pure(Set()),
-        loggerFactory,
-      )
-    snapshot
-      .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
-      .map(_.topologyChangeDelay)
-  }
+      // Now, replay all the older epsilon updates that might get activated shortly
+      allPending.foreach { change =>
+        tracker
+          .adjustEpsilon(
+            change.effective,
+            change.sequenced,
+            change.epsilon,
+          )
+          .discard[Option[NonNegativeFiniteDuration]]
+      }
+    }
+    eff <- tracker.adjustTimestampForTick(
+      allPending.last1.sequenced
+    ) // need to init with the last one
+  } yield eff
 
 }

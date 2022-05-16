@@ -360,11 +360,12 @@ object TopologyAdminCommands {
         signedBy: Option[Fingerprint],
         domainId: DomainId,
         newParameters: DynamicDomainParameters,
+        force: Boolean,
     ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
       override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] =
         v0.DomainParametersChangeAuthorization(
           authorization =
-            authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = false),
+            authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
           domain = domainId.toProtoPrimitive,
           parameters = Option(newParameters.toProtoV0),
         ).asRight

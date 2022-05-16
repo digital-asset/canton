@@ -26,7 +26,11 @@ import com.digitalasset.canton.domain.admin.{grpc => admingrpc}
 import com.digitalasset.canton.domain.config._
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.initialization._
-import com.digitalasset.canton.domain.mediator.{DomainNodeMediatorFactory, MediatorRuntime}
+import com.digitalasset.canton.domain.mediator.{
+  CommunityMediatorRuntimeFactory,
+  MediatorRuntime,
+  MediatorRuntimeFactory,
+}
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.domain.sequencing.admin._
 import com.digitalasset.canton.domain.sequencing.admin.client.SequencerAdminClient
@@ -89,7 +93,7 @@ class DomainNodeBootstrap(
     legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
     addMemberHook: DomainTopologyManager.AddMemberHook,
     sequencerRuntimeFactory: SequencerRuntimeFactory,
-    mediatorFactory: DomainNodeMediatorFactory,
+    mediatorFactory: MediatorRuntimeFactory,
     storageFactory: StorageFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit
@@ -117,12 +121,16 @@ class DomainNodeBootstrap(
           legalIdentityHook,
           DynamicDomainParameters.initialValues(clock),
         )
-        (nodeId, topologyManager, ns) = initialized
+        (nodeId, topologyManager, namespaceKey) = initialized
         domainId = DomainId(nodeId.identity)
-        _ <- initializeMediator(domainId, ns, topologyManager)
+        _ <- initializeMediator(domainId, namespaceKey, topologyManager)
         _ <- initializeSequencerServices(config.domainParameters.protocolVersion.unwrap)
-        _ <- initializeSequencer(domainId, topologyManager)
-        _ <- startIfDomainManagerReadyOrDefer(topologyManager, nodeId)
+        _ <- initializeSequencer(domainId, topologyManager, namespaceKey)
+        // finally, store the node id (which means we have completed initialisation)
+        // as all methods above are idempotent, if we die during initialisation, we should come back here
+        // and resume until we've stored the node id
+        _ <- storeId(nodeId)
+        _ <- startDomain(topologyManager)
       } yield ()
     }
 
@@ -138,20 +146,13 @@ class DomainNodeBootstrap(
 
   private def initializeMediator(
       domainId: DomainId,
-      namespaceKey: PublicKey,
+      namespaceKey: SigningPublicKey,
       topologyManager: DomainTopologyManager,
   ): EitherT[Future, String, Unit] = {
     // In a domain without a dedicated DomainTopologyManager, the mediator always gets the same ID as the domain.
     val mediatorId = MediatorId(domainId)
     for {
-      mediatorKey <- mediatorFactory.fetchInitialMediatorKey(
-        name,
-        domainId,
-        mediatorId,
-        namespaceKey,
-        topologyManager,
-        crypto,
-      )
+      mediatorKey <- getOrCreateSigningKey(s"$name-mediator-signing")
       _ <- authorizeStateUpdate(
         topologyManager,
         namespaceKey,
@@ -168,6 +169,7 @@ class DomainNodeBootstrap(
   private def initializeSequencer(
       domainId: DomainId,
       topologyManager: DomainTopologyManager,
+      namespaceKey: SigningPublicKey,
   ): EitherT[Future, String, PublicKey] = {
     def createAdminConnection(): EitherT[Future, String, SequencerAdminClient] =
       for {
@@ -203,7 +205,7 @@ class DomainNodeBootstrap(
           parameters.sequencerClient,
           parameters.devVersionSupport,
           adminClient,
-          topologyManager,
+          authorizeStateUpdate(topologyManager, namespaceKey, _),
           crypto.cryptoPublicStore,
           request,
           parameters.processingTimeouts,
@@ -260,7 +262,7 @@ class DomainNodeBootstrap(
 
   override protected def initialize(id: NodeId): EitherT[Future, String, Unit] = {
     val topologyManager = initializeIdentityManagerAndServices(id)
-    startIfDomainManagerReadyOrDefer(topologyManager, id)
+    startIfDomainManagerReadyOrDefer(topologyManager)
   }
 
   /** The Domain cannot be started until the domain manager has keys for all domain entities available. These keys
@@ -276,8 +278,7 @@ class DomainNodeBootstrap(
     *                       I don't believe we currently have a means of doing this.
     */
   private def startIfDomainManagerReadyOrDefer(
-      manager: DomainTopologyManager,
-      nodeId: NodeId,
+      manager: DomainTopologyManager
   ): EitherT[Future, String, Unit] = {
     def deferStart: EitherT[Future, String, Unit] = {
       val attemptedStart = new AtomicBoolean(false)
@@ -300,7 +301,7 @@ class DomainNodeBootstrap(
                 // we're now the top level error handler of starting a domain so log appropriately
                 val domainStarted =
                   initTimeout.await("Domain startup awaiting domain ready to handle requests")(
-                    startDomain(manager, nodeId).value
+                    startDomain(manager).value
                   )
                 domainStarted match {
                   case Left(error) =>
@@ -320,15 +321,12 @@ class DomainNodeBootstrap(
       // if the domain is starting up after previously running its identity will have been stored and will be immediately available
       alreadyInitialized <- EitherT.right[String](manager.isInitialized)
       // if not, then create an observer of topology transactions that will check each time whether full identity has been generated
-      _ <- if (alreadyInitialized) startDomain(manager, nodeId) else deferStart
+      _ <- if (alreadyInitialized) startDomain(manager) else deferStart
     } yield ()
   }
 
   /** Attempt to create the domain and only return and call setInstance once it is ready to handle requests */
-  private def startDomain(
-      manager: DomainTopologyManager,
-      nodeId: NodeId,
-  ): EitherT[Future, String, Unit] =
+  private def startDomain(manager: DomainTopologyManager): EitherT[Future, String, Unit] =
     startInstanceUnlessClosing {
       // store with all topology transactions which were timestamped and distributed via sequencer
       val domainId = DomainId(manager.id)
@@ -463,7 +461,6 @@ class DomainNodeBootstrap(
         topologyManagementArtefacts <- TopologyManagementInitialization(
           config,
           domainId,
-          nodeId,
           storage,
           clock,
           crypto,
@@ -484,8 +481,8 @@ class DomainNodeBootstrap(
 
         mediatorRuntime <- EmbeddedMediatorInitialization(
           domainId,
-          nodeId,
           parameters,
+          staticDomainParameters.protocolVersion,
           clock,
           crypto,
           topologyStoreFactory.forId(DomainStore(domainId, discriminator = "M")),
@@ -572,7 +569,7 @@ object DomainNodeBootstrap {
         DomainTopologyManager.legalIdentityHookNoOp,
         DomainTopologyManager.addMemberNoOp,
         new SequencerRuntimeFactory.Community(config.sequencer),
-        DomainNodeMediatorFactory.Embedded,
+        CommunityMediatorRuntimeFactory,
         new CommunityStorageFactory(config.storage),
         futureSupervisor,
       )

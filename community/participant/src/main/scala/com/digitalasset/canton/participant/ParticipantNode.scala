@@ -19,7 +19,7 @@ import com.digitalasset.canton.concurrent.{
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, TestingConfigInternal}
-import com.digitalasset.canton.crypto.{CryptoPureApi, KeyName, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
@@ -121,7 +121,7 @@ class ParticipantNodeBootstrap(
     ) {
 
   /** per session created admin token for in-process connections to ledger-api */
-  val adminToken: CantonAdminToken = CantonAdminToken.create()
+  val adminToken: CantonAdminToken = CantonAdminToken.create(crypto.pureCrypto)
 
   override protected def connectionPoolForParticipant: Boolean = true
 
@@ -134,10 +134,11 @@ class ParticipantNodeBootstrap(
     None
   )
 
+  private val authorizedTopologyStore = topologyStoreFactory.forId(AuthorizedStore)
   private val topologyManager =
     new ParticipantTopologyManager(
       clock,
-      topologyStoreFactory.forId(AuthorizedStore),
+      authorizedTopologyStore,
       crypto,
       cantonParameterConfig.processingTimeouts,
       loggerFactory,
@@ -218,20 +219,11 @@ class ParticipantNodeBootstrap(
     withNewTraceContext { implicit traceContext =>
       for {
         // create keys
-        nsName <- EitherT.fromEither[Future](KeyName.create(s"$name-namespace"))
-        namespaceKey <- crypto
-          .generateSigningKey(name = Some(nsName))
-          .leftMap(err => s"Failed to generate key for namespace: $err")
-        sgName <- EitherT.fromEither[Future](KeyName.create(s"$name-signing"))
-        signingKey <- crypto
-          .generateSigningKey(name = Some(sgName))
-          .leftMap(err => s"Failed to generate key for signing: $err")
-        encryptName <- EitherT.fromEither[Future](KeyName.create(s"$name-encryption"))
-        encryptionKey <- crypto
-          .generateEncryptionKey(name = Some(encryptName))
-          .leftMap(err => s"Failed to generate key for encryption: $err")
+        namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
+        signingKey <- getOrCreateSigningKey(s"$name-signing")
+        encryptionKey <- getOrCreateEncryptionKey(s"$name-encryption")
 
-        // init id
+        // create id
         identifier <- EitherT
           .fromEither[Future](Identifier.create(name.unwrap))
           .leftMap(err => s"Failed to convert participant name to identifier: $err")
@@ -240,7 +232,6 @@ class ParticipantNodeBootstrap(
           Namespace(namespaceKey.fingerprint),
         )
         nodeId = NodeId(uid)
-        _ <- storeId(nodeId)
 
         // init topology manager
         participantId = ParticipantId(uid)
@@ -266,10 +257,14 @@ class ParticipantNodeBootstrap(
           namespaceKey,
           OwnerToKeyMapping(participantId, encryptionKey),
         )
-
         // initialize certificate
-        _ <- new LegalIdentityInit(certificateGenerator, crypto)
-          .initializeCertificate(uid, Seq(participantId), namespaceKey)(topologyManager)
+        _ <- (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
+          uid,
+          Seq(participantId),
+          namespaceKey,
+        )(topologyManager, authorizedTopologyStore)
+        // finally, we store the node id, which means that the node will not be auto-initialised next time when we start
+        _ <- storeId(nodeId)
       } yield ()
     }
 

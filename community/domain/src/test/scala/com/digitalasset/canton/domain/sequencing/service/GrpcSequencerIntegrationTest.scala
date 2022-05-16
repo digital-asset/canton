@@ -116,7 +116,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
           .Success(
             v0.Challenge.Success(
               ReleaseVersion.current.toProtoPrimitive,
-              Nonce.generate().toProtoPrimitive,
+              Nonce.generate(cryptoApi.pureCrypto).toProtoPrimitive,
               fingerprints.map(_.unwrap),
             )
           )
@@ -129,7 +129,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
           v0.Authentication.Response.Value
             .Success(
               v0.Authentication.Success(
-                AuthenticationToken.generate().toProtoPrimitive,
+                AuthenticationToken.generate(cryptoApi.pureCrypto).toProtoPrimitive,
                 Some(clock.now.plusSeconds(100000).toProtoPrimitive),
               )
             )

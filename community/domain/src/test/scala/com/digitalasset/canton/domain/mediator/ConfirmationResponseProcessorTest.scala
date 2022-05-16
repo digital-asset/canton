@@ -33,6 +33,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.{eq => eqMatch}
@@ -112,6 +113,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         timeTracker,
         mediatorState,
         new LoggingAlarmStreamer(logger),
+        ProtocolVersion.latestForTest,
         loggerFactory,
       )
 
@@ -183,6 +185,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         Some(fullInformeeTree.transactionId.toRootHash),
         confirmers,
         factory.domainId,
+        ProtocolVersion.latestForTest,
       )
       val participantCrypto = identityFactory.forOwner(participant)
       SignedProtocolMessage.tryCreate(
@@ -840,6 +843,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           Some(fullInformeeTree.transactionId.toRootHash),
           Set.empty,
           factory.domainId,
+          ProtocolVersion.latestForTest,
         )
         val participantCrypto = identityFactory2.forOwner(participant)
         SignedProtocolMessage.tryCreate(

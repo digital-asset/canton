@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
@@ -97,8 +98,10 @@ class SequencerAuthenticationServerInterceptorTest
   val unauthenticatedMemberId =
     UniqueIdentifier.fromProtoPrimitive_("unm1::default").map(new UnauthenticatedMemberId(_)).value
   val neverExpire = CantonTimestamp.MaxValue
-  val token = AuthenticationTokenWithExpiry(AuthenticationToken.generate(), neverExpire)
-  val incorrectToken = AuthenticationTokenWithExpiry(AuthenticationToken.generate(), neverExpire)
+  val crypto = new SymbolicPureCrypto
+  val token = AuthenticationTokenWithExpiry(AuthenticationToken.generate(crypto), neverExpire)
+  val incorrectToken =
+    AuthenticationTokenWithExpiry(AuthenticationToken.generate(crypto), neverExpire)
 
   require(token != incorrectToken, "The generated tokens must be different")
 

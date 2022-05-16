@@ -26,7 +26,7 @@ trait DatabaseDeadlockTest
   import rawStorage.api._
 
   val batchSize = 100
-  val roundsNegative = 10
+  val roundsNegative = 50
   val roundsPositive = 1
   val maxRetries = 3
 

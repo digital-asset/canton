@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.{
   EncryptionKeyScheme,
   EncryptionTest,
   HashAlgorithm,
-  HmacPrivateTest,
+  RandomTest,
   SigningKeyScheme,
   SigningTest,
   SymmetricKeyScheme,
@@ -38,7 +38,7 @@ class SymbolicCryptoTest
     extends AsyncWordSpec
     with SigningTest
     with EncryptionTest
-    with HmacPrivateTest {
+    with RandomTest {
 
   "SymbolicCrypto" can {
 
@@ -51,7 +51,7 @@ class SymbolicCryptoTest
       SymbolicCryptoProvider.supportedSymmetricKeySchemes,
       symbolicCrypto(),
     )
-    behave like hmacProvider(symbolicCrypto().map(_.privateCrypto))
+    behave like randomnessProvider(symbolicCrypto().map(_.pureCrypto))
 
     // Symbolic crypto does not support Java key conversion, thus not tested
   }

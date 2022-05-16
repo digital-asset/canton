@@ -10,6 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
@@ -73,8 +74,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     override def close(): Unit = {}
   }
 
-  private val participant = DefaultTestIdentities.participant1
-  private val unauthenticatedMember = UnauthenticatedMemberId.tryCreate(participant.uid.namespace)
+  private lazy val participant = DefaultTestIdentities.participant1
+  private lazy val crypto = new SymbolicPureCrypto
+  private lazy val unauthenticatedMember =
+    UnauthenticatedMemberId.tryCreate(participant.uid.namespace)(crypto)
 
   class Environment(member: Member) extends Matchers {
     val sequencer: Sequencer = mock[Sequencer]

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.data
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.crypto.SecureRandomness
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
@@ -115,7 +114,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           ) shouldEqual Right(informeeTree)
 
         forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>
-          LightTransactionViewTree.fromByteString(example.hashOps)(
+          LightTransactionViewTree.fromByteString(example.cryptoOps)(
             lt.toByteString(ProtocolVersion.latestForTest)
           ) shouldBe Right(lt)
         }
@@ -141,12 +140,16 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       }
 
       "correctly reconstruct the top-level transaction view trees from the lightweight ones for each informee" in {
-        val seedLength = example.hashOps.defaultHashAlgorithm.length
-        val seed = SecureRandomness.secureRandomness(seedLength.toInt)
+        val seedLength = example.cryptoOps.defaultHashAlgorithm.length
+        val seed = example.cryptoOps.generateSecureRandomness(seedLength.toInt)
         val hkdfOps = ExampleTransactionFactory.hkdfOps
 
         val allLightTrees = example.transactionTree
-          .allLightTransactionViewTreesWithWitnessesAndSeeds(seed, hkdfOps)
+          .allLightTransactionViewTreesWithWitnessesAndSeeds(
+            seed,
+            hkdfOps,
+            ProtocolVersion.latestForTest,
+          )
           .valueOrFail("Cant get the light transaction trees")
         val allTrees = example.transactionTree.allTransactionViewTrees.toList
         val allInformees = allLightTrees.map(_._1.informees).fold(Set.empty)(_.union(_))

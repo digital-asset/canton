@@ -8,7 +8,7 @@ import cats.syntax.either._
 import com.daml.ledger.client.binding.Primitive.{Party => ClientParty}
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String300}
-import com.digitalasset.canton.crypto.SecureRandomness
+import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -190,10 +190,10 @@ object UnauthenticatedMemberId {
 
   private val RandomIdentifierNumberOfBytes = 20
 
-  def tryCreate(namespace: Namespace): UnauthenticatedMemberId =
+  def tryCreate(namespace: Namespace)(randomOps: RandomOps): UnauthenticatedMemberId =
     UnauthenticatedMemberId(
       UniqueIdentifier.tryCreate(
-        HexString.toHexString(SecureRandomness.randomByteString(RandomIdentifierNumberOfBytes)),
+        HexString.toHexString(randomOps.generateRandomByteString(RandomIdentifierNumberOfBytes)),
         namespace.fingerprint.unwrap,
       )
     )

@@ -10,6 +10,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.time.PositiveSeconds
 
@@ -41,6 +42,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       counterParticipant,
       period1,
       cmt,
+      TestDomainParameters.defaultStatic.protocolVersion,
     )
 
   val commitment2 = AcsCommitment
@@ -50,6 +52,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       counterParticipant,
       period2,
       cmt,
+      TestDomainParameters.defaultStatic.protocolVersion,
     )
 
   def fromByteString(bytes: ByteString): AcsCommitment = {

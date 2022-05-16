@@ -49,13 +49,20 @@ case class TransferOutMediatorMessage(tree: TransferOutViewTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
   ): MediatorResult with SignedProtocolMessageContent = {
     val informees = commonData.stakeholders ++ commonData.adminParties
     require(
       recipientParties.subsetOf(informees),
       "Recipient parties of the transfer-out result are neither stakeholders nor admin parties",
     )
-    TransferResult.create(requestId, informees, TransferOutDomainId(domainId), verdict)
+    TransferResult.create(
+      requestId,
+      informees,
+      TransferOutDomainId(domainId),
+      verdict,
+      protocolVersion,
+    )
   }
 
   override def toProtoV0: v0.TransferOutMediatorMessage =

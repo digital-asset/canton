@@ -20,8 +20,8 @@ import com.digitalasset.canton.protocol.messages.{
   DomainTopologyTransactionMessage,
   ProtocolMessage,
 }
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
 import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, DeliverError}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.client.{
@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{ExecutionContext, Future}
 
-case class EffectiveTime(value: CantonTimestamp) extends AnyVal {
+case class EffectiveTime(value: CantonTimestamp) {
   def toApproximate: ApproximateTime = ApproximateTime(value)
 
   def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
@@ -62,13 +62,15 @@ object EffectiveTime {
   def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[EffectiveTime] =
     CantonTimestamp.fromProtoPrimitive(ts).map(EffectiveTime(_))
 }
-case class ApproximateTime(value: CantonTimestamp) extends AnyVal
-case class SequencedTime(value: CantonTimestamp) extends AnyVal {
+case class ApproximateTime(value: CantonTimestamp)
+case class SequencedTime(value: CantonTimestamp) {
   def toProtoPrimitive: ProtoTimestamp = value.toProtoPrimitive
 }
 object SequencedTime {
   def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[SequencedTime] =
     CantonTimestamp.fromProtoPrimitive(ts).map(SequencedTime(_))
+  implicit val orderingSequencedTime: Ordering[SequencedTime] =
+    Ordering.by[SequencedTime, CantonTimestamp](_.value)
 }
 
 trait TopologyTransactionProcessingSubscriber {
@@ -136,63 +138,103 @@ class TopologyTransactionProcessor(
   private def initialise(
       start: ResubscriptionStart
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+
     ErrorUtil.requireState(
       !initialised.getAndSet(true),
       "topology processor is already initialised",
     )
 
-    // TODO(#4638) initialize the topology processor and the topology client at the appropriate timestamps
-    val resubscriptionTs = start match {
-      case ResubscriptionStart.FreshSubscription => CantonTimestamp.MinValue
-      case ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, cleanPreheadO) =>
-        firstReplayed
-      case ResubscriptionStart.CleanHeadResubscriptionStart(cleanPrehead) =>
-        cleanPrehead.immediateSuccessor
-    }
-
-    def mergeEffectiveTimesWithApproximateTimestamps(
-        effectiveTsOfSequencedTs: EffectiveTime,
-        effectiveTimes: Seq[CantonTimestamp],
-    ): Seq[(EffectiveTime, ApproximateTime)] = {
-      ((
-        (
-          effectiveTsOfSequencedTs,
-          ApproximateTime(resubscriptionTs),
-        ),
-      ) +: effectiveTimes.map(x => (EffectiveTime(x), ApproximateTime(x))))
-        .sortBy(_._1.value)
-    }
-
-    for {
-      // on startup, we need to figure out up to which point we know the topology state
-      effectiveKnownUntil <- start match {
-        case ResubscriptionStart.FreshSubscription =>
-          TopologyTimestampPlusEpsilonTracker.initializeOnFirstSubscription(
-            timeAdjuster,
-            store,
+    def resubscriptionTs(
+        timestamps: Option[(SequencedTime, EffectiveTime)]
+    ): (CantonTimestamp, Either[SequencedTime, EffectiveTime]) =
+      (start, timestamps) match {
+        // clean-head subscription. this means that the first event we are going to get is > cleanPrehead
+        // and all our stores are clean.
+        // processor: initialise with ts = cleanPrehead
+        // client: approximate time: cleanPrehead, knownUntil = cleanPrehead + epsilon
+        //         plus, there might be "effective times" > cleanPrehead, so we need to schedule the adjustment
+        //         of the approximate time to the effective time
+        case (ResubscriptionStart.CleanHeadResubscriptionStart(cleanPrehead), _) =>
+          (cleanPrehead, Left(SequencedTime(cleanPrehead)))
+        // dirty or replay subscription.
+        // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
+        // client: same as clean-head resubscription
+        case (
+              ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, Some(cleanPrehead)),
+              _,
+            ) =>
+          (firstReplayed.immediatePredecessor, Left(SequencedTime(cleanPrehead)))
+        // dirty re-subscription of a node that crashed before fully processing the first event
+        // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
+        // client: initialise client with firstReplayed (careful: firstReplayed is known, but firstReplayed.immediateSuccessor not)
+        case (ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, None), _) =>
+          (
+            firstReplayed.immediatePredecessor,
+            Right(EffectiveTime(firstReplayed.immediatePredecessor)),
           )
-        case _: ResubscriptionStart.ReplayResubscriptionStart |
-            _: ResubscriptionStart.CleanHeadResubscriptionStart =>
-          TopologyTimestampPlusEpsilonTracker.initializeFromStore(
-            timeAdjuster,
-            store,
-            resubscriptionTs,
-          )
+
+        // Fresh subscription with an empty domain topology store
+        // processor: init at ts = min
+        // client: init at ts = min
+        case (ResubscriptionStart.FreshSubscription, None) =>
+          (CantonTimestamp.MinValue, Right(EffectiveTime(CantonTimestamp.MinValue)))
+
+        // Fresh subscription with a bootstrapping timestamp
+        // NOTE: we assume that the bootstrapping topology snapshot does not contain the first message
+        // that we are going to receive from the domain
+        // processor: init at max(sequence-time) of bootstrapping transactions
+        // client: init at max(effective-time) of bootstrapping transactions
+        case (ResubscriptionStart.FreshSubscription, Some((sequenced, effective))) =>
+          (sequenced.value, Right(effective))
+
       }
 
+    def initClientFromSequencedTs(
+        sequencedTs: SequencedTime
+    ): FutureUnlessShutdown[Seq[(EffectiveTime, ApproximateTime)]] = for {
       // we need to figure out any future effective time. if we had been running, there would be a clock
       // scheduled to poke the domain client at the given time in order to adjust the approximate timestamp up to the
       // effective time at the given point in time. we need to recover these as otherwise, we might be using outdated
       // topology snapshots on startup. (wouldn't be tragic as by getting the rejects, we'd be updating the timestamps
       // anyway).
-      futureEffectiveTimes <- performUnlessClosingF(functionFullName)(
-        store.findEffectiveTimestampsSince(resubscriptionTs)
+      upcoming <- performUnlessClosingF(functionFullName)(
+        store.findUpcomingEffectiveChanges(sequencedTs.value)
+        // find effective time of sequenced Ts (directly from store)
+        // merge times
+      )
+      currentEpsilon <- TopologyTimestampPlusEpsilonTracker.epsilonForTimestamp(
+        store,
+        sequencedTs.value,
       )
     } yield {
-      val tmp =
-        mergeEffectiveTimesWithApproximateTimestamps(effectiveKnownUntil, futureEffectiveTimes)
-      logger.debug(s"Initialising topology processing with effective ts ${tmp.map(_._1)}")
-      tmp.foreach { case (effective, approximate) =>
+
+      // we have (ts+e, ts) and quite a few te in the future, so we create list of upcoming changes and sort them
+      ((
+        EffectiveTime(sequencedTs.value.plus(currentEpsilon.epsilon.unwrap)),
+        ApproximateTime(sequencedTs.value),
+      ) +: upcoming.map(x => (x.effective, x.effective.toApproximate))).sortBy(_._1.value)
+    }
+
+    for {
+      stateStoreTsO <- performUnlessClosingF(functionFullName)(
+        store.timestamp(useStateStore = true)
+      )
+      (processorTs, clientTs) = resubscriptionTs(stateStoreTsO)
+      _ <- TopologyTimestampPlusEpsilonTracker.initialize(timeAdjuster, store, processorTs)
+
+      clientInitTimes <- clientTs match {
+        case Left(sequencedTs) =>
+          // approximate time is sequencedTs
+          initClientFromSequencedTs(sequencedTs)
+        case Right(effective) =>
+          // effective and approximate time are effective time
+          FutureUnlessShutdown.pure(Seq((effective, effective.toApproximate)))
+      }
+    } yield {
+      logger.debug(
+        s"Initialising topology processing with effective ts ${clientInitTimes.map(_._1)}"
+      )
+      clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
         // TODO(ratko/andreas) This should be scheduled via the DomainTimeTracker or something similar
         //  rather than via the participant's local clock

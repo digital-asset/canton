@@ -172,6 +172,7 @@ case class GenTransactionTree(
   def allLightTransactionViewTreesWithWitnessesAndSeeds(
       initSeed: SecureRandomness,
       hkdfOps: HkdfOps,
+      protocolVersion: ProtocolVersion,
   ): Either[HkdfError, Seq[(LightTransactionViewTree, Witnesses, SecureRandomness)]] = {
     val randomnessLength = initSeed.unwrap.size
     val witnessAndSeedMapE =
@@ -191,7 +192,11 @@ case class GenTransactionTree(
         val viewIndex =
           tvt.viewPosition.position.headOption
             .getOrElse(throw new IllegalStateException("View with no position"))
-        val seedE = hkdfOps.hkdfExpand(parentSeed, randomnessLength, HkdfInfo.subview(viewIndex))
+        val seedE = ProtocolCryptoApi.hkdf(hkdfOps, protocolVersion)(
+          parentSeed,
+          randomnessLength,
+          HkdfInfo.subview(viewIndex),
+        )
         seedE.map(seed => ws.updated(tvt.viewPosition, witnesses -> seed))
       }
     witnessAndSeedMapE.map { witnessAndSeedMap =>

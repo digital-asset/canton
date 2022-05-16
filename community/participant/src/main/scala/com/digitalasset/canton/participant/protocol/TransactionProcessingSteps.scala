@@ -18,6 +18,7 @@ import com.digitalasset.canton.crypto.{
   DomainSyncCryptoClient,
   HashOps,
   HkdfInfo,
+  ProtocolCryptoApi,
   SecureRandomness,
 }
 import com.digitalasset.canton.data.ViewPosition.ListIndex
@@ -494,7 +495,13 @@ class TransactionProcessingSteps(
           vt: TransactionViewMessage,
           optRandomness: Option[SecureRandomness],
       ): EitherT[Future, DecryptionError, LightTransactionViewTree] =
-        EncryptedViewMessage.decryptFor(snapshot, vt, participantId, optRandomness)(
+        EncryptedViewMessage.decryptFor(
+          snapshot,
+          vt,
+          participantId,
+          staticDomainParameters.protocolVersion,
+          optRandomness,
+        )(
           lightTransactionViewTreeDeserializer
         )
 
@@ -540,9 +547,14 @@ class TransactionProcessingSteps(
         val (subviewHash, index) = subviewHashAndIndex
         val info = HkdfInfo.subview(ListIndex(index))
         for {
-          subviewRandomness <- pureCrypto
-            .hkdfExpand(randomness, randomness.unwrap.size, info)
-            .leftMap(error => EncryptedViewMessage.HkdfExpansionError(error, viewMessage))
+          subviewRandomness <-
+            ProtocolCryptoApi
+              .hkdf(pureCrypto, staticDomainParameters.protocolVersion)(
+                randomness,
+                randomness.unwrap.size,
+                info,
+              )
+              .leftMap(error => EncryptedViewMessage.HkdfExpansionError(error, viewMessage))
         } yield {
           randomnessMap.get(subviewHash) match {
             case Some(promise) =>

@@ -1177,11 +1177,11 @@ class TopologyAdministrationGroup(
   object domain_parameters_changes extends Helpful {
     @Help.Summary("Change domain parameters")
     @Help.Description("""Authorize a transaction to change parameters of the domain.
-      domainId: Id of the domain affected by the change.
-      newParameters: New value of the domain parameters.
-      signedBy: Refers to the fingerprint of the authorizing key which in turn must be authorized by a valid, locally existing certificate.
-                If none is given, a key is automatically determined.
-      synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node
+      |domainId: Id of the domain affected by the change.
+      |newParameters: New value of the domain parameters.
+      |signedBy: Refers to the fingerprint of the authorizing key which in turn must be authorized by a valid, locally existing certificate.
+      |          If none is given, a key is automatically determined.
+      |synchronize: Synchronize timeout can be used to ensure that the state has been propagated into the node
       """)
     def authorize(
         domainId: DomainId,
@@ -1194,7 +1194,7 @@ class TopologyAdministrationGroup(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AuthorizeDomainParametersChange(signedBy, domainId, newParameters)
+            .AuthorizeDomainParametersChange(signedBy, domainId, newParameters, force = false)
         )
       }
     )

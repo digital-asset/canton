@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -602,7 +603,7 @@ object TransferStoreTest {
       10.seconds,
     )
   }
-  val seedGenerator = new SeedGenerator(privateCrypto, pureCryptoApi)
+  val seedGenerator = new SeedGenerator(pureCryptoApi)
 
   def mkTransferDataForDomain(
       transferId: TransferId,
@@ -621,13 +622,10 @@ object TransferStoreTest {
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomainId),
     )
     val uuid = new UUID(10L, 0L)
-    for {
-      seed <- seedGenerator
-        .generateSeedForTransferOut(transferOutRequest, uuid)
-        .valueOr(err => throw new IllegalStateException(err.toString))
-    } yield {
-      val fullTransferOutViewTree =
-        transferOutRequest.toFullTransferOutTree(pureCryptoApi, pureCryptoApi, seed, uuid)
+    val seed = seedGenerator.generateSaltSeed()
+    val fullTransferOutViewTree =
+      transferOutRequest.toFullTransferOutTree(pureCryptoApi, pureCryptoApi, seed, uuid)
+    Future.successful(
       TransferData(
         transferId.requestTimestamp,
         0L,
@@ -637,7 +635,7 @@ object TransferStoreTest {
         transactionId1,
         None,
       )
-    }
+    )
   }
 
   private def mkTransferData(
@@ -656,6 +654,7 @@ object TransferStoreTest {
         requestId,
         Verdict.Approve,
         mediatorMessage.allInformees,
+        ProtocolVersion.latestForTest,
       )
       val signedResult = SignedProtocolMessage(result, sign("TransferOutResult-mediator"))
       val batch = Batch.of(signedResult -> RecipientsTest.testInstance)

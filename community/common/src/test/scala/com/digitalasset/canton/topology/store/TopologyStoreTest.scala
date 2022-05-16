@@ -17,8 +17,10 @@ import org.scalatest.{Assertion, BeforeAndAfterAll}
 import scala.annotation.nowarn
 import scala.concurrent.Future
 import cats.syntax.contravariantSemigroupal._
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Replace}
+import com.digitalasset.canton.util.MonadUtil
 
 trait TopologyStoreTest
     extends AsyncWordSpec
@@ -311,7 +313,7 @@ trait TopologyStoreTest
               )
             )
             currentTs <- store.timestamp()
-          } yield currentTs shouldBe Some(ts.plusSeconds(5))
+          } yield currentTs.map(_._2.value) shouldBe Some(ts.plusSeconds(5))
         }
 
         "successfully append new items" in {
@@ -461,10 +463,10 @@ trait TopologyStoreTest
               "",
               false,
             )
-            _ <- store.findActiveTransactionsForMapping(okm1.transaction.element.mapping)
+            _ <- store.findPositiveTransactionsForMapping(okm1.transaction.element.mapping)
             _ <- store.findRemovalTransactionForMappings(Set(okm1.transaction.element))
             _ <- store.findDispatchingTransactionsAfter(ts1)
-            _ <- store.findEffectiveTimestampsSince(ts1)
+            _ <- store.findUpcomingEffectiveChanges(ts1)
             _ <- store.findTsOfParticipantStateChangesBefore(ts1, participant1, 100)
             _ <- store.findTransactionsInRange(ts, ts1)
           } yield {
@@ -544,12 +546,12 @@ trait TopologyStoreTest
             snapshot1 <- snapshot(ts.plusMillis(5))
             snapshot1b <- snapshot(ts1.immediatePredecessor)
             snapshot2 <- snapshot(ts1.plusMillis(5))
-            empty2 <- store.findActiveTransactionsForMapping(okm1.transaction.element.mapping)
-            activeOkm2 <- store.findActiveTransactionsForMapping(okm2.transaction.element.mapping)
+            empty2 <- store.findPositiveTransactionsForMapping(okm1.transaction.element.mapping)
+            activeOkm2 <- store.findPositiveTransactionsForMapping(okm2.transaction.element.mapping)
             foundRokm1 <- store.findRemovalTransactionForMappings(Set(okm1.transaction.element))
             _ <- testQueriesUsedForDomainTopologyDispatching()
           } yield {
-            maxTimestamp should contain(ts1)
+            maxTimestamp.map(_._2.value) should contain(ts1)
             all.result should have length ((first.length + snd.length - 1).toLong)
             headState.result.map(_.transaction) shouldBe Seq(ns1k1, ns1k2, id1k1, ps1, dpc1, okm2)
             empty1 shouldBe (Nil, Nil)
@@ -560,6 +562,67 @@ trait TopologyStoreTest
             activeOkm2 should contain(okm2)
             foundRokm1 shouldBe Seq(rokm1)
           }
+        }
+
+        "test bootstrapping queries" in {
+          val store = mk()
+
+          // we have the following changes
+          val changes = List(
+            (0, 0) -> Seq(ns1k1),
+            (100, 100) -> Seq(ns1k2, dpc1), // epsilon 250ms
+            (110, 260) -> Seq(id1k1),
+            (120, 270) -> Seq(dpc1Updated),
+            (150, 300) -> Seq(okm1),
+          )
+
+          implicit class AddMs(ts: CantonTimestamp) {
+            def +(ms: Int): CantonTimestamp = ts.plusMillis(ms.toLong)
+          }
+
+          val storeF = MonadUtil.sequentialTraverse_(changes) {
+            case ((sequenced, effective), items) =>
+              store.append(
+                SequencedTime(ts + sequenced),
+                EffectiveTime(ts + effective),
+                items.map(toValidated),
+              )
+          }
+
+          def change(sequenced: Int, effective: Int, dpc: Option[Int]): TopologyStore.Change = {
+            dpc.fold(
+              TopologyStore.Change
+                .Other(
+                  SequencedTime(ts + sequenced),
+                  EffectiveTime(ts + effective),
+                ): TopologyStore.Change
+            ) { epsilon =>
+              TopologyStore.Change.TopologyDelay(
+                SequencedTime(ts + sequenced),
+                EffectiveTime(ts + effective),
+                NonNegativeFiniteDuration.ofMillis(epsilon.toLong),
+              )
+            }
+          }
+
+          for {
+            _ <- storeF
+            empty1 <- store.findUpcomingEffectiveChanges(ts + 301)
+            last1 <- store.findUpcomingEffectiveChanges(ts + 271)
+            pendingDpc <- store.findUpcomingEffectiveChanges(ts + 270)
+            firstDpc <- store.findUpcomingEffectiveChanges(ts + 101)
+            timestamps <- store.timestamp(useStateStore = false)
+          } yield {
+            val change150 = change(150, 300, None)
+            val change120 = change(120, 270, Some(100))
+            val change110 = change(110, 260, None)
+            empty1 shouldBe empty
+            last1 shouldBe Seq(change150)
+            pendingDpc shouldBe Seq(change120, change150)
+            firstDpc shouldBe Seq(change110, change120, change150)
+            timestamps should contain((SequencedTime(ts + 150), EffectiveTime(ts + 300)))
+          }
+
         }
 
         "namespace filter behaves correctly" in {

@@ -4,37 +4,31 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
-import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
-
-import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
 
 class SaltTest extends AnyWordSpec with BaseTest {
 
   "Salt" should {
 
     "serializing and deserializing via protobuf" in {
-      val salt = TestSalt.generate(0)
+      val salt = TestSalt.generateSalt(0)
       val saltP = salt.toProtoV0
       Salt.fromProtoV0(saltP).value shouldBe salt
     }
 
-    "generate a fresh salt" in {
-      implicit val ec: ExecutionContext = DirectExecutionContext(logger)
-
+    "generate a fresh salt seeds" in {
       val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
-      val seedData = ByteString.copyFromUtf8("testSeedData")
-      val salt = Await.result(Salt.generate(seedData, crypto.privateCrypto).value, 10.seconds)
+      val salt1 = SaltSeed.generate()(crypto.pureCrypto)
+      val salt2 = SaltSeed.generate()(crypto.pureCrypto)
 
-      salt.value shouldBe a[Salt]
+      salt1 shouldBe a[SaltSeed]
+      salt1 should not equal salt2
     }
 
     "derive a salt" in {
       val hmacOps = new SymbolicPureCrypto
-      val seedSalt = TestSalt.generate(0)
+      val seedSalt = TestSalt.generateSeed(0)
       val salt = Salt.deriveSalt(seedSalt, 0, hmacOps)
 
       // The derived salt must be different than the seed salt value

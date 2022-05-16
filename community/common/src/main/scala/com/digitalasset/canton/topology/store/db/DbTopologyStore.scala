@@ -432,7 +432,8 @@ class DbTopologyStore(
   )(implicit
       traceContext: TraceContext
   ): Future[CantonTimestamp] =
-    if (!isDomainStore) Future.successful(validFrom) // only compute for domain stores
+    if (!isDomainStore)
+      Future.successful(sequencedO.getOrElse(validFrom)) // only compute for domain stores
     else {
       def getParameterChangeBefore(
           ts: CantonTimestamp
@@ -488,18 +489,10 @@ class DbTopologyStore(
 
   override def timestamp(
       useStateStore: Boolean
-  )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] = {
-
+  )(implicit traceContext: TraceContext): Future[Option[(SequencedTime, EffectiveTime)]] = {
     val storeId = if (useStateStore) stateStoreIdFilterName else transactionStoreIdName
-    val query = sql"""SELECT valid_from FROM topology_transactions
-           WHERE store_id = $storeId ORDER BY id DESC #${storage.limit(1)}"""
-
-    readTime.metric
-      .event {
-        storage.query(query.as[Option[CantonTimestamp]].headOption, functionFullName)
-      }
-      .map(_.flatten)
-
+    queryForTransactions(storeId, sql"", storage.limit(1), orderBy = " ORDER BY id DESC")
+      .map(_.result.headOption.map(tx => (tx.sequenced, tx.validFrom)))
   }
 
   override def headTransactions(implicit
@@ -533,28 +526,26 @@ class DbTopologyStore(
       )
     }
 
-  override def findActiveTransactionsForMapping(
+  override def findPositiveTransactionsForMapping(
       mapping: TopologyMapping
   )(implicit
       traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Add]]] = {
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]]] = {
     val tmp = TopologyElementId.tryCreate("1")
     val ns = mapping.uniquePath(tmp).namespace
     val query = mapping.uniquePath(tmp).maybeUid.map(_.id) match {
       case None => sql"AND namespace = $ns"
       case Some(identifier) => sql"AND namespace = $ns AND identifier = $identifier"
     }
-
     queryForTransactions(
       transactionStoreIdName,
       sql"AND valid_until is NULL AND transaction_type = ${mapping.dbType}" ++ query,
     )
-      .map(_.result.collect {
-        case StoredTopologyTransaction(_sequenced, _validFrom, None, tr)
-            if tr.transaction.element.mapping == mapping =>
-          tr
-      })
-      .map(_.mapFilter(TopologyChangeOp.select[TopologyChangeOp.Add]))
+      .map { x =>
+        x.positiveTransactions.combine.result
+          .map(_.transaction)
+          .filter(_.transaction.element.mapping == mapping)
+      }
   }
 
   override def allTransactions(implicit
@@ -624,10 +615,10 @@ class DbTopologyStore(
       case None => sql" AND valid_until is NULL"
     }
     val query1: SQLActionBuilderChain = timeQuery match {
-      case TimeQuery.HeadState => getHeadStateQuery()
+      case TimeQuery.HeadState =>
+        getHeadStateQuery()
       case TimeQuery.Snapshot(asOf) =>
         asOfQuery(asOf = asOf, asOfInclusive = false)
-
       case TimeQuery.Range(None, None) =>
         sql"" // The case below insert an additional `AND` that we don't want
       case TimeQuery.Range(from, until) =>
@@ -868,21 +859,18 @@ class DbTopologyStore(
       },
     )
 
-  override def findEffectiveTimestampsSince(
-      timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Seq[CantonTimestamp]] = {
-    val query =
-      sql"SELECT DISTINCT valid_from FROM topology_transactions WHERE store_id = $transactionStoreIdName AND valid_from > $timestamp ORDER BY valid_from"
-    readTime.metric.event {
-      storage
-        .query(
-          query.as[
-            CantonTimestamp
-          ],
-          functionFullName,
-        )
-
-    }
+  override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Seq[TopologyStore.Change]] = {
+    queryForTransactions(
+      transactionStoreIdName,
+      sql"AND valid_from >= $asOfInclusive ",
+      orderBy = " ORDER BY valid_from",
+    ).map(res =>
+      TopologyStore.Change.accumulateUpcomingEffectiveChanges(
+        res.result
+      )
+    )
   }
 
   override def currentDispatchingWatermark(implicit

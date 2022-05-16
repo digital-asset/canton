@@ -95,6 +95,8 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     remoteId2 -> Set(carol),
   )
 
+  protected val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+
   def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
   def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
@@ -176,9 +178,10 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       .thenReturn(EitherT.rightT[Future, SendAsyncClientError](()))
 
     val changeTimes =
-      (timeProofs.map(ts => TimeOfChange(0, ts)) ++ contractSetup.values.toList.flatMap(cInfo =>
-        List(cInfo._2, cInfo._3)
-      )).distinct.sorted
+      (timeProofs.map(ts => TimeOfChange(0, ts)) ++ contractSetup.values.toList.flatMap {
+        case (_, creationTs, archivalTs) =>
+          List(creationTs, archivalTs)
+      }).distinct.sorted
     val changes = changeTimes.map(changesAtToc(contractSetup))
     val store = optCommitmentStore.getOrElse(new InMemoryAcsCommitmentStore(loggerFactory))
     val acsCommitmentProcessor = new AcsCommitmentProcessor(
@@ -191,6 +194,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       (_, _) => FutureUnlessShutdown.unit,
       killSwitch,
       ParticipantTestMetrics.pruning,
+      protocolVersion,
       DefaultProcessingTimeouts.testing
         .copy(storageMaxRetryInterval = TimeoutDuration.tryFromDuration(1.millisecond)),
       loggerFactory,
@@ -514,7 +518,14 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
             val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
             val period =
               CommitmentPeriod(fromExclusive.forgetSecond, toInclusive.forgetSecond, interval).value
-            val payload = AcsCommitment.create(domainId, remote, localId, period, cmt)
+            val payload = AcsCommitment.create(
+              domainId,
+              remote,
+              localId,
+              period,
+              cmt,
+              protocolVersion,
+            )
 
             snapshotF.flatMap { snapshot =>
               SignedProtocolMessage.tryCreate(payload, snapshot, crypto.pureCrypto)

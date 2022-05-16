@@ -38,6 +38,7 @@ import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -55,6 +56,7 @@ class ConfirmationResponseProcessor(
     timeTracker: DomainTimeTracker,
     val mediatorState: MediatorState,
     alarmer: AlarmStreamer,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
@@ -316,7 +318,13 @@ class ConfirmationResponseProcessor(
         envs <- recipientsByViewType.toSeq
           .traverse { case (viewType, recipients) =>
             val rejection =
-              MalformedMediatorRequestResult(requestId, domain, viewType, rejectionReason)
+              MalformedMediatorRequestResult(
+                requestId,
+                domain,
+                viewType,
+                rejectionReason,
+                protocolVersion,
+              )
             SignedProtocolMessage
               .tryCreate(rejection, snapshot, crypto.pureCrypto)
               .map { signedRejection =>
@@ -512,14 +520,17 @@ class ConfirmationResponseProcessor(
             .Reject(show"$informeesNoParticipant")
         else verdict
       }
-      envelopes <- informeesMap
-        .map { case (participantId, informees) =>
-          val result = request.createMediatorResult(requestId, verdictWithInformeeCheck, informees)
+      envelopes <- informeesMap.toList
+        .traverse { case (participantId, informees) =>
+          val result = request.createMediatorResult(
+            requestId,
+            verdictWithInformeeCheck,
+            informees,
+            protocolVersion,
+          )
           SignedProtocolMessage
             .create(result, snapshot, crypto.pureCrypto)
             .map(signedResult => OpenEnvelope(signedResult, Recipients.cc(participantId)))
         }
-        .toList
-        .sequence
     } yield Batch(envelopes)
 }

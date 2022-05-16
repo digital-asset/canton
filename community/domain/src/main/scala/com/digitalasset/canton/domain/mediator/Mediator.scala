@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -51,6 +52,7 @@ class Mediator(
     sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
     parameters: LocalNodeParameters,
+    protocolVersion: ProtocolVersion,
     clock: Clock,
     metrics: MediatorMetrics,
     readyCheck: MediatorReadyCheck,
@@ -80,6 +82,7 @@ class Mediator(
     timeTracker,
     state,
     new LoggingAlarmStreamer(logger),
+    protocolVersion,
     loggerFactory,
   )
 

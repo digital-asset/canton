@@ -7,15 +7,15 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.2.0-snapshot.20220504.9851.0.4c8e027d"
+  val version: String = "2.3.0-snapshot.20220511.9887.0.5a509164"
 
   /** Custom Daml artifacts override version.
     */
-  private val customDamlVersion: String = "0.0.0"
+  private val customDamlVersion: String = sys.env.getOrElse("DAML_HEAD_VERSION", "0.0.0")
 
   /** Whether we want to use the customDamlVersion.
     */
-  val useCustomDamlVersion: Boolean = sys.env.contains("DAML_SNAPSHOT")
+  val useCustomDamlVersion: Boolean = sys.env.contains("DAML_HEAD_VERSION")
 
   /** The version to use when sdk jvm libraries published to maven repositories.
     */

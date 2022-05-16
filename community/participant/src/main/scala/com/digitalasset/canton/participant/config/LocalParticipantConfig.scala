@@ -278,6 +278,8 @@ case class LedgerApiServerConfig(
     maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     databaseConnectionTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultDatabaseConnectionTimeout,
+    apiStreamShutdownTimeout: NonNegativeFiniteDuration =
+      LedgerApiServerConfig.DefaultApiStreamShutdownTimeout,
     maxTransactionsInMemoryFanOutBufferSize: Long =
       LedgerApiServerConfig.DefaultMaxTransactionsInMemoryFanOutBufferSize,
     enableInMemoryFanOutForLedgerApi: Boolean = false, // Not tested for production yet
@@ -310,6 +312,8 @@ object LedgerApiServerConfig {
   val DefaultDatabaseConnectionTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(30)
   val DefaultMaxTransactionsInMemoryFanOutBufferSize: Long = 10000L
+  val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.ofSeconds(5)
 
   // By default synchronous commit locally but don't await ACKs when replicated
   val DefaultSynchronousCommitMode: String = "LOCAL"
@@ -345,6 +349,7 @@ object LedgerApiServerConfig {
               _maxContractKeyStateCacheSize,
               _maxTransactionsInMemoryFanOutBufferSize,
               _enableInMemoryFanOutForLedgerApi,
+              _apiStreamShutdownTimeout,
             ),
             _portFile,
             _seeding,
@@ -531,9 +536,6 @@ case class IndexerConfig(
     ingestionParallelism: NonNegativeInt =
       NonNegativeInt.tryCreate(DamlIndexerConfig.DefaultIngestionParallelism),
     submissionBatchSize: Long = DamlIndexerConfig.DefaultSubmissionBatchSize,
-    tailingRateLimitPerSecond: NonNegativeInt =
-      NonNegativeInt.tryCreate(DamlIndexerConfig.DefaultTailingRateLimitPerSecond),
-    batchWithinMillis: Long = DamlIndexerConfig.DefaultBatchWithinMillis,
     enableCompression: Boolean = DamlIndexerConfig.DefaultEnableCompression,
     schemaMigrationAttempts: Int = IndexerStartupMode.DefaultSchemaMigrationAttempts,
     schemaMigrationAttemptBackoff: NonNegativeFiniteDuration =
@@ -572,8 +574,6 @@ object IndexerConfig {
             batchingParallelism,
             ingestionParallelism,
             submissionBatchSize,
-            tailingRateLimitPerSecond,
-            batchWithinMillis,
             enableCompression,
             _haConfig, // consider making a subset of these settings configurable once the ha-dust settles
             postgresTcpKeepalivesIdle,
@@ -603,8 +603,6 @@ object IndexerConfig {
           batchingParallelism = NonNegativeInt.tryCreate(batchingParallelism),
           ingestionParallelism = NonNegativeInt.tryCreate(ingestionParallelism),
           submissionBatchSize = submissionBatchSize,
-          tailingRateLimitPerSecond = NonNegativeInt.tryCreate(tailingRateLimitPerSecond),
-          batchWithinMillis = batchWithinMillis,
           enableCompression = enableCompression,
           schemaMigrationAttempts = schemaMigrationAttempts,
           schemaMigrationAttemptBackoff =

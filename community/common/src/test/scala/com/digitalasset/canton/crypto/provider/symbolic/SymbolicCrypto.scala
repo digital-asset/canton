@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto.provider.symbolic
 
-import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
@@ -12,13 +11,12 @@ import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPublicStore,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 
-import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
+import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
+import scala.concurrent.ExecutionContext
 
 object SymbolicCrypto extends LazyLogging {
 
@@ -78,30 +76,13 @@ object SymbolicCrypto extends LazyLogging {
   def create(
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-      hkdfOps: Option[HkdfOps] = None,
-      autoInitialize: Boolean = true,
   ): Crypto = {
     implicit val ec: ExecutionContext = DirectExecutionContext(TracedLogger(logger))
-    import TraceContext.Implicits.Empty._
 
-    val pureCrypto = new SymbolicPureCrypto(hkdfOps)
+    val pureCrypto = new SymbolicPureCrypto()
     val cryptoPublicStore = new InMemoryCryptoPublicStore
     val cryptoPrivateStore = new InMemoryCryptoPrivateStore(loggerFactory)
     val privateCrypto = new SymbolicPrivateCrypto(pureCrypto, cryptoPrivateStore)
-
-    if (autoInitialize) {
-      // Auto initialize the private store's HMAC
-      Await.result(
-        privateCrypto
-          .initializeHmacSecret()
-          .valueOr(err =>
-            throw new RuntimeException(
-              s"Failed to initialize private crypto with HMAC secret: $err"
-            )
-          ),
-        10.seconds,
-      )
-    }
 
     // Conversion to java keys is not supported by symbolic crypto
     val javaKeyConverter = new JavaKeyConverter {
@@ -141,13 +122,12 @@ object SymbolicCrypto extends LazyLogging {
   def tryCreate(
       signingFingerprints: Seq[Fingerprint],
       fingerprintSuffixes: Seq[String],
-      hkdfOps: Option[HkdfOps],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
 
-    val crypto = SymbolicCrypto.create(timeouts, loggerFactory, hkdfOps)
+    val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
 
     // Create a keypair for each signing fingerprint
     signingFingerprints.foreach { k =>

@@ -9,6 +9,7 @@ import cats.implicits._
 import com.codahale.metrics.SharedMetricRegistries
 import com.daml.api.util.TimeProvider
 import com.daml.caching
+import scala.jdk.DurationConverters._
 import com.daml.ledger.api.health.HealthChecks
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
@@ -167,8 +168,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           batchingParallelism = config.indexerConfig.batchingParallelism.unwrap,
           ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
           submissionBatchSize = config.indexerConfig.submissionBatchSize,
-          tailingRateLimitPerSecond = config.indexerConfig.tailingRateLimitPerSecond.unwrap,
-          batchWithinMillis = config.indexerConfig.batchWithinMillis,
           enableCompression = config.indexerConfig.enableCompression,
           haConfig = config.indexerLockIds.fold(HaConfig()) {
             case IndexerLockIds(mainLockId, workerLockId) =>
@@ -363,6 +362,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                   ),
                 ),
                 userManagementConfig = config.serverConfig.userManagementService.damlConfig,
+                apiStreamShutdownTimeout =
+                  config.serverConfig.apiStreamShutdownTimeout.duration.toScala,
               ).acquire()
             } yield ()
 

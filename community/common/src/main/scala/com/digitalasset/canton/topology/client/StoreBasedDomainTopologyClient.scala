@@ -448,7 +448,7 @@ class StoreBasedTopologySnapshot(
         ),
         filterUid = Some(parties.map(_.uid)),
         filterNamespace = None,
-      ).map(_.toIdentityState)
+      ).map(_.toTopologyState)
 
       // aggregate the mappings, looking for matching request sides
       allAggregated = transactions.foldLeft(Map.empty[PartyId, PartyAggregation]) {
@@ -498,7 +498,7 @@ class StoreBasedTopologySnapshot(
       types = Seq(DomainTopologyTransactionType.OwnerToKeyMapping),
       filterUid = Some(Seq(owner.uid)),
       filterNamespace = None,
-    ).map(_.toIdentityState)
+    ).map(_.toTopologyState)
       .map(_.collect {
         case TopologyStateUpdateElement(_, OwnerToKeyMapping(foundOwner, key))
             if foundOwner.code == owner.code =>
@@ -522,7 +522,7 @@ class StoreBasedTopologySnapshot(
       types = Seq(DomainTopologyTransactionType.ParticipantState),
       filterUid = None,
       filterNamespace = None,
-    ).map(_.toIdentityState)
+    ).map(_.toTopologyState)
       // TODO(i4930) this is quite inefficient
       .map(_.collect { case TopologyStateUpdateElement(_, ps: ParticipantState) =>
         ps.participant
@@ -564,7 +564,7 @@ class StoreBasedTopologySnapshot(
         types = Seq(DomainTopologyTransactionType.ParticipantState),
         filterUid = Some(participants.map(_.uid)),
         filterNamespace = None,
-      ).map(_.toIdentityState)
+      ).map(_.toTopologyState)
         .map { loaded =>
           loaded
             .foldLeft(
@@ -611,7 +611,7 @@ class StoreBasedTopologySnapshot(
       types = Seq(DomainTopologyTransactionType.SignedLegalIdentityClaim),
       filterUid = Some(Seq(participantId.uid)),
       filterNamespace = None,
-    ).map(_.toIdentityState.reverse.collectFirstSome {
+    ).map(_.toTopologyState.reverse.collectFirstSome {
       case TopologyStateUpdateElement(_id, SignedLegalIdentityClaim(_, claimBytes, _signature)) =>
         val result = for {
           claim <- LegalIdentityClaim
@@ -651,7 +651,7 @@ class StoreBasedTopologySnapshot(
         namespaceOnly = false,
       )
       .map { col =>
-        col.toIdentityState
+        col.toTopologyState
           .map(_.mapping)
           .collect {
             case OwnerToKeyMapping(owner, key)
@@ -693,7 +693,7 @@ class StoreBasedTopologySnapshot(
         filterUid = Some(Seq(participant.uid)),
         filterNamespace = None,
       ).map { res =>
-        res.toIdentityState.flatMap {
+        res.toTopologyState.flatMap {
           case TopologyStateUpdateElement(_, VettedPackages(_, packageIds)) => packageIds
           case _ => Seq()
         }.toSet
@@ -727,7 +727,7 @@ class StoreBasedTopologySnapshot(
     filterNamespace = None,
   ).map { res =>
     ArraySeq.from(
-      res.toIdentityState
+      res.toTopologyState
         .foldLeft(Map.empty[MediatorId, (Boolean, Boolean)]) {
           case (acc, TopologyStateUpdateElement(_, MediatorDomainState(side, _, mediator))) =>
             acc + (mediator -> RequestSide
@@ -755,7 +755,7 @@ class StoreBasedTopologySnapshot(
       // We sort the results to be able to pick the most recent one in case
       // several transactions are found.
       val domainParameters =
-        StoredTopologyTransactions(storedTxs.result.sortBy(_.validFrom.value)).toIdentityState
+        StoredTopologyTransactions(storedTxs.result.sortBy(_.validFrom.value)).toTopologyState
           .collect { case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
             domainParameters
           }

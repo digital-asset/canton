@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -13,7 +12,24 @@ import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
-import scala.concurrent.{ExecutionContext, Future}
+/** A seed to derive further salts from.
+  *
+  * Unlike [[Salt]] this seed will not be shipped to another participant.
+  */
+abstract sealed case class SaltSeed(unwrap: ByteString)
+
+object SaltSeed {
+
+  /** Default length for a salt seed is 128 bits */
+  val defaultLength = 16
+
+  private[crypto] def apply(bytes: ByteString): SaltSeed = {
+    new SaltSeed(bytes) {}
+  }
+
+  def generate(length: Int = defaultLength)(randomOps: RandomOps): SaltSeed =
+    SaltSeed(randomOps.generateRandomByteString(length))
+}
 
 /** Indicates the algorithm used to generate and derive salts. */
 sealed trait SaltAlgorithm extends Product with Serializable with PrettyPrinting {
@@ -79,20 +95,14 @@ object Salt {
       SaltError.InvalidSaltCreation(bytes, algorithm),
     )
 
-  /** Derives a salt from a `seed` salt and an `index`. */
-  def deriveSalt(seed: Salt, index: Int, hmacOps: HmacOps): Either[SaltError, Salt] = {
-    deriveSalt(seed, DeterministicEncoding.encodeInt(index), hmacOps)
-  }
-
-  def tryDeriveSalt(seed: Salt, index: Int, hmacOps: HmacOps): Salt = {
-    deriveSalt(seed, index, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
-  }
-
-  /** Derives a salt from a `seed` salt and `bytes` using an HMAC as a pseudo-random function. */
-  def deriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Either[SaltError, Salt] =
+  private def deriveSalt(
+      seed: ByteString,
+      bytes: ByteString,
+      hmacOps: HmacOps,
+  ): Either[SaltError, Salt] =
     for {
       pseudoSecret <- HmacSecret
-        .create(seed.toByteString)
+        .create(seed)
         .leftMap(SaltError.HmacGenerationError)
       saltAlgorithm = SaltAlgorithm.Hmac(hmacOps.defaultHmacAlgorithm)
       hmac <- hmacOps
@@ -101,19 +111,26 @@ object Salt {
       salt <- create(hmac.unwrap, saltAlgorithm)
     } yield salt
 
-  def tryDeriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Salt =
+  /** Derives a salt from a `seed` salt and an `index`. */
+  def deriveSalt(seed: SaltSeed, index: Int, hmacOps: HmacOps): Either[SaltError, Salt] = {
+    deriveSalt(seed, DeterministicEncoding.encodeInt(index), hmacOps)
+  }
+
+  def tryDeriveSalt(seed: SaltSeed, index: Int, hmacOps: HmacOps): Salt = {
+    deriveSalt(seed, index, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
+  }
+
+  /** Derives a salt from a `seed` salt and `bytes` using an HMAC as a pseudo-random function. */
+  def deriveSalt(seed: SaltSeed, bytes: ByteString, hmacOps: HmacOps): Either[SaltError, Salt] =
+    deriveSalt(seed.unwrap, bytes, hmacOps)
+
+  def tryDeriveSalt(seed: SaltSeed, bytes: ByteString, hmacOps: HmacOps): Salt =
     deriveSalt(seed, bytes, hmacOps).valueOr(err => throw new IllegalStateException(err.toString))
 
-  /** Generates a salt from the given `bytes` using HMAC with a stored HMAC secret as pseudo-random function. */
-  def generate(bytes: ByteString, hmacPrivateOps: HmacPrivateOps)(implicit
-      ec: ExecutionContext
-  ): EitherT[Future, SaltError, Salt] = {
-    val saltAlgorithm = SaltAlgorithm.Hmac(hmacPrivateOps.defaultHmacAlgorithm)
-    hmacPrivateOps
-      .hmac(bytes, saltAlgorithm.hmacAlgorithm)
-      .leftMap(SaltError.HmacGenerationError)
-      .flatMap(hmac => create(hmac.unwrap, saltAlgorithm).toEitherT)
-  }
+  def tryDeriveSalt(seed: Salt, bytes: ByteString, hmacOps: HmacOps): Salt =
+    deriveSalt(seed.toByteString, bytes, hmacOps).valueOr(err =>
+      throw new IllegalStateException(err.toString)
+    )
 
   def fromProtoV0(saltP: v0.Salt): ParsingResult[Salt] =
     for {

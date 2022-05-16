@@ -17,9 +17,9 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -122,16 +122,16 @@ case class AcsCommitment private (
     counterParticipant: ParticipantId,
     period: CommitmentPeriod,
     commitment: AcsCommitment.CommitmentType,
-)(override val deserializedFrom: Option[ByteString])
-    extends HasVersionedWrapper[VersionedMessage[AcsCommitment]]
+)(
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends HasProtocolVersionedWrapper[VersionedMessage[AcsCommitment]]
     with HasProtoV0[v0.AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[AcsCommitment] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[AcsCommitment] =
+    AcsCommitment.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.AcsCommitment = {
     v0.AcsCommitment(
@@ -144,8 +144,8 @@ case class AcsCommitment private (
     )
   }
 
-  override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
   protected[messages] def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage =
@@ -164,11 +164,19 @@ case class AcsCommitment private (
   }
 }
 
-object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment] {
+object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCommitment] {
   override val name: String = "AcsCommitment"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
+
+  private val protocolVersionRepresentative = protocolVersionRepresentativeFor(
+    ProtocolVersion.v2_0_0_Todo_i8793
   )
 
   type CommitmentType = ByteString
@@ -193,7 +201,10 @@ object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment]
       sender: ParticipantId,
       timestamp: CantonTimestamp,
       commitment: CommitmentType,
-  )(deserializedFrom: Option[ByteString]): AcsCommitment =
+  )(
+      representativeProtocolVersion: ProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ): AcsCommitment =
     throw new UnsupportedOperationException("Use the create/tryCreate methods instead")
 
   def create(
@@ -202,8 +213,12 @@ object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment]
       counterParticipant: ParticipantId,
       period: CommitmentPeriod,
       commitment: CommitmentType,
+      protocolVersion: ProtocolVersion,
   ): AcsCommitment =
-    new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(None)
+    new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
+      protocolVersion,
+      None,
+    )
 
   private def fromProtoV0(protoMsg: v0.AcsCommitment)(
       bytes: ByteString
@@ -236,7 +251,10 @@ object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment]
       period = CommitmentPeriod(fromExclusive, periodLength)
       cmt = protoMsg.commitment
       commitment = commitmentTypeFromByteString(cmt)
-    } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(Some(bytes))
+    } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
+      protocolVersionRepresentativeFor(0),
+      Some(bytes),
+    )
   }
 
   implicit val acsCommitmentCast: SignedMessageContentCast[AcsCommitment] = {
@@ -251,7 +269,10 @@ object AcsCommitment extends HasMemoizedVersionedMessageCompanion[AcsCommitment]
       GetResult[CommitmentPeriod],
       GetResult[CommitmentType],
     ).andThen { case (sender, counterParticipant, period, commitment) =>
-      AcsCommitment(domainId, sender, counterParticipant, period, commitment)(None)
+      AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
+        protocolVersionRepresentative,
+        None,
+      )
     }
 
 }

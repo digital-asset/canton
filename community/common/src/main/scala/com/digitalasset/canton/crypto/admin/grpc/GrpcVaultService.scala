@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto.admin.grpc
 import cats.syntax.either._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.crypto.admin.v0
-import com.digitalasset.canton.crypto.admin.v0.{RotateHmacSecretRequest, RotateHmacSecretResponse}
 import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -190,14 +189,5 @@ class GrpcVaultService(
         results = converted.map(pem => v0.ListCertificateResponse.Result(x509Cert = pem.toString))
       )
       EitherTUtil.toFuture(res)
-    }
-
-  override def rotateHmacSecret(
-      request: RotateHmacSecretRequest
-  ): Future[RotateHmacSecretResponse] =
-    TraceContext.fromGrpcContext { implicit traceContext =>
-      EitherTUtil
-        .toFuture(mapErr(crypto.privateCrypto.rotateHmacSecret(request.length)))
-        .map(_ => RotateHmacSecretResponse())
     }
 }

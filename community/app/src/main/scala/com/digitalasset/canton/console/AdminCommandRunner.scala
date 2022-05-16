@@ -10,7 +10,6 @@ import com.digitalasset.canton.console.CommandErrors.ConsoleTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.tracing.NoTracing
 
 import scala.annotation.tailrec
 
@@ -103,7 +102,7 @@ trait BaseInspection[I <: CantonNode] {
 
 }
 
-trait FeatureFlagFilter extends NamedLogging with NoTracing {
+trait FeatureFlagFilter extends NamedLogging {
 
   protected def consoleEnvironment: ConsoleEnvironment
 
@@ -113,7 +112,7 @@ trait FeatureFlagFilter extends NamedLogging with NoTracing {
     if (flag) {
       command
     } else {
-      logger.error(
+      noTracingLogger.error(
         s"The command is currently disabled. You need to enable it explicitly by setting `canton.features.${config} = yes` in your Canton configuration file (`.conf`)"
       )
       throw new CommandFailure()

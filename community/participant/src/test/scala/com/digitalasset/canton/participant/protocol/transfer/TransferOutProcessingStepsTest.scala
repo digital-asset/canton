@@ -174,7 +174,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       .forOwnerAndDomain(submittingParticipant, originDomain)
       .currentSnapshotApproximation
 
-  val seedGenerator = new SeedGenerator(cryptoSnapshot.crypto.privateCrypto, pureCrypto)
+  val seedGenerator = new SeedGenerator(pureCrypto)
 
   private val coordination: TransferCoordination =
     TestTransferCoordination(
@@ -484,9 +484,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       targetDomain,
       timeEvent,
     )
-    val outTreeF = makeFullTransferOutTree(outRequest)
+    val outTree = makeFullTransferOutTree(outRequest)
     val encryptedOutRequestF = for {
-      outTree <- outTreeF
       encrypted <- encryptTransferOutTree(outTree)
     } yield encrypted
 
@@ -506,7 +505,6 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
     "succeed without errors" in {
       for {
-        outTree <- outTreeF
         encryptedOutRequest <- encryptedOutRequestF
         envelopes = NonEmpty(Seq, OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance))
         decrypted <- valueOrFail(outProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
@@ -561,16 +559,16 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         timeEvent,
       )
 
+      val fullTransferOutTree = makeFullTransferOutTree(outRequest)
+      val dataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs(
+        fullTransferOutTree,
+        Recipients.cc(submittingParticipant),
+        CantonTimestamp.Epoch,
+        1L,
+        1L,
+        cryptoSnapshot,
+      )
       for {
-        fullTransferOutTree <- makeFullTransferOutTree(outRequest)
-        dataAndResponseArgs = TransferOutProcessingSteps.PendingDataAndResponseArgs(
-          fullTransferOutTree,
-          Recipients.cc(submittingParticipant),
-          CantonTimestamp.Epoch,
-          1L,
-          1L,
-          cryptoSnapshot,
-        )
         _ <- state.storedContractManager.addPendingContracts(
           1L,
           Seq(WithTransactionId(contract, transactionId)),
@@ -603,6 +601,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           Set(),
           TransferOutDomainId(originDomain),
           Verdict.Approve,
+          ProtocolVersion.latestForTest,
         )
       for {
         signedResult <- SignedProtocolMessage.tryCreate(transferResult, cryptoSnapshot, pureCrypto)
@@ -655,10 +654,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
   def makeFullTransferOutTree(
       request: TransferOutRequest,
       uuid: UUID = new UUID(6L, 7L),
-  ): Future[FullTransferOutTree] = {
-    for {
-      seed <- seedGenerator.generateSeedForTransferOut(request, uuid).valueOrFail("generate seed")
-    } yield request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+  ): FullTransferOutTree = {
+    val seed = seedGenerator.generateSaltSeed()
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
   }
 
   def encryptTransferOutTree(

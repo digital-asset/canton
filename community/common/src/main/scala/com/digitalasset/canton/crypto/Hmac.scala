@@ -3,25 +3,21 @@
 
 package com.digitalasset.canton.crypto
 
-import java.security.{InvalidKeyException, NoSuchAlgorithmException}
-import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPrivateStoreError}
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
-
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 import slick.jdbc.{GetResult, SetParameter}
 
-import scala.concurrent.{ExecutionContext, Future}
+import java.security.{InvalidKeyException, NoSuchAlgorithmException}
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 sealed abstract class HmacAlgorithm(val name: String, val hashAlgorithm: HashAlgorithm)
     extends PrettyPrinting {
@@ -35,7 +31,7 @@ object HmacAlgorithm {
 
   val algorithms: Seq[HmacAlgorithm] = Seq(HmacSha256)
 
-  case object HmacSha256 extends HmacAlgorithm("HmacSHA256", HashAlgorithm.Sha256) {
+  case object HmacSha256 extends HmacAlgorithm("HMACSHA256", HashAlgorithm.Sha256) {
     override def toProtoEnum: v0.HmacAlgorithm = v0.HmacAlgorithm.HmacSha256
   }
 
@@ -172,9 +168,9 @@ object HmacSecret {
     * NOTE: The length of the HMAC secret should not exceed the internal _block_ size of the hash function,
     * e.g., 512 bits for SHA256.
     */
-  def generate(length: Int = defaultLength): HmacSecret = {
+  def generate(randomOps: RandomOps, length: Int = defaultLength): HmacSecret = {
     require(length >= defaultLength, s"Specified HMAC secret key length ${length} too small.")
-    new HmacSecret(SecureRandomness.randomByteString(length))
+    new HmacSecret(randomOps.generateRandomByteString(length))
   }
 }
 
@@ -189,70 +185,6 @@ trait HmacOps {
       algorithm: HmacAlgorithm = defaultHmacAlgorithm,
   ): Either[HmacError, Hmac] =
     Hmac.compute(secret, message, algorithm)
-
-}
-
-/** HMAC operations that require access to private key store and knowledge about the current entity to key association */
-trait HmacPrivateOps extends HmacOps {
-
-  protected def hmacSecret(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Option[HmacSecret]]
-
-  /** Calculates the HMAC of the given message using the stored private key */
-  def hmac(message: ByteString, algorithm: HmacAlgorithm = defaultHmacAlgorithm)(implicit
-      executionContext: ExecutionContext
-  ): EitherT[Future, HmacError, Hmac] =
-    hmacSecret(executionContext, TraceContext.empty)
-      .subflatMap(_.toRight(HmacError.MissingHmacSecret))
-      .subflatMap { secret =>
-        hmacWithSecret(secret, message, algorithm)
-      }
-
-  /** Initializes the private HMAC secret if not present */
-  def initializeHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Unit]
-
-  /** Rotates the private HMAC secret by replacing the existing one with a newly generated secret. */
-  def rotateHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Unit]
-
-}
-
-/** A default implementation with a private key store for the HMAC secret. */
-trait HmacPrivateStoreOps extends HmacPrivateOps {
-
-  protected val store: CryptoPrivateStore
-
-  override def hmacSecret(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Option[HmacSecret]] =
-    store.hmacSecret
-      .leftMap[HmacError](HmacError.HmacPrivateStoreError)
-
-  override def initializeHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Unit] =
-    for {
-      secretOption <- hmacSecret
-      _ <- secretOption.fold[EitherT[Future, HmacError, Unit]](
-        store.storeHmacSecret(HmacSecret.generate()).leftMap(HmacError.HmacPrivateStoreError)
-      )(_ => EitherT.rightT(()))
-    } yield ()
-
-  override def rotateHmacSecret(length: Int = HmacSecret.defaultLength)(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, HmacError, Unit] = {
-    store.storeHmacSecret(HmacSecret.generate()).leftMap(HmacError.HmacPrivateStoreError)
-  }
 
 }
 

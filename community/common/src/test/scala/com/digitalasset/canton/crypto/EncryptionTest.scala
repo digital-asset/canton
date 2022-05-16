@@ -38,8 +38,8 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             .generateSymmetricKey(scheme = symmetricKeyScheme)
             .valueOrFail("generate symmetric key")
 
-        def newSecureRandomKey(): SecureRandomness = {
-          SecureRandomness.secureRandomness(symmetricKeyScheme.keySizeInBytes)
+        def newSecureRandomKey(crypto: Crypto): SecureRandomness = {
+          crypto.pureCrypto.generateSecureRandomness(symmetricKeyScheme.keySizeInBytes)
         }
 
         "serialize and deserialize symmetric encryption key via protobuf" in {
@@ -85,7 +85,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           for {
             crypto <- newCrypto
             message = Message(ByteString.copyFromUtf8("foobar"))
-            key = newSecureRandomKey()
+            key = newSecureRandomKey(crypto)
             encrypted = crypto.pureCrypto
               .encryptWith(message, key, ProtocolVersion.latestForTest)
               .valueOrFail("encrypt")
@@ -102,8 +102,8 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           for {
             crypto <- newCrypto
             message = Message(ByteString.copyFromUtf8("foobar"))
-            key = newSecureRandomKey()
-            key2 = newSecureRandomKey()
+            key = newSecureRandomKey(crypto)
+            key2 = newSecureRandomKey(crypto)
             encrypted = crypto.pureCrypto
               .encryptWith(message, key, ProtocolVersion.latestForTest)
               .valueOrFail("encrypt")

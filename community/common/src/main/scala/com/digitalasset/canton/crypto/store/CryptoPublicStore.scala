@@ -76,6 +76,16 @@ trait CryptoPublicStore extends AutoCloseable {
       case KeyPurpose.Encryption => encryptionKey(keyId).map(_.nonEmpty)
     }
 
+  def findSigningKeyIdByName(keyName: KeyName)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPublicStoreError, Option[SigningPublicKey]] =
+    listSigningKeys.map(_.find(_.name.contains(keyName)).map(_.publicKey))
+
+  def findEncryptionKeyIdByName(keyName: KeyName)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPublicStoreError, Option[EncryptionPublicKey]] =
+    listEncryptionKeys.map(_.find(_.name.contains(keyName)).map(_.publicKey))
+
   def publicKeysWithName(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Set[PublicKeyWithName]] =

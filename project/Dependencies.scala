@@ -78,12 +78,12 @@ object Dependencies {
 
   lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
   lazy val daml_ledger_api_common = "com.daml" %% "ledger-api-common" % daml_libraries_version
+  lazy val daml_ledger_api_auth_client =
+    "com.daml" % "ledger-api-auth-client" % daml_libraries_version
   lazy val daml_ledger_api_client = "com.daml" %% "ledger-api-client" % daml_libraries_version
   lazy val daml_participant_integration_api =
     "com.daml" %% "participant-integration-api" % daml_libraries_version
   lazy val daml_caching = "com.daml" %% "caching" % daml_libraries_version
-  lazy val daml_contextualized_logging =
-    "com.daml" %% "contextualized-logging" % daml_libraries_version
   lazy val daml_error = "com.daml" %% "error" % daml_libraries_version
   lazy val daml_error_generator = "com.daml" %% "error-generator-lib" % daml_libraries_version
   lazy val daml_metrics = "com.daml" %% "metrics" % daml_libraries_version
@@ -91,7 +91,6 @@ object Dependencies {
   lazy val daml_resources_akka = "com.daml" %% "resources-akka" % daml_libraries_version
   lazy val daml_ledger_rxjava_client = "com.daml" % "bindings-rxjava" % daml_libraries_version
 
-  lazy val daml_ledger_api_scalapb = "com.daml" %% "ledger-api-scalapb" % daml_libraries_version
   lazy val da_grpc_bindings_ledger_client = "com.daml" %% "bindings-scala" % daml_libraries_version
 
   lazy val da_akka_bindings = "com.daml" %% "bindings-akka" % daml_libraries_version

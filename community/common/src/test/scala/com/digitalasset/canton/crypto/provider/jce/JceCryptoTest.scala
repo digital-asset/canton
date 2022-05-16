@@ -15,8 +15,8 @@ class JceCryptoTest
     extends AsyncWordSpec
     with SigningTest
     with EncryptionTest
-    with HmacPrivateTest
     with HkdfTest
+    with RandomTest
     with JavaKeyConverterTest {
 
   "JceCrypto" can {
@@ -33,8 +33,8 @@ class JceCryptoTest
 
     behave like signingProvider(Jce.signing.supported, jceCrypto())
     behave like encryptionProvider(Jce.encryption.supported, Jce.symmetric.supported, jceCrypto())
-    behave like hmacProvider(jceCrypto().map(_.privateCrypto))
     behave like hkdfProvider(jceCrypto().map(_.pureCrypto))
+    behave like randomnessProvider(jceCrypto().map(_.pureCrypto))
     behave like javaKeyConverterProvider(
       Jce.signing.supported,
       Jce.encryption.supported,

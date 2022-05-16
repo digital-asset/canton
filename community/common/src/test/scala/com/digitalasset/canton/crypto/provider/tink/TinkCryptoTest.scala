@@ -15,8 +15,8 @@ class TinkCryptoTest
     extends AsyncWordSpec
     with SigningTest
     with EncryptionTest
-    with HmacPrivateTest
     with HkdfTest
+    with RandomTest
     with JavaKeyConverterTest {
 
   "TinkCrypto" can {
@@ -32,8 +32,8 @@ class TinkCryptoTest
       Tink.symmetric.supported,
       tinkCrypto(),
     )
-    behave like hmacProvider(tinkCrypto().map(_.privateCrypto))
     behave like hkdfProvider(tinkCrypto().map(_.pureCrypto))
+    behave like randomnessProvider(tinkCrypto().map(_.pureCrypto))
 
     // Tink provider does not support Java conversion of Ed25519 or Hybrid encryption keys
     behave like javaKeyConverterProvider(

@@ -75,6 +75,8 @@ trait MemoizedEvidence extends HasCryptographicEvidence {
 
 /** Effectively immutable [[HasCryptographicEvidence]] classes can mix in this trait
   * to implement the memoization logic.
+  * Unlike [[MemoizedEvidence]] above, this trait should be mixed in classes that contain
+  * the protocol version.
   *
   * Use this class if serialization always succeeds.
   *
@@ -84,7 +86,7 @@ trait MemoizedEvidence extends HasCryptographicEvidence {
   *
   * @see MemoizedEvidenceWithFailure if serialization may fail
   */
-trait MemoizedEvidenceV2 extends HasCryptographicEvidence {
+trait ProtocolVersionedMemoizedEvidence extends HasCryptographicEvidence {
 
   /** Returns the [[com.google.protobuf.ByteString]] from which this object has been deserialized, if any.
     * If defined, [[getCryptographicEvidence]] will use this as the serialization.

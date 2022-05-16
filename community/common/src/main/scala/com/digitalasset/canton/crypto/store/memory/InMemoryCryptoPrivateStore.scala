@@ -12,16 +12,10 @@ import com.digitalasset.canton.crypto.store.{
   PrivateKeyWithName,
   SigningPrivateKeyWithName,
 }
-import com.digitalasset.canton.crypto.{
-  EncryptionPrivateKey,
-  Fingerprint,
-  HmacSecret,
-  SigningPrivateKey,
-}
+import com.digitalasset.canton.crypto.{EncryptionPrivateKey, Fingerprint, SigningPrivateKey}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TrieMapUtil
-import java.util.concurrent.atomic.AtomicReference
 
 import com.digitalasset.canton.crypto.KeyName
 
@@ -38,7 +32,6 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
   private val storedSigningKeyMap: TrieMap[Fingerprint, SigningPrivateKeyWithName] = TrieMap.empty
   private val storedDecryptionKeyMap: TrieMap[Fingerprint, EncryptionPrivateKeyWithName] =
     TrieMap.empty
-  private val storedHmacSecret: AtomicReference[Option[HmacSecret]] = new AtomicReference(None)
 
   private def errorDuplicate[K <: PrivateKeyWithName](
       keyId: Fingerprint,
@@ -83,12 +76,6 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
       .toEitherT
   }
 
-  override protected def writeHmacSecret(
-      hmacSecret: HmacSecret
-  )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit] = {
-    EitherT.rightT(storedHmacSecret.set(Some(hmacSecret)))
-  }
-
   override private[store] def listSigningKeys(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[SigningPrivateKeyWithName]] =
@@ -98,11 +85,6 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[EncryptionPrivateKeyWithName]] =
     EitherT.rightT(storedDecryptionKeyMap.values.toSet)
-
-  override private[store] def loadHmacSecret()(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[HmacSecret]] =
-    EitherT.rightT(storedHmacSecret.get())
 
   override protected def deletePrivateKey(
       keyId: Fingerprint

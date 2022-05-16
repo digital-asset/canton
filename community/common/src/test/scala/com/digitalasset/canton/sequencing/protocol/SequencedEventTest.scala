@@ -27,6 +27,7 @@ class SequencedEventTest extends BaseTestWordSpec {
               Set.empty,
               TransferInDomainId(domainId),
               Verdict.Timeout,
+              ProtocolVersion.latestForTest,
             ),
           SymbolicCrypto.emptySignature,
         )

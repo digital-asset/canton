@@ -4,11 +4,11 @@
 package com.digitalasset.canton.data
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.crypto.{HashOps, Salt}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionContext {
@@ -27,7 +27,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
     )
   val absoluteId: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
   val otherAbsoluteId: LfContractId = ExampleTransactionFactory.suffixedId(1, 1)
-  val salt: Salt = factory.transactionSeed
+  val salt: Salt = factory.transactionSalt
   val nodeSeed = ExampleTransactionFactory.lfHash(1)
   val globalKey: LfGlobalKey =
     LfGlobalKey(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(100L))

@@ -84,7 +84,6 @@ case class TestingTopology(
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
     additionalParticipants: Set[ParticipantId] = Set.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
-    hkdfOps: Option[HkdfOps] = None,
     domainParameters: List[DynamicDomainParameters.WithValidity] = List(
       DynamicDomainParameters.WithValidity(
         validFrom = CantonTimestamp.Epoch,
@@ -155,10 +154,6 @@ case class TestingTopology(
   ): TestingTopology =
     this.copy(topology = parties.fmap(w => w.fmap(ParticipantAttributes(_, trustLevel))))
 
-  def withHkdfOps(hkdfOps: Option[HkdfOps]): TestingTopology = {
-    this.copy(hkdfOps = hkdfOps)
-  }
-
   def build(
       loggerFactory: NamedLoggerFactory = NamedLoggerFactory("test-area", "crypto")
   ): TestingIdentityFactory =
@@ -177,7 +172,7 @@ class TestingIdentityFactory(
     new SyncCryptoApiProvider(
       owner,
       ips(),
-      newCrypto(owner, hkdfOps = topology.hkdfOps),
+      newCrypto(owner),
       CachingConfigs.testing,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
@@ -391,7 +386,6 @@ class TestingIdentityFactory(
       owner: KeyOwner,
       signingFingerprints: Seq[Fingerprint] = Seq(),
       fingerprintSuffixes: Seq[String] = Seq(),
-      hkdfOps: Option[HkdfOps] = None,
   ): Crypto = {
     val signingFingerprintsOrOwner =
       if (signingFingerprints.isEmpty)
@@ -408,7 +402,6 @@ class TestingIdentityFactory(
     SymbolicCrypto.tryCreate(
       signingFingerprintsOrOwner,
       fingerprintSuffixesOrOwner,
-      hkdfOps,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     )
@@ -522,8 +515,9 @@ class TestingOwnerWithKeys(
     val dpc1Updated = mkDmGov(
       DomainParametersChange(
         DomainId(uid),
-        defaultDomainParameters.copy(participantResponseTimeout =
-          NonNegativeFiniteDuration.ofSeconds(2)
+        defaultDomainParameters.copy(
+          participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2),
+          topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100),
         ),
       ),
       namespaceKey,

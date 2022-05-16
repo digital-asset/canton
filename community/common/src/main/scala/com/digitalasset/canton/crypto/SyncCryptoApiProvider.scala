@@ -169,7 +169,13 @@ class DomainSyncCryptoClient(
         .leftMap[SyncCryptoError](SyncCryptoError.StoreError)
       kk <- existingKeys.lastOption
         .toRight[SyncCryptoError](
-          SyncCryptoError.KeyNotAvailable(owner, KeyPurpose.Signing, snapshot.timestamp)
+          SyncCryptoError
+            .KeyNotAvailable(
+              owner,
+              KeyPurpose.Signing,
+              snapshot.timestamp,
+              signingKeys.map(_.fingerprint),
+            )
         )
         .toEitherT[Future]
     } yield kk.fingerprint
@@ -316,10 +322,16 @@ class DomainSnapshotSyncCryptoApi(
         .map { keyO =>
           keyO
             .toRight(
-              KeyNotAvailable(owner, KeyPurpose.Encryption, ipsSnapshot.timestamp): SyncCryptoError
+              KeyNotAvailable(
+                owner,
+                KeyPurpose.Encryption,
+                ipsSnapshot.timestamp,
+                Seq.empty,
+              ): SyncCryptoError
             )
         }
     )
+      // TODO (error handling) better alert / error message if given key does not exist locally
       .flatMap(key =>
         crypto.privateCrypto
           .decrypt(encryptedMessage, key.fingerprint)(deserialize)
@@ -342,8 +354,11 @@ class DomainSnapshotSyncCryptoApi(
         .encryptionKey(owner)
         .map { keyO =>
           keyO
-            .toRight(KeyNotAvailable(owner, KeyPurpose.Encryption, ipsSnapshot.timestamp))
+            .toRight(
+              KeyNotAvailable(owner, KeyPurpose.Encryption, ipsSnapshot.timestamp, Seq.empty)
+            )
             .flatMap(k =>
+              // TODO (error handling): better error message if given key does not exist locally
               crypto.pureCrypto
                 .encryptWith(message, k, version)
                 .leftMap(SyncCryptoEncryptionError)

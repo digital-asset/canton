@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.google.common.annotations.VisibleForTesting
 
@@ -206,15 +207,6 @@ object TimeQuery {
         for {
           fromO <- value.from.traverse(CantonTimestamp.fromProtoPrimitive)
           toO <- value.until.traverse(CantonTimestamp.fromProtoPrimitive)
-          _ <- Either.cond(
-            fromO.nonEmpty || toO.nonEmpty,
-            (),
-            ProtoDeserializationError
-              .ValueDeserializationError(
-                "range",
-                "At least one of from / to needs to be set within a time range query",
-              ),
-          )
         } yield Range(fromO, toO)
     }
 
@@ -269,7 +261,7 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
 
   def timestamp(useStateStore: Boolean = false)(implicit
       traceContext: TraceContext
-  ): Future[Option[CantonTimestamp]]
+  ): Future[Option[(SequencedTime, EffectiveTime)]]
 
   /** set of topology transactions which are active */
   def headTransactions(implicit
@@ -283,9 +275,9 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
       traceContext: TraceContext
   ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Remove]]]
 
-  def findActiveTransactionsForMapping(mapping: TopologyMapping)(implicit
+  def findPositiveTransactionsForMapping(mapping: TopologyMapping)(implicit
       traceContext: TraceContext
-  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Add]]]
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]]]
 
   @VisibleForTesting
   def allTransactions(implicit
@@ -424,18 +416,47 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
       filterNamespace: Option[Seq[Namespace]],
   )(implicit traceContext: TraceContext): Future[PositiveStoredTopologyTransactions]
 
-  /** fetch the effective time updates greater than a certain timestamp
+  /** fetch the effective time updates greater than or equal to a certain timestamp
     *
     * this function is used to recover the future effective timestamp such that we can reschedule "pokes" of the
     * topology client and updates of the acs commitment processor on startup
     */
-  def findEffectiveTimestampsSince(timestamp: CantonTimestamp)(implicit
+  def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Seq[CantonTimestamp]]
+  ): Future[Seq[TopologyStore.Change]]
 
 }
 
 object TopologyStore {
+
+  sealed trait Change extends Product with Serializable {
+    def sequenced: SequencedTime
+    def effective: EffectiveTime
+  }
+
+  object Change {
+    case class TopologyDelay(
+        sequenced: SequencedTime,
+        effective: EffectiveTime,
+        epsilon: NonNegativeFiniteDuration,
+    ) extends Change
+    case class Other(sequenced: SequencedTime, effective: EffectiveTime) extends Change
+
+    def accumulateUpcomingEffectiveChanges(
+        items: Seq[StoredTopologyTransaction[TopologyChangeOp]]
+    ): Seq[TopologyStore.Change] = {
+      items
+        .map(x => (x, x.transaction.transaction.element.mapping))
+        .map {
+          case (tx, x: DomainParametersChange) =>
+            TopologyDelay(tx.sequenced, tx.validFrom, x.domainParameters.topologyChangeDelay)
+          case (tx, _) => Other(tx.sequenced, tx.validFrom)
+        }
+        .sortBy(_.effective)
+        .distinct
+    }
+
+  }
 
   private[topology] case class InsertTransaction(
       transaction: SignedTopologyTransaction[TopologyChangeOp],

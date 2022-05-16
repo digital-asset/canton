@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton._
-import com.digitalasset.canton.crypto.Salt
+import com.digitalasset.canton.crypto.{Salt, SaltSeed}
 import com.digitalasset.canton.data.{
   GenTransactionTree,
   TransactionView,
@@ -40,7 +40,7 @@ trait TransactionTreeFactory {
       confirmationPolicy: ConfirmationPolicy,
       workflowId: Option[WorkflowId],
       mediatorId: MediatorId,
-      transactionSeed: Salt,
+      transactionSeed: SaltSeed,
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,

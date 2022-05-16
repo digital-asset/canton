@@ -188,7 +188,7 @@ private class DomainOutbox(
       watermarkTsO <- targetStore.currentDispatchingWatermark
       watermarkTs = watermarkTsO.getOrElse(CantonTimestamp.MinValue)
       authorizedTsO <- authorizedStore.timestamp()
-      authorizedTs = authorizedTsO.getOrElse(CantonTimestamp.MinValue)
+      authorizedTs = authorizedTsO.map(_._2.value).getOrElse(CantonTimestamp.MinValue)
       // update cached watermark
     } yield {
       val cur = watermarks.updateAndGet { c =>

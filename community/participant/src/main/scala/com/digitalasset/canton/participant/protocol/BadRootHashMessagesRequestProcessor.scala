@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import scala.concurrent.ExecutionContext
@@ -27,6 +28,7 @@ class BadRootHashMessagesRequestProcessor(
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClient,
     participantId: ParticipantId,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -84,6 +86,7 @@ class BadRootHashMessagesRequestProcessor(
             rootHash = Some(rootHash),
             confirmingParties = Set.empty,
             domainId = domainId,
+            protocolVersion = protocolVersion,
           )
         )
         signedRejection <- signResponse(snapshot, rejection)

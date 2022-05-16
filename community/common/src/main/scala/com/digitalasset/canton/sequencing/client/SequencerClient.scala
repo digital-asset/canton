@@ -330,33 +330,6 @@ class SequencerClient(
             SendAsyncClientError.DuplicateMessageId
           }
 
-      def performSend: EitherT[Future, SendAsyncClientError, Unit] = {
-        EitherTUtil
-          .timed(metrics.submissions.sends) {
-            val timeout = timeouts.network.duration
-            if (requiresAuthentication)
-              transport.sendAsync(request, timeout, staticDomainParameters.protocolVersion)
-            else
-              transport.sendAsyncUnauthenticated(
-                request,
-                timeout,
-                staticDomainParameters.protocolVersion,
-              )
-          }
-          .leftSemiflatMap { err =>
-            // increment appropriate error metrics
-            err match {
-              case SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded(_)) =>
-                metrics.submissions.overloaded.metric.inc()
-              case _ =>
-            }
-
-            // cancel pending send now as we know the request will never cause a sequenced result
-            logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
-            sendTracker.cancelPendingSend(messageId).map(_ => err)
-          }
-      }
-
       if (replayEnabled) {
         EitherT.fromEither(for {
           _ <- unitOrBatchSizeErr
@@ -380,10 +353,43 @@ class SequencerClient(
           _ <- EitherT.fromEither[Future](unitOrBatchSizeErr)
           _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
-          _ <- performSend
+          _ <- performSend(messageId, request, requiresAuthentication)
         } yield ()
       }
     }
+
+  /** Perform the send, without any check.
+    */
+  private def performSend(
+      messageId: MessageId,
+      request: SubmissionRequest,
+      requiresAuthentication: Boolean,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
+    EitherTUtil
+      .timed(metrics.submissions.sends) {
+        val timeout = timeouts.network.duration
+        if (requiresAuthentication)
+          transport.sendAsync(request, timeout, staticDomainParameters.protocolVersion)
+        else
+          transport.sendAsyncUnauthenticated(
+            request,
+            timeout,
+            staticDomainParameters.protocolVersion,
+          )
+      }
+      .leftSemiflatMap { err =>
+        // increment appropriate error metrics
+        err match {
+          case SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded(_)) =>
+            metrics.submissions.overloaded.metric.inc()
+          case _ =>
+        }
+
+        // cancel pending send now as we know the request will never cause a sequenced result
+        logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
+        sendTracker.cancelPendingSend(messageId).map(_ => err)
+      }
+  }
 
   private def verifyBatchSize(batch: Batch[_]): Either[SendAsyncClientError, Unit] = {
     val batchSerializedSize =
@@ -1187,15 +1193,6 @@ object SequencerClient {
             connection,
             member,
           )
-          // handshake to check that sequencer client supports the protocol version required by the sequencer
-          _ <- SequencerHandshake.handshake(
-            supportedProtocolVersions,
-            minimumProtocolVersion,
-            transport,
-            config,
-            processingTimeout,
-            loggerFactory,
-          )
           // fetch the initial set of pending sends to initialize the client with.
           // as it owns the client that should be writing to this store it should not be racy.
           initialPendingSends <- EitherT.right(sendTrackerStore.fetchPendingSends)
@@ -1252,32 +1249,46 @@ object SequencerClient {
             case grpc: GrpcSequencerConnection => grpcTransport(grpc, member).toEitherT
           }
 
-        replayConfigForMember(member) match {
-          case None => mkRealTransport
-          case Some(ReplayConfig(recording, SequencerEvents)) =>
-            EitherT.rightT(
-              new ReplayingEventsSequencerClientTransport(
+        val transportEitherT: EitherT[Future, String, SequencerClientTransport] =
+          replayConfigForMember(member) match {
+            case None => mkRealTransport
+            case Some(ReplayConfig(recording, SequencerEvents)) =>
+              EitherT.rightT(
+                new ReplayingEventsSequencerClientTransport(
+                  domainParameters.protocolVersion,
+                  recording.fullFilePath,
+                  metrics,
+                  processingTimeout,
+                  loggerFactory,
+                )
+              )
+            case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
+              for {
+                underlyingTransport <- mkRealTransport
+              } yield new ReplayingSendsSequencerClientTransport(
                 domainParameters.protocolVersion,
                 recording.fullFilePath,
+                replaySendsConfig,
+                member,
+                underlyingTransport,
                 metrics,
                 processingTimeout,
                 loggerFactory,
               )
-            )
-          case Some(ReplayConfig(recording, replaySendsConfig: SequencerSends)) =>
-            for {
-              underlyingTransport <- mkRealTransport
-            } yield new ReplayingSendsSequencerClientTransport(
-              domainParameters.protocolVersion,
-              recording.fullFilePath,
-              replaySendsConfig,
-              member,
-              underlyingTransport,
-              metrics,
-              processingTimeout,
-              loggerFactory,
-            )
-        }
+          }
+
+        for {
+          transport <- transportEitherT
+          // handshake to check that sequencer client supports the protocol version required by the sequencer
+          _ <- SequencerHandshake.handshake(
+            supportedProtocolVersions,
+            minimumProtocolVersion,
+            transport,
+            config,
+            processingTimeout,
+            loggerFactory,
+          )
+        } yield transport
       }
 
       private def httpTransport(connection: HttpSequencerConnection)(implicit

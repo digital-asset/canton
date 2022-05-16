@@ -5,13 +5,16 @@ package com.digitalasset.canton.crypto.provider.tink
 
 import java.security.GeneralSecurityException
 import cats.syntax.either._
+import cats.syntax.foldable._
+import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.crypto.HkdfError.{HkdfHmacError, HkdfInternalError}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink._
 import com.google.crypto.tink.aead.AeadKeyTemplates
 import com.google.crypto.tink.config.TinkConfig
-import com.google.crypto.tink.subtle.AesGcmJce
+import com.google.crypto.tink.subtle.{AesGcmJce, Hkdf, Random}
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent.TrieMap
@@ -240,6 +243,54 @@ class TinkPureCrypto private (
         )
     } yield ()
 
+  override protected def computeHkdfInternal(
+      keyMaterial: ByteString,
+      outputBytes: Int,
+      info: HkdfInfo,
+      salt: ByteString,
+      algorithm: HmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] = {
+    Either
+      .catchOnly[GeneralSecurityException] {
+        Hkdf.computeHkdf(
+          algorithm.name,
+          keyMaterial.toByteArray,
+          salt.toByteArray,
+          info.bytes.toByteArray,
+          outputBytes,
+        )
+      }
+      .leftMap(err => show"Failed to compute HKDF with Tink: $err")
+      .flatMap { hkdfOutput =>
+        SecureRandomness
+          .fromByteString(outputBytes)(ByteString.copyFrom(hkdfOutput))
+          .leftMap(err => s"Invalid output from HKDF: $err")
+      }
+      .leftMap(HkdfInternalError)
+  }
+
+  override protected def hkdfExpandInternal(
+      keyMaterial: SecureRandomness,
+      outputBytes: Int,
+      info: HkdfInfo,
+      algorithm: HmacAlgorithm,
+  ): Either[HkdfError, SecureRandomness] = {
+    // NOTE: Tink does not expose only the expand phase, thus we have to implement it ourselves
+    val hashBytes = algorithm.hashAlgorithm.length
+    for {
+      prk <- HmacSecret.create(keyMaterial.unwrap).leftMap(HkdfHmacError)
+      nrChunks = scala.math.ceil(outputBytes.toDouble / hashBytes).toInt
+      outputAndLast <- (1 to nrChunks).toList
+        .foldM(ByteString.EMPTY -> ByteString.EMPTY) { case ((out, last), chunk) =>
+          val chunkByte = ByteString.copyFrom(Array[Byte](chunk.toByte))
+          hmacWithSecret(prk, last.concat(info.bytes).concat(chunkByte), algorithm)
+            .bimap(HkdfHmacError, hmac => out.concat(hmac.unwrap) -> hmac.unwrap)
+        }
+      (out, _last) = outputAndLast
+    } yield SecureRandomness(out.substring(0, outputBytes))
+  }
+
+  override protected def generateRandomBytes(length: Int): Array[Byte] = Random.randBytes(length)
 }
 
 object TinkPureCrypto {

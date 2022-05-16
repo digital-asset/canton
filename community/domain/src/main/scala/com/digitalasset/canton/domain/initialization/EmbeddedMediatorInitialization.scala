@@ -8,7 +8,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
-import com.digitalasset.canton.domain.mediator.{DomainNodeMediatorFactory, MediatorRuntime}
+import com.digitalasset.canton.domain.mediator.{MediatorRuntime, MediatorRuntimeFactory}
 import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -24,8 +24,9 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStore
-import com.digitalasset.canton.topology.{DomainId, MediatorId, NodeId}
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContextExecutorService, Future}
@@ -34,8 +35,8 @@ object EmbeddedMediatorInitialization {
 
   def apply(
       id: DomainId,
-      nodeId: NodeId,
       cantonParameterConfig: DomainNodeParameters,
+      protocolVersion: ProtocolVersion,
       clock: Clock,
       crypto: Crypto,
       mediatorTopologyStore: TopologyStore,
@@ -43,7 +44,7 @@ object EmbeddedMediatorInitialization {
       storage: Storage,
       sequencerClientFactoryFactory: DomainTopologyClientWithInit => SequencerClientFactory,
       metrics: DomainMetrics,
-      domainNodeMediatorFactory: DomainNodeMediatorFactory,
+      mediatorFactory: MediatorRuntimeFactory,
       indexedStringStore: IndexedStringStore,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
@@ -54,7 +55,6 @@ object EmbeddedMediatorInitialization {
       actorSystem: ActorSystem,
   ): EitherT[Future, String, MediatorRuntime] = {
 
-    val factory = domainNodeMediatorFactory.mediatorRuntimeFactory
     val timeouts = cantonParameterConfig.processingTimeouts
     val mediatorId = MediatorId(id) // The embedded mediator always has the same ID as the domain
     val sendTrackerStore = SendTrackerStore(storage)
@@ -106,7 +106,7 @@ object EmbeddedMediatorInitialization {
         sequencedEventStore,
         sendTrackerStore,
       )
-      mediatorRuntime <- factory
+      mediatorRuntime <- mediatorFactory
         .create(
           mediatorId,
           id,
@@ -119,6 +119,7 @@ object EmbeddedMediatorInitialization {
           topologyProcessor,
           timeTrackerConfig,
           cantonParameterConfig,
+          protocolVersion,
           clock,
           metrics.mediator,
           futureSupervisor,
