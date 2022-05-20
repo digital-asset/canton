@@ -21,7 +21,7 @@ run it using:
 
 ```
     python3 examples/03-advanced-configuration/storage/dbinit.py \
-      --type=postgres --user=canton --password=<choose-wisely> --participants=2 --domains=1 --drop
+      --type=postgres --user=canton --pwd=<choose-wisely> --participants=2 --domains=1 --drop
 ```
 
 Please run the script with ``--help`` to get an overview of all commands. Generally, you would just pipe the output
