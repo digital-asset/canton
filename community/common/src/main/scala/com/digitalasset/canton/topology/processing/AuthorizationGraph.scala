@@ -4,27 +4,34 @@
 package com.digitalasset.canton.topology.processing
 
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.topology.Namespace
-import AuthorizedTopologyTransaction._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.topology.Namespace
+import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
+import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.transaction.{
   IdentifierDelegation,
   NamespaceDelegation,
+  SignedTopologyTransaction,
+  TopologyChangeOp,
   TopologyMapping,
   UniquePath,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-
-import scala.math.Ordering.Implicits._
-import scala.collection.concurrent.TrieMap
 import com.digitalasset.canton.util.ShowUtil._
 
+import scala.annotation.tailrec
+import scala.collection.concurrent.TrieMap
+import scala.math.Ordering.Implicits._
+
+/** An authorized topology transaction */
 final case class AuthorizedTopologyTransaction[T <: TopologyMapping](
     uniquePath: UniquePath,
     mapping: T,
-    authorizingKey: Fingerprint,
-)
+    transaction: SignedTopologyTransaction[TopologyChangeOp],
+) {
+  def signingKey: Fingerprint = transaction.key.fingerprint
+}
 
 object AuthorizedTopologyTransaction {
 
@@ -38,7 +45,7 @@ object AuthorizedTopologyTransaction {
     */
   def isRootCertificate(namespaceDelegation: AuthorizedNamespaceDelegation): Boolean = {
     val mapping = namespaceDelegation.mapping
-    (mapping.namespace.fingerprint == mapping.target.fingerprint) && namespaceDelegation.authorizingKey == mapping.target.fingerprint
+    (mapping.namespace.fingerprint == mapping.target.fingerprint) && namespaceDelegation.signingKey == mapping.target.fingerprint
   }
 
 }
@@ -95,6 +102,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
 
   private abstract class AuthLevel(val isAuth: Boolean, val isRoot: Boolean)
   private object AuthLevel {
+
     object NotAuthorized extends AuthLevel(false, false)
     object Standard extends AuthLevel(true, false)
     object RootDelegation extends AuthLevel(true, true)
@@ -126,7 +134,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
     )
     if (
       AuthorizedTopologyTransaction.isRootCertificate(item) ||
-      this.isValidAuthorizationKey(item.authorizingKey, requireRoot = true)
+      this.isValidAuthorizationKey(item.signingKey, requireRoot = true)
     ) {
       doAdd(item)
       recompute()
@@ -148,7 +156,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
     if (AuthorizedTopologyTransaction.isRootCertificate(item)) {
       nodes.update(targetKey, curTarget.copy(root = curTarget.root + item))
     } else {
-      val authKey = item.authorizingKey
+      val authKey = item.signingKey
       val curAuth = nodes.getOrElse(authKey, GraphNode(authKey))
       nodes.update(authKey, curAuth.copy(outgoing = curAuth.outgoing + item))
       nodes.update(targetKey, curTarget.copy(incoming = curTarget.incoming + item))
@@ -156,7 +164,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
   }
 
   def remove(item: AuthorizedNamespaceDelegation)(implicit traceContext: TraceContext): Boolean =
-    if (isValidAuthorizationKey(item.authorizingKey, requireRoot = true)) {
+    if (isValidAuthorizationKey(item.signingKey, requireRoot = true)) {
       doRemove(item)
       true
     } else false
@@ -189,7 +197,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
     def removeOutgoing(node: GraphNode): Unit = {
       // we need to use the "incoming" edges to figure out the original outgoing keys, as the key that
       // was authorizing this removal might not be the one that authorized the addition
-      node.incoming.map(_.authorizingKey).foreach { fp =>
+      node.incoming.map(_.signingKey).foreach { fp =>
         nodes.get(fp) match {
           case Some(curIncoming) =>
             // remove for this key the edge that goes to the target node
@@ -272,7 +280,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
         val str =
           authorizedDelegations()
             .map(aud =>
-              show"auth=${aud.authorizingKey}, target=${aud.mapping.target.fingerprint}, root=${isRootCertificate(aud)}, elementId=${aud.uniquePath.maybeElementId}"
+              show"auth=${aud.signingKey}, target=${aud.mapping.target.fingerprint}, root=${isRootCertificate(aud)}, elementId=${aud.uniquePath.maybeElementId}"
             )
             .mkString("\n  ")
         logger.debug(s"The authorization graph is given by:\n  $str")
@@ -285,6 +293,36 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
   def isValidAuthorizationKey(authKey: Fingerprint, requireRoot: Boolean): Boolean = {
     val authLevel = AuthLevel.fromDelegationO(cache.getOrElse(authKey, None))
     authLevel.isRoot || (authLevel.isAuth && !requireRoot)
+  }
+
+  def authorizationChain(
+      authKey: Fingerprint,
+      requireRoot: Boolean,
+  ): Option[AuthorizationChain] = {
+    @tailrec
+    def go(
+        authKey: Fingerprint,
+        requireRoot: Boolean,
+        acc: List[AuthorizedNamespaceDelegation],
+    ): List[AuthorizedNamespaceDelegation] = {
+      cache.getOrElse(authKey, None) match {
+        // we've terminated with the root certificate
+        case Some(delegation) if isRootCertificate(delegation) =>
+          delegation :: acc
+        // cert is valid, append it
+        case Some(delegation) if delegation.mapping.isRootDelegation || !requireRoot =>
+          go(delegation.signingKey, delegation.mapping.isRootDelegation, delegation :: acc)
+        // return empty to indicate failure
+        case _ => List.empty
+      }
+    }
+    go(authKey, requireRoot, List.empty) match {
+      case Nil => None
+      case rest =>
+        Some(
+          AuthorizationChain(identifierDelegation = Seq.empty, namespaceDelegations = rest)
+        )
+    }
   }
 
   def authorizedDelegations(): Seq[AuthorizedNamespaceDelegation] =

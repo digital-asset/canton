@@ -3,24 +3,22 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.syntax.either._
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
+  TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.{DomainId, _}
-import com.digitalasset.canton.topology.processing._
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
-import cats.syntax.either._
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.annotation.nowarn
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Data collection providing information with respect to what is affected by this update
@@ -82,20 +80,17 @@ private[processing] case class UpdateAggregation(
   */
 class IncomingTopologyTransactionAuthorizationValidator(
     cryptoPureApi: CryptoPureApi,
-    store: TopologyStore,
+    val store: TopologyStore[TopologyStoreId],
     domainId: Option[DomainId],
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging {
+    extends NamedLogging
+    with TransactionAuthorizationValidator {
 
   def reset(): Unit = {
     namespaceCache.clear()
     identifierDelegationCache.clear()
   }
-
-  private val namespaceCache = new TrieMap[Namespace, AuthorizationGraph]()
-  private val identifierDelegationCache =
-    new TrieMap[UniqueIdentifier, Set[AuthorizedIdentifierDelegation]]()
 
   /** Validates the provided domain topology transactions and applies the certificates to the auth state
     *
@@ -144,9 +139,6 @@ class IncomingTopologyTransactionAuthorizationValidator(
     }
   }
 
-  private def getCacheForNamespace(namespace: Namespace): AuthorizationGraph =
-    namespaceCache.getOrElseUpdate(namespace, new AuthorizationGraph(namespace, loggerFactory))
-
   private def processTransaction(
       elem: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): Boolean =
@@ -156,30 +148,18 @@ class IncomingTopologyTransactionAuthorizationValidator(
           case nd: NamespaceDelegation =>
             processNamespaceDelegation(
               op,
-              AuthorizedTopologyTransaction(elem.uniquePath, nd, elem.key.fingerprint),
+              AuthorizedTopologyTransaction(elem.uniquePath, nd, elem),
             )
           case id: IdentifierDelegation =>
             processIdentifierDelegation(
               op,
-              AuthorizedTopologyTransaction(elem.uniquePath, id, elem.key.fingerprint),
+              AuthorizedTopologyTransaction(elem.uniquePath, id, elem),
             )
           case _ => isCurrentlyAuthorized(elem)
         }
 
       case _: DomainGovernanceTransaction => isCurrentlyAuthorized(elem)
     }
-
-  def isCurrentlyAuthorized(sit: SignedTopologyTransaction[TopologyChangeOp]): Boolean = {
-    val authKey = sit.key.fingerprint
-    sit.transaction.element.mapping.requiredAuth match {
-      case RequiredAuth.Ns(namespace, rootDelegation) =>
-        getCacheForNamespace(namespace).isValidAuthorizationKey(
-          authKey,
-          requireRoot = rootDelegation,
-        )
-      case RequiredAuth.Uid(uids) => uids.forall(isAuthorizedForUid(_, authKey))
-    }
-  }
 
   def getValidSigningKeysForMapping(asOf: CantonTimestamp, mapping: TopologyMapping)(implicit
       traceContext: TraceContext
@@ -201,7 +181,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
       val (namespaces, requireRoot) = mapping.requiredAuth.namespaces
       val fromNs = namespaces
         .map { namespace =>
-          getCacheForNamespace(namespace)
+          getAuthorizationGraphForNamespace(namespace)
             .authorizedDelegations()
             .filter { auth =>
               auth.mapping.isRootDelegation || !requireRoot
@@ -211,9 +191,9 @@ class IncomingTopologyTransactionAuthorizationValidator(
         }
       val fromUids = mapping.requiredAuth.uids.map { uid =>
         identifierDelegationCache.get(uid).toList.flatMap { cache =>
-          val graph = getCacheForNamespace(uid.namespace)
+          val graph = getAuthorizationGraphForNamespace(uid.namespace)
           cache
-            .filter(aid => graph.isValidAuthorizationKey(aid.authorizingKey, requireRoot = false))
+            .filter(aid => graph.isValidAuthorizationKey(aid.signingKey, requireRoot = false))
             .map(_.mapping.target.fingerprint)
         }
       }
@@ -224,19 +204,6 @@ class IncomingTopologyTransactionAuthorizationValidator(
       (intersect(fromUids.map(_.toSet)) ++ intersect(fromNs) ++ selfSigned).toSeq
     }
   }
-
-  def isAuthorizedForUid(uid: UniqueIdentifier, authKey: Fingerprint): Boolean = {
-    val graph = getCacheForNamespace(uid.namespace)
-    def hasValidIdentifierDelegation: Boolean =
-      identifierDelegationCache
-        .getOrElse(uid, Set())
-        .filter(_.mapping.target.fingerprint == authKey)
-        .exists(aid => graph.isValidAuthorizationKey(aid.authorizingKey, requireRoot = false))
-    graph.isValidAuthorizationKey(authKey, requireRoot = false) || hasValidIdentifierDelegation
-  }
-
-  private def mergeLoadedIdentifierDelegation(item: AuthorizedIdentifierDelegation): Unit =
-    updateIdentifierDelegationCache(item.mapping.identifier, _ + item)
 
   /** loads all identifier delegations into the identifier delegation cache
     *
@@ -260,42 +227,13 @@ class IncomingTopologyTransactionAuthorizationValidator(
     } else loadIdentifierDelegations(timestamp, cascadingUpdate.cascadingNamespaces.toSeq, loadUids)
   }
 
-  private def loadIdentifierDelegations(
-      timestamp: CantonTimestamp,
-      namespaces: Seq[Namespace],
-      uids: Set[UniqueIdentifier],
-  )(implicit traceContext: TraceContext): Future[Set[UniqueIdentifier]] = {
-    store
-      .findPositiveTransactions(
-        asOf = timestamp,
-        asOfInclusive = false,
-        includeSecondary = false,
-        types = Seq(DomainTopologyTransactionType.IdentifierDelegation),
-        filterNamespace = Some(namespaces),
-        filterUid = Some((uids -- identifierDelegationCache.keySet).toSeq),
-      )
-      .map(_.adds.toAuthorizedTopologyTransactions { case x: IdentifierDelegation => x })
-      .map { loaded =>
-        // include the uids which we already cache
-        val start =
-          identifierDelegationCache.keySet.filter(x => namespaces.contains(x.namespace)).toSet
-        loaded.foldLeft(start) { case (acc, item) =>
-          mergeLoadedIdentifierDelegation(item)
-          val uid = item.mapping.identifier
-          if (namespaces.contains(uid.namespace))
-            acc + uid
-          else acc
-        }
-      }
-  }
-
   private def processIdentifierDelegation(
       op: AddRemoveChangeOp,
       elem: AuthorizedIdentifierDelegation,
   ): Boolean = {
     // check authorization
-    val graph = getCacheForNamespace(elem.mapping.identifier.namespace)
-    val auth = graph.isValidAuthorizationKey(elem.authorizingKey, requireRoot = false)
+    val graph = getAuthorizationGraphForNamespace(elem.mapping.identifier.namespace)
+    val auth = graph.isValidAuthorizationKey(elem.signingKey, requireRoot = false)
     // update identifier delegation cache if necessary
     if (auth) {
       val updateOp: Set[AuthorizedIdentifierDelegation] => Set[AuthorizedIdentifierDelegation] =
@@ -311,19 +249,11 @@ class IncomingTopologyTransactionAuthorizationValidator(
     auth
   }
 
-  private def updateIdentifierDelegationCache(
-      uid: UniqueIdentifier,
-      op: Set[AuthorizedIdentifierDelegation] => Set[AuthorizedIdentifierDelegation],
-  ): Unit = {
-    val cur = identifierDelegationCache.getOrElseUpdate(uid, Set())
-    val _ = identifierDelegationCache.update(uid, op(cur))
-  }
-
   private def processNamespaceDelegation(
       op: AddRemoveChangeOp,
       elem: AuthorizedNamespaceDelegation,
   )(implicit traceContext: TraceContext): Boolean = {
-    val graph = getCacheForNamespace(elem.mapping.namespace)
+    val graph = getAuthorizationGraphForNamespace(elem.mapping.namespace)
     // add or remove including authorization check
     op match {
       case TopologyChangeOp.Add => graph.add(elem)
@@ -370,42 +300,6 @@ class IncomingTopologyTransactionAuthorizationValidator(
     }
   }
 
-  private def loadAuthorizationGraphs(timestamp: CantonTimestamp, namespaces: Set[Namespace])(
-      implicit traceContext: TraceContext
-  ): Future[Unit] = {
-    val loadNamespaces =
-      namespaces -- namespaceCache.keySet // only load the once we don't already hold in memory
-    for {
-      existing <- store.findPositiveTransactions(
-        asOf = timestamp,
-        asOfInclusive = false,
-        includeSecondary = false,
-        types = Seq(DomainTopologyTransactionType.NamespaceDelegation),
-        filterUid = None,
-        filterNamespace = Some(loadNamespaces.toSeq),
-      )
-    } yield {
-      existing.adds
-        .toAuthorizedTopologyTransactions { case x: NamespaceDelegation => x }
-        .groupBy(_.mapping.namespace)
-        .foreach { case (namespace, transactions) =>
-          ErrorUtil.requireArgument(
-            !namespaceCache.isDefinedAt(namespace),
-            s"graph shouldnt exist before loading ${namespaces} vs ${namespaceCache.keySet}",
-          )
-          val graph = new AuthorizationGraph(namespace, loggerFactory)
-          namespaceCache.put(namespace, graph)
-          // use un-authorized batch load. while we are checking for proper authorization when we
-          // add a certificate the first time, we allow for the situation where an intermediate certificate
-          // is currently expired, but might be replaced with another cert. in this case,
-          // the authorization check would fail.
-          // unauthorized certificates are not really an issue as we'll simply exclude them when calculating
-          // the connected graph
-          graph.unauthorizedAdd(transactions)
-        }
-    }
-  }
-
   def authorizedNamespaceDelegationsForNamespaces(
       namespaces: Set[Namespace]
   ): Seq[AuthorizedNamespaceDelegation] =
@@ -422,7 +316,7 @@ class IncomingTopologyTransactionAuthorizationValidator(
       graph <- namespaceCache.get(uid.namespace)
       items <- identifierDelegationCache.get(uid)
     } yield items
-      .filter(x => graph.isValidAuthorizationKey(x.authorizingKey, requireRoot = false))
+      .filter(x => graph.isValidAuthorizationKey(x.signingKey, requireRoot = false))
       .toSeq
     ret.getOrElse(Seq())
   }

@@ -11,12 +11,17 @@ import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolM
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener.EventDeserializationError
 import com.digitalasset.canton.sequencing.{ApplicationHandler, EnvelopeBox}
 import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
+import com.digitalasset.canton.version.ProtocolVersion
 
 /** Opener for envelopes inside an arbitrary [[EnvelopeBox]] */
-class EnvelopeOpener[Box[+_]](hashOps: HashOps)(implicit Box: EnvelopeBox[Box]) {
+class EnvelopeOpener[Box[+_]](protocolVersion: ProtocolVersion, hashOps: HashOps)(implicit
+    Box: EnvelopeBox[Box]
+) {
   def open(closed: Box[ClosedEnvelope]): Box[DefaultOpenEnvelope] = {
     val openedEventE = Box.traverse(closed) { closedEnvelope =>
-      closedEnvelope.openEnvelope(ProtocolMessage.fromEnvelopeContentByteStringV0(hashOps))
+      closedEnvelope.openEnvelope(
+        ProtocolMessage.fromEnvelopeContentByteString(protocolVersion, hashOps)
+      )
     }
 
     openedEventE.valueOr { error =>
@@ -30,10 +35,10 @@ class EnvelopeOpener[Box[+_]](hashOps: HashOps)(implicit Box: EnvelopeBox[Box]) 
 object EnvelopeOpener {
 
   /** Opens the envelopes inside the [[EnvelopeBox]] before handing them to the given application handler. */
-  def apply[Box[+_]](hashOps: HashOps)(
+  def apply[Box[+_]](protocolVersion: ProtocolVersion, hashOps: HashOps)(
       handler: ApplicationHandler[Box, DefaultOpenEnvelope]
   )(implicit Box: EnvelopeBox[Box]): ApplicationHandler[Box, ClosedEnvelope] = handler.replace {
-    val opener = new EnvelopeOpener[Box](hashOps)
+    val opener = new EnvelopeOpener[Box](protocolVersion, hashOps)
 
     closedEvent => handler(opener.open(closedEvent))
   }

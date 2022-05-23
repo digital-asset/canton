@@ -101,7 +101,13 @@ object SignedTopologyTransaction
   )(implicit ec: ExecutionContext): EitherT[Future, SigningError, SignedTopologyTransaction[Op]] =
     for {
       signature <- crypto.sign(transaction.hashToSign(hashOps), signingKey.id)
-    } yield SignedTopologyTransaction(transaction, signingKey, signature)(protocolVersion, None)
+      representativeProtocolVersion = supportedProtoVersions.protocolVersionRepresentativeFor(
+        protocolVersion
+      )
+    } yield SignedTopologyTransaction(transaction, signingKey, signature)(
+      representativeProtocolVersion,
+      None,
+    )
 
   private def fromProtoV0(transactionP: v0.SignedTopologyTransaction)(
       bytes: ByteString

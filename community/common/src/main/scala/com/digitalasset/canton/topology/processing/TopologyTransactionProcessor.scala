@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.store.{
   PositiveSignedTopologyTransactions,
   SignedTopologyTransactions,
   TopologyStore,
+  TopologyStoreId,
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
@@ -104,7 +105,7 @@ trait TopologyTransactionProcessingSubscriber {
 class TopologyTransactionProcessor(
     domainId: DomainId,
     cryptoPureApi: CryptoPureApi,
-    store: TopologyStore,
+    store: TopologyStore[TopologyStoreId.DomainStore],
     clock: Clock,
     acsCommitmentScheduleEffectiveTime: Traced[CantonTimestamp] => Unit,
     futureSupervisor: FutureSupervisor,
@@ -232,7 +233,7 @@ class TopologyTransactionProcessor(
       }
     } yield {
       logger.debug(
-        s"Initialising topology processing with effective ts ${clientInitTimes.map(_._1)}"
+        s"Initialising topology processing for start=$start with effective ts ${clientInitTimes.map(_._1)}"
       )
       clientInitTimes.foreach { case (effective, approximate) =>
         // if the effective time is in the future, schedule a clock to update the time accordingly
@@ -458,7 +459,7 @@ class TopologyTransactionProcessor(
     ) = AuthorizedTopologyTransaction(
       sit.uniquePath,
       sit.transaction.element.mapping,
-      sit.key.fingerprint,
+      sit,
     ) -> sit
 
     val currentMap = current.map(toIndex).toMap
@@ -698,7 +699,7 @@ class TopologyTransactionProcessor(
 object TopologyTransactionProcessor {
 
   def createProcessorAndClientForDomain(
-      topologyStore: TopologyStore,
+      topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       domainId: DomainId,
       pureCrypto: CryptoPureApi,
       initKeys: Map[KeyOwner, Seq[PublicKey]],

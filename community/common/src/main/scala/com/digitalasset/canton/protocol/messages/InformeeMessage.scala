@@ -7,7 +7,7 @@ import java.util.UUID
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
@@ -27,7 +27,9 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
     // Serializable classes that have a corresponding Protobuf message should inherit from this trait to inherit common code and naming conventions.
     // If the corresponding Protobuf message of a class has multiple versions (e.g. `v0.InformeeMessage` and `v1.InformeeMessage`),
     // it should implement traits for each (e.g. InformeeMessage should implement HasProtoV0 and HasProtoV1)
-    with HasProtoV0[v0.InformeeMessage] {
+    with HasProtoV0[v0.InformeeMessage]
+    with ProtocolMessageV0
+    with ProtocolMessageV1 {
 
   override def requestUuid: UUID = fullInformeeTree.transactionUuid
 
@@ -69,6 +71,9 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
 
   override def confirmationPolicy: ConfirmationPolicy = fullInformeeTree.confirmationPolicy
 

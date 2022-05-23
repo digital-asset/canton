@@ -1,17 +1,6 @@
-
-
-// load dependencies first, so that we fail early if there is a dependency problem
-import $ivy.`org.openjfx:javafx-controls:17-ea+8`
-type test = javafx.scene.control.TableCell[String, String]
-import $ivy.`org.openjfx:javafx-controls:17-ea+8`
-import $ivy.`org.openjfx:javafx-base:17-ea+8`
-import $ivy.`org.openjfx:javafx-fxml:17-ea+8`
-import $ivy.`org.openjfx:javafx-media:17-ea+8`
-import $ivy.`org.openjfx:javafx-web:17-ea+8`
-import $ivy.`org.openjfx:javafx-graphics:17-ea+8`
+// same script as demo.sc, but without the java-fx ivy imports. we can't use the same script as we can't
+// guard the imports with an if statement in ammonite.
 import $ivy.`org.scalafx::scalafx:17.0.1-R26`
-
-
 val (testScript, loadJar, adjustPath) = sys.props.getOrElseUpdate("demo-test", "0") match {
   case "1" => (true, false, true)
   case "2" => (true, true, false)

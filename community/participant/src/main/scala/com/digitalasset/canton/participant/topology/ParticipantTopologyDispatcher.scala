@@ -20,7 +20,11 @@ import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TopologyStore}
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransaction,
+  TopologyStore,
+  TopologyStoreId,
+}
 import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
   SignedTopologyTransaction,
@@ -109,7 +113,7 @@ class ParticipantTopologyDispatcher(
       domainId: DomainId,
       handle: RegisterTopologyTransactionHandle,
       client: DomainTopologyClientWithInit,
-      targetStore: TopologyStore,
+      targetStore: TopologyStore[TopologyStoreId.DomainStore],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
@@ -137,8 +141,8 @@ private class DomainOutbox(
     val domainId: DomainId,
     val handle: RegisterTopologyTransactionHandle,
     val targetClient: DomainTopologyClientWithInit,
-    authorizedStore: TopologyStore,
-    val targetStore: TopologyStore,
+    authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+    val targetStore: TopologyStore[TopologyStoreId.DomainStore],
     override protected val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     // TODO(#9270) clean up how we parameterize our nodes
@@ -266,7 +270,7 @@ private class DomainOutbox(
           // find pending transactions
           pending <- findPendingTransactions(cur)
           // filter out applicable
-          applicablePotentiallyPresent <- onlyApplicable(pending)
+          applicablePotentiallyPresent <- onlyApplicable(pending.map(_.transaction))
           // not already present
           applicable <- notAlreadyPresent(applicablePotentiallyPresent)
         } yield (pending, applicable))
@@ -296,12 +300,12 @@ private class DomainOutbox(
   private def updateWatermark(
       current: Watermarks,
       found: Seq[StoredTopologyTransaction[TopologyChangeOp]],
-      applicable: Seq[StoredTopologyTransaction[TopologyChangeOp]],
+      applicable: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       responses: Seq[RegisterTopologyTransactionResponse.Result],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val valid = applicable.zipWithIndex.zip(responses).foldLeft(true) {
       case (valid, ((item, idx), response)) =>
-        if (item.transaction.uniquePath.toProtoPrimitive != response.uniquePath) {
+        if (item.uniquePath.toProtoPrimitive != response.uniquePath) {
           logger.error(
             s"Error at ${idx}: Invalid response ${response} for transaction ${item.transaction}"
           )
@@ -339,8 +343,8 @@ private class DomainOnboardingOutbox(
     val domainId: DomainId,
     participantId: ParticipantId,
     val handle: RegisterTopologyTransactionHandle,
-    authorizedStore: TopologyStore,
-    val targetStore: TopologyStore,
+    authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+    val targetStore: TopologyStore[TopologyStoreId.DomainStore],
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 ) extends DomainOutboxDispatch {
@@ -361,15 +365,15 @@ private class DomainOnboardingOutbox(
   private def loadInitialTransactionsFromStore()(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+  ): EitherT[FutureUnlessShutdown, String, Seq[SignedTopologyTransaction[TopologyChangeOp]]] =
     for {
       candidates <- EitherT.right(
         performUnlessClosingF(functionFullName)(
-          authorizedStore.findParticipantOnboardingTransactions(participantId)
+          authorizedStore.findParticipantOnboardingTransactions(participantId, domainId)
         )
       )
       applicablePossiblyPresent <- EitherT.right(
-        performUnlessClosingF(functionFullName)(onlyApplicable(candidates.result))
+        performUnlessClosingF(functionFullName)(onlyApplicable(candidates))
       )
       _ <- EitherT.fromEither[FutureUnlessShutdown](initializedWith(applicablePossiblyPresent))
       applicable <- EitherT.right(
@@ -378,10 +382,10 @@ private class DomainOnboardingOutbox(
     } yield applicable
 
   private def initializedWith(
-      initial: Seq[StoredTopologyTransaction[TopologyChangeOp]]
+      initial: Seq[SignedTopologyTransaction[TopologyChangeOp]]
   ): Either[String, Unit] = {
     val (haveEncryptionKey, haveSigningKey) =
-      initial.map(_.transaction.transaction.element.mapping).foldLeft((false, false)) {
+      initial.map(_.transaction.element.mapping).foldLeft((false, false)) {
         case ((haveEncryptionKey, haveSigningKey), OwnerToKeyMapping(`participantId`, key)) =>
           (haveEncryptionKey || !key.isSigning, haveSigningKey || key.isSigning)
         case (acc, _) => acc
@@ -401,8 +405,8 @@ object DomainOnboardingOutbox {
       domainId: DomainId,
       participantId: ParticipantId,
       handle: RegisterTopologyTransactionHandle,
-      authorizedStore: TopologyStore,
-      targetStore: TopologyStore,
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      targetStore: TopologyStore[TopologyStoreId.DomainStore],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -429,7 +433,7 @@ object DomainOnboardingOutbox {
 private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
 
   protected def domainId: DomainId
-  protected def targetStore: TopologyStore
+  protected def targetStore: TopologyStore[TopologyStoreId.DomainStore]
   protected def handle: RegisterTopologyTransactionHandle
 
   // register handle close task
@@ -441,18 +445,18 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
   })(TraceContext.empty)
 
   protected def notAlreadyPresent(
-      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
-    transactions.toList.traverseFilter(stored =>
-      targetStore.exists(stored.transaction).map(exists => Option.when(!exists)(stored))
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] =
+    transactions.toList.traverseFilter(transaction =>
+      targetStore.exists(transaction).map(exists => Option.when(!exists)(transaction))
     )
 
   protected def onlyApplicable(
-      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]]
-  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] = {
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
     def notAlien(mapping: TopologyMapping): Boolean = mapping match {
       case OwnerToKeyMapping(_: ParticipantId, _) => true
       case OwnerToKeyMapping(owner, _) => owner.uid == domainId.unwrap
@@ -461,8 +465,8 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
     Future.successful(
       transactions.filter(x =>
         notAlien(
-          x.transaction.transaction.element.mapping
-        ) && x.transaction.transaction.element.mapping.restrictedToDomain.forall(_ == domainId)
+          x.transaction.element.mapping
+        ) && x.transaction.element.mapping.restrictedToDomain.forall(_ == domainId)
       )
     )
   }
@@ -470,7 +474,7 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
   protected def dispatch(
       domain: DomainAlias,
       handle: RegisterTopologyTransactionHandle,
-      transactions: Seq[StoredTopologyTransaction[TopologyChangeOp]],
+      transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -492,7 +496,7 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
         {
           logger.debug(s"Attempting to push ${transactions.size} topology transactions to $domain")
           FutureUtil.logOnFailureUnlessShutdown(
-            handle.submit(transactions.map(_.transaction)),
+            handle.submit(transactions),
             s"Pushing topology transactions to $domain",
           )
         },

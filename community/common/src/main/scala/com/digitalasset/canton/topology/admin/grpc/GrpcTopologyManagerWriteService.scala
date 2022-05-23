@@ -17,7 +17,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.v0.SignedLegalIdentityClaimGeneration.X509CertificateClaim
 import com.digitalasset.canton.topology.admin.v0._
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
@@ -25,12 +25,13 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcTopologyManagerWriteService[T <: CantonError](
     manager: TopologyManager[T],
-    store: TopologyStore,
+    store: TopologyStore[TopologyStoreId.AuthorizedStore],
     cryptoPublicStore: CryptoPublicStore,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -43,31 +44,29 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
       authDataPO: Option[AuthorizationData],
       elementE: Either[CantonError, TopologyMapping],
   )(implicit traceContext: TraceContext): Future[AuthorizationSuccess] = {
-    try {
-      val authDataE = for {
-        authDataP <- ProtoConverter.required("authorization", authDataPO)
-        AuthorizationData(changeP, signedByP, replaceExistingP, forceChangeP) = authDataP
-        change <- TopologyChangeOp.fromProtoV0(changeP)
-        fingerprint <- (if (signedByP.isEmpty) None
-                        else Some(Fingerprint.fromProtoPrimitive(signedByP))).sequence
-      } yield (change, fingerprint, replaceExistingP, forceChangeP)
-      val process = for {
-        authData <- EitherT.fromEither[Future](
-          authDataE.leftMap(ProtoDeserializationFailure.Wrap(_))
-        )
-        element <- EitherT.fromEither[Future](elementE)
-        (op, fingerprint, replace, force) = authData
-        tx <- manager.genTransaction(op, element).leftMap(x => x: CantonError)
-        success <- manager
-          .authorize(tx, fingerprint, force = force, replaceExisting = replace)
-          .leftWiden[CantonError]
-      } yield new AuthorizationSuccess(success.getCryptographicEvidence)
-      EitherTUtil.toFuture(mapErrNew(process))
-    } catch {
-      case x: RuntimeException =>
-        logger.error("Caught runtime exception {}", x)
-        throw x
-    }
+    val authDataE = for {
+      authDataP <- ProtoConverter.required("authorization", authDataPO)
+      AuthorizationData(changeP, signedByP, replaceExistingP, forceChangeP) = authDataP
+      change <- TopologyChangeOp.fromProtoV0(changeP)
+      fingerprint <- (if (signedByP.isEmpty) None
+                      else Some(Fingerprint.fromProtoPrimitive(signedByP))).sequence
+    } yield (change, fingerprint, replaceExistingP, forceChangeP)
+
+    val protocolVersion = ProtocolVersion.latest
+
+    val authorizationSuccess = for {
+      authData <- EitherT.fromEither[Future](
+        authDataE.leftMap(ProtoDeserializationFailure.Wrap(_))
+      )
+      element <- EitherT.fromEither[Future](elementE)
+      (op, fingerprint, replace, force) = authData
+      tx <- manager.genTransaction(op, element).leftWiden[CantonError]
+      success <- manager
+        .authorize(tx, fingerprint, protocolVersion, force = force, replaceExisting = replace)
+        .leftWiden[CantonError]
+    } yield new AuthorizationSuccess(success.getCryptographicEvidence)
+
+    EitherTUtil.toFuture(mapErrNew(authorizationSuccess))
   }
 
   override def authorizePartyToParticipant(

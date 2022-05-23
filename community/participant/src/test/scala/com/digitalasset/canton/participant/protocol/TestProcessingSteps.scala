@@ -46,7 +46,7 @@ import com.digitalasset.canton.participant.store.{
   TransferLookup,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.SyncCryptoDecryptError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.sequencing.protocol._

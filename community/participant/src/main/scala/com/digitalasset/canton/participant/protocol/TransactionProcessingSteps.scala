@@ -76,7 +76,7 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
@@ -523,7 +523,11 @@ class TransactionProcessingSteps(
         if (transactionViewEnvelope.recipients.leafMembers.contains(participantId)) {
           val message = transactionViewEnvelope.protocolMessage
           val randomnessF = EncryptedViewMessage
-            .decryptRandomness(snapshot, message, participantId)
+            .decryptRandomness(
+              snapshot,
+              message,
+              participantId,
+            )
             .valueOr { e =>
               ErrorUtil.internalError(
                 new IllegalArgumentException(
@@ -554,7 +558,9 @@ class TransactionProcessingSteps(
                 randomness.unwrap.size,
                 info,
               )
-              .leftMap(error => EncryptedViewMessage.HkdfExpansionError(error, viewMessage))
+              .leftMap(error =>
+                EncryptedViewMessageDecryptionError.HkdfExpansionError(error, viewMessage)
+              )
         } yield {
           randomnessMap.get(subviewHash) match {
             case Some(promise) =>

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.traverse._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String256M}
@@ -13,16 +14,20 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.{v0 => topoV0}
+import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
+import com.digitalasset.canton.topology.processing.{
+  EffectiveTime,
+  SequencedTime,
+  SnapshotAuthorizationValidator,
+}
 import com.digitalasset.canton.topology.store.db.DbTopologyStoreFactory
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactory
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
-import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -83,11 +88,10 @@ trait PartyMetadataStore extends AutoCloseable {
 }
 
 sealed trait TopologyStoreId {
-
   def filterName: String = dbString.unwrap
   def dbString: LengthLimitedString
-
 }
+
 object TopologyStoreId {
 
   /** A topology store storing sequenced topology transactions
@@ -99,11 +103,15 @@ object TopologyStoreId {
       extends TopologyStoreId {
     lazy val dbString: LengthLimitedString = domainId.toLengthLimitedString
   }
+
   // authorized transactions (the topology managers store)
+  type AuthorizedStore = AuthorizedStore.type
   object AuthorizedStore extends TopologyStoreId {
     val dbString = String255.tryCreate("Authorized")
   }
+
   // requested transactions (requests sent via domain service)
+  type RequestedStore = RequestedStore.type
   object RequestedStore extends TopologyStoreId {
     val dbString = String255.tryCreate("Requested")
   }
@@ -112,16 +120,35 @@ object TopologyStoreId {
     case "Requested" => RequestedStore
     case domain => DomainStore(DomainId(UniqueIdentifier.tryFromProtoPrimitive(domain)))
   }
+
+  trait IdTypeChecker[A <: TopologyStoreId] {
+    def isOfType(id: TopologyStoreId): Boolean
+  }
+
+  implicit val domainTypeChecker = new IdTypeChecker[DomainStore] {
+    override def isOfType(id: TopologyStoreId): Boolean = id match {
+      case DomainStore(_, _) => true
+      case AuthorizedStore => false
+      case RequestedStore => false
+    }
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def select[StoreId <: TopologyStoreId](store: TopologyStore[TopologyStoreId])(implicit
+      checker: IdTypeChecker[StoreId]
+  ): Option[TopologyStore[StoreId]] = if (checker.isOfType(store.storeId))
+    Some(store.asInstanceOf[TopologyStore[StoreId]])
+  else None
 }
 
 trait TopologyStoreFactory extends AutoCloseable {
 
-  def forId(storeId: TopologyStoreId): TopologyStore
+  def forId[StoreId <: TopologyStoreId](storeId: StoreId): TopologyStore[StoreId]
 
   /** returns all stores except the discriminated store of the embedded mediator */
   def allNonDiscriminated(implicit
       traceContext: TraceContext
-  ): Future[Map[TopologyStoreId, TopologyStore]]
+  ): Future[Seq[TopologyStore[TopologyStoreId]]]
 
   def partyMetadataStore(): PartyMetadataStore
 
@@ -212,10 +239,13 @@ object TimeQuery {
 
 }
 
-abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseable {
+abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: ExecutionContext)
+    extends AutoCloseable {
   this: NamedLogging =>
 
   private val monotonicityCheck = new AtomicReference[Option[CantonTimestamp]](None)
+
+  def storeId: StoreID
 
   protected def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] =
     monotonicityCheck.getAndSet(Some(ts))
@@ -243,9 +273,9 @@ abstract class TopologyStore(implicit ec: ExecutionContext) extends AutoCloseabl
   )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]]
 
   /** returns initial set of onboarding transactions that should be dispatched to the domain */
-  def findParticipantOnboardingTransactions(participantId: ParticipantId)(implicit
-      traceContext: TraceContext
-  ): Future[StoredTopologyTransactions[TopologyChangeOp]]
+  def findParticipantOnboardingTransactions(participantId: ParticipantId, domainId: DomainId)(
+      implicit traceContext: TraceContext
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]]
 
   /** returns an descending ordered list of timestamps of when participant state changes occurred before a certain point in time */
   def findTsOfParticipantStateChangesBefore(
@@ -620,20 +650,29 @@ object TopologyStore {
 
   lazy val initialParticipantDispatchingSet = Set(
     DomainTopologyTransactionType.ParticipantState,
-    DomainTopologyTransactionType.IdentifierDelegation,
-    DomainTopologyTransactionType.NamespaceDelegation,
     DomainTopologyTransactionType.OwnerToKeyMapping,
     DomainTopologyTransactionType.SignedLegalIdentityClaim,
   )
 
-  // TODO(#6300) remove once we have proper authorization data stored
   def filterInitialParticipantDispatchingTransactions(
       participantId: ParticipantId,
+      domainId: DomainId,
+      store: TopologyStore[TopologyStoreId],
+      loggerFactory: NamedLoggerFactory,
       transactions: StoredTopologyTransactions[TopologyChangeOp],
-  ): StoredTopologyTransactions[TopologyChangeOp] = {
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+    val logger = loggerFactory.getLogger(getClass)
     def includeState(mapping: TopologyStateUpdateMapping): Boolean = mapping match {
-      case NamespaceDelegation(_, _, _) => true
-      case IdentifierDelegation(_, _) => true
+      case NamespaceDelegation(_, _, _) | IdentifierDelegation(_, _) =>
+        // note for future devs: this function here should only be supplied with core mappings that need to be
+        // sent to the topology manager on bootstrapping. so the query that picks these transactions up should
+        // not include namespace delegations and therelike
+        // note that we'll pick up the necessary certificates further below
+        logger.error("Initial dispatching should not include namespace or identifier delegations")
+        false
       case OwnerToKeyMapping(pid, _) => pid == participantId
       case SignedLegalIdentityClaim(uid, _, _) => uid == participantId.uid
       case ParticipantState(_, _, pid, _, _) => pid == participantId
@@ -645,9 +684,29 @@ object TopologyStore {
       case mapping: TopologyStateUpdateMapping => includeState(mapping)
       case _ => false
     }
-    StoredTopologyTransactions(
-      transactions.result.filter(x => include(x.transaction.transaction.element.mapping))
+    val validator =
+      new SnapshotAuthorizationValidator(CantonTimestamp.MaxValue, store, loggerFactory)
+    val filtered = transactions.result.filter(tx =>
+      tx.transaction.transaction.element.mapping.restrictedToDomain
+        .forall(_ == domainId) && include(tx.transaction.transaction.element.mapping)
     )
+    val authF = filtered.toList
+      .flatTraverse(tx =>
+        validator
+          .authorizedBy(tx.transaction)
+          .map(_.toList)
+      )
+      .map(_.foldLeft(AuthorizationChain.empty) { case (acc, elem) => acc.merge(elem) })
+    authF.map { chain =>
+      // put all transactions into the correct order to ensure that the authorizations come first
+      val res = chain.namespaceDelegations.map(_.transaction) ++ chain.identifierDelegation.map(
+        _.transaction
+      ) ++ filtered.map(_.transaction)
+      logger.debug(
+        s"Computed participant on-boarding transaction with ${res.length} transactions"
+      )
+      res
+    }
   }
 
 }

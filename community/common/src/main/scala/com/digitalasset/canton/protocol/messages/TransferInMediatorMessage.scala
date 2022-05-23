@@ -24,6 +24,8 @@ import java.util.UUID
   */
 case class TransferInMediatorMessage(tree: TransferInViewTree)
     extends MediatorRequest
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.TransferInMediatorMessage] {
 
   require(tree.commonData.isFullyUnblinded, "The transfer-in common data must be unblinded")
@@ -69,6 +71,12 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
     v0.EnvelopeContent(
       someEnvelopeContent =
         v0.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV0)
+    )
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(
+      someEnvelopeContent =
+        v1.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV0)
     )
 
   override def toProtoV0: v0.TransferInMediatorMessage =

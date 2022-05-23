@@ -20,14 +20,27 @@ that you are using OpenJDK 8.
 
 Therefore, please use a JRE of version 11 or higher.
 
+### Apple Silicon Users
+
+Please note that Apple Silicon requires some tweaking due to poor Java FX for JDK 11 support on this platform.
+The only way to run the demo is to run it with an JDK that packages JavaFX natively. You can download one from
+https://www.azul.com/downloads/?version=java-11-lts&os=macos&architecture=arm-64-bit&package=jdk-fx
+
+Unpack it, then restart the demo with:
+```
+    export JAVA_HOME=<path to the unpacked new jdk>"
+    export PATH=$JAVA_HOME/bin:$PATH
+    bash start-demo.command
+```
 
 ## Running
      
 The demo application can be started using  
 
 ```
-       bin/canton -v -c demo/demo.conf --bootstrap demo/demo.sc 
+       ./start-demo.command 
 ```
+on Unix like systems and by clicking the ``start-demo-win.cmd`` on Windows.
 
 Please note that you need to start the script from the directory where you unpacked the Canton distribution,
 as otherwise the script won't find the resources.

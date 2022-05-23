@@ -29,7 +29,7 @@ import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationRequest,
   EncryptedView,
-  EncryptedViewMessage,
+  EncryptedViewMessageV0,
   InformeeMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
@@ -211,13 +211,18 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             .valueOr(e => throw new IllegalStateException(s"Failed to derive key: $e"))
         }
 
-        val symmetricKey = ProtocolCryptoApi
+        val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
+        val symmetricKeyRandomness = ProtocolCryptoApi
           .hkdf(cryptoPureApi, ProtocolVersion.latestForTest)(
             keySeed,
-            cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes,
+            viewEncryptionScheme.keySizeInBytes,
             HkdfInfo.ViewKey,
           )
           .valueOr(e => fail(s"Failed to derive key: $e"))
+
+        val symmetricKey = cryptoPureApi
+          .createSymmetricKey(symmetricKeyRandomness, viewEncryptionScheme)
+          .valueOrFail("failed to create symmetric key from randomness")
 
         val participants = tree.informees
           .map(_.party)
@@ -242,11 +247,13 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           .futureValue
           .value
 
+        val createdRandomnessMap = randomnessMap(keySeed, participants, cryptoPureApi)
+
         OpenEnvelope(
-          EncryptedViewMessage(
+          EncryptedViewMessageV0(
             signature,
             tree.viewHash,
-            randomnessMap(keySeed, participants, cryptoPureApi),
+            createdRandomnessMap.fmap(_.encrypted),
             encryptedView,
             transactionFactory.domainId,
           ),
@@ -266,7 +273,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       randomness: SecureRandomness,
       informeeParticipants: Set[ParticipantId],
       cryptoPureApi: CryptoPureApi,
-  ): Map[ParticipantId, Encrypted[SecureRandomness]] = {
+  ): Map[ParticipantId, AsymmetricEncrypted[SecureRandomness]] = {
 
     val randomnessPairs = for {
       participant <- informeeParticipants

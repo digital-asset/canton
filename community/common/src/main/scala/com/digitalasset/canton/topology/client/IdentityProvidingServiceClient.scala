@@ -243,7 +243,7 @@ trait KeyTopologySnapshotClient {
   /** returns newest encryption public key */
   def encryptionKey(owner: KeyOwner): Future[Option[EncryptionPublicKey]]
 
-  /** returns all signing keys */
+  /** returns all encryption keys */
   def encryptionKeys(owner: KeyOwner): Future[Seq[EncryptionPublicKey]]
 
   /** Returns a list of all known parties on this domain */

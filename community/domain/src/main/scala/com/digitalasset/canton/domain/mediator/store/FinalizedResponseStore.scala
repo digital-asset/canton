@@ -120,7 +120,9 @@ class DbFinalizedResponseStore(
 
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteStringV0(cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
+      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+        ByteString.copyFrom(r.<<[Array[Byte]])
+      )
       .fold[MediatorRequest](
         error =>
           throw new DbDeserializationException(s"Error deserializing mediator request $error"),
@@ -133,7 +135,9 @@ class DbFinalizedResponseStore(
   )
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =
     (r: MediatorRequest, pp: PositionedParameters) =>
-      pp >> r.toEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
+      pp >> ProtocolMessage
+        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toByteArray
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("finalized-response-store")

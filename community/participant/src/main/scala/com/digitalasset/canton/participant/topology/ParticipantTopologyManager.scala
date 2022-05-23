@@ -16,14 +16,16 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManager.PostInitCallbacks
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
+import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantErrorGroup
 import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
@@ -45,7 +47,7 @@ trait ParticipantTopologyManagerObserver {
   */
 class ParticipantTopologyManager(
     clock: Clock,
-    override val store: TopologyStore,
+    override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     crypto: Crypto,
     override protected val timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
@@ -218,7 +220,11 @@ class ParticipantTopologyManager(
       case _ => EitherT.rightT(())
     }
 
-  def issueParticipantDomainStateCert(participantId: ParticipantId, domainId: DomainId)(implicit
+  def issueParticipantDomainStateCert(
+      participantId: ParticipantId,
+      domainId: DomainId,
+      staticDomainParameters: StaticDomainParameters,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]] = {
 
@@ -241,21 +247,23 @@ class ParticipantTopologyManager(
           })
       )
 
-    def trustDomain: EitherT[Future, ParticipantTopologyManagerError, Unit] =
+    def trustDomain: EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+      val transaction = ParticipantState(
+        RequestSide.To,
+        domainId,
+        participantId,
+        ParticipantPermission.Submission,
+        TrustLevel.Ordinary,
+      )
+
       authorize(
-        TopologyStateUpdate.createAdd(
-          ParticipantState(
-            RequestSide.To,
-            domainId,
-            participantId,
-            ParticipantPermission.Submission,
-            TrustLevel.Ordinary,
-          )
-        ),
+        TopologyStateUpdate.createAdd(transaction),
         signingKey = None,
+        protocolVersion = staticDomainParameters.protocolVersion,
         force = false,
         replaceExisting = true,
       ).map(_ => ())
+    }
 
     // check if cert already exists
     performUnlessClosingF(functionFullName) {
@@ -301,6 +309,7 @@ class ParticipantTopologyManager(
       authorize(
         TopologyStateUpdate.createAdd(VettedPackages(pid, packages)),
         None,
+        ProtocolVersion.latest,
         force = false,
       )
 

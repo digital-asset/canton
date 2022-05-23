@@ -5,6 +5,7 @@ package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
 import cats.data.{EitherT, OptionT}
+import cats.syntax.functorFilter._
 import cats.syntax.option._
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -41,12 +42,14 @@ import com.digitalasset.canton.topology.store.{
   InitializationStore,
   TopologyStore,
   TopologyStoreFactory,
+  TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.{TopologyTransaction, _}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
@@ -228,7 +231,9 @@ abstract class CantonNodeBootstrapBase[
         canton.topology.admin.v0.TopologyAggregationServiceGrpc
           .bindService(
             new GrpcTopologyAggregationService(
-              topologyStoreFactory.allNonDiscriminated,
+              topologyStoreFactory.allNonDiscriminated.map(
+                _.mapFilter(TopologyStoreId.select[TopologyStoreId.DomainStore])
+              ),
               ips,
               loggerFactory,
             ),
@@ -253,7 +258,7 @@ abstract class CantonNodeBootstrapBase[
 
   protected def startTopologyManagementWriteService[E <: CantonError](
       topologyManager: TopologyManager[E],
-      authorizedStore: TopologyStore,
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
   ): Unit = {
     adminServerRegistry
       .addService(
@@ -397,15 +402,17 @@ abstract class CantonNodeBootstrapBase[
       manager: TopologyManager[E],
       key: SigningPublicKey,
       mapping: TopologyStateUpdateMapping,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
-    authorizeIfNew(manager, TopologyStateUpdate.createAdd(mapping), key)
+    authorizeIfNew(manager, TopologyStateUpdate.createAdd(mapping), key, protocolVersion)
 
   private def authorizeIfNew[E <: CantonError, Op <: TopologyChangeOp](
       manager: TopologyManager[E],
       transaction: TopologyTransaction[Op],
       signingKey: SigningPublicKey,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] = for {
@@ -418,7 +425,7 @@ abstract class CantonNodeBootstrapBase[
         EitherT.rightT[Future, String](())
       } else
         manager
-          .authorize(transaction, Some(signingKey.fingerprint), false)
+          .authorize(transaction, Some(signingKey.fingerprint), protocolVersion, false)
           .leftMap(_.toString)
           .map(_ => ())
   } yield res
@@ -427,10 +434,11 @@ abstract class CantonNodeBootstrapBase[
       manager: TopologyManager[E],
       key: SigningPublicKey,
       mapping: DomainGovernanceMapping,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
-    authorizeIfNew(manager, DomainGovernanceTransaction(mapping), key)
+    authorizeIfNew(manager, DomainGovernanceTransaction(mapping), key, protocolVersion)
 
   protected def getOrCreateSigningKey(
       name: String

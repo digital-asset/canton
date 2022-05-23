@@ -26,7 +26,7 @@ case class OpenEnvelope[+M <: ProtocolMessage](
 
   /** Returns the serialized contents of the envelope */
   protected def contentAsByteString(version: ProtocolVersion): ByteString =
-    protocolMessage.toEnvelopeContentByteString(version)
+    ProtocolMessage.toEnvelopeContentByteString(protocolMessage, version)
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def traverse[F[_], MM <: ProtocolMessage](

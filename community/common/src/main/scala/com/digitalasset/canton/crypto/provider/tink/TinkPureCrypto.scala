@@ -11,10 +11,11 @@ import com.digitalasset.canton.crypto.HkdfError.{HkdfHmacError, HkdfInternalErro
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
-import com.google.crypto.tink._
+import com.google.crypto.tink
 import com.google.crypto.tink.aead.AeadKeyTemplates
 import com.google.crypto.tink.config.TinkConfig
-import com.google.crypto.tink.subtle.{AesGcmJce, Hkdf, Random}
+import com.google.crypto.tink.subtle.{Hkdf, Random}
+import com.google.crypto.tink.{KeysetHandle, proto => tinkproto}
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent.TrieMap
@@ -50,9 +51,15 @@ class TinkPureCrypto private (
       encrypted: Encrypted[M],
       decrypt: Array[Byte] => Array[Byte],
       deserialize: ByteString => Either[DeserializationError, M],
+  ): Either[DecryptionError, M] = decryptWith(encrypted.ciphertext, decrypt, deserialize)
+
+  private def decryptWith[M](
+      ciphertext: ByteString,
+      decrypt: Array[Byte] => Array[Byte],
+      deserialize: ByteString => Either[DeserializationError, M],
   ): Either[DecryptionError, M] =
     Either
-      .catchOnly[GeneralSecurityException](decrypt(encrypted.ciphertext.toByteArray))
+      .catchOnly[GeneralSecurityException](decrypt(ciphertext.toByteArray))
       .leftMap(err => DecryptionError.FailedToDecrypt(err.toString))
       .flatMap(plain =>
         deserialize(ByteString.copyFrom(plain)).leftMap(DecryptionError.FailedToDeserialize)
@@ -108,6 +115,50 @@ class TinkPureCrypto private (
       )
   }
 
+  override def createSymmetricKey(
+      bytes: SecureRandomness,
+      scheme: SymmetricKeyScheme,
+  ): Either[EncryptionKeyCreationError, SymmetricKey] = {
+    val keyData = scheme match {
+      case SymmetricKeyScheme.Aes128Gcm =>
+        val key = tinkproto.AesGcmKey
+          .newBuilder()
+          .setVersion(0)
+          .setKeyValue(bytes.unwrap)
+          .build()
+
+        tinkproto.KeyData
+          .newBuilder()
+          .setTypeUrl("type.googleapis.com/google.crypto.tink.AesGcmKey")
+          .setValue(key.toByteString)
+          .setKeyMaterialType(tinkproto.KeyData.KeyMaterialType.SYMMETRIC)
+          .build()
+    }
+
+    val keyId = 0
+    val key = tinkproto.Keyset.Key
+      .newBuilder()
+      .setKeyData(keyData)
+      .setStatus(tinkproto.KeyStatusType.ENABLED)
+      .setKeyId(keyId)
+      .setOutputPrefixType(tinkproto.OutputPrefixType.RAW)
+      .build()
+
+    val keyset = tinkproto.Keyset.newBuilder().setPrimaryKeyId(keyId).addKey(key).build()
+
+    for {
+      keysetHandle <- TinkKeyFormat
+        .deserializeHandle(keyset.toByteString)
+        .leftMap(err => EncryptionKeyCreationError.InternalConversionError(err.toString))
+    } yield {
+      SymmetricKey.create(
+        CryptoKeyFormat.Tink,
+        TinkKeyFormat.serializeHandle(keysetHandle),
+        scheme,
+      )
+    }
+  }
+
   /** Encrypts the given bytes with the given symmetric key */
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
@@ -116,7 +167,10 @@ class TinkPureCrypto private (
   ): Either[EncryptionError, Encrypted[M]] =
     for {
       keysetHandle <- keysetNonCached(symmetricKey, EncryptionError.InvalidSymmetricKey)
-      aead <- getPrimitive[Aead, EncryptionError](keysetHandle, EncryptionError.InvalidSymmetricKey)
+      aead <- getPrimitive[tink.Aead, EncryptionError](
+        keysetHandle,
+        EncryptionError.InvalidSymmetricKey,
+      )
       encrypted <- encryptWith(message, in => aead.encrypt(in, Array[Byte]()), version)
     } yield encrypted
 
@@ -126,7 +180,10 @@ class TinkPureCrypto private (
   ): Either[DecryptionError, M] =
     for {
       keysetHandle <- keysetNonCached(symmetricKey, DecryptionError.InvalidSymmetricKey)
-      aead <- getPrimitive[Aead, DecryptionError](keysetHandle, DecryptionError.InvalidSymmetricKey)
+      aead <- getPrimitive[tink.Aead, DecryptionError](
+        keysetHandle,
+        DecryptionError.InvalidSymmetricKey,
+      )
       msg <- decryptWith(encrypted, in => aead.decrypt(in, Array[Byte]()), deserialize)
     } yield msg
 
@@ -135,62 +192,30 @@ class TinkPureCrypto private (
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
-  ): Either[EncryptionError, Encrypted[M]] =
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] =
     for {
       keysetHandle <- keysetCached(publicKey, EncryptionError.InvalidEncryptionKey)
-      hybrid <- getPrimitive[HybridEncrypt, EncryptionError](
+      hybrid <- getPrimitive[tink.HybridEncrypt, EncryptionError](
         keysetHandle,
         EncryptionError.InvalidEncryptionKey,
       )
       encrypted <- encryptWith(message, in => hybrid.encrypt(in, Array[Byte]()), version)
-    } yield encrypted
+    } yield AsymmetricEncrypted(encrypted.ciphertext, publicKey.fingerprint)
 
-  override def decryptWith[M](encrypted: Encrypted[M], privateKey: EncryptionPrivateKey)(
+  override protected def decryptWithInternal[M](
+      encrypted: AsymmetricEncrypted[M],
+      privateKey: EncryptionPrivateKey,
+  )(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M] =
     for {
       keysetHandle <- keysetCached(privateKey, DecryptionError.InvalidEncryptionKey)
-      hybrid <- getPrimitive[HybridDecrypt, DecryptionError](
+      hybrid <- getPrimitive[tink.HybridDecrypt, DecryptionError](
         keysetHandle,
         DecryptionError.InvalidEncryptionKey,
       )
-      msg <- decryptWith(encrypted, in => hybrid.decrypt(in, Array[Byte]()), deserialize)
+      msg <- decryptWith(encrypted.ciphertext, in => hybrid.decrypt(in, Array[Byte]()), deserialize)
     } yield msg
-
-  override def encryptWith[M <: HasVersionedToByteString](
-      message: M,
-      symmetricKey: SecureRandomness,
-      version: ProtocolVersion,
-      scheme: SymmetricKeyScheme,
-  ): Either[EncryptionError, Encrypted[M]] = {
-    scheme match {
-      case SymmetricKeyScheme.Aes128Gcm =>
-        for {
-          aead <- Either
-            .catchOnly[GeneralSecurityException](new AesGcmJce(symmetricKey.unwrap.toByteArray))
-            .leftMap(e => EncryptionError.InvalidSymmetricKey(e.getMessage))
-          res <- encryptWith(message, in => aead.encrypt(in, Array.emptyByteArray), version)
-        } yield res
-    }
-  }
-
-  override def decryptWith[M](
-      encrypted: Encrypted[M],
-      symmetricKey: SecureRandomness,
-      scheme: SymmetricKeyScheme,
-  )(deserialize: ByteString => Either[DeserializationError, M]): Either[DecryptionError, M] = {
-    scheme match {
-      case SymmetricKeyScheme.Aes128Gcm =>
-        try {
-          val aead = new AesGcmJce(symmetricKey.unwrap.toByteArray)
-          decryptWith(encrypted, in => aead.decrypt(in, Array.emptyByteArray), deserialize)
-        } catch {
-          case e: GeneralSecurityException =>
-            Left(DecryptionError.InvalidSymmetricKey(e.getMessage))
-        }
-    }
-
-  }
 
   override protected[crypto] def sign(
       bytes: ByteString,
@@ -198,7 +223,7 @@ class TinkPureCrypto private (
   ): Either[SigningError, Signature] =
     for {
       keysetHandle <- keysetCached(signingKey, SigningError.InvalidSigningKey)
-      verify <- getPrimitive[PublicKeySign, SigningError](
+      verify <- getPrimitive[tink.PublicKeySign, SigningError](
         keysetHandle,
         SigningError.InvalidSigningKey,
       )
@@ -229,7 +254,7 @@ class TinkPureCrypto private (
           s"Signature signed by ${signature.signedBy} instead of ${publicKey.id}"
         ),
       )
-      verify <- getPrimitive[PublicKeyVerify, SignatureCheckError](
+      verify <- getPrimitive[tink.PublicKeyVerify, SignatureCheckError](
         keysetHandle,
         SignatureCheckError.InvalidKeyError,
       )

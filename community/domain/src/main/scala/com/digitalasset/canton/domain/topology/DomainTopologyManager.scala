@@ -13,11 +13,12 @@ import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, _}
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.nowarn
 import scala.collection.mutable
@@ -93,10 +94,11 @@ object DomainTopologyManager {
 class DomainTopologyManager(
     val id: UniqueIdentifier,
     clock: Clock,
-    override val store: TopologyStore,
+    override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     addParticipantHook: DomainTopologyManager.AddMemberHook,
     override val crypto: Crypto,
     override protected val timeouts: ProcessingTimeout,
+    val protocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyManager[DomainTopologyManagerError](
@@ -117,6 +119,24 @@ class DomainTopologyManager(
   private def sendToObservers(action: DomainIdentityStateObserver => Unit): Unit =
     blocking(synchronized(observers.foreach(action)))
 
+  /** Authorizes a new topology transaction by signing it and adding it to the topology state
+    *
+    * @param transaction the transaction to be signed and added
+    * @param signingKey  the key which should be used to sign
+    * @param force       force dangerous operations, such as removing the last signing key of a participant
+    * @param replaceExisting if true and the transaction op is add, then we'll replace existing active mappings before adding the new
+    * @return            the domain state (initialized or not initialized) or an error code of why the addition failed
+    */
+  def authorize[Op <: TopologyChangeOp](
+      transaction: TopologyTransaction[Op],
+      signingKey: Option[Fingerprint],
+      force: Boolean,
+      replaceExisting: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainTopologyManagerError, SignedTopologyTransaction[Op]] =
+    authorize(transaction, signingKey, protocolVersion, force, replaceExisting)
+
   override protected def notifyObservers(
       timestamp: CantonTimestamp,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
@@ -136,7 +156,7 @@ class DomainTopologyManager(
     addParticipantHook(participantId, x509)
   }
 
-  protected def checkTransactionIsNotForAlienDomainEntities(
+  private def checkTransactionIsNotForAlienDomainEntities(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] =
     transaction.transaction.element.mapping match {
@@ -154,12 +174,13 @@ class DomainTopologyManager(
       traceContext: TraceContext
   ): EitherT[Future, DomainTopologyManagerError, Unit] =
     for {
+      _ <- checkCorrectProtocolVersion(transaction)
       _ <- checkTransactionIsNotForAlienDomainEntities(transaction)
       _ <- checkNotAddingToWrongDomain(transaction)
       _ <- checkNotEnablingParticipantWithoutKeys(transaction)
     } yield ()
 
-  protected def checkNotAddingToWrongDomain(
+  private def checkNotAddingToWrongDomain(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
     val domainId = managerId.domainId
@@ -170,7 +191,32 @@ class DomainTopologyManager(
     }
   }
 
-  protected def checkNotEnablingParticipantWithoutKeys(
+  // Representative for the class of protocol versions of SignedTopologyTransaction
+  private val signedTopologyTransactionRepresentativeProtocolVersion: ProtocolVersion =
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+
+  private def checkCorrectProtocolVersion(
+      transaction: SignedTopologyTransaction[TopologyChangeOp]
+  )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
+
+    EitherT.cond[Future](
+      transaction.representativeProtocolVersion == signedTopologyTransactionRepresentativeProtocolVersion,
+      (),
+      DomainTopologyManagerError.WrongProtocolVersion.Failure(
+        domainProtocolVersion = protocolVersion,
+        transactionProtocolVersion = transaction.representativeProtocolVersion,
+      ),
+    )
+
+    val domainId = managerId.domainId
+    transaction.restrictedToDomain match {
+      case None | Some(`domainId`) => EitherT.pure(())
+      case Some(otherDomain) =>
+        EitherT.leftT(DomainTopologyManagerError.WrongDomain.Failure(otherDomain))
+    }
+  }
+
+  private def checkNotEnablingParticipantWithoutKeys(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] =
     if (transaction.operation == TopologyChangeOp.Remove) EitherT.pure(())
@@ -319,6 +365,28 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         extends CantonError.Impl(
           cause =
             "Keys of alien domain entities can not be managed through a domain topology manager"
+        )
+        with DomainTopologyManagerError
+  }
+
+  @Explanation(
+    """This error is returned if a transaction has a protocol version different than the one spoken on the domain."""
+  )
+  @Resolution(
+    """Recreate the transaction with a correct protocol version."""
+  )
+  object WrongProtocolVersion
+      extends ErrorCode(
+        id = "WRONG_PROTOCOL_VERSION",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class Failure(
+        domainProtocolVersion: ProtocolVersion,
+        transactionProtocolVersion: ProtocolVersion,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            "Mismatch between protocol version of the transaction and the one spoken on the domain."
         )
         with DomainTopologyManagerError
   }

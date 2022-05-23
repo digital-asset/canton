@@ -45,7 +45,11 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessor,
 }
-import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyTransaction}
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreId,
+  ValidatedTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
@@ -127,8 +131,9 @@ class DomainTopologyDispatcherTest
     val ts1 = ts0.plusSeconds(1)
     val ts2 = ts1.plusSeconds(1)
 
-    val sourceStore = new InMemoryTopologyStore(loggerFactory)
-    val targetStore = new InMemoryTopologyStore(loggerFactory)
+    val sourceStore = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    val targetStore =
+      new InMemoryTopologyStore(TopologyStoreId.DomainStore(domainId), loggerFactory)
 
     val manager = mock[DomainTopologyManager]
     when(manager.store).thenReturn(sourceStore)
@@ -217,7 +222,7 @@ class DomainTopologyDispatcherTest
     }
 
     def append(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
         txs: Seq[SignedTopologyTransaction[TopologyChangeOp]],
     ): Future[Unit] = {

@@ -99,7 +99,7 @@ object CantonVersion {
   // At some point after Daml 3.0, this Map may diverge for domain and participant because we have
   // different compatibility guarantees for participants and domains and we will need to add separate maps for each
   private val releaseVersionToProtocolVersions: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
-    ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0_snapshot),
+    ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_0_0 -> List(v2_0_0),
     ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_1_0 -> List(v2_0_0),
@@ -313,7 +313,6 @@ object ProtocolVersion extends CompanionTrait {
   lazy val unstable_development: ProtocolVersion = ProtocolVersion(0, 0, 0, Some("DEV"))
   lazy val minimum_protocol_version: ProtocolVersion =
     ProtocolVersion(2, 0, 0) // Minimum stable protocol version introduced
-  lazy val v2_0_0_snapshot: ProtocolVersion = ProtocolVersion(2, 0, 0, Some("SNAPSHOT"))
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
   // passed in via propagating the protocol version set in the domain parameters

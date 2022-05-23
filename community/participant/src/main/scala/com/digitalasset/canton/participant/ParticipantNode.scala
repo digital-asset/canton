@@ -77,6 +77,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
@@ -217,6 +218,8 @@ class ParticipantNodeBootstrap(
 
   override protected def autoInitializeIdentity(): EitherT[Future, String, Unit] =
     withNewTraceContext { implicit traceContext =>
+      val protocolVersion = ProtocolVersion.latest
+
       for {
         // create keys
         namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
@@ -243,6 +246,7 @@ class ParticipantNodeBootstrap(
             namespaceKey,
             isRootDelegation = true,
           ),
+          protocolVersion,
         )
         // avoid a race condition with admin-workflows and only kick off the start once the namespace certificate is registered
         _ <- initialize(nodeId)
@@ -251,17 +255,20 @@ class ParticipantNodeBootstrap(
           topologyManager,
           namespaceKey,
           OwnerToKeyMapping(participantId, signingKey),
+          protocolVersion,
         )
         _ <- authorizeStateUpdate(
           topologyManager,
           namespaceKey,
           OwnerToKeyMapping(participantId, encryptionKey),
+          protocolVersion,
         )
         // initialize certificate
         _ <- (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
           uid,
           Seq(participantId),
           namespaceKey,
+          protocolVersion,
         )(topologyManager, authorizedTopologyStore)
         // finally, we store the node id, which means that the node will not be auto-initialised next time when we start
         _ <- storeId(nodeId)
@@ -378,7 +385,6 @@ class ParticipantNodeBootstrap(
 
       domainRegistry = new GrpcDomainRegistry(
         participantId,
-        id,
         agreementService,
         identityPusher,
         domainAliasManager,
@@ -390,8 +396,12 @@ class ParticipantNodeBootstrap(
         testingConfig,
         recordSequencerInteractions,
         replaySequencerConfig,
-        (domainId, traceContext) =>
-          topologyManager.issueParticipantDomainStateCert(participantId, domainId)(traceContext),
+        (domainId, staticDomainParameters, traceContext) =>
+          topologyManager.issueParticipantDomainStateCert(
+            participantId,
+            domainId,
+            staticDomainParameters,
+          )(traceContext),
         packageId => packageService.packageDependencies(List(packageId)),
         metrics.domainMetrics,
         futureSupervisor,

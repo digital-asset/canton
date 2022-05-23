@@ -18,6 +18,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Future
 
@@ -28,6 +29,7 @@ trait DomainTopologyManagerIdentityInitialization {
       name: InstanceName,
       legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
       initialDynamicDomainParameters: DynamicDomainParameters,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] =
@@ -42,7 +44,7 @@ trait DomainTopologyManagerIdentityInitialization {
       uid = UniqueIdentifier(id, Namespace(namespaceKey.fingerprint))
       nodeId = NodeId(uid)
       // now, we kick off the topology manager services so we can start building topology transactions
-      topologyManager = initializeIdentityManagerAndServices(nodeId)
+      topologyManager <- initializeIdentityManagerAndServices(nodeId).toEitherT[Future]
       // first, we issue the root namespace delegation for our namespace
       _ <- authorizeStateUpdate(
         topologyManager,
@@ -52,12 +54,14 @@ trait DomainTopologyManagerIdentityInitialization {
           namespaceKey,
           isRootDelegation = true,
         ),
+        protocolVersion,
       )
       // then, we initialise the domain parameters
       _ <- authorizeDomainGovernance(
         topologyManager,
         namespaceKey,
         DomainParametersChange(DomainId(uid), initialDynamicDomainParameters),
+        protocolVersion,
       )
 
       // now, we assign the topology manager key with the domain topology manager
@@ -66,6 +70,7 @@ trait DomainTopologyManagerIdentityInitialization {
         topologyManager,
         namespaceKey,
         OwnerToKeyMapping(domainTopologyManagerId, topologyManagerSigningKey),
+        protocolVersion,
       )
 
       // Setup the legal identity of the domain nodes
@@ -77,6 +82,8 @@ trait DomainTopologyManagerIdentityInitialization {
 
     } yield (nodeId, topologyManager, namespaceKey)
 
-  protected def initializeIdentityManagerAndServices(nodeId: NodeId): DomainTopologyManager
+  protected def initializeIdentityManagerAndServices(
+      nodeId: NodeId
+  ): Either[String, DomainTopologyManager]
 
 }

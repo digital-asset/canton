@@ -7,6 +7,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainManager
 import com.digitalasset.canton.topology.store.{
+  TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
@@ -60,6 +61,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val ns1k2_k1 = mkAdd(NamespaceDelegation(ns1, key2, isRootDelegation = true), key1)
   val ns1k2_k1p = mkAdd(NamespaceDelegation(ns1, key2, isRootDelegation = true), key1)
   val ns1k3_k2 = mkAdd(NamespaceDelegation(ns1, key3, isRootDelegation = false), key2)
+  val ns1k8_k3_fail = mkAdd(NamespaceDelegation(ns1, key8, isRootDelegation = false), key3)
   val ns6k3_k6 = mkAdd(NamespaceDelegation(ns6, key3, isRootDelegation = false), key6)
   val ns6k6_k6 = mkAdd(NamespaceDelegation(ns6, key6, isRootDelegation = true), key6)
   val id1ak4_k2 = mkAdd(IdentifierDelegation(uid1a, key4), key2)
@@ -68,6 +70,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
 
   val id6k4_k1 = mkAdd(IdentifierDelegation(uid6, key4), key1)
 
+  val okm1ak5_k3 = mkAdd(OwnerToKeyMapping(participant1, key5), key3)
   val okm1ak5_k2 = mkAdd(OwnerToKeyMapping(participant1, key5), key2)
   val okm1bk5_k1 = mkAdd(OwnerToKeyMapping(participant1, key5), key1)
   val okm1bk5_k4 = mkAdd(OwnerToKeyMapping(participant1, key5), key4)
@@ -79,7 +82,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
       PartyToParticipant(RequestSide.Both, party1b, participant1, ParticipantPermission.Submission),
       key2,
     )
-  val p1p2F_k4 =
+  val p1p2F_k2 =
     mkAdd(
       PartyToParticipant(RequestSide.From, party1b, participant6, ParticipantPermission.Submission),
       key2,
@@ -88,6 +91,11 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
     mkAdd(
       PartyToParticipant(RequestSide.To, party1b, participant6, ParticipantPermission.Submission),
       key6,
+    )
+  val p1p2B_k3 =
+    mkAdd(
+      PartyToParticipant(RequestSide.Both, party1b, participant6, ParticipantPermission.Submission),
+      key3,
     )
 
   val dmp1_k2 = mkDmGov(
@@ -128,7 +136,10 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
     def ts(seconds: Long) = CantonTimestamp.Epoch.plusSeconds(seconds)
 
-    def mk(store: InMemoryTopologyStore = new InMemoryTopologyStore(loggerFactory)) = {
+    def mk(
+        store: InMemoryTopologyStore[TopologyStoreId] =
+          new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    ) = {
       val validator =
         new IncomingTopologyTransactionAuthorizationValidator(
           Factory.cryptoApi.pureCrypto,
@@ -248,7 +259,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         }
       }
       "succeed and use load existing delegations" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         for {
@@ -310,7 +321,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
-            List(ns1k1_k1, ns1k2_k1, okm1ak5_k2, p1p1B_k2, id1ak4_k1, ns6k6_k6, p1p2F_k4, p1p2T_k6),
+            List(ns1k1_k1, ns1k2_k1, okm1ak5_k2, p1p1B_k2, id1ak4_k1, ns6k6_k6, p1p2F_k2, p1p2T_k6),
           )
         } yield {
           check(res._2, Seq(None, None, None, None, None, None, None, None))
@@ -329,12 +340,13 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         }
       }
       "succeed with loading existing identifier delegations" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store: InMemoryTopologyStore[TopologyStoreId.AuthorizedStore] =
+          new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1, id1ak4_k1))
-          res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, p1p2F_k4, p1p1B_k2))
+          res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, p1p2F_k2, p1p1B_k2))
         } yield {
           check(res._2, Seq(None, None, None))
         }
@@ -365,7 +377,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
-            List(ns1k1_k1, ns1k2_k1, id1ak4_k1, Rns1k2_k1, Rid1ak4_k1, okm1ak5_k2, p1p2F_k4),
+            List(ns1k1_k1, ns1k2_k1, id1ak4_k1, Rns1k2_k1, Rid1ak4_k1, okm1ak5_k2, p1p2F_k2),
           )
         } yield {
           check(res._2, Seq(None, None, None, None, None, unauthorized, unauthorized))
@@ -376,7 +388,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
     "correctly determine cascading update for" should {
       "namespace additions" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         for {
@@ -391,7 +403,8 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
 
       "namespace removals" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store: InMemoryTopologyStore[TopologyStoreId] =
+          new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         val Rns1k1_k1 = revert(ns1k1_k1)
@@ -405,7 +418,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
 
       "identifier additions and removals" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         val Rid1ak4_k1 = revert(id1ak4_k1)
@@ -421,7 +434,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
 
       "cascading invalidation pre-existing identifier uids" in {
-        val store = new InMemoryTopologyStore(loggerFactory)
+        val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
         import Factory._
         import Factory.SigningKeys._
@@ -437,7 +450,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
           )
           res <- validator.validateAndUpdateHeadAuthState(
             ts(1),
-            List(p1p2F_k4, Rns1k2_k1, id6ak7_k6, p1p2F_k4),
+            List(p1p2F_k2, Rns1k2_k1, id6ak7_k6, p1p2F_k2),
           )
         } yield {
           check(res._2, Seq(None, None, None, unauthorized))

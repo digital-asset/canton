@@ -8,7 +8,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
-import com.digitalasset.canton.protocol.messages.InformeeMessage
+import com.digitalasset.canton.protocol.messages.{InformeeMessage, ProtocolMessage}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.sequencing.{
@@ -79,7 +79,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         List(
           ClosedEnvelope(
             serializedOverride.getOrElse(
-              message.toEnvelopeContentByteString(ProtocolVersion.latestForTest)
+              ProtocolMessage.toEnvelopeContentByteString(message, ProtocolVersion.latestForTest)
             ),
             Recipients.cc(subscriberId),
           )

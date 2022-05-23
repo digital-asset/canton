@@ -29,9 +29,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.TestDomainParameters
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
-import com.digitalasset.canton.protocol.v0.EnvelopeContent.SomeEnvelopeContent
-import com.digitalasset.canton.protocol.v0.{EnvelopeContent, SignedProtocolMessage}
+import com.digitalasset.canton.protocol.messages.{ProtocolMessage, ProtocolMessageV0}
+import com.digitalasset.canton.protocol.{v0 => protocolV0}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
@@ -292,14 +291,18 @@ class GrpcSequencerIntegrationTest
     }
   }
 
-  private case object MockProtocolMessage extends ProtocolMessage {
-    override def domainId: DomainId = DefaultTestIdentities.domainId
+  private case object MockProtocolMessage extends ProtocolMessage with ProtocolMessageV0 {
     // no significance to this payload, just need anything valid and this was the easiest to construct
-    override def toProtoEnvelopeContentV0(version: ProtocolVersion): EnvelopeContent =
-      EnvelopeContent(
-        SomeEnvelopeContent.SignedMessage(
-          SignedProtocolMessage(None, SignedProtocolMessage.SomeSignedProtocolMessage.Empty)
-        )
+    private val payload =
+      protocolV0.SignedProtocolMessage(
+        None,
+        protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
+      )
+
+    override def domainId: DomainId = DefaultTestIdentities.domainId
+    override def toProtoEnvelopeContentV0(version: ProtocolVersion): protocolV0.EnvelopeContent =
+      protocolV0.EnvelopeContent(
+        protocolV0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )
   }
 }

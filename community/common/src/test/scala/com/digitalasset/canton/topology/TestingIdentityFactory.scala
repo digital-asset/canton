@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.TopologyStoreId
 import com.digitalasset.canton.version.ProtocolVersion
 import org.mockito.MockitoSugar.mock
 
@@ -240,7 +241,7 @@ class TestingIdentityFactory(
       timestampForDomainParameters: CantonTimestamp = CantonTimestamp.Epoch,
   ): TopologySnapshot = {
 
-    val store = new InMemoryTopologyStore(loggerFactory)
+    val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
 
     val permissions: Map[ParticipantId, ParticipantAttributes] = topology.topology.flatMap(_._2)
 

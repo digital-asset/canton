@@ -10,7 +10,12 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.commands.DomainChoice
-import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
+import com.digitalasset.canton.console.{
+  ConsoleEnvironment,
+  ConsoleMacros,
+  DomainReference,
+  ParticipantReference,
+}
 import com.digitalasset.canton.demo.Step.{Action, Noop}
 import com.digitalasset.canton.demo.model.{ai => ME, doctor => M}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -552,6 +557,55 @@ object ReferenceDemoScript {
     val participantResponseTimeout = defaultDynamicDomainParameters.participantResponseTimeout
 
     mediatorReactionTimeout.unwrap.plus(participantResponseTimeout.unwrap)
+  }
+
+  def startup(adjustPath: Boolean, testScript: Boolean)(implicit
+      consoleEnvironment: ConsoleEnvironment
+  ): Unit = {
+
+    def getDomain(str: String): DomainReference =
+      consoleEnvironment.domains.all
+        .find(_.name == str)
+        .getOrElse(sys.error(s"can not find domain named ${str}"))
+
+    val banking = getDomain("banking")
+    val medical = getDomain("medical")
+
+    // determine where the assets are
+    val location = sys.env.getOrElse("DEMO_ROOT", "demo")
+    val noPhoneHome = sys.env.keys.exists(_ == "NO_PHONE_HOME")
+
+    // start all nodes before starting the ui (the ui requires this)
+    val (maxWaitForPruning, bankingConnection, medicalConnection) = (
+      ReferenceDemoScript.computeMaxWaitForPruning,
+      banking.sequencerConnection,
+      medical.sequencerConnection,
+    )
+    val loggerFactory = consoleEnvironment.environment.loggerFactory
+
+    val script = new ReferenceDemoScript(
+      consoleEnvironment.participants.all,
+      bankingConnection,
+      medicalConnection,
+      location,
+      maxWaitForPruning,
+      editionSupportsPruning = consoleEnvironment.environment.isEnterprise,
+      darPath =
+        if (adjustPath) Some("./community/demo/target/scala-2.13/resource_managed/main") else None,
+      additionalChecks = testScript,
+      loggerFactory = loggerFactory,
+    )(consoleEnvironment.environment.executionContext)
+    if (testScript) {
+      script.run()
+      println("The last emperor is always the worst.")
+    } else {
+      if (!noPhoneHome) {
+        Notify.send()
+      }
+      val runner = new DemoRunner(new DemoUI(script, loggerFactory))
+      runner.startBackground()
+    }
+    ()
   }
 
 }

@@ -15,8 +15,8 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseableAsync,
   SyncCloseable,
 }
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
-import com.digitalasset.canton.protocol.v0.EnvelopeContent
+import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.messages.{ProtocolMessage, ProtocolMessageV0}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol._
@@ -24,7 +24,6 @@ import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
-import com.google.protobuf.ByteString
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -101,11 +100,17 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     }
   }
 
-  class TestProtocolMessage(text: String) extends ProtocolMessage {
-    override def toEnvelopeContentByteString(version: ProtocolVersion): ByteString =
-      ByteString.copyFromUtf8(text)
+  class TestProtocolMessage(text: String) extends ProtocolMessage with ProtocolMessageV0 {
+    private val payload =
+      v0.SignedProtocolMessage(
+        None,
+        v0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
+      )
     override def domainId: DomainId = ???
-    override def toProtoEnvelopeContentV0(version: ProtocolVersion): EnvelopeContent = ???
+    override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+      v0.EnvelopeContent(
+        v0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
     override def productElement(n: Int): Any = ???
     override def productArity: Int = ???
     override def canEqual(that: Any): Boolean = ???
@@ -154,12 +159,12 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         aliceDeliverEvent.batch.envelopes should have size (0) // as we didn't send a message to ourself
 
         bobDeliverEvent.messageId shouldBe None
-        bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only message1
-          .toEnvelopeContentByteString(ProtocolVersion.latestForTest)
+        bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only
+          ProtocolMessage.toEnvelopeContentByteString(message1, ProtocolVersion.latestForTest)
 
         caroleDeliverEvent.messageId shouldBe None
-        caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only message2
-          .toEnvelopeContentByteString(ProtocolVersion.latestForTest)
+        caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only
+          ProtocolMessage.toEnvelopeContentByteString(message2, ProtocolVersion.latestForTest)
       }
     }
   }

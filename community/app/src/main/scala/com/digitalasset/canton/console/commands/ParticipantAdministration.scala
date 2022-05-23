@@ -692,12 +692,17 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |   revoke the vetting for the main package of the DAR, but this automatic vetting revocation will only succeed if the
         |   main package vetting originates from a standard ``dars.upload``. Even if the automatic revocation fails, you can
         |   always manually revoke the package vetting.
+        |   
+        |If synchronizeVetting is true (default), then the command will block until the participant has observed the vetting transactions to be registered with the domain.
         |"""
     )
-    def remove(darHash: String): Unit = {
+    def remove(darHash: String, synchronizeVetting: Boolean = true): Unit = {
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(ParticipantAdminCommands.Package.RemoveDar(darHash))
       })
+      if (synchronizeVetting) {
+        packages.synchronize_vetting()
+      }
     }
 
     @Help.Summary("List installed DAR files")

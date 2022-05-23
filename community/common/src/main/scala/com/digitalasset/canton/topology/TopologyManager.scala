@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
+  TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
@@ -40,7 +41,7 @@ import scala.concurrent.{ExecutionContext, Future}
 abstract class TopologyManager[E <: CantonError](
     val clock: Clock,
     val crypto: Crypto,
-    protected val store: TopologyStore,
+    protected val store: TopologyStore[TopologyStoreId],
     timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -192,6 +193,7 @@ abstract class TopologyManager[E <: CantonError](
   protected def build[Op <: TopologyChangeOp](
       transaction: TopologyTransaction[Op],
       signingKey: Option[Fingerprint],
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, E, SignedTopologyTransaction[Op]] = {
@@ -213,7 +215,7 @@ abstract class TopologyManager[E <: CantonError](
           pubkey,
           crypto.pureCrypto,
           crypto.privateCrypto,
-          ProtocolVersion.v2_0_0_Todo_i8793, // TODO(#8973)
+          protocolVersion,
         )
         .leftMap {
           case SigningError.UnknownSigningKey(keyId) =>
@@ -227,6 +229,7 @@ abstract class TopologyManager[E <: CantonError](
     *
     * @param transaction the transaction to be signed and added
     * @param signingKey  the key which should be used to sign
+    * @param protocolVersion the protocol version corresponding to the transaction
     * @param force       force dangerous operations, such as removing the last signing key of a participant
     * @param replaceExisting if true and the transaction op is add, then we'll replace existing active mappings before adding the new
     * @return            the domain state (initialized or not initialized) or an error code of why the addition failed
@@ -234,6 +237,7 @@ abstract class TopologyManager[E <: CantonError](
   def authorize[Op <: TopologyChangeOp](
       transaction: TopologyTransaction[Op],
       signingKey: Option[Fingerprint],
+      protocolVersion: ProtocolVersion,
       force: Boolean = false,
       replaceExisting: Boolean = false,
   )(implicit traceContext: TraceContext): EitherT[Future, E, SignedTopologyTransaction[Op]] = {
@@ -241,7 +245,7 @@ abstract class TopologyManager[E <: CantonError](
       {
         logger.debug(show"Attempting to authorize ${transaction.element.mapping} with $signingKey")
         for {
-          signed <- build(transaction, signingKey)
+          signed <- build(transaction, signingKey, protocolVersion)
           _ <- process(signed, force, replaceExisting, allowDuplicateMappings = false)
         } yield signed
       },
@@ -405,15 +409,13 @@ abstract class TopologyManager[E <: CantonError](
           )
         )
         reverse <- rawTxs.adds.toDomainTopologyTransactions.view
-          .collect {
-            case x
-                if x.transaction.element.mapping.isReplacedBy(
-                  transaction.transaction.element.mapping
-                ) =>
-              x
-          }
+          .filter(
+            _.transaction.element.mapping.isReplacedBy(
+              transaction.transaction.element.mapping
+            )
+          )
           .toList
-          .traverse(x => build(x.transaction.reverse, None))
+          .traverse(x => build(x.transaction.reverse, None, x.representativeProtocolVersion))
       } yield reverse
     }
 
@@ -437,8 +439,7 @@ abstract class TopologyManager[E <: CantonError](
       case LegalIdentityClaimEvidence.X509Cert(pem) =>
         for {
           pubKey <- (for {
-            cert <- X509Certificate
-              .fromPem(pem)
+            cert <- X509Certificate.fromPem(pem)
             key <- cert.publicKey(crypto.javaKeyConverter)
           } yield key)
             .leftMap(x => wrapError(TopologyManagerError.CertificateGenerationError.Failure(x)))

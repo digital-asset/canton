@@ -25,6 +25,8 @@ import java.util.UUID
   */
 case class TransferOutMediatorMessage(tree: TransferOutViewTree)
     extends MediatorRequest
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.TransferOutMediatorMessage] {
   require(tree.commonData.isFullyUnblinded, "The transfer-out common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
@@ -70,6 +72,9 @@ case class TransferOutMediatorMessage(tree: TransferOutViewTree)
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
 
   override def rootHash: Option[RootHash] = Some(tree.rootHash)
 

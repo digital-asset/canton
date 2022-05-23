@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.transaction.{
   VettedPackages,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, participant}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -169,7 +170,12 @@ class PackageInspectionOpsImpl(
       tc: TraceContext
   ): EitherT[Future, ParticipantTopologyManagerError, Unit] = {
     for {
-      _signedTx <- topologyManager.authorize(tx, signingKey = None, force)
+      _signedTx <- topologyManager.authorize(
+        tx,
+        signingKey = None,
+        ProtocolVersion.latest,
+        force,
+      ) // TODO(#9368) use PV of protocol version here
     } yield ()
   }
 

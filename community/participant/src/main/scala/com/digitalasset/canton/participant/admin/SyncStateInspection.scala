@@ -40,6 +40,7 @@ import com.digitalasset.canton.store.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LedgerTransactionId}
 
 import java.time.Instant
@@ -205,6 +206,15 @@ class SyncStateInspection(
         }
     }
 
+  private def tryGetProtocolVersion(
+      state: SyncDomainPersistentState,
+      domain: DomainAlias,
+  )(implicit traceContext: TraceContext): ProtocolVersion =
+    timeouts.inspection
+      .await()(state.parameterStore.lastParameters)
+      .getOrElse(throw new IllegalStateException(s"No static domain parameters found for $domain"))
+      .protocolVersion
+
   def findMessages(
       domain: DomainAlias,
       from: Option[Instant],
@@ -228,7 +238,11 @@ class SyncStateInspection(
         }
       }
     val closed = timeouts.inspection.await()(messagesF)
-    val opener = new EnvelopeOpener[PossiblyIgnoredSequencedEvent](state.pureCryptoApi)
+    val opener =
+      new EnvelopeOpener[PossiblyIgnoredSequencedEvent](
+        tryGetProtocolVersion(state, domain),
+        state.pureCryptoApi,
+      )
     closed.map(opener.open)
   }
 
@@ -240,7 +254,10 @@ class SyncStateInspection(
     )
     val messageF = state.sequencedEventStore.find(criterion).value
     val closed = timeouts.inspection.await()(messageF)
-    val opener = new EnvelopeOpener[PossiblyIgnoredSequencedEvent](state.pureCryptoApi)
+    val opener = new EnvelopeOpener[PossiblyIgnoredSequencedEvent](
+      tryGetProtocolVersion(state, domain),
+      state.pureCryptoApi,
+    )
     closed.map(opener.open)
   }
 

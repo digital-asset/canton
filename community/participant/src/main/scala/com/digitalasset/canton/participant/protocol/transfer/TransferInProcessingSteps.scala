@@ -45,7 +45,7 @@ import com.digitalasset.canton.participant.sync.{LedgerEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError

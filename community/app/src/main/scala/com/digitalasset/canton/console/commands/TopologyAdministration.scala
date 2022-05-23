@@ -135,7 +135,7 @@ class TopologyAdministrationGroup(
     /** run a topology change command synchronized and wait until the node becomes idle again */
     private[console] def run[T](timeout: Option[TimeoutDuration])(func: => T): T = {
       val ret = func
-      timeout.foreach(await_idle)
+      ConsoleMacros.utils.synchronize_topology(timeout)(consoleEnvironment)
       ret
     }
   }
@@ -238,7 +238,7 @@ class TopologyAdministrationGroup(
         )
       }
 
-      // TODO(i6300): Move authorization key filtering to the server side
+      // TODO(i9419): Move authorization key filtering to the server side
       filterTargetKey
         .map { targetKey =>
           delegations.filter(_.item.target.fingerprint == targetKey)
@@ -310,7 +310,7 @@ class TopologyAdministrationGroup(
         )
       }
 
-      // TODO(i6300): Move authorization key filtering to the server side
+      // TODO(i9419): Move authorization key filtering to the server side
       filterTargetKey
         .map { targetKey =>
           delegations.filter(_.item.target.fingerprint == targetKey)
@@ -557,7 +557,7 @@ class TopologyAdministrationGroup(
           )
         }
 
-      // TODO(i6300): Move authorization key filtering to the server side
+      // TODO(i9419): Move authorization key filtering to the server side
       filterAuthorizedKey
         .map { authKey =>
           val filteredResult =
@@ -620,7 +620,7 @@ class TopologyAdministrationGroup(
 
       val existingTxs = list(filterAuthorizedKey = Some(filterAuthorizedKey))
 
-      // TODO(i6300): Move renewal to the server side
+      // TODO(i9419): Move renewal to the server side
       existingTxs.result
         .foreach { storedTx =>
           storedTx.transaction.transaction match {

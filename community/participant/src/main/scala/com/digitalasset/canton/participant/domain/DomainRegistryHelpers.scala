@@ -39,7 +39,7 @@ import com.digitalasset.canton.topology.client.{
   DomainTopologyClientWithInit,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -65,8 +65,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       sequencerConnection: SequencerConnection,
       syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
   )(
-      nodeId: NodeId,
-      authorizedStore: TopologyStore,
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
       cryptoApiProvider: SyncCryptoApiProvider,
       cryptoConfig: CryptoConfig,
       topologyStoreFactory: TopologyStoreFactory,
@@ -76,6 +75,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
       trustDomain: (
           DomainId,
+          StaticDomainParameters,
           TraceContext,
       ) => FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]],
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
@@ -132,7 +132,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
       targetDomainStore = topologyStoreFactory.forId(DomainStore(domainId))
 
       // check and issue the domain trust certificate
-      _ <- EitherT(trustDomain(domainId, traceContext)).leftMap {
+      _ <- EitherT(trustDomain(domainId, staticDomainParameters, traceContext)).leftMap {
         case ParticipantTopologyManagerError.IdentityManagerParentError(
               TopologyManagerError.NoAppropriateSigningKeyInStore.Failure(_)
             ) =>
@@ -247,6 +247,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
               loggerFactory,
               sequencerClientFactory,
               cryptoApiProvider.crypto.pureCrypto,
+              staticDomainParameters.protocolVersion,
             )
 
             // make sure the participant is immediately active after pushing our topology,
@@ -394,7 +395,7 @@ object DomainRegistryHelpers {
       staticParameters: StaticDomainParameters,
       sequencer: SequencerClient,
       topologyClient: DomainTopologyClientWithInit,
-      topologyStore: TopologyStore,
+      topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       domainPersistentState: SyncDomainPersistentState,
       timeouts: ProcessingTimeout,
   )

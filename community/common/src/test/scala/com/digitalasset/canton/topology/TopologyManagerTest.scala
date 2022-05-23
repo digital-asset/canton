@@ -10,10 +10,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.time.{Clock, SimClock}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AnyWordSpec
@@ -27,7 +28,12 @@ trait TopologyManagerTest
     with HasExecutionContext {
 
   def topologyManager[E <: CantonError](
-      mk: (Clock, TopologyStore, Crypto, NamedLoggerFactory) => Future[TopologyManager[E]]
+      mk: (
+          Clock,
+          TopologyStore[TopologyStoreId.AuthorizedStore],
+          Crypto,
+          NamedLoggerFactory,
+      ) => Future[TopologyManager[E]]
   ): Unit = {
 
     val loggerFactory = SuppressingLogger(getClass)
@@ -40,7 +46,7 @@ trait TopologyManagerTest
         val betaKey: SigningPublicKey,
     ) {
       val namespace = Namespace(namespaceKey.id)
-      val store = new InMemoryTopologyStore(loggerFactory)
+      val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
 
       def createRootCert() = {
         TopologyStateUpdate.createAdd(
@@ -80,11 +86,22 @@ trait TopologyManagerTest
         genr <- gen("success")
         (mgr, setup) = genr
         rootCert = setup.createRootCert()
-        auth <- mgr.authorize(rootCert, Some(setup.namespace.fingerprint), force = false).value
+        auth <- mgr
+          .authorize(
+            rootCert,
+            Some(setup.namespace.fingerprint),
+            ProtocolVersion.latestForTest,
+            force = false,
+          )
+          .value
         transaction = auth.getOrElse(fail("root cert addition failed"))
       } yield (mgr, setup, rootCert, transaction)
 
-    def checkStore(store: TopologyStore, numTransactions: Int, numActive: Int): Future[Unit] =
+    def checkStore(
+        store: TopologyStore[TopologyStoreId],
+        numTransactions: Int,
+        numActive: Int,
+    ): Future[Unit] =
       for {
         tr <- store.allTransactions
         ac <- store.headTransactions
@@ -102,7 +119,12 @@ trait TopologyManagerTest
       }
       "automatically find a signing key" in {
         def add(mgr: TopologyManager[E], mapping: TopologyStateUpdateMapping) =
-          mgr.authorize(TopologyStateUpdate.createAdd(mapping), None, force = true)
+          mgr.authorize(
+            TopologyStateUpdate.createAdd(mapping),
+            None,
+            ProtocolVersion.latestForTest,
+            force = true,
+          )
 
         val res = for {
           generated <- EitherT.right(genAndAddRootCert())
@@ -151,7 +173,12 @@ trait TopologyManagerTest
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
           authRemove <- mgr
-            .authorize(rootCert.reverse, Some(setup.namespace.fingerprint), false)
+            .authorize(
+              rootCert.reverse,
+              Some(setup.namespace.fingerprint),
+              ProtocolVersion.latestForTest,
+              false,
+            )
             .value
           _ = authRemove.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
@@ -161,10 +188,23 @@ trait TopologyManagerTest
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
           removeCert = rootCert.reverse
-          authRemove <- mgr.authorize(removeCert, Some(setup.namespace.fingerprint), false).value
+          authRemove <- mgr
+            .authorize(
+              removeCert,
+              Some(setup.namespace.fingerprint),
+              ProtocolVersion.latestForTest,
+              false,
+            )
+            .value
           _ = authRemove.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
-          authAdd2 <- mgr.authorize(removeCert.reverse, Some(setup.namespace.fingerprint)).value
+          authAdd2 <- mgr
+            .authorize(
+              removeCert.reverse,
+              Some(setup.namespace.fingerprint),
+              ProtocolVersion.latestForTest,
+            )
+            .value
           _ = authAdd2.value shouldBe a[SignedTopologyTransaction[_]]
           _ <- checkStore(setup.store, numTransactions = 3, numActive = 1)
         } yield succeed).futureValue
@@ -172,7 +212,9 @@ trait TopologyManagerTest
       "fail duplicate addition" in {
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
-          authAgain <- mgr.authorize(rootCert, Some(setup.namespace.fingerprint)).value
+          authAgain <- mgr
+            .authorize(rootCert, Some(setup.namespace.fingerprint), ProtocolVersion.latestForTest)
+            .value
           _ = authAgain.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
         } yield succeed).futureValue
@@ -180,8 +222,20 @@ trait TopologyManagerTest
       "fail on duplicate removal" in {
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
-          _ <- mgr.authorize(rootCert.reverse, Some(setup.namespace.fingerprint)).value
-          authFail <- mgr.authorize(rootCert.reverse, Some(setup.namespace.fingerprint)).value
+          _ <- mgr
+            .authorize(
+              rootCert.reverse,
+              Some(setup.namespace.fingerprint),
+              ProtocolVersion.latestForTest,
+            )
+            .value
+          authFail <- mgr
+            .authorize(
+              rootCert.reverse,
+              Some(setup.namespace.fingerprint),
+              ProtocolVersion.latestForTest,
+            )
+            .value
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 2, numActive = 0)
         } yield succeed).futureValue
@@ -193,7 +247,9 @@ trait TopologyManagerTest
           _ = assert(
             invalidRev.element.id != rootCert.element.id
           ) // ensure transaction ids are different so we are sure to fail the test
-          authFail <- mgr.authorize(invalidRev, Some(setup.namespace.fingerprint)).value
+          authFail <- mgr
+            .authorize(invalidRev, Some(setup.namespace.fingerprint), ProtocolVersion.latestForTest)
+            .value
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
         } yield succeed).futureValue
@@ -217,7 +273,13 @@ trait TopologyManagerTest
           (mgr, setup, rootCert, transaction) <- genAndAddRootCert()
           (otherMgr, otherSetup) <- gen("other")
           reverted = rootCert.reverse
-          authRev <- mgr.authorize(reverted, Some(setup.namespaceKey.fingerprint)).value
+          authRev <- mgr
+            .authorize(
+              reverted,
+              Some(setup.namespaceKey.fingerprint),
+              ProtocolVersion.latestForTest,
+            )
+            .value
           _ = authRev.value shouldBe a[SignedTopologyTransaction[_]]
           // import cert
           _ <- otherMgr.add(transaction).value

@@ -196,6 +196,26 @@ class JcePureCrypto(
         Right(SymmetricKey.create(CryptoKeyFormat.Raw, key128, scheme))
     }
 
+  override def createSymmetricKey(
+      bytes: SecureRandomness,
+      scheme: SymmetricKeyScheme,
+  ): Either[EncryptionKeyCreationError, SymmetricKey] = {
+    val randomnessLength = bytes.unwrap.size()
+    val keyLength = scheme.keySizeInBytes
+
+    for {
+      _ <- Either.cond(
+        randomnessLength == keyLength,
+        (),
+        EncryptionKeyCreationError.InvalidRandomnessLength(randomnessLength, keyLength),
+      )
+      key = scheme match {
+        case SymmetricKeyScheme.Aes128Gcm =>
+          SymmetricKey.create(CryptoKeyFormat.Raw, bytes.unwrap, scheme)
+      }
+    } yield key
+  }
+
   override protected[crypto] def sign(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
@@ -345,7 +365,7 @@ class JcePureCrypto(
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
-  ): Either[EncryptionError, Encrypted[M]] = publicKey.scheme match {
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] = publicKey.scheme match {
     case EncryptionKeyScheme.EciesP256HkdfHmacSha256Aes128Gcm =>
       for {
         _ <- checkKeyFormat(
@@ -386,11 +406,17 @@ class JcePureCrypto(
               )
           )
           .leftMap(err => EncryptionError.FailedToEncrypt(err.toString))
-        encrypted = new Encrypted[M](ByteString.copyFrom(ciphertext))
+        encrypted = new AsymmetricEncrypted[M](
+          ByteString.copyFrom(ciphertext),
+          publicKey.fingerprint,
+        )
       } yield encrypted
   }
 
-  override def decryptWith[M](encrypted: Encrypted[M], privateKey: EncryptionPrivateKey)(
+  override protected def decryptWithInternal[M](
+      encrypted: AsymmetricEncrypted[M],
+      privateKey: EncryptionPrivateKey,
+  )(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M] =
     privateKey.scheme match {
@@ -474,29 +500,6 @@ class JcePureCrypto(
           message <- deserialize(plaintext).leftMap(DecryptionError.FailedToDeserialize)
         } yield message
     }
-
-  override def encryptWith[M <: HasVersionedToByteString](
-      message: M,
-      symmetricKey: SecureRandomness,
-      version: ProtocolVersion,
-      scheme: SymmetricKeyScheme,
-  ): Either[EncryptionError, Encrypted[M]] = {
-    encryptWith(
-      message,
-      SymmetricKey(CryptoKeyFormat.Raw, symmetricKey.unwrap, scheme)(None),
-      version,
-    )
-  }
-
-  override def decryptWith[M](
-      encrypted: Encrypted[M],
-      symmetricKey: SecureRandomness,
-      scheme: SymmetricKeyScheme,
-  )(deserialize: ByteString => Either[DeserializationError, M]): Either[DecryptionError, M] = {
-    decryptWith(encrypted, SymmetricKey(CryptoKeyFormat.Raw, symmetricKey.unwrap, scheme)(None))(
-      deserialize
-    )
-  }
 
   private def hkdf(
       params: HKDFParameters,

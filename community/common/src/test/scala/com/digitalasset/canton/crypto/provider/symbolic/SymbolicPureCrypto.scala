@@ -63,11 +63,18 @@ class SymbolicPureCrypto() extends CryptoPureApi {
     Right(SymmetricKey.create(CryptoKeyFormat.Symbolic, key, scheme))
   }
 
+  override def createSymmetricKey(
+      bytes: SecureRandomness,
+      scheme: SymmetricKeyScheme,
+  ): Either[EncryptionKeyCreationError, SymmetricKey] = {
+    Right(SymmetricKey.create(CryptoKeyFormat.Symbolic, bytes.unwrap, scheme))
+  }
+
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
-  ): Either[EncryptionError, Encrypted[M]] =
+  ): Either[EncryptionError, AsymmetricEncrypted[M]] =
     for {
       _ <- Either.cond(
         publicKey.format == CryptoKeyFormat.Symbolic,
@@ -82,10 +89,13 @@ class SymbolicPureCrypto() extends CryptoPureApi {
             message.toByteString(version)
           )
         )
-      encrypted = new Encrypted[M](payload)
+      encrypted = new AsymmetricEncrypted[M](payload, publicKey.id)
     } yield encrypted
 
-  override def decryptWith[M](encrypted: Encrypted[M], privateKey: EncryptionPrivateKey)(
+  override protected def decryptWithInternal[M](
+      encrypted: AsymmetricEncrypted[M],
+      privateKey: EncryptionPrivateKey,
+  )(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M] =
     for {
@@ -149,19 +159,6 @@ class SymbolicPureCrypto() extends CryptoPureApi {
       encrypted = new Encrypted[M](payload)
     } yield encrypted
 
-  override def encryptWith[M <: HasVersionedToByteString](
-      message: M,
-      symmetricKey: SecureRandomness,
-      version: ProtocolVersion,
-      scheme: SymmetricKeyScheme,
-  ): Either[EncryptionError, Encrypted[M]] = {
-    encryptWith(
-      message,
-      SymmetricKey.create(CryptoKeyFormat.Symbolic, symmetricKey.unwrap, scheme),
-      version,
-    )
-  }
-
   override def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M] =
@@ -203,17 +200,6 @@ class SymbolicPureCrypto() extends CryptoPureApi {
       message <- deserialize(plaintext).leftMap(DecryptionError.FailedToDeserialize)
 
     } yield message
-
-  override def decryptWith[M](
-      encrypted: Encrypted[M],
-      symmetricKey: SecureRandomness,
-      scheme: SymmetricKeyScheme,
-  )(deserialize: ByteString => Either[DeserializationError, M]): Either[DecryptionError, M] = {
-    decryptWith(
-      encrypted,
-      SymmetricKey.create(CryptoKeyFormat.Symbolic, symmetricKey.unwrap, scheme),
-    )(deserialize)
-  }
 
   override protected def computeHkdfInternal(
       keyMaterial: ByteString,

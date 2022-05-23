@@ -5,12 +5,18 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.either._
+import cats.syntax.functor._
 import cats.syntax.traverse._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.messages.{EncryptedView, EncryptedViewMessage}
+import com.digitalasset.canton.protocol.messages.{
+  EncryptedView,
+  EncryptedViewMessage,
+  EncryptedViewMessageV0,
+  EncryptedViewMessageV1,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.LfPartyId
@@ -31,27 +37,34 @@ object EncryptedViewMessageFactory {
 
     val cryptoPureApi = cryptoSnapshot.pureCrypto
 
-    val keyLength = EncryptedViewMessage.computeKeyLength(cryptoSnapshot)
+    val viewEncryptionScheme = cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme
+    val viewKeyLength = viewEncryptionScheme.keySizeInBytes
     val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoSnapshot)
     val randomness: SecureRandomness =
       optRandomness.getOrElse(cryptoPureApi.generateSecureRandomness(randomnessLength))
 
     val informeeParties = viewTree.informees.map(_.party).toList
+
     def eitherT[B](
         value: Either[EncryptedViewMessageCreationError, B]
     ): EitherT[Future, EncryptedViewMessageCreationError, B] =
       EitherT.fromEither[Future](value)
 
     for {
-      symmetricViewKey <- eitherT(
+      symmetricViewKeyRandomness <- eitherT(
         ProtocolCryptoApi
-          .hkdf(cryptoPureApi, protocolVersion)(randomness, keyLength, HkdfInfo.ViewKey)
+          .hkdf(cryptoPureApi, protocolVersion)(randomness, viewKeyLength, HkdfInfo.ViewKey)
           .leftMap(FailedToExpandKey)
+      )
+      symmetricViewKey <- eitherT(
+        cryptoPureApi
+          .createSymmetricKey(symmetricViewKeyRandomness, viewEncryptionScheme)
+          .leftMap(FailedToCreateEncryptionKey)
       )
       informeeParticipants <- cryptoSnapshot.ipsSnapshot
         .activeParticipantsOfAll(informeeParties)
         .leftMap(UnableToDetermineParticipant(_, cryptoSnapshot.domainId))
-      keyMap <- createKeyMap(
+      randomnessMap <- createRandomnessMap(
         informeeParticipants.to(LazyList),
         randomness,
         cryptoSnapshot,
@@ -64,23 +77,44 @@ object EncryptedViewMessageFactory {
           .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, protocolVersion)(viewTree)
           .leftMap(FailedToEncryptViewMessage)
       )
-    } yield EncryptedViewMessage[VT](
-      signature,
-      viewTree.viewHash,
-      keyMap,
-      encryptedView,
-      viewTree.domainId,
-    )
+      message = protocolVersion match {
+        // TODO(i9423): Migrate to next protocol version
+        case ProtocolVersion.unstable_development =>
+          val randomnessV1 = randomnessMap.values.toSeq
+          EncryptedViewMessageV1[VT](
+            signature,
+            viewTree.viewHash,
+            randomnessV1,
+            encryptedView,
+            viewTree.domainId,
+            viewEncryptionScheme,
+          )(
+            Some(informeeParticipants)
+          )
+        case _ =>
+          val randomnessMapV0 = randomnessMap.fmap(_.encrypted)
+          EncryptedViewMessageV0[VT](
+            signature,
+            viewTree.viewHash,
+            randomnessMapV0,
+            encryptedView,
+            viewTree.domainId,
+          )
+      }
+    } yield message
   }
 
-  private def createKeyMap(
+  private def createRandomnessMap(
       participants: LazyList[ParticipantId],
       randomness: SecureRandomness,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       version: ProtocolVersion,
   )(implicit
       ec: ExecutionContext
-  ): EitherT[Future, UnableToDetermineKey, Map[ParticipantId, Encrypted[SecureRandomness]]] =
+  ): EitherT[Future, UnableToDetermineKey, Map[
+    ParticipantId,
+    AsymmetricEncrypted[SecureRandomness],
+  ]] =
     participants
       .traverse { participant =>
         cryptoSnapshot
@@ -118,6 +152,13 @@ object EncryptedViewMessageFactory {
   case class FailedToGenerateEncryptionKey(cause: EncryptionKeyGenerationError)
       extends EncryptedViewMessageCreationError {
     override def pretty: Pretty[FailedToGenerateEncryptionKey] = prettyOfClass(
+      unnamedParam(_.cause)
+    )
+  }
+
+  case class FailedToCreateEncryptionKey(cause: EncryptionKeyCreationError)
+      extends EncryptedViewMessageCreationError {
+    override def pretty: Pretty[FailedToCreateEncryptionKey] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }

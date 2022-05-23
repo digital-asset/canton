@@ -277,10 +277,10 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   lazy val viewHash = ViewHash(TestHash.digest(2))
   lazy val encryptedView =
     EncryptedView(TestViewType)(Encrypted.fromByteString(rootHash.toProtoPrimitive).value)
-  lazy val viewMessage = EncryptedViewMessage(
+  lazy val viewMessage: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV0(
     submitterParticipantSignature = None,
     viewHash = viewHash,
-    randomSeed = Map.empty,
+    randomnessMap = Map.empty,
     encryptedView = encryptedView,
     domainId = DefaultTestIdentities.domainId,
   )
@@ -459,10 +459,10 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val viewHash1 = ViewHash(TestHash.digest(2))
       val encryptedViewWrongRH =
         EncryptedView(TestViewType)(Encrypted.fromByteString(wrongRootHash.toProtoPrimitive).value)
-      val viewMessageWrongRH = EncryptedViewMessage(
+      val viewMessageWrongRH = EncryptedViewMessageV0(
         submitterParticipantSignature = None,
         viewHash = viewHash1,
-        randomSeed = Map.empty,
+        randomnessMap = Map.empty,
         encryptedView = encryptedViewWrongRH,
         domainId = DefaultTestIdentities.domainId,
       )
@@ -491,10 +491,10 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     }
 
     "log decryption errors" in {
-      val viewMessageDecryptError = EncryptedViewMessage(
+      val viewMessageDecryptError: EncryptedViewMessage[TestViewType] = EncryptedViewMessageV0(
         submitterParticipantSignature = None,
         viewHash = viewHash,
-        randomSeed = Map.empty,
+        randomnessMap = Map.empty,
         encryptedView =
           EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY).value),
         domainId = DefaultTestIdentities.domainId,

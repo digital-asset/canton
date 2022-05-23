@@ -17,7 +17,7 @@ import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerEr
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
@@ -323,7 +323,7 @@ trait DomainHandle extends AutoCloseable {
 
   def topologyClient: DomainTopologyClientWithInit
 
-  def topologyStore: TopologyStore
+  def topologyStore: TopologyStore[TopologyStoreId.DomainStore]
 
   def domainPersistentState: SyncDomainPersistentState
 }

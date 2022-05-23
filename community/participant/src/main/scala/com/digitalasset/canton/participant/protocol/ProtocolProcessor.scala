@@ -43,7 +43,7 @@ import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphe
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.{RequestCounter, store}
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.messages.Verdict.Approve
 import com.digitalasset.canton.protocol.messages._

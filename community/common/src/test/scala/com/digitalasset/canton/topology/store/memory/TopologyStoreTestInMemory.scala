@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.store.memory
-import com.digitalasset.canton.topology.store.TopologyStoreTest
+import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreTest}
 
 class TopologyStoreTestInMemory extends TopologyStoreTest {
 
   "InMemoryTopologyStore" should {
     behave like partyMetadataStore(() => new InMemoryPartyMetadataStore())
-    behave like topologyStore(() => new InMemoryTopologyStore(loggerFactory))
+    behave like topologyStore(() =>
+      new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    )
   }
 }

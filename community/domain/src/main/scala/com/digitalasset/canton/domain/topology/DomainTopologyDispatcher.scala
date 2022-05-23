@@ -44,6 +44,7 @@ import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
   TopologyStore,
+  TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
@@ -85,12 +86,12 @@ import scala.util.{Failure, Success}
   * One final remark: the present code will properly resume from a crash, except that it might send a snapshot to a participant
   * a second time. I.e. it assumes idempotency of the topology transaction message processing.
   */
-class DomainTopologyDispatcher(
+private[domain] class DomainTopologyDispatcher(
     domainId: DomainId,
-    authorizedStore: TopologyStore,
+    authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
     processor: TopologyTransactionProcessor,
     initialKeys: Map[KeyOwner, Seq[PublicKey]],
-    targetStore: TopologyStore,
+    targetStore: TopologyStore[TopologyStoreId.DomainStore],
     crypto: Crypto,
     clock: Clock,
     addressSequencerAsDomainMember: Boolean,
@@ -130,9 +131,22 @@ class DomainTopologyDispatcher(
   private val flushing = new AtomicBoolean(false)
   private val queue = mutable.Queue[Traced[StoredTopologyTransaction[TopologyChangeOp]]]()
   private val lock = new Object()
-  private val catchup = new ParticipantTopologyCatchup(authorizedStore, sender, loggerFactory)
+  private val catchup = new MemberTopologyCatchup(authorizedStore, loggerFactory)
   private val lastTs = new AtomicReference(CantonTimestamp.MinValue)
   private val inflight = new AtomicInteger(0)
+
+  private sealed trait DispatchStrategy extends Product with Serializable
+  private case object Alone extends DispatchStrategy
+  private case object Batched extends DispatchStrategy
+  private case object Last extends DispatchStrategy
+
+  private def dispatchStrategy(mapping: TopologyMapping): DispatchStrategy = mapping match {
+    case _: ParticipantState | _: DomainParametersChange => Last
+    case _: MediatorDomainState => Alone
+    case _: IdentifierDelegation | _: NamespaceDelegation | _: OwnerToKeyMapping |
+        _: PartyToParticipant | _: SignedLegalIdentityClaim | _: VettedPackages =>
+      Batched
+  }
 
   def init(
       flushSequencer: => FutureUnlessShutdown[Unit]
@@ -180,16 +194,15 @@ class DomainTopologyDispatcher(
     // we assume that there is only one participant state or domain parameters change per timestamp
     // otherwise, we need to make the dispatching stuff a bit smarter and deal with "multiple participants could become active in this batch"
     // and we also can't deal with multiple replaces with the same timestamp
-    val (ps, dpc) = transactions.map(_.transaction.element.mapping).foldLeft((0, 0)) {
-      case ((ps, dpc), _: DomainParametersChange) =>
-        (ps, dpc + 1)
-      case ((ps, dpc), _: ParticipantState) =>
-        (ps + 1, dpc)
-      case (acc, _) => acc
+    val byStrategy = transactions.map(_.transaction.element.mapping).groupBy(dispatchStrategy).map {
+      case (k, v) => (k, v.length)
     }
+    val alone = byStrategy.getOrElse(Alone, 0)
+    val batched = byStrategy.getOrElse(Batched, 0)
+    val lst = byStrategy.getOrElse(Last, 0)
     ErrorUtil.requireArgument(
-      ps < 2 && dpc < 2,
-      s"received batch of topology transactions with multiple participant state changes ${transactions}",
+      (lst < 2 && alone == 0) || (alone < 2 && lst == 0 && batched == 0),
+      s"received batch of topology transactions with multiple changes $byStrategy that can't be batched ${transactions}",
     )
     updateTopologyClientTs(timestamp)
     blocking {
@@ -260,15 +273,25 @@ class DomainTopologyDispatcher(
 
   /** Determines the next batch of topology transactions to send.
     *
-    * We send the entire queue up and including of the first `ParticipantState` update at once for efficiency reasons.
+    * We send the entire queue up and including of the first `ParticipantState`, `MediatorDomainState` or `DomainParametersChange` update at once for efficiency reasons.
     */
   private def determineBatchFromQueue()
       : Seq[Traced[StoredTopologyTransaction[TopologyChangeOp]]] = {
-    val items = queue.dequeueWhile(_.value.transaction.transaction.element.mapping match {
-      case _: ParticipantState | _: DomainParametersChange => false
-      case _ => true
-    })
-    (if (queue.nonEmpty)
+
+    val items =
+      queue.dequeueWhile(tx =>
+        dispatchStrategy(tx.value.transaction.transaction.element.mapping) == Batched
+      )
+
+    val includeNext = queue.headOption
+      .map(tx => dispatchStrategy(tx.value.transaction.transaction.element.mapping))
+      .exists {
+        case Alone => items.isEmpty
+        case Batched => true // shouldn't actually happen ...
+        case Last => true
+      }
+
+    (if (includeNext)
        items :+ queue.dequeue()
      else items).toSeq
   }
@@ -404,9 +427,39 @@ class DomainTopologyDispatcher(
           case _ =>
             EitherT.rightT(None)
         }
+      val checkForMediatorActivationET: EitherT[FutureUnlessShutdown, String, Option[MediatorId]] =
+        transactions.last1.transaction.transaction.element.mapping match {
+          case MediatorDomainState(_, _, mediator) =>
+            EitherT.right(
+              performUnlessClosingF(functionFullName)(
+                catchup
+                  .determinePermissionChangeForMediator(
+                    transactions.last1.validFrom.value,
+                    mediator,
+                  )
+                  .map {
+                    case (true, true) => None
+                    case (false, true) => Some(mediator)
+                    case (false, false) => None
+                    case (true, false) =>
+                      // TODO(#1251) implement catchup for mediator
+                      logger.warn(
+                        s"Mediator ${mediator} is deactivated and will miss out on topology transactions. This will break it"
+                      )
+                      None
+                  }
+              )
+            )
+          case _ =>
+            EitherT.rightT(None)
+        }
       for {
         includeParticipant <- flushToParticipantET
-        _ <- sendTransactions(transactions, includeParticipant)
+        includeMediator <- checkForMediatorActivationET
+        _ <- sendTransactions(
+          transactions,
+          includeParticipant.toList ++ includeMediator.toList,
+        )
         // update watermark, which we can as we successfully registered all transactions with the domain
         // we don't need to wait until they are processed
         _ <- EitherT.right(
@@ -420,7 +473,7 @@ class DomainTopologyDispatcher(
 
   private def sendTransactions(
       transactions: NonEmpty[Seq[StoredTopologyTransaction[TopologyChangeOp]]],
-      add: Option[ParticipantId],
+      add: Seq[Member],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val headSnapshot = authorizedStoreSnapshot(transactions.head1.validFrom.value)
     val receivingParticipantsF = performUnlessClosingF(functionFullName)(
@@ -437,7 +490,7 @@ class DomainTopologyDispatcher(
       _ <- sender.sendTransactions(
         authorizedCryptoSnapshot(transactions.head1.validFrom.value),
         transactions.map(_.transaction).toList,
-        (receivingParticipants ++ staticDomainMembers ++ mediators ++ add.toList).toSet,
+        (receivingParticipants ++ staticDomainMembers ++ mediators ++ add).toSet,
       )
     } yield ()
   }
@@ -447,14 +500,14 @@ class DomainTopologyDispatcher(
 
 }
 
-object DomainTopologyDispatcher {
+private[domain] object DomainTopologyDispatcher {
   def create(
       domainId: DomainId,
       domainTopologyManager: DomainTopologyManager,
       targetClient: DomainTopologyClientWithInit,
       processor: TopologyTransactionProcessor,
       initialKeys: Map[KeyOwner, Seq[PublicKey]],
-      targetStore: TopologyStore,
+      targetStore: TopologyStore[TopologyStoreId.DomainStore],
       client: SequencerClient,
       timeTracker: DomainTimeTracker,
       crypto: Crypto,
@@ -764,9 +817,8 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
 
 }
 
-class ParticipantTopologyCatchup(
-    store: TopologyStore,
-    sender: DomainTopologySender,
+class MemberTopologyCatchup(
+    store: TopologyStore[TopologyStoreId.AuthorizedStore],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -877,16 +929,22 @@ class ParticipantTopologyCatchup(
   private def determinePermissionChange(
       timestamp: CantonTimestamp,
       participant: ParticipantId,
-  ): Future[(ParticipantPermission, ParticipantPermission)] = {
-    def get(ts: CantonTimestamp): Future[ParticipantPermission] =
-      snapshot(ts)
-        .findParticipantState(participant)
-        .map(_.map(_.permission).getOrElse(ParticipantPermission.Disabled))
+  ): Future[(ParticipantPermission, ParticipantPermission)] =
+    determineChange(
+      timestamp,
+      _.findParticipantState(participant)
+        .map(_.map(_.permission).getOrElse(ParticipantPermission.Disabled)),
+    )
+
+  private def determineChange[T](
+      timestamp: CantonTimestamp,
+      get: StoreBasedTopologySnapshot => Future[T],
+  ): Future[(T, T)] = {
     // as topology timestamps are "as of exclusive", if we want to access the impact
     // of a topology tx, we need to look at ts + immediate successor
-    val curF = get(timestamp.immediateSuccessor)
-    val prevF = get(timestamp)
-    curF.flatMap { cur => prevF.map { prev => (prev, cur) } }
+    val curF = get(snapshot(timestamp.immediateSuccessor))
+    val prevF = get(snapshot(timestamp))
+    prevF.zip(curF)
   }
 
   private def snapshot(timestamp: CantonTimestamp): StoreBasedTopologySnapshot =
@@ -898,5 +956,10 @@ class ParticipantTopologyCatchup(
       StoreBasedDomainTopologyClient.NoPackageDependencies,
       loggerFactory,
     )
+
+  def determinePermissionChangeForMediator(
+      timestamp: CantonTimestamp,
+      mediator: MediatorId,
+  ): Future[(Boolean, Boolean)] = determineChange(timestamp, _.isMediatorActive(mediator))
 
 }

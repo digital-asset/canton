@@ -68,8 +68,9 @@ package object canton {
   type LfCreateCommand = LfCommand.Create
   val LfCreateCommand: LfCommand.Create.type = LfCommand.Create
 
-  type LfExerciseCommand = LfCommand.Exercise
-  val LfExerciseCommand: LfCommand.Exercise.type = LfCommand.Exercise
+  @nowarn("cat=deprecation")
+  type LfExerciseCommand = LfCommand.LenientExercise
+  val LfExerciseCommand: LfCommand.LenientExercise.type = LfCommand.LenientExercise
 
   type LfExerciseByKeyCommand = LfCommand.ExerciseByKey
   val LfExerciseByKeyCommand: LfCommand.ExerciseByKey.type = LfCommand.ExerciseByKey

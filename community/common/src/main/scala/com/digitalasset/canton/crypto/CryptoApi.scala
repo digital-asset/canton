@@ -130,7 +130,12 @@ trait SyncCryptoApi {
       traceContext: TraceContext
   ): EitherT[Future, SyncCryptoError, Signature]
 
-  /** Decrypts a message using the private encryption key */
+  /** Decrypts a message using the private key of the public key given as the fingerprint. */
+  def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
+      deserialize: ByteString => Either[DeserializationError, M]
+  ): EitherT[Future, SyncCryptoError, M]
+
+  @Deprecated
   def decrypt[M](encryptedMessage: Encrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   ): EitherT[Future, SyncCryptoError, M]
@@ -154,6 +159,6 @@ trait SyncCryptoApi {
       message: M,
       owner: KeyOwner,
       version: ProtocolVersion,
-  ): EitherT[Future, SyncCryptoError, Encrypted[M]]
+  ): EitherT[Future, SyncCryptoError, AsymmetricEncrypted[M]]
 }
 // architecture-handbook-entry-end: SyncCryptoApi
