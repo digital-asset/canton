@@ -74,7 +74,7 @@ object BaseQuery {
   * @param stores the various identity stores
   */
 class GrpcTopologyManagerReadService(
-    stores: => Future[Map[TopologyStoreId, TopologyStore]],
+    stores: => Future[Seq[TopologyStore[TopologyStoreId]]],
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -93,9 +93,9 @@ class GrpcTopologyManagerReadService(
 
   private def collectStores(
       filterStore: String
-  ): EitherT[Future, CantonError, Iterable[(TopologyStoreId, TopologyStore)]] = {
+  ): EitherT[Future, CantonError, Seq[TopologyStore[TopologyStoreId]]] = {
     val res = stores.map { allStores =>
-      allStores.filter { case (storeId, _) => storeId.filterName.startsWith(filterStore) }
+      allStores.filter(_.storeId.filterName.startsWith(filterStore))
     }
     EitherT.right(res)
   }
@@ -131,9 +131,10 @@ class GrpcTopologyManagerReadService(
 
     def fromStore(
         baseQuery: BaseQuery,
-        storeId: TopologyStoreId,
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
     ): Future[Seq[(TransactionSearchResult, TopologyMapping)]] = {
+      val storeId = store.storeId
+
       store
         .inspect(
           stateStore =
@@ -170,8 +171,8 @@ class GrpcTopologyManagerReadService(
     for {
       baseQuery <- wrapErr(BaseQuery.fromProto(baseQueryProto))
       stores <- collectStores(baseQuery.filterStore)
-      results <- EitherT.right(stores.toList.traverse { case (storeId, store) =>
-        fromStore(baseQuery, storeId, store)
+      results <- EitherT.right(stores.traverse { store =>
+        fromStore(baseQuery, store)
       })
     } yield {
       val res = results.flatten
@@ -318,9 +319,7 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListAvailableStoresRequest
   ): Future[adminProto.ListAvailableStoresResult] =
     stores.map { allStores =>
-      adminProto.ListAvailableStoresResult(
-        storeIds = allStores.keys.map(_.filterName).toSeq
-      )
+      adminProto.ListAvailableStoresResult(storeIds = allStores.map(_.storeId.filterName))
     }
 
   override def listParticipantDomainState(
@@ -384,22 +383,22 @@ class GrpcTopologyManagerReadService(
         baseQuery <- wrapErr(BaseQuery.fromProto(request.baseQuery))
         stores <- collectStores(baseQuery.filterStore)
         results <- EitherT.right(
-          stores.toList.traverse { case (storeId, store) =>
+          stores.traverse { store =>
             store
               .inspect(
                 stateStore =
                   // state store doesn't make any sense for the authorized store
-                  if (storeId == TopologyStoreId.AuthorizedStore) false
+                  if (store.storeId == TopologyStoreId.AuthorizedStore) false
                   else baseQuery.useStateStore,
                 timeQuery = baseQuery.timeQuery,
-                recentTimestampO = getApproximateTimestamp(storeId),
+                recentTimestampO = getApproximateTimestamp(store.storeId),
                 ops = baseQuery.ops,
                 typ = None,
                 idFilter = "",
                 namespaceOnly = false,
               )
           }
-        ): EitherT[Future, CantonError, List[StoredTopologyTransactions[TopologyChangeOp]]]
+        ): EitherT[Future, CantonError, Seq[StoredTopologyTransactions[TopologyChangeOp]]]
       } yield {
         val res = results.foldLeft(StoredTopologyTransactions.empty[TopologyChangeOp]) {
           case (acc, elem) =>

@@ -37,6 +37,13 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Encryption operations that do not require access to a private key store but operates with provided keys. */
 trait EncryptionOps {
 
+  protected def decryptWithInternal[M](
+      encrypted: AsymmetricEncrypted[M],
+      privateKey: EncryptionPrivateKey,
+  )(
+      deserialize: ByteString => Either[DeserializationError, M]
+  ): Either[DecryptionError, M]
+
   def defaultSymmetricKeyScheme: SymmetricKeyScheme
 
   /** Generates and returns a random symmetric key using the specified scheme. */
@@ -44,17 +51,32 @@ trait EncryptionOps {
       scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme
   ): Either[EncryptionKeyGenerationError, SymmetricKey]
 
+  /** Creates a symmetric key with the specified scheme for the given randomness. */
+  def createSymmetricKey(
+      bytes: SecureRandomness,
+      scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme,
+  ): Either[EncryptionKeyCreationError, SymmetricKey]
+
   /** Encrypts the given bytes using the given public key */
   def encryptWith[M <: HasVersionedToByteString](
       message: M,
       publicKey: EncryptionPublicKey,
       version: ProtocolVersion,
-  ): Either[EncryptionError, Encrypted[M]]
+  ): Either[EncryptionError, AsymmetricEncrypted[M]]
 
   /** Decrypts a message encrypted using `encryptWith` */
-  def decryptWith[M](encrypted: Encrypted[M], privateKey: EncryptionPrivateKey)(
+  def decryptWith[M](encrypted: AsymmetricEncrypted[M], privateKey: EncryptionPrivateKey)(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M]
+  ): Either[DecryptionError, M] = for {
+    _ <- Either.cond(
+      encrypted.encryptedFor == privateKey.id,
+      (),
+      DecryptionError.InvalidEncryptionKey(
+        s"Private key ${privateKey.id} does not match the used encryption key ${encrypted.encryptedFor}"
+      ),
+    )
+    message <- decryptWithInternal(encrypted, privateKey)(deserialize)
+  } yield message
 
   /** Encrypts the given message with the given symmetric key */
   def encryptWith[M <: HasVersionedToByteString](
@@ -68,26 +90,6 @@ trait EncryptionOps {
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M]
 
-  /** Encrypts the given message with the given randomness as the symmetric key for the given scheme.
-    *
-    * TODO(i4612): this is a bit of a kludge; a cleaner way would be to provide a conversion from SecureRandom to
-    *             SymmetricKey, and use the encryptWith method, but that's annoying to do with Tink. Clean up once Tink
-    *             is removed,
-    */
-  def encryptWith[M <: HasVersionedToByteString](
-      message: M,
-      symmetricKey: SecureRandomness,
-      version: ProtocolVersion,
-      scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme,
-  ): Either[EncryptionError, Encrypted[M]]
-
-  /** Decrypts a message encrypted using `encryptWith` */
-  def decryptWith[M](
-      encrypted: Encrypted[M],
-      symmetricKey: SecureRandomness,
-      scheme: SymmetricKeyScheme = defaultSymmetricKeyScheme,
-  )(deserialize: ByteString => Either[DeserializationError, M]): Either[DecryptionError, M]
-
 }
 
 /** Encryption operations that require access to stored private keys. */
@@ -96,7 +98,7 @@ trait EncryptionPrivateOps {
   def defaultEncryptionKeyScheme: EncryptionKeyScheme
 
   /** Decrypts an encrypted message using the referenced private encryption key */
-  def decrypt[M](encrypted: Encrypted[M], encryptionKeyId: Fingerprint)(
+  def decrypt[M](encrypted: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   ): EitherT[Future, DecryptionError, M]
 
@@ -124,13 +126,13 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
   ): EitherT[Future, EncryptionKeyGenerationError, EncryptionKeyPair]
 
   /** Decrypts an encrypted message using the referenced private encryption key */
-  def decrypt[M](encryptedMessage: Encrypted[M], encryptionKeyId: Fingerprint)(
+  def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   ): EitherT[Future, DecryptionError, M] =
     store
-      .decryptionKey(encryptionKeyId)(TraceContext.todo)
+      .decryptionKey(encryptedMessage.encryptedFor)(TraceContext.todo)
       .leftMap(DecryptionError.KeyStoreError)
-      .subflatMap(_.toRight(DecryptionError.UnknownEncryptionKey(encryptionKeyId)))
+      .subflatMap(_.toRight(DecryptionError.UnknownEncryptionKey(encryptedMessage.encryptedFor)))
       .subflatMap(encryptionKey =>
         encryptionOps.decryptWith(encryptedMessage, encryptionKey)(deserialize)
       )
@@ -161,6 +163,13 @@ object Encrypted {
 
   def fromByteString[M](byteString: ByteString): Either[DeserializationError, Encrypted[M]] =
     Right(new Encrypted[M](byteString))
+}
+
+case class AsymmetricEncrypted[+M] private[crypto] (
+    ciphertext: ByteString,
+    encryptedFor: Fingerprint,
+) extends NoCopy {
+  def encrypted: Encrypted[M] = new Encrypted(ciphertext)
 }
 
 /** Key schemes for asymmetric/hybrid encryption. */
@@ -520,4 +529,23 @@ object EncryptionKeyGenerationError {
       extends EncryptionKeyGenerationError {
     override def pretty: Pretty[EncryptionPublicStoreError] = prettyOfClass(unnamedParam(_.error))
   }
+}
+
+sealed trait EncryptionKeyCreationError extends Product with Serializable with PrettyPrinting
+object EncryptionKeyCreationError {
+
+  case class InvalidRandomnessLength(randomnessLength: Int, expectedKeyLength: Int)
+      extends EncryptionKeyCreationError {
+    override def pretty: Pretty[InvalidRandomnessLength] = prettyOfClass(
+      param("provided randomness length", _.randomnessLength),
+      param("expected key length", _.expectedKeyLength),
+    )
+  }
+
+  case class InternalConversionError(error: String) extends EncryptionKeyCreationError {
+    override def pretty: Pretty[InternalConversionError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
+  }
+
 }

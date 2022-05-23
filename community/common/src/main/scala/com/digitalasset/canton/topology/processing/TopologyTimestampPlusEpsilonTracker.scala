@@ -10,7 +10,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, U
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time._
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.store.TopologyStore.Change
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
@@ -25,7 +25,6 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Promise}
 import scala.util.{Failure, Success}
-import com.daml.nonempty.NonEmpty
 
 /** Compute and synchronise the effective timestamps
   *
@@ -237,7 +236,7 @@ class TopologyTimestampPlusEpsilonTracker(
 object TopologyTimestampPlusEpsilonTracker {
 
   def epsilonForTimestamp(
-      store: TopologyStore,
+      store: TopologyStore[TopologyStoreId.DomainStore],
       asOfExclusive: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
@@ -286,7 +285,7 @@ object TopologyTimestampPlusEpsilonTracker {
     */
   def initialize(
       tracker: TopologyTimestampPlusEpsilonTracker,
-      store: TopologyStore,
+      store: TopologyStore[TopologyStoreId.DomainStore],
       processorTs: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
@@ -306,7 +305,7 @@ object TopologyTimestampPlusEpsilonTracker {
             tdc
         })
     )
-    allPending = NonEmpty.mk(Seq, epsilonAtProcessorTs, upcoming: _*).sortBy(_.sequenced)
+    allPending = (epsilonAtProcessorTs +: upcoming).sortBy(_.sequenced)
     _ = {
       tracker.logger.debug(
         s"Initialising with $allPending"
@@ -322,9 +321,7 @@ object TopologyTimestampPlusEpsilonTracker {
           .discard[Option[NonNegativeFiniteDuration]]
       }
     }
-    eff <- tracker.adjustTimestampForTick(
-      allPending.last1.sequenced
-    ) // need to init with the last one
+    eff <- tracker.adjustTimestampForTick(SequencedTime(processorTs))
   } yield eff
 
 }

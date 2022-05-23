@@ -266,7 +266,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   def mockEncryptedViewTree = mock[Encrypted[CompressedView[MockViewTree]]]
   val encryptedTestView = EncryptedView(TestViewType)(mockEncryptedViewTree)
   val encryptedTestViewMessage =
-    EncryptedViewMessage(
+    EncryptedViewMessageV0(
       None,
       ViewHash(TestHash.digest(9000)),
       Map.empty,
@@ -276,7 +276,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
   val encryptedOtherTestView = EncryptedView(OtherTestViewType)(mockEncryptedViewTree)
   val encryptedOtherTestViewMessage =
-    EncryptedViewMessage(
+    EncryptedViewMessageV0(
       None,
       ViewHash(TestHash.digest(9001)),
       Map.empty,
@@ -605,7 +605,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       val sut = mk(initRc = -12L)
       val encryptedUnknownTestView = EncryptedView(UnknownTestViewType)(mockEncryptedViewTree)
       val encryptedUnknownTestViewMessage =
-        EncryptedViewMessage(
+        EncryptedViewMessageV0(
           None,
           ViewHash(TestHash.digest(9002)),
           Map.empty,

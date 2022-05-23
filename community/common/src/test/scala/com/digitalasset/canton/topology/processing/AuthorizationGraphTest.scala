@@ -6,8 +6,9 @@ package com.digitalasset.canton.topology.processing
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction.AuthorizedNamespaceDelegation
-import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, TopologyElementId}
+import com.digitalasset.canton.topology.transaction.NamespaceDelegation
 import com.digitalasset.canton.topology.{Namespace, TestingOwnerWithKeys}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
@@ -22,11 +23,8 @@ class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
 
     def mkGraph = new AuthorizationGraph(namespace, loggerFactory)
     def mkAuth(nsd: NamespaceDelegation, key: SigningPublicKey): AuthorizedNamespaceDelegation = {
-      AuthorizedTopologyTransaction(
-        nsd.uniquePath(TopologyElementId.generate()),
-        nsd,
-        key.fingerprint,
-      )
+      val tx = factory.mkAdd(nsd, key)
+      AuthorizedTopologyTransaction(tx.uniquePath, nsd, tx)
     }
     val nsk1k1 = mkAuth(NamespaceDelegation(namespace, key1, isRootDelegation = true), key1)
     val nsk2k1 = mkAuth(NamespaceDelegation(namespace, key2, isRootDelegation = true), key1)
@@ -163,7 +161,11 @@ class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
       graph.add(nsk2k1)
       graph.add(nsk3k2)
       check(graph, key3, requireRoot = true, should = true)
-      graph.remove(nsk3k2.copy(authorizingKey = key1.fingerprint))
+      graph.remove(
+        nsk3k2.copy(transaction =
+          nsk3k2.transaction.copy(key = key1)(ProtocolVersion.latestForTest, None)
+        )
+      )
       check(graph, key3, requireRoot = true, should = false)
     }
 
@@ -180,7 +182,9 @@ class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
         graph.add(nsk1k1)
         graph.add(nsk2k1)
         check(graph, key2, requireRoot = false, should = true)
-        val fakeRemove = nsk2k1.copy(authorizingKey = key6.fingerprint)
+        val fakeRemove = nsk2k1.copy(transaction =
+          nsk2k1.transaction.copy(key = key6)(ProtocolVersion.latestForTest, None)
+        )
         graph.remove(fakeRemove) shouldBe false
         check(graph, key2, requireRoot = false, should = true)
         graph.remove(nsk2k1)
@@ -203,7 +207,11 @@ class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
         graph.add(nsk2k1)
         check(graph, key3, requireRoot = false, should = true)
         check(graph, key2, requireRoot = true, should = true)
-        graph.remove(nsk2k1.copy(authorizingKey = key3.fingerprint)) shouldBe false
+        graph.remove(
+          nsk2k1.copy(transaction =
+            nsk2k1.transaction.copy(key = key3)(ProtocolVersion.latestForTest, None)
+          )
+        ) shouldBe false
         check(graph, key2, requireRoot = true, should = true)
       }
 

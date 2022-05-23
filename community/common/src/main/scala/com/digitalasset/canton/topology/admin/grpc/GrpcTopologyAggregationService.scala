@@ -17,7 +17,6 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
@@ -28,7 +27,7 @@ import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcTopologyAggregationService(
-    storesF: => Future[Map[TopologyStoreId, TopologyStore]],
+    storesF: => Future[Seq[TopologyStore[TopologyStoreId.DomainStore]]],
     ips: IdentityProvidingServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -43,16 +42,18 @@ class GrpcTopologyAggregationService(
       stores <- EitherT.right(storesF)
     } yield {
       stores.collect {
-        case (x: DomainStore, store) if x.filterName.startsWith(filterStore) =>
+        case store if store.storeId.filterName.startsWith(filterStore) =>
+          val domainId = store.storeId.domainId
+
           // get approximate timestamp from domain client to prevent race conditions (when we have written data into the stores but haven't yet updated the client)
           val asOf = asOfO.getOrElse(
             ips
-              .forDomain(x.domainId)
+              .forDomain(domainId)
               .map(_.approximateTimestamp)
               .getOrElse(CantonTimestamp.MaxValue)
           )
           (
-            x.domainId,
+            domainId,
             new StoreBasedTopologySnapshot(
               asOf,
               store,

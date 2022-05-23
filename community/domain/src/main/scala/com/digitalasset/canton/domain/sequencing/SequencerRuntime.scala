@@ -65,7 +65,7 @@ import com.digitalasset.canton.time.{
 }
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -102,7 +102,7 @@ class SequencerRuntime(
     val metrics: SequencerMetrics,
     val domainId: DomainId,
     crypto: Crypto,
-    sequencedTopologyStore: TopologyStore,
+    sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
     sharedTopologyProcessor: Boolean,
@@ -244,7 +244,9 @@ class SequencerRuntime(
             client.subscribeTracking(
               topologyManagerSequencerCounterTrackerStore,
               DiscardIgnoredEvents {
-                EnvelopeOpener(crypto.pureCrypto)(eventHandler)
+                EnvelopeOpener(staticDomainParameters.protocolVersion, crypto.pureCrypto)(
+                  eventHandler
+                )
               },
               timeTracker,
             )

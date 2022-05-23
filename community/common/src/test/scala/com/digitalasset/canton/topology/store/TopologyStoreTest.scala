@@ -138,7 +138,7 @@ trait TopologyStoreTest
 
   }
 
-  def topologyStore(mk: () => TopologyStore): Unit = {
+  def topologyStore(mk: () => TopologyStore[TopologyStoreId]): Unit = {
 
     import DefaultTestIdentities._
     val factory: TestingOwnerWithKeys =
@@ -150,7 +150,7 @@ trait TopologyStoreTest
       x => ValidatedTopologyTransaction(x, None)
 
     def findTransactionsForTesting(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         from: CantonTimestamp,
         until: Option[CantonTimestamp],
         op: TopologyChangeOp,
@@ -171,7 +171,7 @@ trait TopologyStoreTest
       SignedTopologyTransactions(validatedTx.map(_.transaction)).collectOfType[Op].result
 
     def findPositiveTx(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
         types: Seq[DomainTopologyTransactionType],
         uidsO: Option[Seq[UniqueIdentifier]],
@@ -255,7 +255,7 @@ trait TopologyStoreTest
     }
 
     def append(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
         items: List[ValidatedTopologyTransaction],
     ): Future[Unit] = {
@@ -263,7 +263,7 @@ trait TopologyStoreTest
     }
 
     def doAppend(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
         items: List[ValidatedTopologyTransaction],
     ): Future[Unit] = {
@@ -271,7 +271,7 @@ trait TopologyStoreTest
     }
 
     def updateState(
-        store: TopologyStore,
+        store: TopologyStore[TopologyStoreId],
         ts: CantonTimestamp,
         deactivate: Seq[UniquePath],
         positive: Seq[SignedTopologyTransaction[TopologyChangeOp.Positive]],
@@ -845,13 +845,11 @@ trait TopologyStoreTest
           val first = List[ValidatedTopologyTransaction](ns1k1, p2p1, p2p2, okmS, okmE, crtE)
           for {
             _ <- append(store, ts, first)
-            bootstrap <- store.findParticipantOnboardingTransactions(participant1)
-            empty1 <- store.findParticipantOnboardingTransactions(participant2)
+            bootstrap <- store.findParticipantOnboardingTransactions(participant1, domainId)
+            empty1 <- store.findParticipantOnboardingTransactions(participant2, domainId)
           } yield {
-            empty1.result.map(_.transaction) shouldBe List(
-              ns1k1
-            ) // TODO(#6300) should be empty once we have authorization data
-            bootstrap.result.map(_.transaction) shouldBe List(ns1k1, okmS, okmE, crtE)
+            empty1 shouldBe empty
+            bootstrap shouldBe List(ns1k1, okmS, okmE, crtE)
           }
         }
 

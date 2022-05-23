@@ -128,7 +128,9 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val getRegisterTopologyTransactionRequest
       : GetResult[RegisterTopologyTransactionRequest] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteStringV0(cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
+      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+        ByteString.copyFrom(r.<<[Array[Byte]])
+      )
       .fold[RegisterTopologyTransactionRequest](
         error =>
           throw new DbDeserializationException(
@@ -146,12 +148,16 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setParameterRegisterTopologyTransactionRequest
       : SetParameter[RegisterTopologyTransactionRequest] =
     (r: RegisterTopologyTransactionRequest, pp: PositionedParameters) =>
-      pp >> r.toEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
+      pp >> ProtocolMessage
+        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
       : GetResult[RegisterTopologyTransactionResponse] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteStringV0(cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
+      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+        ByteString.copyFrom(r.<<[Array[Byte]])
+      )
       .fold[RegisterTopologyTransactionResponse](
         error =>
           throw new DbDeserializationException(
@@ -176,7 +182,9 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setRegisterTopologyTransactionResponse
       : SetParameter[RegisterTopologyTransactionResponse] =
     (r: RegisterTopologyTransactionResponse, pp: PositionedParameters) =>
-      pp >> r.toEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
+      pp >> ProtocolMessage
+        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toByteArray
 
   override def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
       traceContext: TraceContext

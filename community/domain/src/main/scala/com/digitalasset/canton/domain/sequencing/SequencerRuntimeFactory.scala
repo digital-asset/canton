@@ -28,16 +28,16 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor
 
-trait SequencerRuntimeFactory {
+private[domain] trait SequencerRuntimeFactory {
   def create(
       domainId: DomainId,
       crypto: Crypto,
-      sequencedTopologyStore: TopologyStore,
+      sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
       topologyClient: DomainTopologyClientWithInit,
       topologyProcessor: TopologyTransactionProcessor,
       storage: Storage,
@@ -66,7 +66,7 @@ object SequencerRuntimeFactory {
     override def create(
         domainId: DomainId,
         crypto: Crypto,
-        sequencedTopologyStore: TopologyStore,
+        sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
         topologyClient: DomainTopologyClientWithInit,
         topologyProcessor: TopologyTransactionProcessor,
         storage: Storage,

@@ -551,7 +551,11 @@ class SyncDomain(
           override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
             messageDispatcher.handleAll(events)
         }
-      eventHandler = monitor(EnvelopeOpener(domainCrypto.crypto.pureCrypto)(messageHandler))
+      eventHandler = monitor(
+        EnvelopeOpener(staticDomainParameters.protocolVersion, domainCrypto.crypto.pureCrypto)(
+          messageHandler
+        )
+      )
 
       cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         persistent.sequencerCounterTrackerStore,

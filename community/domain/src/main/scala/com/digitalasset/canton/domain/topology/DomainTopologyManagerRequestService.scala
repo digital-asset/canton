@@ -33,6 +33,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.RequestedStore
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreFactory,
+  TopologyStoreId,
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -256,8 +257,12 @@ object RequestProcessingStrategy {
       Future.successful(transactions.map(_ => Rejected))
   }
 
-  class QueueStrategy(clock: Clock, store: TopologyStore, val loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
+  class QueueStrategy(
+      clock: Clock,
+      store: TopologyStore[TopologyStoreId.RequestedStore],
+      val loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
   ) extends RequestProcessingStrategy
       with NamedLogging {
 
@@ -309,9 +314,9 @@ case class RequestResult(uniquePath: UniquePath, state: RegisterTopologyTransact
   }
 }
 
-class DomainTopologyManagerRequestService(
+private[domain] class DomainTopologyManagerRequestService(
     strategy: RequestProcessingStrategy,
-    store: TopologyStore,
+    store: TopologyStore[TopologyStoreId],
     crypto: CryptoPureApi,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)

@@ -18,10 +18,6 @@ object CreateSubscriptionError {
   case class RegisterUnauthenticatedMemberError(e: SequencerWriteError[RegisterMemberError])
       extends CreateSubscriptionError
 
-  /** Problem registering a mediator error */
-  case class RegisterMediatorError(e: SequencerWriteError[RegisterMemberError])
-      extends CreateSubscriptionError
-
   /** The member has been disabled and can no longer read. */
   case class MemberDisabled(member: Member) extends CreateSubscriptionError
 

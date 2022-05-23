@@ -47,14 +47,17 @@ class DbTopologyStoreFactory(
     extends TopologyStoreFactory
     with DbStore {
 
-  private val storeCache = TrieMap.empty[TopologyStoreId, TopologyStore]
+  private val storeCache = TrieMap.empty[TopologyStoreId, TopologyStore[TopologyStoreId]]
   private val metadata = new DbPartyMetadataStore(storage, timeouts, loggerFactory)
 
-  override def forId(storeId: TopologyStoreId): TopologyStore =
-    storeCache.getOrElseUpdate(
-      storeId,
-      new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, timeouts, loggerFactory),
-    )
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  override def forId[StoreId <: TopologyStoreId](storeId: StoreId): TopologyStore[StoreId] =
+    storeCache
+      .getOrElseUpdate(
+        storeId,
+        new DbTopologyStore(storage, storeId, maxItemsInSqlQuery, timeouts, loggerFactory),
+      )
+      .asInstanceOf[TopologyStore[StoreId]]
 
   import storage.api._
 
@@ -63,7 +66,7 @@ class DbTopologyStoreFactory(
 
   override def allNonDiscriminated(implicit
       traceContext: TraceContext
-  ): Future[Map[TopologyStoreId, TopologyStore]] =
+  ): Future[Seq[TopologyStore[TopologyStoreId]]] =
     processingTime.metric.event {
       def filterStateStores(str: String): Boolean = {
         // state stores (and discriminated stores) are prefixed with an <something>::, but we don't want
@@ -84,11 +87,7 @@ class DbTopologyStoreFactory(
         // If this filtering doesn't work correctly, the '[S|<discriminator>T|<discriminator>S]::' suffix of filter
         // stores could make it four characters too long when we try to (unsafely) convert it to an UniqueIdentifier
         .filter(filterStateStores)
-        .map { rawId =>
-          val id = TopologyStoreId(rawId)
-          id -> forId(id)
-        }
-        .toMap
+        .map(rawId => forId(TopologyStoreId(rawId)))
     }
 
   override def partyMetadataStore(): PartyMetadataStore = metadata
@@ -221,14 +220,14 @@ class DbPartyMetadataStore(
 
 }
 
-class DbTopologyStore(
+class DbTopologyStore[StoreId <: TopologyStoreId](
     override protected val storage: DbStorage,
-    storeId: TopologyStoreId,
+    val storeId: StoreId,
     maxItemsInSqlQuery: Int,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends TopologyStore
+    extends TopologyStore[StoreId]
     with DbStore {
 
   import DbStorage.Implicits.BuilderChain._
@@ -242,8 +241,7 @@ class DbTopologyStore(
   private val (transactionStoreIdName, stateStoreIdFilterName) = buildTransactionStoreNames(storeId)
   private val isDomainStore = storeId match {
     case TopologyStoreId.DomainStore(_, _) => true
-    case TopologyStoreId.AuthorizedStore => false
-    case TopologyStoreId.RequestedStore => false
+    case _ => false
   }
 
   private val updatingTime: GaugeM[TimedLoadGauge, Double] =
@@ -370,8 +368,9 @@ class DbTopologyStore(
 
   private def dbioSeq[E <: Effect](
       actions: Seq[(Boolean, DBIOAction[_, NoStream, E])]
-  ): DBIOAction[Unit, NoStream, E] =
-    DBIO.seq(actions.filter(_._1).map(_._2): _*)
+  ): DBIOAction[Unit, NoStream, E] = DBIO.seq(actions.collect {
+    case (filter, action) if filter => action
+  }: _*)
 
   private def queryForTransactions(
       store: LengthLimitedString,
@@ -881,8 +880,7 @@ class DbTopologyStore(
         .as[CantonTimestamp]
         .headOption
     readTime.metric.event {
-      storage
-        .query(query, functionFullName)
+      storage.query(query, functionFullName)
     }
   }
 
@@ -925,15 +923,24 @@ class DbTopologyStore(
   }
 
   override def findParticipantOnboardingTransactions(
-      participantId: ParticipantId
-  )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
-    // TODO(#6300) only dispatch necessary transactions (this here is an approximation)
+      participantId: ParticipantId,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+    val ns = participantId.uid.namespace
     val subQuery =
-      sql"AND valid_until is NULL AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
+      sql"AND valid_until is NULL AND namespace = $ns AND transaction_type IN (" ++ TopologyStore.initialParticipantDispatchingSet.toList
         .map(s => sql"$s")
         .intercalate(sql", ") ++ sql")"
-    queryForTransactions(transactionStoreIdName, subQuery).map(
-      TopologyStore.filterInitialParticipantDispatchingTransactions(participantId, _)
+    queryForTransactions(transactionStoreIdName, subQuery).flatMap(
+      TopologyStore.filterInitialParticipantDispatchingTransactions(
+        participantId,
+        domainId,
+        this,
+        loggerFactory,
+        _,
+      )
     )
   }
 

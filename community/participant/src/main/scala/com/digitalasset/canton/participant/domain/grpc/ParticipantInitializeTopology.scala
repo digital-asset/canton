@@ -24,10 +24,11 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor
@@ -46,11 +47,12 @@ object ParticipantInitializeTopology {
       clock: Clock,
       timeTracker: DomainTimeTrackerConfig,
       processingTimeout: ProcessingTimeout,
-      authorizedStore: TopologyStore,
-      targetDomainStore: TopologyStore,
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      targetDomainStore: TopologyStore[TopologyStoreId.DomainStore],
       loggerFactory: NamedLoggerFactory,
       sequencerClientFactory: SequencerClientFactory,
       cryptoOps: HashOps with RandomOps,
+      protocolVersion: ProtocolVersion,
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
@@ -100,7 +102,9 @@ object ParticipantInitializeTopology {
           FutureUnlessShutdown.outcomeF(
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
-              DiscardIgnoredEvents { StripSignature { EnvelopeOpener(cryptoOps)(eventHandler) } },
+              DiscardIgnoredEvents {
+                StripSignature { EnvelopeOpener(protocolVersion, cryptoOps)(eventHandler) }
+              },
               domainTimeTracker,
             )
           )

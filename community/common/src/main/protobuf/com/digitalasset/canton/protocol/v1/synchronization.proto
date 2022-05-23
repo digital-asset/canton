@@ -1,0 +1,46 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.v1;
+
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/protocol/v0/synchronization.proto";
+
+message ParticipantRandomnessLookup {
+    // An encrypted random bytestring. After decryption, used in HKDF to derive the encryption keys for the view and
+    // its subviews
+    bytes randomness = 1;
+
+    // The fingerprint of the public key that was used to encrypt the randomness for the participant
+    string fingerprint = 2;
+}
+
+message EncryptedViewMessage {
+    bytes view_tree = 1;
+
+    // The symmetric encryption scheme used to encrypt the view tree
+    com.digitalasset.canton.crypto.v0.SymmetricKeyScheme encryption_scheme = 2;
+
+    com.digitalasset.canton.crypto.v0.Signature submitter_participant_signature = 3; // optional
+    bytes view_hash = 4;
+    repeated ParticipantRandomnessLookup randomness = 5;
+    string domain_id = 6;
+    v0.ViewType view_type = 7;
+}
+
+message EnvelopeContent {
+    oneof some_envelope_content {
+        v0.InformeeMessage informee_message = 1;
+        v0.SignedProtocolMessage signed_message = 2;
+        EncryptedViewMessage encrypted_view_message = 3;
+        v0.DomainTopologyTransactionMessage domain_topology_transaction_message = 5;
+        v0.TransferOutMediatorMessage transfer_out_mediator_message = 6;
+        v0.TransferInMediatorMessage transfer_in_mediator_message = 7;
+        v0.RootHashMessage root_hash_message = 8;
+        v0.RegisterTopologyTransactionRequest register_topology_transaction_request = 9;
+        v0.RegisterTopologyTransactionResponse register_topology_transaction_response = 10;
+        v0.CausalityMessage causality_message = 11;
+    }
+}
+

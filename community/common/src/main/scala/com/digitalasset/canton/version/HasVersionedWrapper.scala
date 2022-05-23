@@ -30,6 +30,10 @@ trait HasProtoV0[ProtoClass <: scalapb.GeneratedMessage] {
   protected def toProtoV0: ProtoClass
 }
 
+trait HasProtoV1[ProtoClass <: scalapb.GeneratedMessage] {
+  protected def toProtoV1: ProtoClass
+}
+
 /** Same as [[HasProtoV0]] but `toProtoV0` takes a version argument.This trait generally only be used in rare cases
   * when a Protobuf message contains a nested `UntypedVersionedMessage` wrapper - see e.g. Batch and Envelope
   */

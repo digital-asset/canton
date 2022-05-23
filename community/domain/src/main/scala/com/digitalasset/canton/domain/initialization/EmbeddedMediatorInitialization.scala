@@ -23,7 +23,7 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -39,7 +39,7 @@ object EmbeddedMediatorInitialization {
       protocolVersion: ProtocolVersion,
       clock: Clock,
       crypto: Crypto,
-      mediatorTopologyStore: TopologyStore,
+      mediatorTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
       timeTrackerConfig: DomainTimeTrackerConfig,
       storage: Storage,
       sequencerClientFactoryFactory: DomainTopologyClientWithInit => SequencerClientFactory,

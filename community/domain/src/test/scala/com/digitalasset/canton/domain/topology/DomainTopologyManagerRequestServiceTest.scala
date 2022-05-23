@@ -19,7 +19,11 @@ import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyTransaction}
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreId,
+  ValidatedTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -69,7 +73,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       .value
 
   private def addToStore(
-      store: TopologyStore,
+      store: TopologyStore[TopologyStoreId],
       transactions: SignedTopologyTransaction[TopologyChangeOp]*
   ): Future[Unit] = {
     val ts = clock.now
@@ -96,7 +100,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       strategy: RequestProcessingStrategy,
       manager: DomainTopologyManager = mock[DomainTopologyManager],
   ) = {
-    val store = new InMemoryTopologyStore(loggerFactory)
+    val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
     val service =
       new DomainTopologyManagerRequestService(strategy, store, syncCrypto.pureCrypto, loggerFactory)
     if (!autoEnable)
@@ -133,7 +137,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
     }
 
     "reject invalid signatures" in {
-      val (manager, store, service) = generate()
+      val (_manager, _store, service) = generate()
       val p2SigKey = TestingIdentityFactory(loggerFactory).newSigningPublicKey(participant2)
       val faulty = p1Mapping.copy(key = p2SigKey)(ProtocolVersion.latestForTest, None)
       for {
@@ -148,7 +152,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       }
     }
     "accept valid transactions" in {
-      val (manager, store, service) = generate(false)
+      val (manager, _store, service) = generate(false)
       when(
         manager.add(
           any[SignedTopologyTransaction[TopologyChangeOp]],
@@ -175,7 +179,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
     }
 
     "correctly propagate topology manager rejects" in {
-      val (manager, store, service) = generate(false)
+      val (manager, _store, service) = generate(false)
       val reject =
         DomainTopologyManagerError.ParticipantNotInitialized.Failure(
           participant1,
@@ -285,13 +289,14 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
   "queue strategy should" should {
     def generate() = {
       val manager = mock[DomainTopologyManager]
-      val queueStore = new InMemoryTopologyStore(loggerFactory)
+      val queueStore = new InMemoryTopologyStore(TopologyStoreId.RequestedStore, loggerFactory)
       val strategy = new QueueStrategy(clock, queueStore, loggerFactory)
       val (_, store, service) = generateBase(false, strategy)
       (manager, store, service, queueStore)
     }
+
     "queue correctly" in {
-      val (manager, store, service, queueStore) = generate()
+      val (_manager, _store, service, queueStore) = generate()
       for {
         res <- service.newRequest(List(p1Mapping, p1MappingEnc))
         itm <- queueStore.allTransactions
@@ -301,7 +306,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       }
     }
     "reject duplicates in queue" in {
-      val (manager, store, service, queueStore) = generate()
+      val (_manager, _store, service, queueStore) = generate()
       for {
         _ <- addToStore(queueStore, p1Mapping)
         res <- service.newRequest(List(p1Mapping, p1MappingEnc))
@@ -315,7 +320,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
   "reject strategy" should {
 
     "reject everything" in {
-      val (manager, store, service) = generateBase(false, new AutoRejectStrategy())
+      val (_manager, _store, service) = generateBase(false, new AutoRejectStrategy())
       for {
         res <- service.newRequest(List(p1Mapping, p1MappingEnc))
       } yield {

@@ -54,6 +54,6 @@ object TestDomainParameters {
     requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
     requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
     requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
-    protocolVersion = ProtocolVersion.latest,
+    protocolVersion = ProtocolVersion.latestForTest,
   )
 }

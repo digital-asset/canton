@@ -98,7 +98,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 
   import EffectiveTimeTestHelpers._
 
-  def topologySnapshot(mk: () => TopologyStore): Unit = {
+  def topologySnapshot(mk: () => TopologyStore[TopologyStoreId]): Unit = {
 
     val factory = new TestingOwnerWithKeys(
       DefaultTestIdentities.participant1,
@@ -375,7 +375,9 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 
 class StoreBasedTopologySnapshotTestInMemory extends StoreBasedTopologySnapshotTest {
   "InMemoryTopologyStore" should {
-    behave like topologySnapshot(() => new InMemoryTopologyStore(loggerFactory))
+    behave like topologySnapshot(() =>
+      new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    )
   }
 }
 

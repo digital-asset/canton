@@ -34,7 +34,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.MediatorId

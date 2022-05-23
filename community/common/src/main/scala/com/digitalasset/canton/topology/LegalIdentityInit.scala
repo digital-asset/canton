@@ -9,7 +9,7 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   DomainTopologyTransactionType,
   LegalIdentityClaim,
@@ -18,6 +18,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyStateUpdate,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -25,14 +26,13 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
     ec: ExecutionContext,
     traceContext: TraceContext,
 ) {
-
-  private def generateCertificate[E](
+  private def generateCertificate(
       uid: UniqueIdentifier,
       alternativeNames: Seq[Member],
   ): EitherT[Future, String, X509Certificate] =
     generateCertificate(uid.toProtoPrimitive, alternativeNames.map(_.toProtoPrimitive))
 
-  def generateCertificate[E](
+  def generateCertificate(
       commonName: String,
       subjectAlternativeNames: Seq[String],
   ): EitherT[Future, String, X509Certificate] =
@@ -73,7 +73,11 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
       uid: UniqueIdentifier,
       alternativeNames: Seq[Member],
       namespaceKey: SigningPublicKey,
-  )(topologyManager: TopologyManager[E], store: TopologyStore): EitherT[Future, String, Unit] =
+      protocolVersion: ProtocolVersion,
+  )(
+      topologyManager: TopologyManager[E],
+      store: TopologyStore[TopologyStoreId],
+  ): EitherT[Future, String, Unit] =
     for {
       cert <- getOrGenerateCertificate(uid, alternativeNames)
 
@@ -117,6 +121,7 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
                   SignedLegalIdentityClaim(uid, claim.getCryptographicEvidence, claimSig)
                 ),
                 Some(namespaceKey.fingerprint),
+                protocolVersion,
                 false,
               )
               .leftMap(_.toString)

@@ -15,7 +15,7 @@ import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -168,7 +168,7 @@ object CachingDomainTopologyClient {
   def create(
       clock: Clock,
       domainId: DomainId,
-      store: TopologyStore,
+      store: TopologyStore[TopologyStoreId.DomainStore],
       initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
       cachingConfigs: CachingConfigs,

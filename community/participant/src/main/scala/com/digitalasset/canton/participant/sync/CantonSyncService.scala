@@ -22,7 +22,7 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton._
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
@@ -38,10 +38,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.Pruning._
 import com.digitalasset.canton.participant.admin._
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.config.{
-  ParticipantNodeParameters,
-  PartyNotificationConfig,
-}
+import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain._
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -63,7 +60,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceDomainDisconnect,
   SyncServiceFailedDomainConnection,
 }
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.participant.topology._
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.{topology => _, _}
@@ -78,19 +74,15 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
-import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util._
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
 import java.time.{Duration => JDuration}
-import java.util.UUID
 import java.util.concurrent.{CompletableFuture, CompletionStage}
-import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
@@ -177,8 +169,19 @@ class CantonSyncService(
   // The domains this sync service is connected to. Can change due to connect/disconnect operations.
   // This may contain domains for which recovery is still running.
   // Invariant: All domain IDs in this map have a corresponding domain alias in the alias manager
-  private val connectedDomainsMap: concurrent.Map[DomainId, SyncDomain] =
+  private val connectedDomainsMap: TrieMap[DomainId, SyncDomain] =
     TrieMap.empty[DomainId, SyncDomain]
+
+  private val partyAllocation = new PartyAllocation(
+    participantId,
+    participantNodeEphemeralState,
+    topologyManager,
+    partyNotifier,
+    parameters,
+    isActive,
+    connectedDomainsMap,
+    loggerFactory,
+  )
 
   private case class AttemptReconnect(
       alias: DomainAlias,
@@ -509,118 +512,8 @@ class CantonSyncService(
   )(implicit
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
-  ): CompletionStage[SubmissionResult] = {
-    implicit val traceContext: TraceContext =
-      TraceContext.fromDamlTelemetryContext(telemetryContext)
-    import scala.jdk.FutureConverters._
-    withSpan("CantonSyncService.allocateParty") { implicit traceContext => span =>
-      span.setAttribute("submission_id", rawSubmissionId)
-      val partyName = hint.getOrElse(s"party-${UUID.randomUUID().toString}")
-      def reject(reason: String, result: SubmissionResult): SubmissionResult = {
-        FutureUtil.doNotAwait(
-          participantNodeEphemeralState.participantEventPublisher.publish(
-            LedgerSyncEvent.PartyAllocationRejected(
-              rawSubmissionId,
-              participantId.toLf,
-              recordTime =
-                LfTimestamp.Epoch, // The actual record time will be filled in by the ParticipantEventPublisher
-              rejectionReason = reason,
-            )
-          ),
-          s"Failed to publish allocation rejection for party $displayName",
-        )
-        result
-      }
-      val result =
-        for {
-          _ <- EitherT
-            .cond[Future](isActive(), (), TransactionError.NotSupported)
-            .leftWiden[SubmissionResult]
-          id <- Identifier
-            .create(partyName)
-            .leftMap(TransactionError.internalError)
-            .toEitherT[Future]
-          partyId = PartyId(id, participantId.uid.namespace)
-          validatedDisplayName <- displayName
-            .traverse(n => String255.create(n, Some("DisplayName")))
-            .leftMap(TransactionError.internalError)
-            .toEitherT[Future]
-          validatedSubmissionId <- EitherT.fromEither[Future](
-            String255
-              .fromProtoPrimitive(rawSubmissionId, "LedgerSubmissionId")
-              .leftMap(err => TransactionError.internalError(err.toString))
-          )
-          // Allow party allocation via ledger API only if notification is Eager or the participant is connected to a domain
-          // Otherwise the gRPC call will just timeout without a meaning error message
-          _ <- EitherT.cond[Future](
-            parameters.partyChangeNotification == PartyNotificationConfig.Eager ||
-              connectedDomainsMap.nonEmpty,
-            (),
-            SubmissionResult.SynchronousError(
-              SyncServiceError.PartyAllocationNoDomainError.Error(rawSubmissionId).rpcStatus()
-            ),
-          )
-          _ <- topologyManager
-            .authorize(
-              TopologyStateUpdate(
-                TopologyChangeOp.Add,
-                TopologyStateUpdateElement(
-                  TopologyElementId.adopt(validatedSubmissionId),
-                  PartyToParticipant(
-                    RequestSide.Both,
-                    partyId,
-                    participantId,
-                    ParticipantPermission.Submission,
-                  ),
-                ),
-              )(),
-              None,
-              force = false,
-            )
-            .leftMap[SubmissionResult] {
-              case IdentityManagerParentError(e) if e.code == MappingAlreadyExists =>
-                reject(
-                  show"Party already exists: party $partyId is already allocated on this node",
-                  SubmissionResult.Acknowledged,
-                )
-              case IdentityManagerParentError(e) =>
-                reject(e.cause, SubmissionResult.Acknowledged)
-              case e =>
-                reject(e.toString, TransactionError.internalError(e.toString))
-            }
-
-          // Notify upstream of display name using the participant party notifier (as display name is a participant setting)
-          _ <- EitherT(
-            validatedDisplayName
-              .fold(Future.unit)(dn => partyNotifier.setDisplayName(partyId, dn))
-              .transform {
-                case Success(_) => Success(Right(()))
-                case Failure(t) =>
-                  Success(
-                    Left(
-                      TransactionError.internalError(s"Failed to set display name ${t.getMessage}")
-                    )
-                  )
-              }
-          ).leftWiden[SubmissionResult]
-
-        } yield SubmissionResult.Acknowledged
-
-      result.fold(
-        l => {
-          logger.info(
-            s"Failed to allocate party $partyName::${participantId.uid.namespace}: ${l.toString}"
-          )
-          l
-        },
-        r => {
-          logger.debug(s"Allocated party $partyName::${participantId.uid.namespace}")
-          r
-        },
-      )
-    }.asJava
-
-  }
+  ): CompletionStage[SubmissionResult] =
+    partyAllocation.allocate(hint, displayName, rawSubmissionId)
 
   override def uploadPackages(
       submissionId: LedgerSubmissionId,

@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
@@ -18,12 +18,19 @@ case class RegisterTopologyTransactionResponse(
     results: Seq[v0.RegisterTopologyTransactionResponse.Result],
     override val domainId: DomainId,
 ) extends ProtocolMessage
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.RegisterTopologyTransactionResponse]
     with NoCopy {
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(
       v0.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV0)
+    )
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(
+      v1.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV0)
     )
 
   override def toProtoV0: v0.RegisterTopologyTransactionResponse =

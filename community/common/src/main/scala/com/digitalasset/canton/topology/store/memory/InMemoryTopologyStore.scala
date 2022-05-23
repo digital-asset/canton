@@ -28,25 +28,27 @@ class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLo
 ) extends TopologyStoreFactory
     with NamedLogging {
 
-  private val stores = TrieMap.empty[TopologyStoreId, TopologyStore]
+  private val stores = TrieMap.empty[TopologyStoreId, TopologyStore[TopologyStoreId]]
   private val metadata = new InMemoryPartyMetadataStore()
 
-  override def forId(storeId: TopologyStoreId): TopologyStore =
-    stores.getOrElseUpdate(storeId, new InMemoryTopologyStore(loggerFactory))
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  override def forId[StoreId <: TopologyStoreId](storeId: StoreId): TopologyStore[StoreId] =
+    stores
+      .getOrElseUpdate(storeId, new InMemoryTopologyStore(storeId, loggerFactory))
+      .asInstanceOf[TopologyStore[StoreId]]
 
   def allNonDiscriminated(implicit
       traceContext: TraceContext
-  ): Future[Map[TopologyStoreId, TopologyStore]] =
+  ): Future[Seq[TopologyStore[TopologyStoreId]]] =
     Future.successful(removeDiscriminatedStores(stores.toMap))
 
   private def removeDiscriminatedStores(
-      original: Map[TopologyStoreId, TopologyStore]
-  ): Map[TopologyStoreId, TopologyStore] = {
-    original.filter {
-      case (DomainStore(id, disc), v) => disc.isEmpty
-      case _ => true
-    }
-  }
+      original: Map[TopologyStoreId, TopologyStore[TopologyStoreId]]
+  ): Seq[TopologyStore[TopologyStoreId]] =
+    original.collect {
+      case (DomainStore(_, disc), store) if disc.isEmpty => store
+      case (_, store) => store
+    }.toSeq
 
   override def partyMetadataStore(): PartyMetadataStore = metadata
 
@@ -104,8 +106,11 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
   override def close(): Unit = ()
 }
 
-class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: ExecutionContext)
-    extends TopologyStore
+class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
+    val storeId: StoreId,
+    val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends TopologyStore[StoreId]
     with NamedLogging {
 
   private case class TopologyStoreEntry[+Op <: TopologyChangeOp](
@@ -552,21 +557,26 @@ class InMemoryTopologyStore(val loggerFactory: NamedLoggerFactory)(implicit ec: 
     })
 
   override def findParticipantOnboardingTransactions(
-      participantId: ParticipantId
-  )(implicit traceContext: TraceContext): Future[StoredTopologyTransactions[TopologyChangeOp]] = {
-    blocking(synchronized {
-      val res = topologyTransactionStore.filter(x =>
-        x.until.isEmpty &&
-          // TODO(#6300) only dispatch necessary transactions (this here is an approximation)
-          TopologyStore.initialParticipantDispatchingSet.contains(x.transaction.uniquePath.dbType)
-      )
-      Future.successful(
-        TopologyStore.filterInitialParticipantDispatchingTransactions(
-          participantId,
-          StoredTopologyTransactions(res.map(_.toStoredTransaction).toSeq),
+      participantId: ParticipantId,
+      domainId: DomainId,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Seq[SignedTopologyTransaction[TopologyChangeOp]]] = {
+    val res = blocking(synchronized {
+      topologyTransactionStore.filter(x =>
+        x.until.isEmpty && TopologyStore.initialParticipantDispatchingSet.contains(
+          x.transaction.uniquePath.dbType
         )
       )
     })
+
+    TopologyStore.filterInitialParticipantDispatchingTransactions(
+      participantId,
+      domainId,
+      this,
+      loggerFactory,
+      StoredTopologyTransactions(res.map(_.toStoredTransaction).toSeq),
+    )
   }
 
   override def findTsOfParticipantStateChangesBefore(

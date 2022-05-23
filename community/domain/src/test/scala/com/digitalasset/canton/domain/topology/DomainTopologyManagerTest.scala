@@ -4,10 +4,11 @@
 package com.digitalasset.canton.domain.topology
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.{
   Identifier,
-  TopologyManagerTest,
   Namespace,
+  TopologyManagerTest,
   UniqueIdentifier,
 }
 
@@ -28,6 +29,7 @@ class DomainTopologyManagerTest extends TopologyManagerTest {
           DomainTopologyManager.addMemberNoOp,
           crypto,
           DefaultProcessingTimeouts.testing,
+          TestDomainParameters.defaultStatic.protocolVersion,
           factory,
         )
       }

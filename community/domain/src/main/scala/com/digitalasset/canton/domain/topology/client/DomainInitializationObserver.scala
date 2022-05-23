@@ -15,17 +15,17 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
   StoreBasedTopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, SequencerId}
 import com.digitalasset.canton.tracing.NoTracing
 
 import scala.concurrent.{ExecutionContext, Future}
 
 /** checks and notifies once the domain is initialized */
-class DomainInitializationObserver(
+private[domain] class DomainInitializationObserver(
     domainId: DomainId,
     client: DomainTopologyClient,
-    sequencedStore: TopologyStore,
+    sequencedStore: TopologyStore[TopologyStoreId],
     processingTimeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -86,11 +86,11 @@ class DomainInitializationObserver(
 
 }
 
-object DomainInitializationObserver {
+private[domain] object DomainInitializationObserver {
   def apply(
       domainId: DomainId,
       client: DomainTopologyClient,
-      sequencedStore: TopologyStore,
+      sequencedStore: TopologyStore[TopologyStoreId.DomainStore],
       processingTimeout: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit

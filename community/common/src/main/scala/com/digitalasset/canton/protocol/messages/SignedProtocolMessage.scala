@@ -9,7 +9,7 @@ import cats.syntax.option._
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -30,6 +30,8 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     message: M,
     signature: Signature,
 ) extends ProtocolMessage
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.SignedProtocolMessage]
     with HasVersionedWrapper[VersionedMessage[SignedProtocolMessage[M]]] {
 
@@ -49,6 +51,9 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private[SignedProtocolMessage] def traverse[F[_], MM <: SignedProtocolMessageContent](

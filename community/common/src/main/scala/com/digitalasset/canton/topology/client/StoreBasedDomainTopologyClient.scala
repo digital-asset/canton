@@ -17,7 +17,12 @@ import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactions,
+  TimeQuery,
+  TopologyStore,
+  TopologyStoreId,
+}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -270,7 +275,7 @@ abstract class BaseDomainTopologyClient
 class StoreBasedDomainTopologyClient(
     val clock: Clock,
     val domainId: DomainId,
-    store: TopologyStore,
+    store: TopologyStore[TopologyStoreId],
     initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
     override val timeouts: ProcessingTimeout,
@@ -336,7 +341,7 @@ object StoreBasedDomainTopologyClient {
   */
 class StoreBasedTopologySnapshot(
     val timestamp: CantonTimestamp,
-    store: TopologyStore,
+    store: TopologyStore[TopologyStoreId],
     initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
     useStateTxs: Boolean,
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],

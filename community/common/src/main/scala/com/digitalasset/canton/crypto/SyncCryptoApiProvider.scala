@@ -317,7 +317,6 @@ class DomainSnapshotSyncCryptoApi(
   ): EitherT[Future, SyncCryptoError, M] = {
     EitherT(
       ipsSnapshot
-        // TODO(i7659) allow use of different keys and not only just first one
         .encryptionKey(owner)
         .map { keyO =>
           keyO
@@ -334,9 +333,19 @@ class DomainSnapshotSyncCryptoApi(
       // TODO (error handling) better alert / error message if given key does not exist locally
       .flatMap(key =>
         crypto.privateCrypto
-          .decrypt(encryptedMessage, key.fingerprint)(deserialize)
+          .decrypt(AsymmetricEncrypted(encryptedMessage.ciphertext, key.fingerprint))(
+            deserialize
+          )
           .leftMap(err => SyncCryptoError.SyncCryptoDecryptionError(err))
       )
+  }
+
+  override def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
+      deserialize: ByteString => Either[DeserializationError, M]
+  ): EitherT[Future, SyncCryptoError, M] = {
+    crypto.privateCrypto
+      .decrypt(encryptedMessage)(deserialize)
+      .leftMap[SyncCryptoError](err => SyncCryptoError.SyncCryptoDecryptionError(err))
   }
 
   /** Encrypts a message for the given key owner
@@ -348,7 +357,7 @@ class DomainSnapshotSyncCryptoApi(
       message: M,
       owner: KeyOwner,
       version: ProtocolVersion,
-  ): EitherT[Future, SyncCryptoError, Encrypted[M]] =
+  ): EitherT[Future, SyncCryptoError, AsymmetricEncrypted[M]] =
     EitherT(
       ipsSnapshot
         .encryptionKey(owner)

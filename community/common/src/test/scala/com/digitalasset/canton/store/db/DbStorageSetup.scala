@@ -39,6 +39,9 @@ trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLoggin
   /** Used when creating the storage */
   def retryConfig: DbStorage.RetryConfig
 
+  // Generous timeout to give the db some time to startup.
+  protected lazy val dbStartupTimeout: TimeoutDuration = TimeoutDuration.ofMinutes(10)
+
   protected def prepareDatabase(): Unit
 
   protected def migrationsFactory: DbMigrationsFactory
@@ -189,7 +192,9 @@ class PostgresTestContainerSetup(
     val command = postgresContainer.getCommandParts.toSeq :+ "-c" :+ "max_connections=500"
     postgresContainer.setCommandParts(command.toArray)
     noTracingLogger.debug(s"Starting postgres container with $command")
-    postgresContainer.start()
+
+    val startF = Future { postgresContainer.start() }
+    dbStartupTimeout.await_("startup of postgres container")(startF)
   }
 
   override lazy val basicConfig: DbBasicConfig = DbBasicConfig(

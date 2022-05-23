@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.RootHashMessage.RootHashMessagePayloadCast
-import com.digitalasset.canton.protocol.{RootHash, v0}
+import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -29,11 +29,16 @@ case class RootHashMessage[+Payload <: RootHashMessagePayload](
     viewType: ViewType,
     payload: Payload,
 ) extends ProtocolMessage
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.RootHashMessage]
     with PrettyPrinting {
 
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
 
   override def toProtoV0: v0.RootHashMessage = v0.RootHashMessage(
     rootHash = rootHash.toProtoPrimitive,

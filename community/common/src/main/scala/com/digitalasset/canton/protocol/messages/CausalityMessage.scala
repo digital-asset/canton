@@ -7,8 +7,7 @@ import cats.implicits._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.v0.EnvelopeContent
-import com.digitalasset.canton.protocol.{TransferId, v0}
+import com.digitalasset.canton.protocol.{TransferId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
@@ -26,7 +25,9 @@ import com.digitalasset.canton.topology.DomainId
 case class CausalityMessage(domainId: DomainId, transferId: TransferId, clock: VectorClock)
     extends ProtocolMessage
     with HasProtoV0[v0.CausalityMessage]
-    with PrettyPrinting {
+    with PrettyPrinting
+    with ProtocolMessageV0
+    with ProtocolMessageV1 {
 
   override def toProtoV0: v0.CausalityMessage = v0.CausalityMessage(
     targetDomainId = domainId.toProtoPrimitive,
@@ -34,8 +35,11 @@ case class CausalityMessage(domainId: DomainId, transferId: TransferId, clock: V
     clock = Some(clock.toProtoV0),
   )
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): EnvelopeContent =
+  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
 
   override def pretty: Pretty[CausalityMessage.this.type] =
     prettyOfClass(

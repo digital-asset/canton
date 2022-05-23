@@ -66,6 +66,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerSubmissionId, LfPartyId}
 import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
@@ -222,6 +223,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
         f.topologyManager.authorize(
           any[TopologyTransaction[TopologyChangeOp]],
           any[Option[Fingerprint]],
+          any[ProtocolVersion],
           anyBoolean,
           anyBoolean,
         )(anyTraceContext)
@@ -268,6 +270,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
             )()
           ),
           eqTo(None),
+          eqTo(ProtocolVersion.latestForTest),
           eqTo(false),
           eqTo(false),
         )(anyTraceContext)

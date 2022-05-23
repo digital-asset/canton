@@ -13,7 +13,11 @@ import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Remove}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.store.{TopologyStore, ValidatedTopologyTransaction}
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreId,
+  ValidatedTopologyTransaction,
+}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -28,6 +32,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -61,8 +66,11 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
   val slice2 = transactions.slice(slice1.length, transactions.length)
 
   private def mk(expect: Int) = {
-    val source = new InMemoryTopologyStore(loggerFactory)
-    val target = new InMemoryTopologyStore(loggerFactory)
+    val source = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
+    val target = new InMemoryTopologyStore(
+      TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
+      loggerFactory,
+    )
     val manager = new ParticipantTopologyManager(clock, source, crypto, timeouts, loggerFactory)
     val dispatcher =
       new ParticipantTopologyDispatcher(manager, timeouts, loggerFactory)
@@ -71,8 +79,11 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     (source, target, manager, dispatcher, handle, client)
   }
 
-  private class MockHandle(expectI: Int, response: State = State.ACCEPTED, store: TopologyStore)
-      extends RegisterTopologyTransactionHandle {
+  private class MockHandle(
+      expectI: Int,
+      response: State = State.ACCEPTED,
+      store: TopologyStore[TopologyStoreId],
+  ) extends RegisterTopologyTransactionHandle {
     val buffer = ListBuffer[SignedTopologyTransaction[TopologyChangeOp]]()
     val promise = new AtomicReference[Promise[Unit]](Promise[Unit]())
     val expect = new AtomicInteger(expectI)
@@ -128,14 +139,16 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     Either[ParticipantTopologyManagerError, Seq[SignedTopologyTransaction[TopologyChangeOp]]]
   ] =
     MonadUtil
-      .sequentialTraverse(transactions)(x => manager.authorize(x, Some(publicKey.fingerprint)))
+      .sequentialTraverse(transactions)(x =>
+        manager.authorize(x, Some(publicKey.fingerprint), ProtocolVersion.latestForTest)
+      )
       .value
 
   private def dispatcherConnected(
       dispatcher: ParticipantTopologyDispatcher,
       handle: RegisterTopologyTransactionHandle,
       client: DomainTopologyClientWithInit,
-      target: TopologyStore,
+      target: TopologyStore[TopologyStoreId.DomainStore],
   ): Future[Unit] = dispatcher
     .domainConnected(domain, domainId, handle, client, target)
     .value

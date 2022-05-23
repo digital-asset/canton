@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
@@ -23,6 +23,8 @@ case class DomainTopologyTransactionMessage private (
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
 ) extends ProtocolMessage
+    with ProtocolMessageV0
+    with ProtocolMessageV1
     with HasProtoV0[v0.DomainTopologyTransactionMessage]
     with NoCopy {
   def hashToSign(hashOps: HashOps): Hash =
@@ -39,6 +41,11 @@ case class DomainTopologyTransactionMessage private (
   override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
     v0.EnvelopeContent(
       v0.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV0)
+    )
+
+  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+    v1.EnvelopeContent(
+      v1.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV0)
     )
 }
 

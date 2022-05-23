@@ -67,7 +67,7 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
         collector
           .lift(mapping)
           .map { matched =>
-            AuthorizedTopologyTransaction(sit.uniquePath, matched, key.fingerprint)
+            AuthorizedTopologyTransaction(sit.uniquePath, matched, sit)
           }
           .toList
       case _ => Seq()

@@ -43,7 +43,7 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
@@ -52,7 +52,7 @@ import io.opentelemetry.api.trace.Tracer
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
-case class TopologyManagementComponents(
+final case class TopologyManagementComponents(
     client: DomainTopologyClientWithInit,
     sequencerClient: SequencerClient,
     processor: TopologyTransactionProcessor,
@@ -104,7 +104,7 @@ object TopologyManagementInitialization {
       clock: Clock,
       crypto: Crypto,
       syncCrypto: DomainSyncCryptoClient,
-      sequencedTopologyStore: TopologyStore,
+      sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
       sequencerConnection: SequencerConnection,
       domainTopologyManager: DomainTopologyManager,
       domainTopologyService: DomainTopologyManagerRequestService,
@@ -169,7 +169,10 @@ object TopologyManagementInitialization {
         val topologyProcessorHandler = topologyProcessor.createHandler(id)
         DiscardIgnoredEvents {
           StripSignature {
-            EnvelopeOpener[UnsignedEnvelopeBox](crypto.pureCrypto) {
+            EnvelopeOpener[UnsignedEnvelopeBox](
+              domainTopologyManager.protocolVersion,
+              crypto.pureCrypto,
+            ) {
               domainTopologyServiceHandler.combineWith(topologyProcessorHandler)
             }
           }

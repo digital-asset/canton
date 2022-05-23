@@ -38,8 +38,12 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
             .generateSymmetricKey(scheme = symmetricKeyScheme)
             .valueOrFail("generate symmetric key")
 
-        def newSecureRandomKey(crypto: Crypto): SecureRandomness = {
-          crypto.pureCrypto.generateSecureRandomness(symmetricKeyScheme.keySizeInBytes)
+        def newSecureRandomKey(crypto: Crypto): SymmetricKey = {
+          val randomness =
+            crypto.pureCrypto.generateSecureRandomness(symmetricKeyScheme.keySizeInBytes)
+          crypto.pureCrypto
+            .createSymmetricKey(randomness, symmetricKeyScheme)
+            .valueOrFail("create key from randomness")
         }
 
         "serialize and deserialize symmetric encryption key via protobuf" in {
@@ -154,7 +158,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
               .encryptWith(message, publicKey, ProtocolVersion.latestForTest)
               .valueOrFail("encrypt")
             message2 <- crypto.privateCrypto
-              .decrypt(encrypted, publicKey.id)(Message.fromByteString)
+              .decrypt(encrypted)(Message.fromByteString)
               .valueOrFail("decrypt")
           } yield message shouldEqual message2
         }
@@ -169,8 +173,12 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
               .encryptWith(message, publicKey, ProtocolVersion.latestForTest)
               .valueOrFail("encrypt")
             _ = assert(message.bytes != encrypted.ciphertext)
+            encrypted2 = AsymmetricEncrypted(
+              encrypted.ciphertext,
+              publicKey2.id,
+            )
             message2 <- crypto.privateCrypto
-              .decrypt(encrypted, publicKey2.id)(Message.fromByteString)
+              .decrypt(encrypted2)(Message.fromByteString)
               .value
           } yield message2
 

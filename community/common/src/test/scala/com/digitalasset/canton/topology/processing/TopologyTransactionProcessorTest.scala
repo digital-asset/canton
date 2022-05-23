@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
@@ -25,11 +25,17 @@ class TopologyTransactionProcessorTest
   val crypto = new SymbolicPureCrypto()
   val clock = mock[Clock]
 
-  private def mkStore = new InMemoryTopologyStore(loggerFactory) {
-    override def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] = None
-  }
+  private def mkStore: InMemoryTopologyStore[TopologyStoreId.DomainStore] =
+    new InMemoryTopologyStore(
+      TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
+      loggerFactory,
+    ) {
+      override def monotonicityTimeCheckUpdate(ts: CantonTimestamp): Option[CantonTimestamp] = None
+    }
 
-  private def mk(store: TopologyStore = mkStore): (TopologyTransactionProcessor, TopologyStore) = {
+  private def mk(
+      store: TopologyStore[TopologyStoreId.DomainStore] = mkStore
+  ): (TopologyTransactionProcessor, TopologyStore[TopologyStoreId.DomainStore]) = {
     val proc = new TopologyTransactionProcessor(
       DefaultTestIdentities.domainId,
       crypto,
@@ -45,7 +51,7 @@ class TopologyTransactionProcessorTest
 
   private def ts(idx: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(idx.toLong)
   private def fetch(
-      store: TopologyStore,
+      store: TopologyStore[TopologyStoreId],
       timestamp: CantonTimestamp,
   ): Future[List[TopologyStateElement[TopologyMapping]]] = {
     store

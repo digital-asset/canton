@@ -55,7 +55,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
 
   private def createTopologyStore(
       storeId: TopologyStoreId = TopologyStoreId.AuthorizedStore
-  ): DbTopologyStore =
+  ): DbTopologyStore[TopologyStoreId] =
     new DbTopologyStore(
       storage,
       storeId,

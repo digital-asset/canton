@@ -30,7 +30,7 @@ import com.digitalasset.canton.participant.store.TransferStore.TransferStoreErro
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.EncryptedViewMessageDecryptionError
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,

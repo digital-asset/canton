@@ -28,7 +28,17 @@ case class ConfirmationRequest(
       viewType = ViewType.TransactionViewType,
       payload = EmptyRootHashMessagePayload,
     )
-    val participants = viewEnvelopes.flatMap(_.protocolMessage.randomSeed.keySet).distinct
+    val participants = viewEnvelopes.flatMap { envelope =>
+      envelope.protocolMessage.participants
+        .getOrElse {
+          // NOTE: We do not serialize the original informee participants as part of a serialized encrypted view message.
+          // Due to sharing of a key a fingerprint may map to multiple participants.
+          // However we only use the informee participants before serialization, so this information is not required afterwards.
+          throw new IllegalStateException(
+            s"Obtaining informee participants on deserialized encrypted view message"
+          )
+        }
+    }.distinct
 
     val rootHashMessages = NonEmpty
       .from(participants)

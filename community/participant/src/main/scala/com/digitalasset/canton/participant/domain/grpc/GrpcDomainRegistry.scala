@@ -28,7 +28,7 @@ import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig,
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory}
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import io.opentelemetry.api.trace.Tracer
@@ -45,7 +45,6 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
   */
 class GrpcDomainRegistry(
     val participantId: ParticipantId,
-    nodeId: NodeId,
     agreementService: AgreementService,
     topologyDispatcher: ParticipantTopologyDispatcher,
     val aliasManager: DomainAliasManager,
@@ -59,6 +58,7 @@ class GrpcDomainRegistry(
     replaySequencerConfig: AtomicReference[Option[ReplayConfig]],
     trustDomain: (
         DomainId,
+        StaticDomainParameters,
         TraceContext,
     ) => FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
@@ -79,7 +79,7 @@ class GrpcDomainRegistry(
       val staticParameters: StaticDomainParameters,
       sequencer: SequencerClient,
       val topologyClient: DomainTopologyClientWithInit,
-      val topologyStore: TopologyStore,
+      val topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       val domainPersistentState: SyncDomainPersistentState,
       override protected val timeouts: ProcessingTimeout,
   ) extends DomainHandle
@@ -127,7 +127,6 @@ class GrpcDomainRegistry(
         sequencerConnection,
         syncDomainPersistentStateFactory,
       )(
-        nodeId,
         topologyDispatcher.manager.store,
         cryptoApiProvider,
         cryptoConfig,

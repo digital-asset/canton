@@ -10,12 +10,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
-import com.digitalasset.canton.topology.{
-  DomainTopologyManagerId,
-  MediatorId,
-  Member,
-  UnauthenticatedMemberId,
-}
+import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.ifThenET
 import io.opentelemetry.api.trace.Tracer
@@ -113,10 +108,6 @@ abstract class BaseSequencer(
         case _: UnauthenticatedMemberId =>
           ensureMemberRegistered(member)
             .leftMap(CreateSubscriptionError.RegisterUnauthenticatedMemberError)
-        case _: MediatorId =>
-          ensureMemberRegistered(member).leftMap(
-            CreateSubscriptionError.RegisterMediatorError
-          )
         case _ =>
           EitherT.pure[Future, CreateSubscriptionError](())
       }

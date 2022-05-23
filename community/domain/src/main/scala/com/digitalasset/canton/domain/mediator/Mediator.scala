@@ -102,7 +102,7 @@ class Mediator(
     sequencerClient.subscribeTracking(
       sequencerCounterTrackerStore,
       DiscardIgnoredEvents(
-        EnvelopeOpener[OrdinaryEnvelopeBox](syncCrypto.crypto.pureCrypto)(handler)
+        EnvelopeOpener[OrdinaryEnvelopeBox](protocolVersion, syncCrypto.crypto.pureCrypto)(handler)
       ),
       timeTracker,
     )
