@@ -102,7 +102,7 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
               .map(LegalIdentityClaimEvidence.X509Cert)
               .leftMap(err => s"Failed to serialize certificate to PEM: $err")
               .toEitherT
-            claim = LegalIdentityClaim.create(uid, evidence)
+            claim = LegalIdentityClaim.create(uid, evidence, protocolVersion)
             claimHash = claim.hash(crypto.pureCrypto)
 
             // Sign the legal identity claim with the legal entity key as specified in the evidence
@@ -118,7 +118,8 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
             _ <- topologyManager
               .authorize(
                 TopologyStateUpdate.createAdd(
-                  SignedLegalIdentityClaim(uid, claim.getCryptographicEvidence, claimSig)
+                  SignedLegalIdentityClaim(uid, claim.getCryptographicEvidence, claimSig),
+                  protocolVersion,
                 ),
                 Some(namespaceKey.fingerprint),
                 protocolVersion,

@@ -173,9 +173,9 @@ class PackageInspectionOpsImpl(
       _signedTx <- topologyManager.authorize(
         tx,
         signingKey = None,
-        ProtocolVersion.latest,
+        tx.representativeProtocolVersion,
         force,
-      ) // TODO(#9368) use PV of protocol version here
+      )
     } yield ()
   }
 
@@ -185,7 +185,7 @@ class PackageInspectionOpsImpl(
     val op = TopologyChangeOp.Remove
     val mapping = VettedPackages(participantId, packages)
     topologyManager
-      .genTransaction(op, mapping)
+      .genTransaction(op, mapping, ProtocolVersion.latest) // TODO(#9396)
       .leftMap(err =>
         participant.topology.ParticipantTopologyManagerError
           .IdentityManagerParentError(err)

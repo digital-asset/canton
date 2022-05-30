@@ -18,7 +18,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   transactionId,
 }
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{RequestId, TransferId}
+import com.digitalasset.canton.protocol.{RequestId, TestDomainParameters, TransferId}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
@@ -624,7 +624,13 @@ object TransferStoreTest {
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
     val fullTransferOutViewTree =
-      transferOutRequest.toFullTransferOutTree(pureCryptoApi, pureCryptoApi, seed, uuid)
+      transferOutRequest.toFullTransferOutTree(
+        pureCryptoApi,
+        pureCryptoApi,
+        seed,
+        uuid,
+        TestDomainParameters.defaultStatic.protocolVersion,
+      )
     Future.successful(
       TransferData(
         transferId.requestTimestamp,

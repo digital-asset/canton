@@ -79,6 +79,7 @@ private[sync] class PartyAllocation(
     }
 
     val partyName = hint.getOrElse(s"party-${UUID.randomUUID().toString}")
+    val protocolVersion = ProtocolVersion.latest // TODO(#9396)
 
     val result =
       for {
@@ -111,9 +112,9 @@ private[sync] class PartyAllocation(
         )
         _ <- topologyManager
           .authorize(
-            topologyTransaction(partyId, validatedSubmissionId),
+            topologyTransaction(partyId, validatedSubmissionId, protocolVersion),
             None,
-            ProtocolVersion.latest,
+            protocolVersion,
             force = false,
           )
           .leftMap[SubmissionResult] {
@@ -181,6 +182,7 @@ private[sync] class PartyAllocation(
   private def topologyTransaction(
       partyId: PartyId,
       validatedSubmissionId: String255,
+      protocolVersion: ProtocolVersion,
   ): TopologyStateUpdate[TopologyChangeOp.Add] = TopologyStateUpdate(
     TopologyChangeOp.Add,
     TopologyStateUpdateElement(
@@ -192,5 +194,5 @@ private[sync] class PartyAllocation(
         ParticipantPermission.Submission,
       ),
     ),
-  )()
+  )(protocolVersion)
 }

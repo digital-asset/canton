@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
+import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -103,6 +103,7 @@ class SequencerRuntime(
     val domainId: DomainId,
     crypto: Crypto,
     sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
+    topologyClientMember: Member,
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
     sharedTopologyProcessor: Boolean,
@@ -114,6 +115,7 @@ class SequencerRuntime(
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
     indexedStringStore: IndexedStringStore,
+    futureSupervisor: FutureSupervisor,
     agreementManager: Option[ServiceAgreementManager],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer, actorSystem: ActorSystem)
@@ -140,10 +142,12 @@ class SequencerRuntime(
       domainId,
       storage,
       clock,
+      topologyClientMember,
       syncCrypto,
       snapshot,
       localNodeParameters,
       staticDomainParameters.protocolVersion,
+      futureSupervisor,
     )
 
   private val keyCheckF =

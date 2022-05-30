@@ -10,6 +10,7 @@ import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -24,15 +25,15 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
   private val defaultDynamicDomainParameters = TestDomainParameters.defaultDynamic
 
   def testConversion[Op <: TopologyChangeOp, M <: TopologyMapping](
-      builder: M => TopologyTransaction[Op],
+      builder: (M, ProtocolVersion) => TopologyTransaction[Op],
       fromByteString: ByteString => ParsingResult[TopologyTransaction[Op]],
   )(
       mapping: M,
       mapping2: Option[M] = None,
       hint: String = "",
   ): Unit = {
-    val transaction = builder(mapping)
-    val transaction2 = builder(mapping2.getOrElse(mapping))
+    val transaction = builder(mapping, defaultProtocolVersion)
+    val transaction2 = builder(mapping2.getOrElse(mapping), defaultProtocolVersion)
     val serialized = transaction.getCryptographicEvidence
 
     val deserializer = fromByteString andThen ({
@@ -51,13 +52,13 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
     "namespace delegation" should {
       val ns1 = NamespaceDelegation(Namespace(fingerprint), pubKey, true)
       val ns2 = NamespaceDelegation(Namespace(fingerprint2), pubKey2, true)
-      testConversion(TopologyStateUpdate.createAdd, TopologyStateUpdate.fromByteString)(
+      testConversion(TopologyStateUpdate.createAdd, TopologyTransaction.fromByteString)(
         ns1,
         Some(ns2),
       )
     }
     "identifier delegation" should {
-      testConversion(TopologyStateUpdate.createAdd, TopologyStateUpdate.fromByteString)(
+      testConversion(TopologyStateUpdate.createAdd, TopologyTransaction.fromByteString)(
         IdentifierDelegation(uid, pubKey),
         Some(IdentifierDelegation(uid2, pubKey2)),
       )
@@ -70,7 +71,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
         DomainTopologyManagerId(uid),
       )
       owners.foreach(owner =>
-        testConversion(TopologyStateUpdate.createAdd, TopologyStateUpdate.fromByteString)(
+        testConversion(TopologyStateUpdate.createAdd, TopologyTransaction.fromByteString)(
           OwnerToKeyMapping(owner, pubKey),
           Some(OwnerToKeyMapping(owner, pubKey2)),
           hint = " for " + owner.toString,
@@ -84,15 +85,21 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
         (RequestSide.To, ParticipantPermission.Observation),
       )
       sides.foreach { case (side, permission) =>
-        testConversion(TopologyStateUpdate.createAdd, TopologyStateUpdate.fromByteString)(
+        testConversion(TopologyStateUpdate.createAdd, TopologyTransaction.fromByteString)(
           PartyToParticipant(side, PartyId(uid), ParticipantId(uid2), permission),
           Some(PartyToParticipant(side, PartyId(uid2), ParticipantId(uid), permission)),
           hint = " for " + side.toString + " and " + permission.toString,
         )
       }
     }
+
     "domain parameters change" should {
-      testConversion(DomainGovernanceTransaction.apply, DomainGovernanceTransaction.fromByteString)(
+      val builder = (
+          mapping: DomainGovernanceMapping,
+          protocolVersion: ProtocolVersion,
+      ) => DomainGovernanceTransaction(mapping, protocolVersion)
+
+      testConversion(builder, DomainGovernanceTransaction.fromByteString)(
         DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
         Some(DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)),
       )

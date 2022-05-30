@@ -50,23 +50,20 @@ abstract class BaseSequencer(
       executionContext: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[Future, WriteRequestRefused, Unit] =
-    ensureRegistered(member).biflatMap(
-      {
-        // due to the way ensureRegistered executes it is unlikely (I think impossible) for the already registered error
-        // to be returned, however in this circumstance it's actually fine as we want them registered regardless.
-        case OperationError(RegisterMemberError.AlreadyRegisteredError(member)) =>
-          logger.debug(
-            s"Went to auto register member but found they were already registered: $member"
-          )
-          EitherT.pure[Future, WriteRequestRefused](())
-        case OperationError(RegisterMemberError.UnexpectedError(member, message)) =>
-          //TODO(phoebe) consider whether to propagate these errors further
-          logger.error(s"An unexpected error occurred whilst registering member $member: $message")
-          EitherT.pure[Future, WriteRequestRefused](())
-        case error: WriteRequestRefused => EitherT.leftT(error)
-      },
-      _ => EitherT.pure[Future, WriteRequestRefused](()),
-    )
+    ensureRegistered(member).leftFlatMap {
+      // due to the way ensureRegistered executes it is unlikely (I think impossible) for the already registered error
+      // to be returned, however in this circumstance it's actually fine as we want them registered regardless.
+      case OperationError(RegisterMemberError.AlreadyRegisteredError(member)) =>
+        logger.debug(
+          s"Went to auto register member but found they were already registered: $member"
+        )
+        EitherT.pure[Future, WriteRequestRefused](())
+      case OperationError(RegisterMemberError.UnexpectedError(member, message)) =>
+        //TODO(phoebe) consider whether to propagate these errors further
+        logger.error(s"An unexpected error occurred whilst registering member $member: $message")
+        EitherT.pure[Future, WriteRequestRefused](())
+      case error: WriteRequestRefused => EitherT.leftT(error)
+    }
 
   override def sendAsync(
       submission: SubmissionRequest

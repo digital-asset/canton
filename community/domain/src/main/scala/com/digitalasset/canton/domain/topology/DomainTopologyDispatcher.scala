@@ -75,7 +75,7 @@ import scala.util.{Failure, Success}
   * Once x is observed, we repeat.
   *
   * The only special thing in here is the case when x = ParticipantState update. Because in this case, a participant
-  * might change his state (i.e. become online for the first time or resume operation after being disabled).
+  * might change its state (i.e. become online for the first time or resume operation after being disabled).
   *
   * In this case, before x is sent from [source] to [target], we send all transactions in [target] to him. And once we
   * did that, we follow-up with x.
@@ -307,7 +307,7 @@ private[domain] class DomainTopologyDispatcher(
           EitherT
             .right(
               performUnlessClosingF(functionFullName)(
-                authorizedStoreSnapshot(txs.last1.validFrom.value).findDynamicDomainParameters
+                authorizedStoreSnapshot(txs.last1.validFrom.value).findDynamicDomainParameters()
               )
             )
             .flatMap(_.fold(empty) { param =>
@@ -551,24 +551,20 @@ private[domain] object DomainTopologyDispatcher {
     // queue filling and store scanning. however, we can't do that synchronously here
     // as starting the domain might be kicked off by the domain manager (in manual init scenarios)
     FutureUtil.doNotAwait(
-      domainTopologyManager
-        .executeSequential(
-          {
-            for {
-              _ <- dispatcher
-                .init(
-                  flushSequencerWithTimeProof(timeTracker, targetClient)
-                )
-            } yield {
-              domainTopologyManager.addObserver(dispatcher)
-            }
-          }.onShutdown(
-            logger.debug("Stopped dispatcher initialization due to shutdown")(
-              TraceContext.empty
-            )
-          ),
-          "initializing domain topology dispatcher",
+      domainTopologyManager.executeSequential(
+        {
+          for {
+            _ <- dispatcher.init(flushSequencerWithTimeProof(timeTracker, targetClient))
+          } yield {
+            domainTopologyManager.addObserver(dispatcher)
+          }
+        }.onShutdown(
+          logger.debug("Stopped dispatcher initialization due to shutdown")(
+            TraceContext.empty
+          )
         ),
+        "initializing domain topology dispatcher",
+      ),
       "domain topology manager sequential init failed",
     )(ErrorLoggingContext.fromTracedLogger(logger))
 
@@ -586,6 +582,9 @@ private[domain] object DomainTopologyDispatcher {
     for {
       // flush the sequencer client with a time-proof. this should ensure that we give the
       // topology processor time to catch up with any pending submissions
+      //
+      // This is not fool-proof as the time proof may be processed by a different sequencer replica
+      // than where earlier transactions have been submitted and therefore overtake them.
       timestamp <- timeTracker.fetchTimeProof().map(_.timestamp)
       // wait until the topology client has seen this timestamp
       _ <- targetClient

@@ -165,6 +165,7 @@ class TransferOutProcessingSteps(
         pureCrypto,
         seed,
         transferOutUuid,
+        protocolVersion,
       )
       mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash

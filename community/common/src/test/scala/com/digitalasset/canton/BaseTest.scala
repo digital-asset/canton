@@ -9,8 +9,10 @@ import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
+import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
 import org.scalacheck.Test
@@ -61,6 +63,9 @@ trait BaseTest
   import scala.language.implicitConversions
 
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+
+  protected def defaultProtocolVersion: ProtocolVersion =
+    TestDomainParameters.defaultStatic.protocolVersion
 
   // default to providing an empty trace context to all tests
   protected implicit def traceContext = TraceContext.empty

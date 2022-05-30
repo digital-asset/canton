@@ -188,7 +188,9 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           archiveFiles = List.empty,
           eventsPageSize = config.serverConfig.eventsPageSize,
           eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
+          bufferedStreamsPageSize = config.serverConfig.bufferedStreamsPageSize,
           acsIdPageSize = config.serverConfig.activeContractsService.acsIdPageSize,
+          acsIdPageBufferSize = config.serverConfig.activeContractsService.acsIdPageBufferSize,
           acsIdFetchingParallelism =
             config.serverConfig.activeContractsService.acsIdFetchingParallelism,
           acsContractFetchingParallelism =
@@ -216,6 +218,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           managementServiceTimeout =
             JDuration.ofNanos(config.serverConfig.managementServiceTimeout.unwrap.toNanos),
           userManagementConfig = config.serverConfig.userManagementService.damlConfig,
+          rateLimitingConfig = config.serverConfig.rateLimitingConfig,
         )
 
         // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.

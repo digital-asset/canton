@@ -98,6 +98,7 @@ trait DbRegisterTopologyTransactionResponseStoreTest
       new DbRegisterTopologyTransactionResponseStore(
         storage,
         pureCryptoApi,
+        defaultProtocolVersion,
         timeouts,
         loggerFactory,
       )

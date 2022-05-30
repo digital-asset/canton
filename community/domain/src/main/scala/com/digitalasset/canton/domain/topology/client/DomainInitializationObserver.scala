@@ -49,7 +49,7 @@ private[domain] class DomainInitializationObserver(
       loggerFactory,
     )
     for {
-      hasParams <- dbSnapshot.findDynamicDomainParameters.map(_.nonEmpty)
+      hasParams <- dbSnapshot.findDynamicDomainParameters().map(_.nonEmpty)
       hasKeys <- needKeys
         .traverse(dbSnapshot.signingKey(_).map(_.nonEmpty))
         .map(_.forall(identity))

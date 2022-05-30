@@ -33,7 +33,12 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       val s: Int => Salt = TestSalt.generateSalt
       def rh(index: Int): RootHash = RootHash(h(index))
       val viewCommonData =
-        ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(2), s(999))
+        ViewCommonData.create(hashOps)(
+          Set(alice, bob),
+          NonNegativeInt.tryCreate(2),
+          s(999),
+          defaultProtocolVersion,
+        )
       val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
       val commonMetadata = CommonMetadata(hashOps)(
         ConfirmationPolicy.Signatory,
@@ -41,6 +46,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         mediatorId,
         s(5417),
         new UUID(0, 0),
+        defaultProtocolVersion,
       )
       FullInformeeTree(
         GenTransactionTree(hashOps)(

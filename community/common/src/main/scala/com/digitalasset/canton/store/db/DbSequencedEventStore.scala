@@ -21,7 +21,7 @@ import com.digitalasset.canton.store._
 import com.digitalasset.canton.store.db.DbSequencedEventStore._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
-import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
+import com.digitalasset.canton.version.{UntypedVersionedMessage, VersionedMessage}
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -140,7 +140,7 @@ class DbSequencedEventStore(
     DbStorage.bulkOperation_(insertSql, events, storage.profile) { pp => event =>
       pp >> partitionKey
       pp >> event.timestamp
-      pp >> event.underlyingEventBytes(ProtocolVersion.v2_0_0_Todo_i8793)
+      pp >> event.underlyingEventBytes
       pp >> event.dbType
       pp >> event.counter
       pp >> event.traceContext

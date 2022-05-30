@@ -267,7 +267,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
                   ParticipantPermission.Submission,
                 ),
               ),
-            )()
+            )(defaultProtocolVersion)
           ),
           eqTo(None),
           eqTo(ProtocolVersion.latestForTest),

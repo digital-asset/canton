@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverseFilter._
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SignatureCheckError.{
   SignatureWithWrongKey,
@@ -14,7 +15,7 @@ import com.digitalasset.canton.crypto.SignatureCheckError.{
 import com.digitalasset.canton.crypto.SyncCryptoError.{KeyNotAvailable, SyncCryptoEncryptionError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.{
@@ -25,7 +26,7 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.{DomainAlias, checked}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -97,6 +98,72 @@ trait SyncCryptoClient extends TopologyClientApi[SyncCryptoApi] {
       traceContext: TraceContext
   ): FutureUnlessShutdown[TopologySnapshot]
 
+}
+
+object SyncCryptoClient {
+
+  /** Computes the snapshot for the desired timestamp, assuming that the last (relevant) update to the
+    * topology state happened at or before `previousTimestamp`.
+    * If `previousTimestampO` is [[scala.None$]] and `desiredTimestamp` is currently not known
+    * [[com.digitalasset.canton.topology.client.TopologyClientApi.topologyKnownUntilTimestamp]],
+    * then the current approximation is returned and if `warnIfApproximate` is set a warning is logged.
+    */
+  def getSnapshotForTimestamp(
+      client: SyncCryptoClient,
+      desiredTimestamp: CantonTimestamp,
+      previousTimestampO: Option[CantonTimestamp],
+      futureSupervisor: FutureSupervisor,
+      warnIfApproximate: Boolean = true,
+  )(implicit
+      executionContext: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): Future[SyncCryptoApi] = {
+    implicit val traceContext: TraceContext = loggingContext.traceContext
+    val knownUntil = client.topologyKnownUntilTimestamp
+    if (desiredTimestamp <= knownUntil) {
+      client.snapshot(desiredTimestamp)
+    } else {
+      loggingContext.logger.debug(
+        s"Waiting for topology snapshot at $desiredTimestamp; known until $knownUntil; previous $previousTimestampO"
+      )
+      previousTimestampO match {
+        case None =>
+          if (warnIfApproximate) {
+            loggingContext.logger.warn(
+              s"Using approximate topology snapshot for desired timestamp $desiredTimestamp"
+            )
+          }
+          Future.successful(client.currentSnapshotApproximation)
+        case Some(previousTimestamp) =>
+          if (desiredTimestamp <= previousTimestamp.immediateSuccessor)
+            futureSupervisor.supervised(
+              s"requesting topology snapshot at $desiredTimestamp with update timestamp $previousTimestamp and known until $knownUntil"
+            )(client.awaitSnapshot(desiredTimestamp))
+          else {
+            import scala.Ordered.orderingToOrdered
+            for {
+              previousSnapshot <- futureSupervisor.supervised(
+                s"searching for topology change delay at $previousTimestamp for desired timestamp $desiredTimestamp and known until $knownUntil"
+              )(client.awaitSnapshot(previousTimestamp))
+              previousDomainParams <- previousSnapshot.ipsSnapshot
+                .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
+
+              delay = previousDomainParams.topologyChangeDelay
+              diff = desiredTimestamp - previousTimestamp
+              snapshotTimestamp =
+                if (diff > delay.unwrap) {
+                  // `desiredTimestamp` is larger than `previousTimestamp` plus the `delay`,
+                  // so timestamps cannot overflow here
+                  checked(previousTimestamp.plus(delay.unwrap).immediateSuccessor)
+                } else desiredTimestamp
+              desiredSnapshot <- futureSupervisor.supervised(
+                s"requesting topology snapshot at $snapshotTimestamp for desired timestamp $desiredTimestamp given previous timestamp $previousTimestamp with topology change delay $delay"
+              )(client.awaitSnapshot(snapshotTimestamp))
+            } yield desiredSnapshot
+          }
+      }
+    }
+  }
 }
 
 /** Crypto operations on a particular domain
@@ -227,7 +294,7 @@ class DomainSyncCryptoClient(
 class DomainSnapshotSyncCryptoApi(
     val owner: KeyOwner,
     val domainId: DomainId,
-    val ipsSnapshot: TopologySnapshot,
+    override val ipsSnapshot: TopologySnapshot,
     val crypto: Crypto,
     fetchSigningKey: CantonTimestamp => EitherT[Future, SyncCryptoError, Fingerprint],
     validKeysCacheConfig: CacheConfig,

@@ -23,14 +23,14 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.{EitherUtil, NoCopy}
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageWithContextCompanion,
+  HasMemoizedProtocolVersionedWithContextCompanion,
+  HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedToByteString,
-  HasVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -98,18 +98,19 @@ case class TransferInCommonData private (
     targetMediator: MediatorId,
     stakeholders: Set[LfPartyId],
     uuid: UUID,
-)(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
-    extends MerkleTreeLeaf[TransferInCommonData](hashOps)
-    with HasVersionedWrapper[VersionedMessage[TransferInCommonData]]
-    with MemoizedEvidence
+)(
+    hashOps: HashOps,
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
+    with HasProtocolVersionedWrapper[VersionedMessage[TransferInCommonData]]
+    with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
   def confirmingParties: Set[Informee] = stakeholders.map(ConfirmingParty(_, 1))
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[TransferInCommonData] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[TransferInCommonData] =
+    TransferInCommonData.toProtoVersioned(this)
 
   protected def toProtoV0: v0.TransferInCommonData = v0.TransferInCommonData(
     salt = Some(salt.toProtoV0),
@@ -121,8 +122,8 @@ case class TransferInCommonData private (
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInCommonData
 
-  override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
   override def pretty: Pretty[TransferInCommonData] = prettyOfClass(
     param("target domain", _.targetDomain),
@@ -134,11 +135,15 @@ case class TransferInCommonData private (
 }
 
 object TransferInCommonData
-    extends HasMemoizedVersionedMessageWithContextCompanion[TransferInCommonData, HashOps] {
+    extends HasMemoizedProtocolVersionedWithContextCompanion[TransferInCommonData, HashOps] {
   override val name: String = "TransferInCommonData"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   private[this] def apply(
@@ -147,7 +152,11 @@ object TransferInCommonData
       targetMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
-  )(hashOps: HashOps, deserializedFrom: Option[ByteString]): TransferInCommonData =
+  )(
+      hashOps: HashOps,
+      representativeProtocolVersion: ProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ): TransferInCommonData =
     throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
@@ -156,8 +165,13 @@ object TransferInCommonData
       targetMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
+      protocolVersion: ProtocolVersion,
   ): TransferInCommonData =
-    new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(hashOps, None)
+    new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(
+      hashOps,
+      protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    )
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
       bytes: ByteString
@@ -172,6 +186,7 @@ object TransferInCommonData
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
     } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
+      protocolVersionRepresentativeFor(0),
       Some(bytes),
     )
   }
@@ -191,17 +206,19 @@ case class TransferInView private (
     contract: SerializableContract,
     creatingTransactionId: TransactionId,
     transferOutResultEvent: DeliveredTransferOutResult,
-)(hashOps: HashOps, override val deserializedFrom: Option[ByteString])
-    extends MerkleTreeLeaf[TransferInView](hashOps)
-    with HasVersionedWrapper[VersionedMessage[TransferInView]]
-    with MemoizedEvidence
+)(
+    hashOps: HashOps,
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends MerkleTreeLeaf[TransferInView](hashOps)
+    with HasProtocolVersionedWrapper[VersionedMessage[TransferInView]]
+    with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[TransferInView] = VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[TransferInView] =
+    TransferInView.toProtoVersioned(this)
 
   protected def toProtoV0: v0.TransferInView =
     v0.TransferInView(
@@ -212,8 +229,8 @@ case class TransferInView private (
       transferOutResultEvent = Some(transferOutResultEvent.result.toProtoV0),
     )
 
-  override protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 
   override def pretty: Pretty[TransferInView] = prettyOfClass(
     param("submitter", _.submitter),
@@ -225,11 +242,15 @@ case class TransferInView private (
 }
 
 object TransferInView
-    extends HasMemoizedVersionedMessageWithContextCompanion[TransferInView, HashOps] {
+    extends HasMemoizedProtocolVersionedWithContextCompanion[TransferInView, HashOps] {
   override val name: String = "TransferInView"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   private[this] def apply(
@@ -238,7 +259,11 @@ object TransferInView
       contract: SerializableContract,
       creatingTransactionid: TransactionId,
       transferOutResultEvent: DeliveredTransferOutResult,
-  )(hashOps: HashOps, deserializedFrom: Option[ByteString]): TransferInView =
+  )(
+      hashOps: HashOps,
+      representativeProtocolVersion: ProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ): TransferInView =
     throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
@@ -247,9 +272,11 @@ object TransferInView
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
       transferOutResultEvent: DeliveredTransferOutResult,
+      protocolVersion: ProtocolVersion,
   ): TransferInView =
     new TransferInView(salt, submitter, contract, creatingTransactionId, transferOutResultEvent)(
       hashOps,
+      protocolVersionRepresentativeFor(protocolVersion),
       None,
     )
 
@@ -289,7 +316,7 @@ object TransferInView
       contract,
       creatingTransactionId,
       transferOutResultEvent,
-    )(hashOps, Some(bytes))
+    )(hashOps, protocolVersionRepresentativeFor(0), Some(bytes))
   }
 }
 

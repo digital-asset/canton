@@ -184,7 +184,7 @@ class ConfirmationRequestFactory(
 }
 
 object ConfirmationRequestFactory {
-  def apply(submitterNode: ParticipantId, domainId: DomainId)(
+  def apply(submitterNode: ParticipantId, domainId: DomainId, protocolVersion: ProtocolVersion)(
       cryptoOps: HashOps with HmacOps,
       seedGenerator: SeedGenerator,
       packageService: PackageService,
@@ -196,6 +196,7 @@ object ConfirmationRequestFactory {
       TransactionTreeFactoryImpl(
         submitterNode,
         domainId,
+        protocolVersion,
         cryptoOps,
         packageService,
         loggerFactory,

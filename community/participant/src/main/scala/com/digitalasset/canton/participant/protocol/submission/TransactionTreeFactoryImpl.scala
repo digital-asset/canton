@@ -28,6 +28,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, Wit
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
@@ -46,6 +47,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class TransactionTreeFactoryImpl(
     submitterParticipant: ParticipantId,
     domainId: DomainId,
+    protocolVersion: ProtocolVersion,
     contractSerializer: LfContractInst => SerializableRawContractInstance,
     packageInfoService: PackageInfoService,
     cryptoOps: HashOps with HmacOps,
@@ -154,6 +156,7 @@ class TransactionTreeFactoryImpl(
       mediatorId,
       commonMetadataSalt,
       transactionUuid,
+      protocolVersion,
     )
 
     val participantMetadata = ParticipantMetadata(cryptoOps)(
@@ -161,6 +164,7 @@ class TransactionTreeFactoryImpl(
       metadata.submissionTime,
       workflowId,
       participantMetadataSalt,
+      protocolVersion,
     )
 
     val rootViewDecompositionsF =
@@ -174,7 +178,12 @@ class TransactionTreeFactoryImpl(
     for {
       submitterMetadata <- EitherT.fromEither[Future](
         SubmitterMetadata
-          .fromSubmitterInfo(cryptoOps)(submitterInfo, submitterParticipant, submitterMetadataSalt)
+          .fromSubmitterInfo(cryptoOps)(
+            submitterInfo,
+            submitterParticipant,
+            submitterMetadataSalt,
+            protocolVersion,
+          )
           .leftMap(SubmitterMetadataError)
       )
       rootViewDecompositions <- EitherT.liftF(rootViewDecompositionsF)
@@ -661,7 +670,8 @@ class TransactionTreeFactoryImpl(
   private[this] def createViewCommonData(
       rootView: TransactionViewDecomposition.NewView,
       salt: Salt,
-  ): ViewCommonData = ViewCommonData.create(cryptoOps)(rootView.informees, rootView.threshold, salt)
+  ): ViewCommonData =
+    ViewCommonData.create(cryptoOps)(rootView.informees, rootView.threshold, salt, protocolVersion)
 
   private def createViewParticipantData(
       coreCreatedNodes: List[(LfNodeCreate, RollbackScope)],
@@ -745,6 +755,7 @@ class TransactionTreeFactoryImpl(
             actionDescription = actionDescription,
             rollbackContext = rbContextCore,
             salt = salt,
+            protocolVersion = protocolVersion,
           )
         )
         .leftMap[TransactionTreeConversionError](ViewParticipantDataError)
@@ -758,6 +769,7 @@ object TransactionTreeFactoryImpl {
   def apply(
       submitterParticipant: ParticipantId,
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       cryptoOps: HashOps with HmacOps,
       packageService: PackageService,
       loggerFactory: NamedLoggerFactory,
@@ -765,6 +777,7 @@ object TransactionTreeFactoryImpl {
     new TransactionTreeFactoryImpl(
       submitterParticipant,
       domainId,
+      protocolVersion,
       contractSerializer,
       packageService,
       cryptoOps,

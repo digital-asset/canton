@@ -135,7 +135,7 @@ object Cli {
         (Map(
           "Canton" -> BuildInfo.version,
           "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
-          "Canton protocol" -> BuildInfo.protocolVersion,
+          "Supported Canton protocol versions" -> BuildInfo.protocolVersions,
         ) ++ additionalVersions) foreach { case (name, version) =>
           Console.out.println(s"$name: $version")
         }

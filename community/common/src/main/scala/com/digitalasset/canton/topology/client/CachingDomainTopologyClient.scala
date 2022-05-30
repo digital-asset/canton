@@ -264,9 +264,9 @@ private class ForwardingTopologySnapshotClient(
   /** returns the list of currently known mediators */
   override def mediators(): Future[Seq[MediatorId]] = parent.mediators()
 
-  override def findDynamicDomainParameters(implicit
+  override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]] = parent.findDynamicDomainParameters
+  ): Future[Option[DynamicDomainParameters]] = parent.findDynamicDomainParameters()
 
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit
@@ -403,10 +403,10 @@ class CachingTopologySnapshot(
     promise.future
   }
 
-  override def findDynamicDomainParameters(implicit
+  override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Option[DynamicDomainParameters]] =
-    getAndCache(domainParametersCache, parent.findDynamicDomainParameters)
+    getAndCache(domainParametersCache, parent.findDynamicDomainParameters())
 
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit

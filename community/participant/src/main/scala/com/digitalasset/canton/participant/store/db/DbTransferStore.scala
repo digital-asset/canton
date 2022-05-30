@@ -100,13 +100,12 @@ class DbTransferStore(
   )
 
   implicit val setParameterDeliveredTransferOutResult: SetParameter[DeliveredTransferOutResult] =
-    (r: DeliveredTransferOutResult, pp: PositionedParameters) =>
-      pp >> r.result.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
+    (r: DeliveredTransferOutResult, pp: PositionedParameters) => pp >> r.result.toByteArray
 
   implicit val setParameterOptionDeliveredTransferOutResult
       : SetParameter[Option[DeliveredTransferOutResult]] =
     (r: Option[DeliveredTransferOutResult], pp: PositionedParameters) =>
-      pp >> r.map(_.result.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
+      pp >> r.map(_.result.toByteArray)
 
   private implicit val getResultTransferData: GetResult[TransferData] = GetResult(r =>
     TransferData(

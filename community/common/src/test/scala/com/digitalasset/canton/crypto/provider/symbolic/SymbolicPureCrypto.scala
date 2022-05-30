@@ -60,15 +60,14 @@ class SymbolicPureCrypto() extends CryptoPureApi {
       scheme: SymmetricKeyScheme
   ): Either[EncryptionKeyGenerationError, SymmetricKey] = {
     val key = ByteString.copyFromUtf8(s"key-${symmetricKeyCounter.incrementAndGet()}")
-    Right(SymmetricKey.create(CryptoKeyFormat.Symbolic, key, scheme))
+    Right(SymmetricKey(CryptoKeyFormat.Symbolic, key, scheme))
   }
 
   override def createSymmetricKey(
       bytes: SecureRandomness,
       scheme: SymmetricKeyScheme,
-  ): Either[EncryptionKeyCreationError, SymmetricKey] = {
-    Right(SymmetricKey.create(CryptoKeyFormat.Symbolic, bytes.unwrap, scheme))
-  }
+  ): Either[EncryptionKeyCreationError, SymmetricKey] =
+    Right(SymmetricKey(CryptoKeyFormat.Symbolic, bytes.unwrap, scheme))
 
   override def encryptWith[M <: HasVersionedToByteString](
       message: M,

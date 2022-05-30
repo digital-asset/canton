@@ -11,12 +11,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
-  HasVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -24,14 +24,21 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
-case class SignedContent[+A <: MemoizedEvidence](
+case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     content: A,
     signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasVersionedWrapper[VersionedMessage[SignedContent[A]]]
+) extends HasProtocolVersionedWrapper[VersionedMessage[SignedContent[A]]]
     with HasProtoV0[v0.SignedContent] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SignedContent[A]] =
+  override def toProtoVersioned: VersionedMessage[SignedContent[A]] =
     VersionedMessage(toProtoV0.toByteString, 0)
+
+  /** We use [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]] here because only v0 is defined
+    * for SignedContent. This can be revisited when this wrapper will evolve.
+    */
+  def representativeProtocolVersion: ProtocolVersion = ProtocolVersion.v2_0_0
+
+  def getCryptographicEvidence: ByteString = content.getCryptographicEvidence
 
   override def toProtoV0: v0.SignedContent =
     v0.SignedContent(
@@ -41,7 +48,7 @@ case class SignedContent[+A <: MemoizedEvidence](
     )
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def traverse[F[_], B <: MemoizedEvidence](
+  def traverse[F[_], B <: ProtocolVersionedMemoizedEvidence](
       f: A => F[B]
   )(implicit F: Functor[F]): F[SignedContent[B]] =
     F.map(f(content)) { newContent =>
@@ -92,7 +99,7 @@ object SignedContent {
         identity,
       )
 
-  def versionedProtoConverter[A <: MemoizedEvidence](
+  def versionedProtoConverter[A <: ProtocolVersionedMemoizedEvidence](
       contentType: String
   ): HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] =
     new HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] {
@@ -105,7 +112,7 @@ object SignedContent {
       )
     }
 
-  def fromProtoV0[A <: MemoizedEvidence](
+  def fromProtoV0[A <: ProtocolVersionedMemoizedEvidence](
       deserializer: ByteString => ParsingResult[A]
   )(signedValueP: v0.SignedContent): ParsingResult[SignedContent[A]] =
     signedValueP match {
@@ -122,7 +129,7 @@ object SignedContent {
         } yield SignedContent(content, signature, ts)
     }
 
-  implicit def prettySignedContent[A <: MemoizedEvidence](implicit
+  implicit def prettySignedContent[A <: ProtocolVersionedMemoizedEvidence](implicit
       prettyA: Pretty[A]
   ): Pretty[SignedContent[A]] = {
     import com.digitalasset.canton.logging.pretty.PrettyUtil._

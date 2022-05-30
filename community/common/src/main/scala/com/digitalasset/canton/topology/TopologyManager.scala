@@ -456,13 +456,18 @@ abstract class TopologyManager[E <: CantonError](
     }
   }
 
-  def genTransaction(op: TopologyChangeOp, mapping: TopologyMapping)(implicit
+  def genTransaction(
+      op: TopologyChangeOp,
+      mapping: TopologyMapping,
+      protocolVersion: ProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
     import TopologyChangeOp._
     (op, mapping) match {
       case (Add, mapping: TopologyStateUpdateMapping) =>
-        EitherT.rightT(TopologyStateUpdate.createAdd(mapping))
+        EitherT.rightT(TopologyStateUpdate.createAdd(mapping, protocolVersion))
+
       case (Remove, mapping: TopologyStateUpdateMapping) =>
         for {
           tx <- EitherT(
@@ -477,7 +482,7 @@ abstract class TopologyManager[E <: CantonError](
         } yield tx.transaction.reverse
 
       case (Replace, mapping: DomainGovernanceMapping) =>
-        EitherT.pure(DomainGovernanceTransaction(mapping))
+        EitherT.pure(DomainGovernanceTransaction(mapping, protocolVersion))
 
       case (op, mapping) =>
         EitherT.fromEither(

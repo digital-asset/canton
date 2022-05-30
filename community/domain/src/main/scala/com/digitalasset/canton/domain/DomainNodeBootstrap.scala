@@ -422,6 +422,8 @@ class DomainNodeBootstrap(
             domainId,
             crypto,
             sequencedTopologyStore,
+            // The sequencer is using the topology manager's topology client
+            manager.managerId,
             topologyClient,
             topologyProcessor,
             storage,
@@ -435,6 +437,7 @@ class DomainNodeBootstrap(
             parameters,
             metrics.sequencer,
             indexedStringStore,
+            futureSupervisor,
             loggerFactory,
             logger,
           )

@@ -4,7 +4,11 @@
 package com.digitalasset.canton.serialization
 
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HasRepresentativeProtocolVersion,
+  HasVersionedToByteString,
+  ProtocolVersion,
+}
 import com.google.protobuf.ByteString
 
 /** Trait for deterministically serializing an object to a [[com.google.protobuf.ByteString]].
@@ -20,7 +24,7 @@ import com.google.protobuf.ByteString
   * '''If a class merely represents content that is transmitted over a network, the class does not need to extend this
   * trait.'''
   *
-  * It is strongly recommended to extend this trait by mixing in [[MemoizedEvidence]] or
+  * It is strongly recommended to extend this trait by mixing in [[ProtocolVersionedMemoizedEvidence]] or
   * [[MemoizedEvidenceWithFailure]], instead of directly extending this trait.
   *
   * Classes `C` implementing [[HasCryptographicEvidence]] must define a
@@ -51,42 +55,9 @@ trait HasCryptographicEvidence extends HasVersionedToByteString {
   *
   * @see MemoizedEvidenceWithFailure if serialization may fail
   */
-trait MemoizedEvidence extends HasCryptographicEvidence {
-
-  /** Returns the [[com.google.protobuf.ByteString]] from which this object has been deserialized, if any.
-    * If defined, [[getCryptographicEvidence]] will use this as the serialization.
-    */
-  def deserializedFrom: Option[ByteString]
-
-  /** Computes the serialization of the object as a [[com.google.protobuf.ByteString]].
-    *
-    * Must meet the contract of [[getCryptographicEvidence]]
-    * except that when called several times, different [[com.google.protobuf.ByteString]]s may be returned.
-    */
-  protected[this] def toByteStringUnmemoized(version: ProtocolVersion): ByteString
-
-  final override lazy val getCryptographicEvidence: ByteString = {
-    deserializedFrom match {
-      case Some(bytes) => bytes
-      case None => toByteStringUnmemoized(ProtocolVersion.v2_0_0_Todo_i8793)
-    }
-  }
-}
-
-/** Effectively immutable [[HasCryptographicEvidence]] classes can mix in this trait
-  * to implement the memoization logic.
-  * Unlike [[MemoizedEvidence]] above, this trait should be mixed in classes that contain
-  * the protocol version.
-  *
-  * Use this class if serialization always succeeds.
-  *
-  * Make sure that `fromByteString(byteString).deserializedFrom` equals `Some(byteString)`.
-  *
-  * Make sure that every public constructor and apply method yields an instance with `deserializedFrom == None`.
-  *
-  * @see MemoizedEvidenceWithFailure if serialization may fail
-  */
-trait ProtocolVersionedMemoizedEvidence extends HasCryptographicEvidence {
+trait ProtocolVersionedMemoizedEvidence
+    extends HasCryptographicEvidence
+    with HasRepresentativeProtocolVersion {
 
   /** Returns the [[com.google.protobuf.ByteString]] from which this object has been deserialized, if any.
     * If defined, [[getCryptographicEvidence]] will use this as the serialization.

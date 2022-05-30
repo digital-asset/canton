@@ -8,6 +8,7 @@ import com.daml.jwt.{ECDSAVerifier, HMAC256Verifier, JwksVerifier, RSA256Verifie
 import com.daml.ledger.api.auth.{AuthService, AuthServiceJWT, AuthServiceWildcard}
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
+import com.daml.platform.apiserver.configuration.RateLimitingConfig
 import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
 import com.daml.platform.configuration.{
   CommandConfiguration,
@@ -238,6 +239,7 @@ object AuthServiceConfig {
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
   * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
   * @param eventsProcessingParallelism parallelism for loading and decoding ledger events
+  * @param bufferedStreamsPageSize  buffer size for streaming events
   * @param activeContractsService    configurations pertaining to the ledger api server's "active contracts service"
   * @param commandService            configurations pertaining to the ledger api server's "command service"
   * @param managementServiceTimeout  ledger api server management service maximum duration. Duration has to be finite
@@ -265,9 +267,11 @@ case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
     eventsPageSize: Int = LedgerApiServerConfig.DefaultEventsPageSize,
     eventsProcessingParallelism: Int = LedgerApiServerConfig.DefaultEventsProcessingParallelism,
+    bufferedStreamsPageSize: Int = DamlIndexConfiguration.DefaultBufferedStreamsPageSize,
     activeContractsService: ActiveContractsServiceConfig = ActiveContractsServiceConfig(),
     commandService: CommandServiceConfig = CommandServiceConfig(),
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
+    rateLimitingConfig: Option[RateLimitingConfig] = Some(RateLimitingConfig.default),
     managementServiceTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
     synchronousCommitMode: String = LedgerApiServerConfig.DefaultSynchronousCommitMode,
@@ -341,7 +345,9 @@ object LedgerApiServerConfig {
               _archiveFiles,
               _eventPageSize, // configured via participant.eventsPageSize,
               _eventsProcessingParallelism,
+              _bufferedStreamsPageSize,
               acsIdPageSize,
+              _acsIdPageBufferSize,
               acsIdFetchingParallelism,
               acsContractFetchingParallelism,
               acsGlobalParallelism,
@@ -354,7 +360,8 @@ object LedgerApiServerConfig {
             _portFile,
             _seeding,
             managementServiceTimeout,
-            _enableUserManagement,
+            _userManagementConfig,
+            _rateLimitingConfig,
           ) =>
         def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
           import ServerAuthRequirementConfig._
@@ -434,15 +441,15 @@ object LedgerApiServerConfig {
 /** Ledger api active contracts service specific configurations
   *
   * @param acsIdPageSize                  number of contract ids fetched from the index for every round trip when serving ACS calls
+  * @param acsIdPageBufferSize            buffer size used for indexer fetching
   * @param acsIdFetchingParallelism       number of contract id pages fetched in parallel when serving ACS calls
   * @param acsContractFetchingParallelism number of event pages fetched in parallel when serving ACS calls
   * @param acsGlobalParallelism           maximum number of concurrent ACS queries to the index database
-  * @param acsIdQueueLimit                maximum number of contract ids queued for fetching
-  *
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
 case class ActiveContractsServiceConfig(
     acsIdPageSize: Int = DamlIndexConfiguration.DefaultAcsIdPageSize,
+    acsIdPageBufferSize: Int = DamlIndexConfiguration.DefaultAcsIdPageBufferSize,
     acsIdFetchingParallelism: Int = DamlIndexConfiguration.DefaultAcsIdFetchingParallelism,
     acsContractFetchingParallelism: Int =
       DamlIndexConfiguration.DefaultAcsContractFetchingParallelism,
@@ -496,6 +503,7 @@ case class UserManagementServiceConfig(
     maxRightsPerUser: Int = UserManagementConfig.MaxRightsPerUser,
     maxUsersPageSize: Int = UserManagementConfig.DefaultMaxUsersPageSize,
 ) {
+
   // This helps us detect if any UserManagementConfig configuration are added in the daml repo.
   private def _completenessCheck(config: UserManagementConfig): UserManagementServiceConfig =
     config match {
@@ -655,7 +663,11 @@ case class ParticipantNodeParameterConfig(
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     indexer: IndexerConfig = IndexerConfig(),
     transferTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
-    minimumProtocolVersion: Option[ParticipantProtocolVersion] = None,
+    minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
+      ParticipantProtocolVersion(
+        ProtocolVersion.v3_0_0
+      )
+    ),
     uniqueContractKeys: Boolean = true,
     enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,

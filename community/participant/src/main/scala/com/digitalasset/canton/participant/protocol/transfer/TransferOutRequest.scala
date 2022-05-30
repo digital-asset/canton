@@ -9,6 +9,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.UUID
 
@@ -35,6 +36,7 @@ case class TransferOutRequest(
       hmacOps: HmacOps,
       seed: SaltSeed,
       uuid: UUID,
+      protocolVersion: ProtocolVersion,
   ): FullTransferOutTree = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, hmacOps)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, hmacOps)
@@ -46,6 +48,7 @@ case class TransferOutRequest(
         stakeholders,
         adminParties,
         uuid,
+        protocolVersion,
       )
     val view = TransferOutView.create(hashOps)(
       viewSalt,
@@ -53,6 +56,7 @@ case class TransferOutRequest(
       contractId,
       targetDomain,
       targetTimeProof,
+      protocolVersion,
     )
     val tree = TransferOutViewTree(commonData, view)(hashOps)
     FullTransferOutTree(tree)

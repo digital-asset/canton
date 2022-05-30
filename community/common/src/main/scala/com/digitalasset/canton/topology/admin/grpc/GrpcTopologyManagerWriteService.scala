@@ -38,6 +38,8 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     extends TopologyManagerWriteServiceGrpc.TopologyManagerWriteService
     with NamedLogging {
 
+  private val protocolVersion = ProtocolVersion.v2_0_0
+
   import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
 
   private def process(
@@ -52,15 +54,13 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
                       else Some(Fingerprint.fromProtoPrimitive(signedByP))).sequence
     } yield (change, fingerprint, replaceExistingP, forceChangeP)
 
-    val protocolVersion = ProtocolVersion.latest
-
     val authorizationSuccess = for {
       authData <- EitherT.fromEither[Future](
         authDataE.leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       element <- EitherT.fromEither[Future](elementE)
       (op, fingerprint, replace, force) = authData
-      tx <- manager.genTransaction(op, element).leftWiden[CantonError]
+      tx <- manager.genTransaction(op, element, protocolVersion).leftWiden[CantonError]
       success <- manager
         .authorize(tx, fingerprint, protocolVersion, force = force, replaceExisting = replace)
         .leftWiden[CantonError]
@@ -220,7 +220,9 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
               .toRight(s"Can not find certificate with id ${certificateId}")
           )
           pem <- mapErr(certificate.toPem)
-          generated <- mapErr(manager.generate(LegalIdentityClaim.create(uid, X509Cert(pem))))
+          generated <- mapErr(
+            manager.generate(LegalIdentityClaim.create(uid, X509Cert(pem), protocolVersion))
+          )
         } yield generated.toProtoV0
         EitherTUtil.toFuture(result)
 

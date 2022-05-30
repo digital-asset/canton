@@ -19,6 +19,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbDomainManagerNodeSequencerConfigStore(
     override protected val storage: DbStorage,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -39,7 +40,7 @@ class DbDomainManagerNodeSequencerConfigStore(
 
   implicit val setParameterSequencerConnection: SetParameter[SequencerConnection] =
     (s: SequencerConnection, pp: PositionedParameters) =>
-      pp >> s.toByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
+      pp >> s.toByteString(protocolVersion).toByteArray
 
   // sentinel value used to ensure the table can only have a single row
   // see create table sql for more details

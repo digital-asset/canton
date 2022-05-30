@@ -42,8 +42,8 @@ class SequencedEventTest extends BaseTestWordSpec {
           Some(MessageId.tryCreate("some-message-id")),
           batch,
         )
-      val deliverEventPV0 = deliver.toProtoV0(ProtocolVersion.latestForTest)
-      val deliverEventP = deliver.toProtoVersioned(ProtocolVersion.latestForTest)
+      val deliverEventPV0 = deliver.toProtoV0
+      val deliverEventP = deliver.toProtoVersioned
       val deserializedEventV0 = deserializeV0(deliverEventPV0)
       val deserializedEvent = deserializeVersioned(deliverEventP)
 
@@ -61,7 +61,7 @@ class SequencedEventTest extends BaseTestWordSpec {
       )
       val deliverErrorPV0 = deliverError.toProtoV0
       val deserializedEventV0 = deserializeV0(deliverErrorPV0)
-      val deliverErrorP = deliverError.toProtoVersioned(ProtocolVersion.latestForTest)
+      val deliverErrorP = deliverError.toProtoVersioned
       val deserializedEvent = deserializeVersioned(deliverErrorP)
 
       deserializedEvent.value shouldBe deliverError

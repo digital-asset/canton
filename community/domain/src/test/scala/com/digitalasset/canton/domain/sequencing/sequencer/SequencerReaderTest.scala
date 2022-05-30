@@ -7,9 +7,12 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Sink, SinkQueueWithCancel, Source}
 import akka.stream.{Materializer, OverflowStrategy, QueueOfferResult}
-import com.daml.nonempty.NonEmptyUtil
+import cats.syntax.foldable._
+import cats.syntax.functorFilter._
+import cats.syntax.option._
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
@@ -20,7 +23,15 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseableAsync,
   SyncCloseable,
 }
-import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule, TracedLogger}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  Deliver,
+  DeliverError,
+  MessageId,
+  Recipients,
+}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{
@@ -32,21 +43,27 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, DiscardOps, SequencerCounter}
+import com.google.protobuf.ByteString
 import org.mockito.Mockito
-import org.scalatest.FutureOutcome
+import org.scalatest.{Assertion, FutureOutcome}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
+import org.slf4j.event.Level
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.collection.immutable.SortedSet
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}
 
 class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
   private val alice: Member = ParticipantId("alice")
-  private val ts0 = CantonTimestamp.ofEpochSecond(0)
+  private val bob: Member = ParticipantId("bob")
+  private val ts0 = CantonTimestamp.Epoch
   private val domainId = DefaultTestIdentities.domainId
+  private val topologyClientMember = SequencerId(domainId)
   private val crypto = TestingTopology().build(loggerFactory).forOwner(SequencerId(domainId))
   private val cryptoD =
     valueOrFail(crypto.forDomain(domainId).toRight("no crypto api"))("domain crypto")
@@ -104,6 +121,8 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       storeSpy,
       cryptoD,
       eventSignaller,
+      topologyClientMember,
+      FutureSupervisor.Noop,
       timeouts,
       loggerFactory,
     )
@@ -111,16 +130,22 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     def ts(epochSeconds: Int): CantonTimestamp = CantonTimestamp.ofEpochSecond(epochSeconds.toLong)
 
+    /** Can be used at most once per environment because [[akka.stream.scaladsl.FlowOps.take]]
+      * cancels the pre-materialized [[ManualEventSignaller.source]].
+      */
     def readAsSeq(
         member: Member,
         counter: SequencerCounter,
         take: Int,
     ): Future[Seq[OrdinarySerializedEvent]] =
-      valueOrFail(reader.read(member, counter))(s"Events source for $member") flatMap {
-        _.take(take.toLong)
-          .idleTimeout(defaultTimeout)
-          .runWith(Sink.seq)
-      }
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
+        valueOrFail(reader.read(member, counter))(s"Events source for $member") flatMap {
+          _.take(take.toLong)
+            .idleTimeout(defaultTimeout)
+            .runWith(Sink.seq)
+        },
+        ignoreWarningsFromLackOfTopologyUpdates,
+      )
 
     def readWithQueue(
         member: Member,
@@ -132,6 +157,22 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         .idleTimeout(defaultTimeout)
         .runWith(Sink.queue())
 
+    // We don't update the topology client, so we expect to get a couple of warnings about unknown topology snapshots
+    private def ignoreWarningsFromLackOfTopologyUpdates(entries: Seq[LogEntry]): Assertion =
+      forEvery(entries) {
+        _.warningMessage should
+          include("Using approximate topology snapshot for desired timestamp")
+      }
+
+    def pullFromQueue(
+        queue: SinkQueueWithCancel[OrdinarySerializedEvent]
+    ): Future[Option[OrdinarySerializedEvent]] = {
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
+        queue.pull(),
+        ignoreWarningsFromLackOfTopologyUpdates,
+      )
+    }
+
     def waitFor(duration: FiniteDuration): Future[Unit] = {
       val promise = Promise[Unit]()
 
@@ -141,12 +182,19 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     def storeAndWatermark(events: Seq[Sequenced[PayloadId]]): Future[Unit] = {
-      val eventsNE = NonEmptyUtil.fromUnsafe(events)
-      val payloads = DomainSequencingTestUtils.payloadsForEvents(events)
+      val withPaylaods = events.map(
+        _.map(id => Payload(id, Batch.empty.toByteString(ProtocolVersion.latestForTest)))
+      )
+      storePayloadsAndWatermark(withPaylaods)
+    }
+
+    def storePayloadsAndWatermark(events: Seq[Sequenced[Payload]]): Future[Unit] = {
+      val eventsNE = NonEmptyUtil.fromUnsafe(events.map(_.map(_.id)))
+      val payloads = NonEmpty.from(events.mapFilter(_.event.payloadO))
 
       for {
-        _ <- store
-          .savePayloads(NonEmptyUtil.fromUnsafe(payloads), instanceDiscriminator)
+        _ <- payloads
+          .traverse_(store.savePayloads(_, instanceDiscriminator))
           .valueOrFail(s"Save payloads")
         _ <- store.saveEvents(instanceIndex, eventsNE)
         _ <- store
@@ -176,11 +224,19 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
   }
 
+  def checkpoint(
+      counter: SequencerCounter,
+      ts: CantonTimestamp,
+      latestTopologyClientTs: Option[CantonTimestamp] = None,
+  ): CounterCheckpoint =
+    CounterCheckpoint(counter, ts, latestTopologyClientTs)
+
   "Reader" should {
     "read a stream of events" in { env =>
       import env._
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         // generate 20 delivers starting at ts0+1s
         events = (1L to 20L)
@@ -197,6 +253,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       import env._
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         delivers = (1L to 20L)
           .map(ts0.plusSeconds)
@@ -216,6 +273,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       import env._
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         delivers = (1L to 5L)
           .map(ts0.plusSeconds)
@@ -226,11 +284,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         // read off all of the initial delivers
         _ <- MonadUtil.sequentialTraverse_(delivers.zipWithIndex.map(_._2)) { expectedCounter =>
           for {
-            eventO <- queue.pull()
+            eventO <- pullFromQueue(queue)
           } yield eventO.value.counter shouldBe expectedCounter
         }
         // start reading the next event
-        nextEventF = queue.pull()
+        nextEventF = pullFromQueue(queue)
         // add another
         _ <- storeAndWatermark(
           Seq(
@@ -250,15 +308,27 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       import env._
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         // we haven't registered alice
         error <- leftOrFail(reader.read(alice, 0L))("read unknown member")
       } yield error shouldBe CreateSubscriptionError.UnknownMember(alice)
+    }
+
+    "attempting to read without having registered the topology client member returns error" in {
+      env =>
+        import env._
+        for {
+          // we haven't registered the topology client member
+          _ <- store.registerMember(alice, ts0)
+          error <- leftOrFail(reader.read(alice, 0L))("read unknown topology client")
+        } yield error shouldBe CreateSubscriptionError.UnknownMember(topologyClientMember)
     }
 
     "attempting to read for a disabled member returns error" in { env =>
       import env._
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         _ <- store.disableMember(aliceId)
         error <- leftOrFail(reader.read(alice, 0L))("read disabled member")
@@ -271,6 +341,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       val waitP = Promise[Unit]()
 
       for {
+        _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         // start reading for an event but don't wait for it
         eventsF = readAsSeq(alice, 0, 1)
@@ -305,6 +376,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         autoPushLatestTimestamps.set(false)
 
         for {
+          _ <- store.registerMember(topologyClientMember, ts0)
           aliceId <- store.registerMember(alice, ts0)
           // generate 20 delivers starting at ts0+1s
           delivers = (1L to 25L)
@@ -314,7 +386,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             )
           _ <- storeAndWatermark(delivers)
           // store a counter check point at 5s
-          _ <- store.saveCounterCheckpoint(aliceId, 5, ts(6)).valueOrFail("saveCounterCheckpoint")
+          _ <- store
+            .saveCounterCheckpoint(aliceId, checkpoint(5, ts(6)))
+            .valueOrFail("saveCounterCheckpoint")
           events <- readAsSeq(alice, 10, 15)
         } yield {
           // this assertion is a bit redundant as we're actually just looking for the prior fetch to complete rather than get stuck
@@ -337,18 +411,23 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             .count(_.getMethod.getName == "saveCounterCheckpoint")
 
         for {
+          topologyClientMemberId <- store.registerMember(topologyClientMember, ts0)
           aliceId <- store.registerMember(alice, ts0)
           // generate 20 delivers starting at ts0+1s
-          delivers = (1L to 20L)
-            .map(ts0.plusSeconds)
-            .map(
-              Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
+          delivers = (1L to 20L).map { i =>
+            val recipients =
+              if (i == 1L || i == 11L) NonEmpty(SortedSet, topologyClientMemberId, aliceId)
+              else NonEmpty(SortedSet, aliceId)
+            Sequenced(
+              ts0.plusSeconds(i),
+              mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)(recipients),
             )
+          }
           _ <- storeAndWatermark(delivers)
           // take some events
           queue = readWithQueue(alice, 0)
           // read a bunch of items
-          readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => queue.pull())
+          readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
           _ <- waitFor(testConfig.checkpointInterval.toScala * 6)
           checkpointsWritten = saveCounterCheckpointCallCount
@@ -363,6 +442,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // check it created a checkpoint for the last event we read
           checkpointForLastEventO.value.counter shouldBe lastEventRead.counter
           checkpointForLastEventO.value.timestamp shouldBe lastEventRead.timestamp
+          checkpointForLastEventO.value.latestTopologyClientTimestamp shouldBe Some(
+            CantonTimestamp.ofEpochSecond(11)
+          )
 
           // make sure we didn't write a checkpoint for every event (in practice this should be <3)
           checkpointsWritten should (be > 0 and be < 20)
@@ -373,6 +455,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         import env._
 
         for {
+          _ <- store.registerMember(topologyClientMember, ts0)
           aliceId <- store.registerMember(alice, ts0)
           // write a bunch of events
           delivers = (1L to 20L)
@@ -382,9 +465,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             )
           _ <- storeAndWatermark(delivers)
           checkpointTimestamp = ts0.plusSeconds(11)
-          _ <- valueOrFail(store.saveCounterCheckpoint(aliceId, 10L, checkpointTimestamp))(
-            "saveCounterCheckpoint"
-          )
+          _ <- valueOrFail(
+            store.saveCounterCheckpoint(aliceId, checkpoint(10L, checkpointTimestamp))
+          )("saveCounterCheckpoint")
           // read from a point ahead of this checkpoint
           events <- readAsSeq(alice, 15L, 3)
         } yield {
@@ -411,6 +494,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             "Subscription for PAR::alice::default@0 would require reading data from 1970-01-01T00:00:00Z but our lower bound is 1970-01-01T00:00:10Z."
 
           for {
+            _ <- store.registerMember(topologyClientMember, ts0)
             aliceId <- store.registerMember(alice, ts0)
             // write a bunch of events
             delivers = (1L to 20L)
@@ -437,6 +521,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             "Subscription for PAR::alice::default@9 would require reading data from 1970-01-01T00:00:00Z but our lower bound is 1970-01-01T00:00:10Z."
 
           for {
+            _ <- store.registerMember(topologyClientMember, ts0)
             aliceId <- store.registerMember(alice, ts0)
             // write a bunch of events
             delivers = (1L to 20L)
@@ -446,7 +531,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
               )
             _ <- storeAndWatermark(delivers)
             _ <- store
-              .saveCounterCheckpoint(aliceId, 9L, ts(10))
+              .saveCounterCheckpoint(aliceId, checkpoint(9L, ts(10)))
               .valueOrFail("saveCounterCheckpoint")
             _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
             error <- loggerFactory.assertLogs(
@@ -462,20 +547,225 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         import env._
 
         for {
+          _ <- store.registerMember(topologyClientMember, ts0)
           aliceId <- store.registerMember(alice, ts0)
           // write a bunch of events
           delivers = (1L to 20L)
             .map(ts0.plusSeconds)
-            .map(
-              Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)())
-            )
+            .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId)()))
           _ <- storeAndWatermark(delivers)
           _ <- store
-            .saveCounterCheckpoint(aliceId, 11L, ts(10))
+            .saveCounterCheckpoint(aliceId, checkpoint(11L, ts(10)))
             .valueOrFail("saveCounterCheckpoint")
           _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
           _ <- reader.read(alice, 12L).valueOrFail("read")
         } yield succeed // the above not failing is enough of an assertion
+      }
+    }
+
+    "convert deliver events with too-old signing timestamps" when {
+
+      def setup(env: Env) = {
+        import env._
+
+        for {
+          domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
+          domainParams = domainParamsO.valueOrFail("No domain parameters found")
+          signingTolerance = domainParams.sequencerSigningTolerance
+          signingToleranceInSec = signingTolerance.duration.toSeconds
+
+          _ <- store.registerMember(topologyClientMember, ts0)
+          aliceId <- store.registerMember(alice, ts0)
+          bobId <- store.registerMember(bob, ts0)
+
+          recipients = NonEmpty(SortedSet, aliceId, bobId)
+          testData = Seq(
+            // Sequencing ts, signing ts relative to ts0
+            (1L, 0L),
+            (signingToleranceInSec, 0L),
+            (signingToleranceInSec + 1L, 0L),
+            (signingToleranceInSec + 2L, 2L),
+          )
+          batch = Batch.fromClosed(
+            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob))
+          )
+
+          delivers = testData.map { case (sequenceTs, signingTs) =>
+            val storeEvent = TraceContext
+              .withNewTraceContext { eventTraceContext =>
+                mockDeliverStoreEvent(
+                  sender = aliceId,
+                  payloadId = PayloadId(ts0.plusSeconds(sequenceTs)),
+                  signingTs = Some(ts0.plusSeconds(signingTs)),
+                  traceContext = eventTraceContext,
+                )(recipients)
+              }
+              .map(id => Payload(id, batch.toByteString(ProtocolVersion.latestForTest)))
+            Sequenced(ts0.plusSeconds(sequenceTs), storeEvent)
+          }
+          _ <- storePayloadsAndWatermark(delivers)
+        } yield (signingTolerance, batch, delivers)
+      }
+
+      case class DeliveredEventToCheck[A](
+          delivered: A,
+          sequencingTimestamp: CantonTimestamp,
+          messageId: MessageId,
+          signingTimestamp: CantonTimestamp,
+          sequencerCounter: Long,
+      )
+
+      def filterForSigningTimestamps[A]
+          : PartialFunction[((A, Sequenced[Payload]), Int), DeliveredEventToCheck[A]] = {
+        case (
+              (
+                delivered,
+                Sequenced(
+                  timestamp,
+                  DeliverStoreEvent(
+                    _sender,
+                    messageId,
+                    _members,
+                    _payload,
+                    Some(signingTimestamp),
+                    _traceContext,
+                  ),
+                ),
+              ),
+              idx,
+            ) =>
+          DeliveredEventToCheck(delivered, timestamp, messageId, signingTimestamp, idx.toLong)
+      }
+
+      "read by the sender into deliver errors" in { env =>
+        import env._
+        setup(env).flatMap { case (signingTolerance, batch, delivers) =>
+          for {
+            aliceEvents <- readAsSeq(alice, 0L, delivers.length)
+          } yield {
+            aliceEvents.length shouldBe delivers.length
+            aliceEvents.map(_.counter) shouldBe (0L until delivers.length.toLong)
+            val deliverWithSigningTimestamps =
+              aliceEvents.zip(delivers).zipWithIndex.collect {
+                filterForSigningTimestamps
+              }
+            forEvery(deliverWithSigningTimestamps) {
+              case DeliveredEventToCheck(
+                    delivered,
+                    sequencingTimestamp,
+                    messageId,
+                    signingTimestamp,
+                    sc,
+                  ) =>
+                val expectedSequencedEvent =
+                  if (signingTimestamp + signingTolerance >= sequencingTimestamp)
+                    Deliver.create(sc, sequencingTimestamp, domainId, messageId.some, batch)
+                  else
+                    DeliverError.create(
+                      sc,
+                      sequencingTimestamp,
+                      domainId,
+                      messageId,
+                      SequencerReader.invalidSigningTimestampError(
+                        signingTimestamp,
+                        sequencingTimestamp,
+                      ),
+                    )
+                delivered.signedEvent.content shouldBe expectedSequencedEvent
+            }
+          }
+        }
+      }
+
+      "read by another recipient into empty batches" in { env =>
+        import env._
+        setup(env).flatMap { case (signingTolerance, batch, delivers) =>
+          for {
+            bobEvents <- readAsSeq(bob, 0L, delivers.length)
+          } yield {
+            bobEvents.length shouldBe delivers.length
+            bobEvents.map(_.counter) shouldBe (0L until delivers.length.toLong)
+            val deliverWithSigningTimestamps =
+              bobEvents.zip(delivers).zipWithIndex.collect {
+                filterForSigningTimestamps
+              }
+            forEvery(deliverWithSigningTimestamps) {
+              case DeliveredEventToCheck(
+                    delivered,
+                    sequencingTimestamp,
+                    messageId,
+                    signingTimestamp,
+                    sc,
+                  ) =>
+                val expectedSequencedEvent =
+                  if (signingTimestamp + signingTolerance >= sequencingTimestamp)
+                    Deliver.create(sc, sequencingTimestamp, domainId, None, batch)
+                  else
+                    Deliver.create(sc, sequencingTimestamp, domainId, None, Batch.empty)
+                delivered.signedEvent.content shouldBe expectedSequencedEvent
+            }
+          }
+        }
+      }
+
+      "do not update the topology client timestamp" in { env =>
+        import env._
+
+        for {
+          domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
+          domainParams = domainParamsO.valueOrFail("No domain parameters found")
+          signingTolerance = domainParams.sequencerSigningTolerance
+          signingToleranceInSec = signingTolerance.duration.toSeconds
+
+          topologyClientMemberId <- store.registerMember(topologyClientMember, ts0)
+          aliceId <- store.registerMember(alice, ts0)
+
+          recipientsTopo = NonEmpty(SortedSet, aliceId, topologyClientMemberId)
+          recipientsAlice = NonEmpty(SortedSet, aliceId)
+          testData = Seq(
+            // Sequencing ts, signing ts relative to ts0, recipients
+            (1L, None, recipientsTopo),
+            (signingToleranceInSec + 1L, Some(0L), recipientsTopo),
+          ) ++ (2L to 20L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
+          batch = Batch.fromClosed(
+            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob))
+          )
+
+          delivers = testData.map { case (sequenceTs, signingTsO, recipients) =>
+            val storeEvent = TraceContext
+              .withNewTraceContext { eventTraceContext =>
+                mockDeliverStoreEvent(
+                  sender = aliceId,
+                  payloadId = PayloadId(ts0.plusSeconds(sequenceTs)),
+                  signingTs = signingTsO.map(ts0.plusSeconds),
+                  traceContext = eventTraceContext,
+                )(recipients)
+              }
+              .map(id => Payload(id, batch.toByteString(ProtocolVersion.latestForTest)))
+            Sequenced(ts0.plusSeconds(sequenceTs), storeEvent)
+          }
+          _ <- storePayloadsAndWatermark(delivers)
+          // take some events
+          queue = readWithQueue(alice, 0)
+          // read a bunch of items
+          readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
+          // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
+          _ <- waitFor(testConfig.checkpointInterval.toScala * 6)
+          // close the queue before we make any assertions
+          _ = queue.cancel()
+          lastEventRead = readEvents.lastOption.value.value
+          checkpointForLastEventO <- store.fetchClosestCheckpointBefore(
+            aliceId,
+            lastEventRead.counter + 1,
+          )
+        } yield {
+          // check it created a checkpoint for a recent event
+          checkpointForLastEventO.value.counter should be >= 10L
+          checkpointForLastEventO.value.latestTopologyClientTimestamp shouldBe Some(
+            // This is before the timestamp of the second event
+            CantonTimestamp.ofEpochSecond(1)
+          )
+        }
       }
     }
   }

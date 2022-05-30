@@ -26,6 +26,8 @@ import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.{Thereafter, retry}
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.Success
+import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
+import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ClientInterceptors
 
 import scala.concurrent.duration.DurationInt
@@ -118,6 +120,8 @@ class GrpcSequencerConnectClient(
       handshakeResponse <- EitherT
         .fromEither[Future](HandshakeResponse.fromProtoV0(responseP))
         .leftMap[Error](err => Error.DeserializationFailure(err.toString))
+      _ = if (handshakeResponse.serverVersion == ProtocolVersion.v2_0_0)
+        UnsafePvVersion2_0_0.WarnSequencerClient(domainAlias)
     } yield handshakeResponse
 
   override def getAgreement(

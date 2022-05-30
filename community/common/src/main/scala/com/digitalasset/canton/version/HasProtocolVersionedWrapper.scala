@@ -11,6 +11,10 @@ import com.google.protobuf.ByteString
 
 import scala.collection.immutable
 
+trait HasRepresentativeProtocolVersion {
+  def representativeProtocolVersion: ProtocolVersion
+}
+
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
   *
@@ -24,7 +28,8 @@ import scala.collection.immutable
   * but we often specify the typed alias [[com.digitalasset.canton.version.VersionedMessage]]
   * instead.
   */
-trait HasProtocolVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage] {
+trait HasProtocolVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage]
+    extends HasRepresentativeProtocolVersion {
 
   /** We have a correspondence {protobuf version} <-> {[protocol version]}: each proto version
     * correspond to a list of consecutive protocol versions. The representative is one instance
@@ -40,7 +45,7 @@ trait HasProtocolVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage] {
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
     * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.MemoizedEvidence]]).
+    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
     */
   protected def toProtoVersioned: ProtoClass
 
@@ -50,14 +55,14 @@ trait HasProtocolVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage] {
 
   /** Yields a byte array representation of the corresponding `UntypedVersionedMessage` wrapper of this instance.
     */
-  protected def toByteArray: Array[Byte] = toByteString.toByteArray
+  def toByteArray: Array[Byte] = toByteString.toByteArray
 
   def getCryptographicEvidence: ByteString
 }
 
-trait GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVersionedWrapper[
-  VersionedMessage[ValueClass]
-]] {
+sealed trait GenericHasMemoizedProtocolVersionedWrapperCompanion[
+    ValueClass <: HasRepresentativeProtocolVersion
+] {
 
   /** The name of the class as used for pretty-printing and error reporting */
   protected def name: String
@@ -156,9 +161,8 @@ trait GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProto
       }
 }
 
-trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVersionedWrapper[
-  VersionedMessage[ValueClass]
-]] extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
+trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasRepresentativeProtocolVersion]
+    extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
   // Deserializer: (Proto => ValueClass)
   type Deserializer = (OriginalByteString, DataByteString) => ParsingResult[ValueClass]
 
@@ -177,10 +181,10 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasProtocolVers
   } yield valueClass
 }
 
-trait HasMemoizedProtocolVersionedWithContextCompanion[ValueClass <: HasProtocolVersionedWrapper[
-  VersionedMessage[ValueClass]
-], Context]
-    extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
+trait HasMemoizedProtocolVersionedWithContextCompanion[
+    ValueClass <: HasRepresentativeProtocolVersion,
+    Context,
+] extends GenericHasMemoizedProtocolVersionedWrapperCompanion[ValueClass] {
   type Deserializer = (Context, OriginalByteString, DataByteString) => ParsingResult[ValueClass]
 
   protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](

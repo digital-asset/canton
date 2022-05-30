@@ -114,6 +114,7 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
         FinalizedResponseStore(
           storage,
           syncCrypto.pureCrypto,
+          protocolVersion,
           nodeParameters.processingTimeouts,
           loggerFactory,
         ),

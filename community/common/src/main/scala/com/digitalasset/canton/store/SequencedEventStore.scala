@@ -28,7 +28,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbTy
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 
@@ -149,7 +149,7 @@ object SequencedEventStore {
 
     def counter: SequencerCounter
 
-    def underlyingEventBytes(version: ProtocolVersion): Array[Byte]
+    def underlyingEventBytes: Array[Byte]
 
     private[store] def dbType: SequencedEventDbType
 
@@ -185,7 +185,7 @@ object SequencedEventStore {
   )(override val traceContext: TraceContext)
       extends PossiblyIgnoredSequencedEvent[Env] {
 
-    override def underlyingEventBytes(version: ProtocolVersion): Array[Byte] = Array.empty
+    override def underlyingEventBytes: Array[Byte] = Array.empty
 
     private[store] override def dbType: SequencedEventDbType =
       underlying.fold[SequencedEventDbType](SequencedEventDbType.IgnoredEvent)(e =>
@@ -220,8 +220,7 @@ object SequencedEventStore {
 
     override def counter: SequencerCounter = signedEvent.content.counter
 
-    override def underlyingEventBytes(version: ProtocolVersion): Array[Byte] =
-      signedEvent.toByteArray(version)
+    override def underlyingEventBytes: Array[Byte] = signedEvent.toByteArray
 
     private[store] override def dbType: SequencedEventDbType = dbTypeOfEvent(signedEvent.content)
 

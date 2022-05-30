@@ -119,6 +119,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             clock,
           ),
           writerStore,
+          defaultProtocolVersion,
           clock,
           eventSignaller,
           loggerFactory,
@@ -309,33 +310,6 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
           message.unwrap should (include("Invalid signing timestamp")
             and include("The signing timestamp must be before or at "))
-        }
-      }
-    }
-
-    "cause errors if way behind the valid signing window" in withEnv() { implicit env =>
-      import env._
-      val nowish = CantonTimestamp.Epoch.plusSeconds(60)
-
-      // lower bound is exclusive
-      val margin = NonNegativeFiniteDuration.ofMillis(1)
-      val invalidSigningTimestamp = nowish - domainParameters.sequencerSigningTolerance
-
-      for {
-        events <- sendWithSigningTimestamp(
-          nowish,
-          validSigningTimestamp = invalidSigningTimestamp + margin,
-          invalidSigningTimestamp = invalidSigningTimestamp,
-        )
-        sortedEvents = sortByMessageId(events)
-      } yield {
-        inside(sortedEvents(0)) { case event: DeliverStoreEvent[Payload] =>
-          event.messageId shouldBe messageId1
-        }
-
-        inside(sortedEvents(1)) { case DeliverErrorStoreEvent(_, `messageId2`, message, _) =>
-          message.unwrap should (include("Invalid signing timestamp")
-            and include("The signing timestamp must be strictly after "))
         }
       }
     }

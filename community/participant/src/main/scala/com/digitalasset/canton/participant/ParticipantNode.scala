@@ -400,7 +400,7 @@ class ParticipantNodeBootstrap(
           topologyManager.issueParticipantDomainStateCert(
             participantId,
             domainId,
-            staticDomainParameters,
+            staticDomainParameters.protocolVersion,
           )(traceContext),
         packageId => packageService.packageDependencies(List(packageId)),
         metrics.domainMetrics,

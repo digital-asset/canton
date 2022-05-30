@@ -110,7 +110,7 @@ class TinkPureCrypto private (
         EncryptionKeyGenerationError.GeneralError,
         { keysetHandle =>
           val key = TinkKeyFormat.serializeHandle(keysetHandle)
-          SymmetricKey.create(CryptoKeyFormat.Tink, key, scheme)
+          SymmetricKey(CryptoKeyFormat.Tink, key, scheme)
         },
       )
   }
@@ -151,7 +151,7 @@ class TinkPureCrypto private (
         .deserializeHandle(keyset.toByteString)
         .leftMap(err => EncryptionKeyCreationError.InternalConversionError(err.toString))
     } yield {
-      SymmetricKey.create(
+      SymmetricKey(
         CryptoKeyFormat.Tink,
         TinkKeyFormat.serializeHandle(keysetHandle),
         scheme,

@@ -315,11 +315,29 @@ trait VettedPackagesSnapshotClient {
 }
 
 trait DomainGovernanceSnapshotClient {
-  this: BaseTopologySnapshotClient =>
+  this: BaseTopologySnapshotClient with NamedLogging =>
 
-  def findDynamicDomainParametersOrDefault(warnOnUsingDefault: Boolean = true)(implicit
+  def findDynamicDomainParametersOrDefault(
+      warnOnUsingDefault: Boolean = true
+  )(implicit traceContext: TraceContext): Future[DynamicDomainParameters] =
+    findDynamicDomainParameters().map {
+      case Some(value) => value
+      case None =>
+        if (warnOnUsingDefault) {
+          logger.warn(s"Unexpectedly using default domain parameters at ${timestamp}")
+        }
+
+        DynamicDomainParameters.initialValues(
+          // we must use zero as default change delay parameter, as otherwise static time tests will not work
+          // however, once the domain has published the initial set of domain parameters, the zero time will be
+          // adjusted.
+          topologyChangeDelay = DynamicDomainParameters.topologyChangeDelayIfAbsent
+        )
+    }
+
+  def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
-  ): Future[DynamicDomainParameters]
+  ): Future[Option[DynamicDomainParameters]]
 
   /** List all the dynamic domain parameters (past and current) */
   def listDynamicDomainParametersChanges()(implicit
@@ -335,7 +353,7 @@ trait TopologySnapshot
     with CertificateSnapshotClient
     with VettedPackagesSnapshotClient
     with MediatorDomainStateClient
-    with DomainGovernanceSnapshotClient {}
+    with DomainGovernanceSnapshotClient { this: BaseTopologySnapshotClient with NamedLogging => }
 
 // architecture-handbook-entry-end: IdentityProvidingServiceClient
 
@@ -600,31 +618,7 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient {
 }
 
 trait DomainGovernanceSnapshotLoader extends DomainGovernanceSnapshotClient {
-
   this: BaseTopologySnapshotClient with NamedLogging =>
-
-  override def findDynamicDomainParametersOrDefault(
-      warnOnUsingDefault: Boolean
-  )(implicit traceContext: TraceContext): Future[DynamicDomainParameters] =
-    findDynamicDomainParameters.map {
-      case Some(value) => value
-      case None =>
-        if (warnOnUsingDefault) {
-          logger.warn(s"Un-expectedly using default domain parameters at ${timestamp}")
-        }
-
-        DynamicDomainParameters.initialValues(
-          // we must use zero as default change delay parameter, as otherwise static time tests will not work
-          // however, once the domain has published the initial set of domain parameters, the zero time will be
-          // adjusted.
-          topologyChangeDelay = DynamicDomainParameters.topologyChangeDelayIfAbsent
-        )
-    }
-
-  def findDynamicDomainParameters(implicit
-      traceContext: TraceContext
-  ): Future[Option[DynamicDomainParameters]]
-
 }
 
 /** Loading interface with a more optimal method to read data from a store

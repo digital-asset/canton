@@ -11,6 +11,9 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.DomainParametersConfig
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
 import com.digitalasset.canton.version.ProtocolVersion
 
 private[config] trait ConfigValidations[C <: CantonConfig] {
@@ -20,7 +23,12 @@ private[config] trait ConfigValidations[C <: CantonConfig] {
   protected val validations: List[C => Validated[NonEmpty[Seq[String]], Unit]]
 }
 
-object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfig] {
+object CommunityConfigValidations
+    extends ConfigValidations[CantonCommunityConfig]
+    with NamedLogging {
+  import TraceContext.Implicits.Empty._
+  override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
+
   case class DbAccess(url: String, user: Option[String])
 
   private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
@@ -31,9 +39,15 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
       CantonCommunityConfig
     ]
 
+  /** Validations applied to all community and enterprise Canton configurations. */
   private[config] def genericValidations[C <: CantonConfig]
       : List[C => Validated[NonEmpty[Seq[String]], Unit]] =
-    List(backwardsCompatibleLoggingConfig, developmentProtocolSafetyCheckDomains)
+    List(
+      backwardsCompatibleLoggingConfig,
+      developmentProtocolSafetyCheckDomains,
+      warnIfUnsafeMinProtocolVersion,
+      warnIfUnsafeProtocolVersionEmbeddedDomain,
+    )
 
   /** Group node configs by db access to find matching db storage configs.
     * Overcomplicated types used are to work around that at this point nodes could have conflicting names so we can't just
@@ -153,6 +167,28 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
     })
   }
 
+  private def warnIfUnsafeMinProtocolVersion(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    config.participants.toSeq.map { case (name, config) =>
+      val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
+      if (minimum.getOrElse(ProtocolVersion.v2_0_0) == ProtocolVersion.v2_0_0)
+        UnsafePvVersion2_0_0.WarnParticipant(name, minimum)
+    }
+    Validated.valid(())
+  }
+
+  private def warnIfUnsafeProtocolVersionEmbeddedDomain(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    config.domains.toSeq.map { case (name, config) =>
+      val pv = config.domainParameters.protocolVersion.unwrap
+      if (pv == ProtocolVersion.v2_0_0)
+        UnsafePvVersion2_0_0.WarnDomain(name)
+    }
+    Validated.valid(())
+  }
+
   private[config] def developmentProtocolSafetyCheck(
       namesAndConfig: Seq[(InstanceName, DomainParametersConfig)]
   ): Validated[NonEmpty[Seq[String]], Unit] = {
@@ -180,5 +216,4 @@ object CommunityConfigValidations extends ConfigValidations[CantonCommunityConfi
     }
 
   }
-
 }

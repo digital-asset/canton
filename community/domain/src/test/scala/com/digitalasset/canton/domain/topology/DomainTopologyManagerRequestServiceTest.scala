@@ -85,12 +85,20 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
   }
 
   private val p1Mapping =
-    genSigned(TopologyStateUpdate.createAdd(OwnerToKeyMapping(participant1, p1Key)), p1Key)
+    genSigned(
+      TopologyStateUpdate.createAdd(OwnerToKeyMapping(participant1, p1Key), defaultProtocolVersion),
+      p1Key,
+    )
   private val p1MappingEnc =
-    genSigned(TopologyStateUpdate.createAdd(OwnerToKeyMapping(participant1, p1KeyEnc)), p1Key)
+    genSigned(
+      TopologyStateUpdate
+        .createAdd(OwnerToKeyMapping(participant1, p1KeyEnc), defaultProtocolVersion),
+      p1Key,
+    )
   private val partyMapping = genSigned(
     TopologyStateUpdate.createAdd(
-      PartyToParticipant(RequestSide.Both, party1, participant1, ParticipantPermission.Submission)
+      PartyToParticipant(RequestSide.Both, party1, participant1, ParticipantPermission.Submission),
+      defaultProtocolVersion,
     ),
     p1Key,
   )
@@ -120,6 +128,7 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
       val client = mock[DomainTopologyClient]
       when(manager.clock).thenReturn(clock)
       when(manager.managerId).thenReturn(domainManager)
+      when(manager.protocolVersion).thenReturn(defaultProtocolVersion)
       val strategy =
         new AutoApproveStrategy(
           manager,
@@ -227,7 +236,8 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
             participant1,
             ParticipantPermission.Submission,
             TrustLevel.Ordinary,
-          )
+          ),
+          defaultProtocolVersion,
         ),
         p1Key,
       )

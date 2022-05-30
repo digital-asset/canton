@@ -11,12 +11,12 @@ import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
-import com.digitalasset.canton.serialization.{MemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -231,19 +231,19 @@ object SignedLegalIdentityClaim {
     } yield SignedLegalIdentityClaim(claim.uid, value.claim, signature)
 }
 
-final case class LegalIdentityClaim private (
+sealed abstract case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
-)(override val deserializedFrom: Option[ByteString])
-    extends MemoizedEvidence
-    with HasVersionedWrapper[VersionedMessage[LegalIdentityClaim]]
+)(
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends ProtocolVersionedMemoizedEvidence
+    with HasProtocolVersionedWrapper[VersionedMessage[LegalIdentityClaim]]
     with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[LegalIdentityClaim] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned: VersionedMessage[LegalIdentityClaim] =
+    LegalIdentityClaim.toProtoVersioned(this)
 
   override protected def toProtoV0: v0.LegalIdentityClaim =
     v0.LegalIdentityClaim(
@@ -254,25 +254,30 @@ final case class LegalIdentityClaim private (
   def hash(hashOps: HashOps): Hash =
     hashOps.digest(HashPurpose.LegalIdentityClaim, getCryptographicEvidence)
 
-  override protected def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
+  override protected def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 }
 
-object LegalIdentityClaim extends HasMemoizedVersionedMessageCompanion[LegalIdentityClaim] {
+object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[LegalIdentityClaim] {
   override val name: String = "LegalIdentityClaim"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.LegalIdentityClaim)(fromProtoV0)
+  val supportedProtoVersions = SupportedProtoVersions(
+    0 -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersionMemoized(v0.LegalIdentityClaim)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
-  private[this] def apply(
+  def create(
       uid: UniqueIdentifier,
       evidence: LegalIdentityClaimEvidence,
+      protocolVersion: ProtocolVersion,
   ): LegalIdentityClaim =
-    throw new UnsupportedOperationException("Use create or deserialization methods")
-
-  def create(uid: UniqueIdentifier, evidence: LegalIdentityClaimEvidence): LegalIdentityClaim =
-    new LegalIdentityClaim(uid, evidence)(None)
+    new LegalIdentityClaim(uid, evidence)(
+      protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    ) {}
 
   def fromProtoV0(
       claimP: v0.LegalIdentityClaim
@@ -280,7 +285,10 @@ object LegalIdentityClaim extends HasMemoizedVersionedMessageCompanion[LegalIden
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(claimP.uniqueIdentifier, "uniqueIdentifier")
       evidence <- LegalIdentityClaimEvidence.fromProtoOneOf(claimP.evidence)
-    } yield new LegalIdentityClaim(uid, evidence)(Some(bytes))
+    } yield new LegalIdentityClaim(uid, evidence)(
+      protocolVersionRepresentativeFor(0),
+      Some(bytes),
+    ) {}
 }
 
 sealed trait LegalIdentityClaimEvidence {

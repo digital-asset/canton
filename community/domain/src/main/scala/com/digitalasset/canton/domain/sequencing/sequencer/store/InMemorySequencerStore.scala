@@ -13,6 +13,7 @@ import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore.CheckpointDataAtCounter
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
@@ -45,7 +46,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
   private val events = new ConcurrentSkipListMap[CantonTimestamp, StoreEvent[PayloadId]]()
   private val watermark = new AtomicReference[Option[CantonTimestamp]](None)
   private val checkpoints =
-    TrieMap[SequencerMemberId, ConcurrentSkipListMap[SequencerCounter, CantonTimestamp]]()
+    TrieMap[SequencerMemberId, ConcurrentSkipListMap[SequencerCounter, CheckpointDataAtCounter]]()
   // using a concurrent hash map for the thread safe computeIfPresent updates
   private val acknowledgements =
     new ConcurrentHashMap[SequencerMemberId, CantonTimestamp]()
@@ -149,15 +150,10 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
     }
 
     def lookupPayloadForDeliver(event: Sequenced[PayloadId]): Sequenced[Payload] =
-      event.map {
-        case deliver: DeliverStoreEvent[PayloadId] =>
-          val payloadId = deliver.payload
-          val storedPayload =
-            Option(payloads.get(payloadId.unwrap))
-              .getOrElse(sys.error(s"payload not found for id [$payloadId]"))
-
-          deliver.copy(payload = Payload(payloadId, storedPayload.content))
-        case error: DeliverErrorStoreEvent => error
+      event.map { payloadId =>
+        val storedPayload = Option(payloads.get(payloadId.unwrap))
+          .getOrElse(sys.error(s"payload not found for id [$payloadId]"))
+        Payload(payloadId, storedPayload.content)
       }
 
     // if there's no watermark, we can't return any events
@@ -184,21 +180,24 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
 
   override def saveCounterCheckpoint(
       memberId: SequencerMemberId,
-      counter: SequencerCounter,
-      ts: CantonTimestamp,
+      checkpoint: CounterCheckpoint,
   )(implicit traceContext: TraceContext): EitherT[Future, SaveCounterCheckpointError, Unit] = {
     val memberCheckpoints =
       checkpoints.getOrElseUpdate(
         memberId,
-        new ConcurrentSkipListMap[SequencerCounter, CantonTimestamp](),
+        new ConcurrentSkipListMap[SequencerCounter, CheckpointDataAtCounter](),
       )
-    val existingTimestampO = Option(memberCheckpoints.putIfAbsent(counter, ts))
+    val CounterCheckpoint(counter, ts, latestTopologyClientTimestamp) = checkpoint
+    val data = CheckpointDataAtCounter.fromCheckpoint(checkpoint)
+    val existingDataO = Option(memberCheckpoints.putIfAbsent(counter, data))
 
-    existingTimestampO
-      .filter(_ != ts) // ignore if the timestamp doesn't match
-      .map[SaveCounterCheckpointError](SaveCounterCheckpointError.CounterCheckpointInconsistent)
-      .toLeft(())
-      .toEitherT[Future]
+    EitherT.cond[Future](
+      existingDataO.forall(_ == data),
+      (),
+      existingDataO
+        .getOrElse(throw new RuntimeException("Option.forall must hold on None"))
+        .toInconsistent,
+    )
   }
 
   override def fetchClosestCheckpointBefore(memberId: SequencerMemberId, counter: SequencerCounter)(
@@ -210,7 +209,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
         .flatMap { memberCheckpoints =>
           Option(memberCheckpoints.headMap(counter, false).lastEntry())
         }
-        .map(entry => CounterCheckpoint(entry.getKey, entry.getValue))
+        .map(entry => entry.getValue.toCheckpoint(entry.getKey))
     }
 
   override def acknowledge(
@@ -292,7 +291,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
       val entriesIterator = checkpoints.entrySet().iterator()
 
       while (!completed && entriesIterator.hasNext) {
-        val checkpointTimestamp = entriesIterator.next().getValue
+        val CheckpointDataAtCounter(checkpointTimestamp, _) = entriesIterator.next().getValue
 
         completed = checkpointTimestamp >= timestamp
 
@@ -319,10 +318,10 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
           memberCheckpoints
             .descendingMap()
             .asScala
-            .find { case (_counter, checkpointTimestamp) =>
+            .find { case (_counter, CheckpointDataAtCounter(checkpointTimestamp, _)) =>
               checkpointTimestamp < timestamp
             }
-            .map(_._2)
+            .map(_._2.timestamp)
         }
       }
 
@@ -409,4 +408,25 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
     )
 
   override def close(): Unit = ()
+}
+
+object InMemorySequencerStore {
+  case class CheckpointDataAtCounter(
+      timestamp: CantonTimestamp,
+      latestTopologyClientTimestamp: Option[CantonTimestamp],
+  ) {
+    def toCheckpoint(sequencerCounter: SequencerCounter): CounterCheckpoint =
+      CounterCheckpoint(sequencerCounter, timestamp, latestTopologyClientTimestamp)
+
+    def toInconsistent: SaveCounterCheckpointError.CounterCheckpointInconsistent =
+      SaveCounterCheckpointError.CounterCheckpointInconsistent(
+        timestamp,
+        latestTopologyClientTimestamp,
+      )
+  }
+
+  object CheckpointDataAtCounter {
+    def fromCheckpoint(checkpoint: CounterCheckpoint): CheckpointDataAtCounter =
+      CheckpointDataAtCounter(checkpoint.timestamp, checkpoint.latestTopologyClientTimestamp)
+  }
 }

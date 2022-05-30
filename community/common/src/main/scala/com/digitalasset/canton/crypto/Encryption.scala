@@ -13,15 +13,10 @@ import com.digitalasset.canton.crypto.store.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{
-  DeserializationError,
-  MemoizedEvidence,
-  ProtoConverter,
-}
+import com.digitalasset.canton.serialization.{DeserializationError, ProtoConverter}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.{
-  HasMemoizedVersionedMessageCompanion,
   HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedToByteString,
@@ -237,53 +232,32 @@ object SymmetricKeyScheme {
     }
 }
 
-final case class SymmetricKey private (
+final case class SymmetricKey(
     format: CryptoKeyFormat,
     protected[crypto] val key: ByteString,
     scheme: SymmetricKeyScheme,
-)(override val deserializedFrom: Option[ByteString])
-    extends CryptoKey
-    with MemoizedEvidence
+) extends CryptoKey
     with HasVersionedWrapper[VersionedMessage[SymmetricKey]]
     with NoCopy {
-
   protected def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SymmetricKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
   protected def toProtoV0: v0.SymmetricKey =
     v0.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
-
-  override protected def toByteStringUnmemoized(version: ProtocolVersion): ByteString =
-    super[HasVersionedWrapper].toByteString(version)
 }
 
-object SymmetricKey extends HasMemoizedVersionedMessageCompanion[SymmetricKey] {
+object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
   override val name: String = "SymmetricKey"
 
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersionMemoized(v0.SymmetricKey)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.SymmetricKey)(fromProtoV0)
   )
 
-  private[this] def apply(
-      format: CryptoKeyFormat,
-      key: ByteString,
-      scheme: SymmetricKeyScheme,
-  ): SymmetricKey =
-    throw new UnsupportedOperationException("Use generate or deserialization methods")
-
-  private[crypto] def create(
-      format: CryptoKeyFormat,
-      key: ByteString,
-      scheme: SymmetricKeyScheme,
-  ): SymmetricKey = {
-    new SymmetricKey(format, key, scheme)(None)
-  }
-
-  private def fromProtoV0(keyP: v0.SymmetricKey)(bytes: ByteString): ParsingResult[SymmetricKey] =
+  private def fromProtoV0(keyP: v0.SymmetricKey): ParsingResult[SymmetricKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum("format", keyP.format)
       scheme <- SymmetricKeyScheme.fromProtoEnum("scheme", keyP.scheme)
-    } yield new SymmetricKey(format, keyP.key, scheme)(Some(bytes))
+    } yield new SymmetricKey(format, keyP.key, scheme)
 }
 
 final case class EncryptionKeyPair(publicKey: EncryptionPublicKey, privateKey: EncryptionPrivateKey)

@@ -168,6 +168,7 @@ class TestingIdentityFactory(
 ) extends NamedLogging {
 
   private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
+  private val defaultProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
 
   def forOwner(owner: KeyOwner): SyncCryptoApiProvider = {
     new SyncCryptoApiProvider(
@@ -300,8 +301,9 @@ class TestingIdentityFactory(
       mapping: DomainGovernanceMapping
   ): SignedTopologyTransaction[TopologyChangeOp.Replace] = SignedTopologyTransaction(
     DomainGovernanceTransaction(
-      DomainGovernanceElement(mapping)
-    )(),
+      DomainGovernanceElement(mapping),
+      defaultProtocolVersion,
+    ),
     mock[SigningPublicKey],
     mock[Signature],
   )(ProtocolVersion.latestForTest, None)
@@ -312,7 +314,7 @@ class TestingIdentityFactory(
     TopologyStateUpdate(
       TopologyChangeOp.Add,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )(),
+    )(defaultProtocolVersion),
     mock[SigningPublicKey],
     mock[Signature],
   )(ProtocolVersion.latestForTest, None)
@@ -422,6 +424,7 @@ class TestingOwnerWithKeys(
 ) extends NoTracing {
 
   val cryptoApi = TestingIdentityFactory(loggerFactory).forOwnerAndDomain(keyOwner)
+  private val defaultProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
 
   object SigningKeys {
 
@@ -552,12 +555,12 @@ class TestingOwnerWithKeys(
   def mkAdd(mapping: TopologyStateUpdateMapping, signingKey: SigningPublicKey = SigningKeys.key1)(
       implicit ec: ExecutionContext
   ): SignedTopologyTransaction[TopologyChangeOp.Add] =
-    mkTrans(TopologyStateUpdate.createAdd(mapping), signingKey)
+    mkTrans(TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion), signingKey)
 
   def mkDmGov(mapping: DomainGovernanceMapping, signingKey: SigningPublicKey)(implicit
       ec: ExecutionContext
   ): SignedTopologyTransaction[TopologyChangeOp.Replace] =
-    mkTrans(DomainGovernanceTransaction(mapping), signingKey)
+    mkTrans(DomainGovernanceTransaction(mapping, defaultProtocolVersion), signingKey)
 
   def revert(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       ec: ExecutionContext

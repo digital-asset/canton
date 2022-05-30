@@ -27,7 +27,7 @@ trait HasCryptographicEvidenceTest { this: AnyWordSpec =>
     }
   }
 
-  def memoizedNondeterministicDeserialization[M <: MemoizedEvidence](
+  def memoizedNondeterministicDeserialization[M <: ProtocolVersionedMemoizedEvidence](
       sut: M,
       ser: ByteString,
       hint: String = "",
@@ -84,13 +84,15 @@ class MemoizedEvidenceTest extends AnyWordSpec with BaseTest with HasCryptograph
   }
 }
 
-sealed case class MemoizedEvidenceSUT(b: Byte)(override val deserializedFrom: Option[ByteString])
-    extends MemoizedEvidence {
+sealed case class MemoizedEvidenceSUT(b: Byte)(
+    val representativeProtocolVersion: ProtocolVersion,
+    override val deserializedFrom: Option[ByteString],
+) extends ProtocolVersionedMemoizedEvidence {
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   var counter: Byte = 0
 
-  protected override def toByteStringUnmemoized(version: ProtocolVersion): ByteString = {
+  protected override def toByteStringUnmemoized: ByteString = {
     counter = (counter + 1).toByte
     ByteString.copyFrom(Array(counter, b))
   }
@@ -101,13 +103,13 @@ object MemoizedEvidenceSUT {
     throw new UnsupportedOperationException("Use the public apply method instead")
 
   def apply(b: Byte): MemoizedEvidenceSUT =
-    new MemoizedEvidenceSUT(b)(None)
+    new MemoizedEvidenceSUT(b)(ProtocolVersion.latestForTest, None)
 
   def fromByteString(bytes: ByteString): MemoizedEvidenceSUT = {
     if (bytes.size() != 2)
       throw new IllegalArgumentException(s"Only two bytes expected, got: ${bytes.toString}")
 
-    new MemoizedEvidenceSUT(bytes.byteAt(1))(Some(bytes))
+    new MemoizedEvidenceSUT(bytes.byteAt(1))(ProtocolVersion.latestForTest, Some(bytes))
   }
 }
 

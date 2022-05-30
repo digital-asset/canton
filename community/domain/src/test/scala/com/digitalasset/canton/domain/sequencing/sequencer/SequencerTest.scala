@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
 import cats.syntax.traverse._
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.lifecycle.{
@@ -36,6 +37,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
   private val alice: Member = ParticipantId("alice")
   private val bob: Member = ParticipantId("bob")
   private val carole: Member = ParticipantId("carole")
+  private val topologyClientMember = SequencerId(domainId)
 
   class Env extends FlagCloseableAsync {
     override val timeouts = SequencerTest.this.timeouts
@@ -59,7 +61,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         new MemoryStorage(),
         clock,
         domainId,
+        topologyClientMember,
+        defaultProtocolVersion,
         crypto,
+        FutureSupervisor.Noop,
         loggerFactory,
       )(parallelExecutionContext, tracer, materializer)
 
@@ -141,7 +146,9 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       )
 
       for {
-        _ <- valueOrFail(List(alice, bob, carole).traverse(sequencer.registerMember))(
+        _ <- valueOrFail(
+          List(alice, bob, carole, topologyClientMember).traverse(sequencer.registerMember)
+        )(
           "member registration"
         )
         _ <- valueOrFail(sequencer.sendAsync(submission))("send")

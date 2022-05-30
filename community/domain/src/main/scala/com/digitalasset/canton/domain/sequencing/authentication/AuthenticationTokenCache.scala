@@ -58,7 +58,9 @@ class AuthenticationTokenCache(
   /** Removes all tokens for the given member from the persisted store and cache.
     * Expected to be used when the member is disabled on the domain.
     */
-  def invalidAllTokensForMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
+  def invalidateAllTokensForMember(
+      member: Member
+  )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       _ <- store.invalidateMember(member)
       _ = tokenCache.filter(_._2.member == member).keys.foreach(tokenCache.remove)

@@ -221,7 +221,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       val seed = seedGenerator.generateSaltSeed()
       val transferData2 = {
         val fullTransferOutTree =
-          transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+          transferOutRequest.toFullTransferOutTree(
+            pureCrypto,
+            pureCrypto,
+            seed,
+            uuid,
+            defaultProtocolVersion,
+          )
         TransferData(
           transferId.requestTimestamp,
           0L,
@@ -653,7 +659,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val uuid = new UUID(3L, 4L)
     val seed = seedGenerator.generateSaltSeed()
     val fullTransferOutTree =
-      transferOutRequest.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+      transferOutRequest.toFullTransferOutTree(
+        pureCrypto,
+        pureCrypto,
+        seed,
+        uuid,
+        defaultProtocolVersion,
+      )
     val transferData =
       TransferData(
         CantonTimestamp.Epoch,
@@ -837,6 +849,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetMediator,
       transferOutResult,
       uuid,
+      defaultProtocolVersion,
     )
   }
 

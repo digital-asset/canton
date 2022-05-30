@@ -31,6 +31,7 @@ import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Pause, Success}
 import com.digitalasset.canton.util.{AkkaUtil, EitherTUtil, FutureUtil, retry}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -363,6 +364,7 @@ object SequencerWriter {
       clock: Clock,
       cryptoApi: DomainSyncCryptoClient,
       eventSignaller: EventSignaller,
+      protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     val logger = TracedLogger(SequencerWriter.getClass, loggerFactory)
@@ -378,6 +380,7 @@ object SequencerWriter {
           keepAliveInterval,
           cryptoApi,
           store,
+          protocolVersion,
           clock,
           eventSignaller,
           loggerFactory,

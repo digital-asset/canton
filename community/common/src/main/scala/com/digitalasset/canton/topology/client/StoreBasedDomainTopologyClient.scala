@@ -747,7 +747,7 @@ class StoreBasedTopologySnapshot(
 
   }
 
-  override def findDynamicDomainParameters(implicit
+  override def findDynamicDomainParameters()(implicit
       traceContext: TraceContext
   ): Future[Option[DynamicDomainParameters]] =
     findTransactions(
