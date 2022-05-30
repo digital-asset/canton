@@ -16,6 +16,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.topology.KeyOwner
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
@@ -124,6 +125,8 @@ object SyncCryptoError {
 trait SyncCryptoApi {
 
   def pureCrypto: CryptoPureApi
+
+  def ipsSnapshot: TopologySnapshot
 
   /** Signs the given hash using the private signing key. */
   def sign(hash: Hash)(implicit

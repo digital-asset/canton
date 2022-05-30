@@ -173,6 +173,7 @@ class TransferInProcessingSteps(
         mediatorId,
         transferOutResult,
         transferInUuid,
+        protocolVersion,
       )
       rootHash = fullTree.rootHash
       mediatorMessage = fullTree.mediatorMessage
@@ -810,6 +811,7 @@ object TransferInProcessingSteps {
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       transferInUuid: UUID,
+      protocolVersion: ProtocolVersion,
   ): FullTransferInTree = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
     val viewSalt = Salt.tryDeriveSalt(seed, 1, pureCrypto)
@@ -819,6 +821,7 @@ object TransferInProcessingSteps {
       targetMediator,
       stakeholders,
       transferInUuid,
+      protocolVersion,
     )
     val view =
       TransferInView.create(pureCrypto)(
@@ -827,6 +830,7 @@ object TransferInProcessingSteps {
         contract,
         creatingTransactionId,
         transferOutResult,
+        protocolVersion,
       )
     val tree = TransferInViewTree(commonData, view)(pureCrypto)
     FullTransferInTree(tree)

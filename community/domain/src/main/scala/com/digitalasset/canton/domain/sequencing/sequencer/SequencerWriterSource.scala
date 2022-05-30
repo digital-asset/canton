@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.NotUsed
 import akka.stream._
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Merge, Source}
-import cats.data.{EitherT, OptionT, Validated}
+import cats.data.{EitherT, Validated}
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.option._
@@ -44,6 +44,8 @@ object Write {
   * an earlier timestamp will not be written.
   */
 sealed trait SequencedWrite extends HasTraceContext {
+
+  /** The sequencing timestamp assigned to the write */
   def timestamp: CantonTimestamp
 }
 
@@ -150,6 +152,7 @@ object SequencerWriterSource {
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       cryptoApi: DomainSyncCryptoClient,
       store: SequencerWriterStore,
+      protocolVersion: ProtocolVersion,
       clock: Clock,
       eventSignaller: EventSignaller,
       loggerFactory: NamedLoggerFactory,
@@ -175,8 +178,11 @@ object SequencerWriterSource {
       s"Starting sequencer writer stream with index ${store.instanceIndex} of $totalNodeCount and instance discriminator [$instanceDiscriminator]"
     )
 
-    val eventGenerator =
-      new SendEventGenerator(store, () => PayloadId(payloadIdGenerator.generateNext))
+    val eventGenerator = new SendEventGenerator(
+      store,
+      protocolVersion,
+      () => PayloadId(payloadIdGenerator.generateNext),
+    )
 
     // Take deliver events with full payloads and first write them before adding them to the events queue
     val deliverEventSource = Source
@@ -224,7 +230,11 @@ object SequencerWriterSource {
   }
 }
 
-class SendEventGenerator(store: SequencerWriterStore, payloadIdGenerator: () => PayloadId)(implicit
+class SendEventGenerator(
+    store: SequencerWriterStore,
+    protocolVersion: ProtocolVersion,
+    payloadIdGenerator: () => PayloadId,
+)(implicit
     executionContext: ExecutionContext
 ) {
   def generate(submission: SubmissionRequest)(implicit
@@ -267,7 +277,7 @@ class SendEventGenerator(store: SequencerWriterStore, payloadIdGenerator: () => 
         val payload =
           Payload(
             payloadIdGenerator(),
-            submission.batch.toByteString(ProtocolVersion.v2_0_0_Todo_i8793),
+            submission.batch.toByteString(protocolVersion),
           )
         DeliverStoreEvent.ensureSenderReceivesEvent(
           senderId,
@@ -301,35 +311,32 @@ object SequenceWritesFlow {
     val logger = TracedLogger(WritePayloadsFlow.getClass, loggerFactory)
 
     def sequenceWritesAndStoreEvents(writes: Seq[Write]): Future[Traced[Option[BatchWritten]]] =
-      writes
-        .traverse(sequenceWrite)
-        .flatMap {
-          NonEmpty
-            .from(_) // due to the groupedWithin we should likely always have items
-            .fold(Future.successful[Traced[Option[BatchWritten]]](Traced.empty(None))) { writes =>
-              withTracedBatch(logger, writes) { implicit traceContext => writes =>
-                val events: Option[NonEmpty[Seq[Sequenced[PayloadId]]]] =
-                  NonEmpty.from(writes.collect { case SequencedWrite.Event(event) =>
-                    event
-                  })
-                val notifies =
-                  events.fold[WriteNotification](WriteNotification.None)(WriteNotification(_))
-                for {
-                  // if this write batch had any events then save them
-                  _ <- events.fold(Future.unit)(store.saveEvents)
-                } yield Traced(BatchWritten(notifies, writes.last1.timestamp).some)
-              }
-            }
+      NonEmpty
+        .from(writes.map(sequenceWrite))
+        // due to the groupedWithin we should likely always have items
+        .fold(Future.successful[Traced[Option[BatchWritten]]](Traced.empty(None))) { writes =>
+          withTracedBatch(logger, writes) { implicit traceContext => writes =>
+            val events: Option[NonEmpty[Seq[Sequenced[PayloadId]]]] =
+              NonEmpty.from(writes.collect { case SequencedWrite.Event(event) =>
+                event
+              })
+            val notifies =
+              events.fold[WriteNotification](WriteNotification.None)(WriteNotification(_))
+            for {
+              // if this write batch had any events then save them
+              _ <- events.fold(Future.unit)(store.saveEvents)
+            } yield Traced(BatchWritten(notifies, writes.last1.timestamp).some)
+          }
         }
 
-    def sequenceWrite(write: Write): Future[SequencedWrite] = {
+    def sequenceWrite(write: Write): SequencedWrite = {
       val timestamp = eventTimestampGenerator.generateNext
 
       write match {
-        case Write.KeepAlive => Future.successful(SequencedWrite.KeepAlive(timestamp))
+        case Write.KeepAlive => SequencedWrite.KeepAlive(timestamp)
         // if we opt not to write the event as we're past the max-sequencing-time, just replace with a keep alive as we're still alive
         case Write.Event(event) =>
-          sequenceEvent(timestamp, event)(TraceContext.empty)
+          sequenceEvent(timestamp, event)
             .map(SequencedWrite.Event)
             .getOrElse[SequencedWrite](SequencedWrite.KeepAlive(timestamp))
       }
@@ -342,7 +349,7 @@ object SequenceWritesFlow {
     def sequenceEvent(
         timestamp: CantonTimestamp,
         presequencedEvent: Presequenced[StoreEvent[PayloadId]],
-    )(implicit traceContext: TraceContext): OptionT[Future, Sequenced[PayloadId]] = {
+    ): Option[Sequenced[PayloadId]] = {
       def checkMaxSequencingTime(
           event: Presequenced[StoreEvent[PayloadId]]
       ): Either[String, Presequenced[StoreEvent[PayloadId]]] =
@@ -359,40 +366,31 @@ object SequenceWritesFlow {
 
       def checkSigningTimestamp(
           event: Presequenced[StoreEvent[PayloadId]]
-      ): Future[Presequenced[StoreEvent[PayloadId]]] =
-        event.traverse {
-          // we only do this validation for deliver events
-          case deliver @ DeliverStoreEvent(sender, messageId, _, _, signingTimestampO, _) =>
-            EitherT
-              .fromEither[Future](signingTimestampO.toLeft(()))
-              .leftFlatMap { signingTimestamp =>
-                /*
-                  If nothing happened for a while, then `timestamp` can be arbitrarily
-                  further from `topologyKnownUntilTimestamp`. However, in that case,
-                  it means that no change was recently made in the domain parameters,
-                  so it safe to take the min.
-                 */
-                val t = CantonTimestamp.min(timestamp, cryptoApi.topologyKnownUntilTimestamp)
-
-                EitherT(
-                  cryptoApi.ips
-                    .awaitSnapshot(t)
-                    .flatMap(_.findDynamicDomainParametersOrDefault())
-                    .map { domainParameters =>
-                      Sequencer
-                        .validateSigningTimestamp(domainParameters.sequencerSigningTolerance)(
-                          timestamp,
-                          signingTimestamp,
-                        )
-                    }
-                )
-              }
-              .fold[StoreEvent[PayloadId]](
-                DeliverErrorStoreEvent(sender, messageId, _, event.traceContext),
-                _ => deliver,
+      ): Presequenced[StoreEvent[PayloadId]] =
+        event.map {
+          // we only do this validation for deliver events that specify a signing timestamp
+          case deliver @ DeliverStoreEvent(sender, messageId, _, _, Some(signingTimestamp), _) =>
+            // We only check that the signing timestamp is at most the assigned timestamp.
+            // The lower bound will be checked only when reading the event
+            // because only then we know the topology state at the signing timestamp,
+            // which we need to determine the dynamic domain parameter sequencerSigningTolerance.
+            //
+            // Sequencer clients should set the signing timestamp only to timestamps that they have read from the
+            // domain. In a setting with multiple sequencers, the SequencerReader delivers only events up to
+            // the lowest watermark of all sequencers. So even if the sequencer client sends a follow-up submission request
+            // to a different sequencer, this sequencer will assign a higher timestamp than the requested signing timestamp.
+            // So this check should only fail if the sequencer client violates this policy.
+            if (signingTimestamp <= timestamp) deliver
+            else
+              DeliverErrorStoreEvent(
+                sender,
+                messageId,
+                String256M.tryCreate(
+                  s"Invalid signing timestamp $signingTimestamp. The signing timestamp must be before or at $timestamp."
+                ),
+                event.traceContext,
               )
-
-          case other => Future.successful(other)
+          case other => other
         }
 
       def checkPayloadToEventMargin(
@@ -423,11 +421,10 @@ object SequenceWritesFlow {
       resultE match {
         case Left(error) =>
           logger.warn(error)(presequencedEvent.traceContext)
-          OptionT.none
+          None
         case Right(event) =>
-          OptionT(checkSigningTimestamp(event).map { event =>
-            Option(Sequenced(timestamp, event.event))
-          })
+          val checkedEvent = checkSigningTimestamp(event)
+          Some(Sequenced(timestamp, checkedEvent.event))
       }
     }
 
@@ -436,7 +433,7 @@ object SequenceWritesFlow {
         writerConfig.eventWriteBatchMaxSize,
         writerConfig.eventWriteBatchMaxDuration.toScala,
       )
-      .mapAsync(1)(sequenceWritesAndStoreEvents(_))
+      .mapAsync(1)(sequenceWritesAndStoreEvents)
       .collect { case tew @ Traced(Some(ew)) => tew.map(_ => ew) }
       .named("sequenceAndWriteEvents")
   }

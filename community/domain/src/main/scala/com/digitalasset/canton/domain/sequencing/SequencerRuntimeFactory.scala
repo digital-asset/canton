@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing
 
 import akka.actor.ActorSystem
 import cats.syntax.option._
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -25,7 +26,7 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -38,6 +39,7 @@ private[domain] trait SequencerRuntimeFactory {
       domainId: DomainId,
       crypto: Crypto,
       sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
+      topologyClientMember: Member,
       topologyClient: DomainTopologyClientWithInit,
       topologyProcessor: TopologyTransactionProcessor,
       storage: Storage,
@@ -51,6 +53,7 @@ private[domain] trait SequencerRuntimeFactory {
       localParameters: LocalNodeParameters,
       metrics: SequencerMetrics,
       indexedStringStore: IndexedStringStore,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
       logger: TracedLogger,
   )(implicit
@@ -67,6 +70,7 @@ object SequencerRuntimeFactory {
         domainId: DomainId,
         crypto: Crypto,
         sequencedTopologyStore: TopologyStore[TopologyStoreId.DomainStore],
+        topologyClientMember: Member,
         topologyClient: DomainTopologyClientWithInit,
         topologyProcessor: TopologyTransactionProcessor,
         storage: Storage,
@@ -80,6 +84,7 @@ object SequencerRuntimeFactory {
         localParameters: LocalNodeParameters,
         metrics: SequencerMetrics,
         indexedStringStore: IndexedStringStore,
+        futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         logger: TracedLogger,
     )(implicit
@@ -97,6 +102,7 @@ object SequencerRuntimeFactory {
         domainId,
         crypto,
         sequencedTopologyStore,
+        topologyClientMember,
         topologyClient,
         topologyProcessor,
         sharedTopologyProcessor = true,
@@ -116,6 +122,7 @@ object SequencerRuntimeFactory {
         registerSequencerMember =
           false, // the community sequencer is always an embedded single sequencer
         indexedStringStore,
+        futureSupervisor,
         agreementManager,
         loggerFactory,
       )

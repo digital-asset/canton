@@ -16,7 +16,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManager.PostInitCallbacks
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
-import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantErrorGroup
 import com.digitalasset.canton.topology.{DomainId, _}
@@ -223,7 +222,7 @@ class ParticipantTopologyManager(
   def issueParticipantDomainStateCert(
       participantId: ParticipantId,
       domainId: DomainId,
-      staticDomainParameters: StaticDomainParameters,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]] = {
@@ -257,9 +256,9 @@ class ParticipantTopologyManager(
       )
 
       authorize(
-        TopologyStateUpdate.createAdd(transaction),
+        TopologyStateUpdate.createAdd(transaction, protocolVersion),
         signingKey = None,
-        protocolVersion = staticDomainParameters.protocolVersion,
+        protocolVersion = protocolVersion,
         force = false,
         replaceExisting = true,
       ).map(_ => ())
@@ -305,13 +304,15 @@ class ParticipantTopologyManager(
         pid: ParticipantId
     ): EitherT[Future, ParticipantTopologyManagerError, SignedTopologyTransaction[
       TopologyChangeOp
-    ]] =
+    ]] = {
+      val protocolVersion = ProtocolVersion.latest // TODO(#9396)
       authorize(
-        TopologyStateUpdate.createAdd(VettedPackages(pid, packages)),
+        TopologyStateUpdate.createAdd(VettedPackages(pid, packages), protocolVersion),
         None,
-        ProtocolVersion.latest,
+        protocolVersion,
         force = false,
       )
+    }
 
     def waitForPackagesBeingVetted(
         pid: ParticipantId,

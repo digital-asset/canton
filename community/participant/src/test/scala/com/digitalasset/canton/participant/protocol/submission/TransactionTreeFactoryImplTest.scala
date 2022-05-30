@@ -47,6 +47,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     new TransactionTreeFactoryImpl(
       ExampleTransactionFactory.submitterParticipant,
       factory.domainId,
+      defaultProtocolVersion,
       TransactionTreeFactoryImpl.contractSerializer,
       ExampleTransactionFactory.defaultPackageInfoService,
       factory.cryptoOps,

@@ -50,7 +50,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
           for {
             crypto <- newCrypto
             key = newSymmetricKey(crypto)
-            keyBytes = key.getCryptographicEvidence
+            keyBytes = key.toByteString(ProtocolVersion.latestForTest)
             key2 = SymmetricKey.fromByteString(keyBytes).valueOrFail("serialize key")
           } yield key shouldEqual key2
         }

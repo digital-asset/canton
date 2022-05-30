@@ -40,7 +40,7 @@ import io.functionmeta.functionFullName
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
-/** The authentication service issues tokens to members after successfully completed the following challenge
+/** The authentication service issues tokens to members after they have successfully completed the following challenge
   * response protocol and after they have accepted the service agreement of the domain. The tokens are required for
   * connecting to the sequencer.
   *
@@ -225,9 +225,7 @@ class MemberAuthenticationService(
     cryptoApi.snapshot(cryptoApi.topologyKnownUntilTimestamp).flatMap { snapshot =>
       // we are a bit more conservative here. a participant needs to be active NOW and the head state (i.e. effective in the future)
       Seq(snapshot.ipsSnapshot, cryptoApi.currentSnapshotApproximation.ipsSnapshot)
-        .traverse(
-          _.isParticipantActive(participant)
-        )
+        .traverse(_.isParticipantActive(participant))
         .map(_.forall(identity))
     }
   }
@@ -248,7 +246,7 @@ class MemberAuthenticationService(
                 logger.debug(s"Expiring all auth-tokens of ${participant}")
                 tokenCache
                   // first, remove all auth tokens
-                  .invalidAllTokensForMember(participant)
+                  .invalidateAllTokensForMember(participant)
                   // second, ensure the sequencer client gets disconnected
                   .map(_ => invalidateMemberCallback(Traced(participant)))
               } else Future.unit

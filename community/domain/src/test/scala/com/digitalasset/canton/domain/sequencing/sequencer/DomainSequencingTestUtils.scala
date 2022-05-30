@@ -18,30 +18,17 @@ object DomainSequencingTestUtils {
   def mockDeliverStoreEvent(
       sender: SequencerMemberId = SequencerMemberId(0),
       payloadId: PayloadId = PayloadId(CantonTimestamp.Epoch),
+      signingTs: Option[CantonTimestamp] = None,
       traceContext: TraceContext = TraceContext.empty,
   )(
       recipients: NonEmpty[SortedSet[SequencerMemberId]] = NonEmpty(SortedSet, sender)
   ): DeliverStoreEvent[PayloadId] = {
     val messageId = MessageId.tryCreate("mock-deliver")
-    val signingTs = None
     DeliverStoreEvent(sender, messageId, recipients, payloadId, signingTs, traceContext)
   }
 
   def payloadsForEvents(events: Seq[Sequenced[PayloadId]]): List[Payload] = {
-    val payloadIds = events.mapFilter { s =>
-      s.event match {
-        case DeliverStoreEvent(
-              _sender,
-              _messageId,
-              _members,
-              payload,
-              _signingTimestampO,
-              _traceContext,
-            ) =>
-          Some(payload)
-        case DeliverErrorStoreEvent(_sender, _messageId, _message, _traceContext) => None
-      }
-    }
+    val payloadIds = events.mapFilter(_.event.payloadO)
     payloadIds
       .map(pid => Payload(pid, Batch.empty.toByteString(ProtocolVersion.latestForTest)))
       .toList

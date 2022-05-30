@@ -538,8 +538,7 @@ object BuildCommon {
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
           BuildInfoKey("vmbc" -> Dependencies.daml_libraries_version),
-          // For now, the release version is the same as the protocol version
-          BuildInfoKey("protocolVersion" -> "2.0.0"),
+          BuildInfoKey("protocolVersions" -> List("2.0.0", "3.0.0")),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
         buildInfoObject := "BuildInfo",

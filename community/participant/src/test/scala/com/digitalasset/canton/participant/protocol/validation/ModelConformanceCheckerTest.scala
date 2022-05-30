@@ -70,6 +70,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     new TransactionTreeFactoryImpl(
       ExampleTransactionFactory.submitterParticipant,
       factory.domainId,
+      defaultProtocolVersion,
       ExampleTransactionFactory.asSerializableRaw,
       ExampleTransactionFactory.defaultPackageInfoService,
       factory.cryptoOps,

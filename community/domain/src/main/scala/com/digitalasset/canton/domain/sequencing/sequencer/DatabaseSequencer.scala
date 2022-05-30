@@ -24,7 +24,9 @@ import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
@@ -39,7 +41,10 @@ object DatabaseSequencer {
       storage: Storage,
       clock: Clock,
       domainId: DomainId,
+      topologyClientMember: Member,
+      protocolVersion: ProtocolVersion,
       cryptoApi: DomainSyncCryptoClient,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
@@ -69,7 +74,10 @@ object DatabaseSequencer {
       storage,
       clock,
       domainId,
+      topologyClientMember,
+      protocolVersion,
       cryptoApi,
+      futureSupervisor,
       loggerFactory,
     )
   }
@@ -86,7 +94,10 @@ class DatabaseSequencer(
     storage: Storage,
     clock: Clock,
     domainId: DomainId,
+    topologyClientMember: Member,
+    protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
+    futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(DomainTopologyManagerId(domainId), loggerFactory)
@@ -110,6 +121,7 @@ class DatabaseSequencer(
     clock,
     cryptoApi,
     eventSignaller,
+    protocolVersion,
     loggerFactory,
   )
   withNewTraceContext { implicit traceContext =>
@@ -162,6 +174,8 @@ class DatabaseSequencer(
       store,
       cryptoApi,
       eventSignaller,
+      topologyClientMember,
+      futureSupervisor,
       timeouts,
       loggerFactory,
     )

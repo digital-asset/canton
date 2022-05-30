@@ -12,6 +12,7 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
   PackageVetted,
 }
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
@@ -55,7 +56,7 @@ class PackageInspectionOpsForTesting(
     val tx: TopologyTransaction[TopologyChangeOp] = TopologyStateUpdate(
       TopologyChangeOp.Remove,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )()
+    )(TestDomainParameters.defaultStatic.protocolVersion)
 
     EitherT.rightT(tx)
   }

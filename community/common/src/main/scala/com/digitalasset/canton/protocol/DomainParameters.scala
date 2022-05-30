@@ -10,6 +10,7 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v0 => protoV0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -202,7 +203,8 @@ final case class DynamicDomainParameters(
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
 ) extends HasVersionedWrapper[VersionedMessage[DynamicDomainParameters]]
-    with HasProtoV0[protoV0.DynamicDomainParameters] {
+    with HasProtoV0[protoV0.DynamicDomainParameters]
+    with PrettyPrinting {
 
   /** Computes the decision time for the given activeness time.
     *
@@ -258,6 +260,14 @@ final case class DynamicDomainParameters(
       topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
       ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
     )
+
+  override def pretty: Pretty[DynamicDomainParameters] = prettyOfClass(
+    param("participant response timeout", _.participantResponseTimeout),
+    param("mediator reaction timeout", _.mediatorReactionTimeout),
+    param("transfer exclusivity timeout", _.transferExclusivityTimeout),
+    param("topology change delay", _.topologyChangeDelay),
+    param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+  )
 }
 
 object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomainParameters] {

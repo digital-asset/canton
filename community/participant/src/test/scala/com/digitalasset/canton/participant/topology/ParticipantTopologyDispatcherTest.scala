@@ -61,7 +61,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("beta"), namespace), publicKey),
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("gamma"), namespace), publicKey),
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("delta"), namespace), publicKey),
-    ).map(TopologyStateUpdate.createAdd)
+    ).map(TopologyStateUpdate.createAdd(_, defaultProtocolVersion))
   val slice1 = transactions.slice(0, 2)
   val slice2 = transactions.slice(slice1.length, transactions.length)
 
@@ -220,7 +220,8 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       val midRevert = transactions(2).reverse
       val another =
         TopologyStateUpdate.createAdd(
-          IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("eta"), namespace), publicKey)
+          IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("eta"), namespace), publicKey),
+          defaultProtocolVersion,
         )
 
       for {

@@ -262,16 +262,15 @@ abstract class CantonNodeBootstrapBase[
   ): Unit = {
     adminServerRegistry
       .addService(
-        TopologyManagerWriteServiceGrpc
-          .bindService(
-            new GrpcTopologyManagerWriteService(
-              topologyManager,
-              authorizedStore,
-              crypto.cryptoPublicStore,
-              loggerFactory,
-            ),
-            executionContext,
-          )
+        TopologyManagerWriteServiceGrpc.bindService(
+          new GrpcTopologyManagerWriteService(
+            topologyManager,
+            authorizedStore,
+            crypto.cryptoPublicStore,
+            loggerFactory,
+          ),
+          executionContext,
+        )
       )
       .discard
   }
@@ -406,7 +405,12 @@ abstract class CantonNodeBootstrapBase[
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
-    authorizeIfNew(manager, TopologyStateUpdate.createAdd(mapping), key, protocolVersion)
+    authorizeIfNew(
+      manager,
+      TopologyStateUpdate.createAdd(mapping, protocolVersion),
+      key,
+      protocolVersion,
+    )
 
   private def authorizeIfNew[E <: CantonError, Op <: TopologyChangeOp](
       manager: TopologyManager[E],
@@ -438,7 +442,12 @@ abstract class CantonNodeBootstrapBase[
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
-    authorizeIfNew(manager, DomainGovernanceTransaction(mapping), key, protocolVersion)
+    authorizeIfNew(
+      manager,
+      DomainGovernanceTransaction(mapping, protocolVersion),
+      key,
+      protocolVersion,
+    )
 
   protected def getOrCreateSigningKey(
       name: String

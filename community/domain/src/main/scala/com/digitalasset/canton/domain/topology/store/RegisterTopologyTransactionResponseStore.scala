@@ -52,6 +52,7 @@ object RegisterTopologyTransactionResponseStore {
   def apply(
       storage: Storage,
       cryptoApi: CryptoPureApi,
+      protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -59,7 +60,13 @@ object RegisterTopologyTransactionResponseStore {
   ): RegisterTopologyTransactionResponseStore = storage match {
     case _: MemoryStorage => new InMemoryRegisterTopologyTransactionResponseStore()
     case jdbc: DbStorage =>
-      new DbRegisterTopologyTransactionResponseStore(jdbc, cryptoApi, timeouts, loggerFactory)
+      new DbRegisterTopologyTransactionResponseStore(
+        jdbc,
+        cryptoApi,
+        protocolVersion,
+        timeouts,
+        loggerFactory,
+      )
   }
 }
 
@@ -116,6 +123,7 @@ class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionCon
 class DbRegisterTopologyTransactionResponseStore(
     override protected val storage: DbStorage,
     cryptoApi: CryptoPureApi,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -128,7 +136,7 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val getRegisterTopologyTransactionRequest
       : GetResult[RegisterTopologyTransactionRequest] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
         ByteString.copyFrom(r.<<[Array[Byte]])
       )
       .fold[RegisterTopologyTransactionRequest](
@@ -149,13 +157,13 @@ class DbRegisterTopologyTransactionResponseStore(
       : SetParameter[RegisterTopologyTransactionRequest] =
     (r: RegisterTopologyTransactionRequest, pp: PositionedParameters) =>
       pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toEnvelopeContentByteString(r, protocolVersion)
         .toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
       : GetResult[RegisterTopologyTransactionResponse] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
         ByteString.copyFrom(r.<<[Array[Byte]])
       )
       .fold[RegisterTopologyTransactionResponse](
@@ -183,7 +191,7 @@ class DbRegisterTopologyTransactionResponseStore(
       : SetParameter[RegisterTopologyTransactionResponse] =
     (r: RegisterTopologyTransactionResponse, pp: PositionedParameters) =>
       pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toEnvelopeContentByteString(r, protocolVersion)
         .toByteArray
 
   override def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit

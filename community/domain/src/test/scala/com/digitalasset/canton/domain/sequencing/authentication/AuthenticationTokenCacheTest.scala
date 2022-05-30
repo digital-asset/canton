@@ -90,7 +90,7 @@ class AuthenticationTokenCacheTest extends AsyncWordSpec with BaseTest {
       for {
         _ <- env.cache.saveToken(stored1)
         _ <- env.cache.saveToken(stored2)
-        _ <- env.cache.invalidAllTokensForMember(participant1)
+        _ <- env.cache.invalidateAllTokensForMember(participant1)
         token1ResultO <- env.cache.lookupMatchingToken(participant1, token1)
         token2ResultO <- env.cache.lookupMatchingToken(participant1, token2)
         storedTokens <- env.store.fetchTokens(participant1)

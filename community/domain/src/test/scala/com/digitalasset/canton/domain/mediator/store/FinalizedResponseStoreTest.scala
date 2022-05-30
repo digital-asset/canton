@@ -33,6 +33,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
   val fullInformeeTree = {
     val domainId = DefaultTestIdentities.domainId
     val mediatorId = DefaultTestIdentities.mediator
+
     val alice = PlainInformee(LfPartyId.assertFromString("alice"))
     val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
     val hashOps = new SymbolicPureCrypto
@@ -40,7 +41,12 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
     def rh(index: Int): RootHash = RootHash(h(index))
     def s(i: Int): Salt = TestSalt.generateSalt(i)
     val viewCommonData =
-      ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(2), s(999))
+      ViewCommonData.create(hashOps)(
+        Set(alice, bob),
+        NonNegativeInt.tryCreate(2),
+        s(999),
+        defaultProtocolVersion,
+      )
     val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
     val commonMetadata = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,
@@ -48,6 +54,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       mediatorId,
       s(5417),
       new UUID(0L, 0L),
+      defaultProtocolVersion,
     )
     FullInformeeTree(
       GenTransactionTree(hashOps)(
@@ -141,7 +148,13 @@ trait DbFinalizedResponseStoreTest
   }
   "DbFinalizedResponseStore" should {
     behave like finalizedResponseStore(() =>
-      new DbFinalizedResponseStore(storage, pureCryptoApi, timeouts, loggerFactory)
+      new DbFinalizedResponseStore(
+        storage,
+        pureCryptoApi,
+        defaultProtocolVersion,
+        timeouts,
+        loggerFactory,
+      )
     )
   }
 }

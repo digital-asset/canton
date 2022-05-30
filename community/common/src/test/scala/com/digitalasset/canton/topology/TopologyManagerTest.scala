@@ -50,7 +50,8 @@ trait TopologyManagerTest
 
       def createRootCert() = {
         TopologyStateUpdate.createAdd(
-          NamespaceDelegation(namespace, namespaceKey, isRootDelegation = true)
+          NamespaceDelegation(namespace, namespaceKey, isRootDelegation = true),
+          defaultProtocolVersion,
         )
       }
     }
@@ -120,7 +121,7 @@ trait TopologyManagerTest
       "automatically find a signing key" in {
         def add(mgr: TopologyManager[E], mapping: TopologyStateUpdateMapping) =
           mgr.authorize(
-            TopologyStateUpdate.createAdd(mapping),
+            TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion),
             None,
             ProtocolVersion.latestForTest,
             force = true,
@@ -243,7 +244,8 @@ trait TopologyManagerTest
       "fail on invalid removal" in {
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
-          invalidRev = rootCert.copy(op = Remove)(None).reverse.reverse
+          removeRootCert = TopologyStateUpdate(Remove, rootCert.element)(defaultProtocolVersion)
+          invalidRev = removeRootCert.reverse.reverse
           _ = assert(
             invalidRev.element.id != rootCert.element.id
           ) // ensure transaction ids are different so we are sure to fail the test

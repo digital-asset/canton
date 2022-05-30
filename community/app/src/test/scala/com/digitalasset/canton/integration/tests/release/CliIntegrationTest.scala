@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.release
 
 import better.files.File
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.console.BufferedProcessLogger
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Outcome, SuiteMixin}
@@ -77,7 +78,10 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
 
     "print out the Canton version when using the --version flag" in { processLogger =>
       s"$cantonBin --version" ! processLogger
-      checkOutput(processLogger, shouldContain = Seq("Canton", "Daml Libraries"))
+      checkOutput(
+        processLogger,
+        shouldContain = Seq("Canton", "Daml Libraries", BuildInfo.protocolVersions.toString),
+      )
     }
 
     "successfully start a Canton node when using a mix of a --config and -C config" in {

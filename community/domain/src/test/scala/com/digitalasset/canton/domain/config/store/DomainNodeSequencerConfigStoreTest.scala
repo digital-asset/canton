@@ -115,7 +115,12 @@ trait DbDomainManagerNodeSequencerConfigStoreTest
   }
 
   behave like domainManagerNodeSequencerConfigStoreTest(
-    new DbDomainManagerNodeSequencerConfigStore(storage, timeouts, loggerFactory)
+    new DbDomainManagerNodeSequencerConfigStore(
+      storage,
+      defaultProtocolVersion,
+      timeouts,
+      loggerFactory,
+    )
   )
 
 }

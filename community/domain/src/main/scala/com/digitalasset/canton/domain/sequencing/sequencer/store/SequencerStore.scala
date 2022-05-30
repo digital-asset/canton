@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.Order._
-import cats.Show
+import cats.{Functor, Show}
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
@@ -107,15 +107,24 @@ sealed trait StoreEvent[+PayloadReference] extends HasTraceContext {
   val description: String
 
   def messageId: MessageId
+
+  /** All members that should receive (parts of) this event */
+  def members: NonEmpty[Set[SequencerMemberId]]
+
+  def map[P](f: PayloadReference => P): StoreEvent[P]
+
+  def payloadO: Option[PayloadReference]
 }
 
 /** Structure for storing a deliver events.
   * @param members should include the sender and event recipients as they all will read the event
+  * @param signingTimestampO The timestamp of the snapshot to be used for determining the signing key of this event
+  *                          [[scala.None]] means that the sequencing timestamp should be used.
   */
 case class DeliverStoreEvent[P](
     sender: SequencerMemberId,
     messageId: MessageId,
-    members: NonEmpty[SortedSet[SequencerMemberId]],
+    override val members: NonEmpty[SortedSet[SequencerMemberId]],
     payload: P,
     signingTimestampO: Option[CantonTimestamp],
     override val traceContext: TraceContext,
@@ -124,6 +133,11 @@ case class DeliverStoreEvent[P](
   override lazy val notifies: WriteNotification = WriteNotification.Members(members)
 
   override val description: String = show"deliver[message-id:$messageId]"
+
+  override def map[P2](f: P => P2): StoreEvent[P2] =
+    copy(payload = f(payload))
+
+  override def payloadO: Option[P] = Some(payload)
 }
 
 object DeliverStoreEvent {
@@ -161,6 +175,9 @@ case class DeliverErrorStoreEvent(
 ) extends StoreEvent[Nothing] {
   override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
+  override def members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
+  override def map[P](f: Nothing => P): StoreEvent[P] = this
+  override def payloadO: Option[Nothing] = None
 }
 
 case class Presequenced[+E <: StoreEvent[_]](event: E, maxSequencingTimeO: Option[CantonTimestamp])
@@ -170,9 +187,13 @@ case class Presequenced[+E <: StoreEvent[_]](event: E, maxSequencingTimeO: Optio
   def map[F <: StoreEvent[_]](fn: E => F): Presequenced[F] =
     Presequenced(fn(event), maxSequencingTimeO)
 
-  def traverse[F <: StoreEvent[_]](fn: E => Future[F])(implicit
-      executionContext: ExecutionContext
-  ): Future[Presequenced[F]] = fn(event).map(Presequenced(_, maxSequencingTimeO))
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def traverse[F[_], E2 <: StoreEvent[_]](fn: E => F[E2])(implicit
+      F: Functor[F]
+  ): F[Presequenced[E2]] = F.map(fn(event)) { newEvent =>
+    if (event eq newEvent) this.asInstanceOf[Presequenced[E2]]
+    else Presequenced(newEvent, maxSequencingTimeO)
+  }
 
   override def traceContext: TraceContext = event.traceContext
 
@@ -204,17 +225,45 @@ object Presequenced {
 case class Sequenced[+P](timestamp: CantonTimestamp, event: StoreEvent[P]) extends HasTraceContext {
   override def traceContext: TraceContext = event.traceContext
 
-  def map[A](fn: StoreEvent[P] => StoreEvent[A]): Sequenced[A] = copy(event = fn(event))
+  def map[A](fn: P => A): Sequenced[A] = copy(event = event.map(fn))
 }
 
-/** Records when a memberId was registered */
-case class CounterCheckpoint(counter: SequencerCounter, timestamp: CantonTimestamp)
+/** Checkpoint a sequencer subscription can be reinitialized from.
+  *
+  * @param counter The sequencer counter associated to the event with the given timestamp.
+  * @param timestamp The timestamp of the event with the given sequencer counter.
+  * @param latestTopologyClientTimestamp The latest timestamp before or at `timestamp`
+  *                                 at which an event was created from a batch
+  *                                 that contains an envelope addressed to the topology client used by the SequencerReader.
+  */
+case class CounterCheckpoint(
+    counter: SequencerCounter,
+    timestamp: CantonTimestamp,
+    latestTopologyClientTimestamp: Option[CantonTimestamp],
+) extends PrettyPrinting {
+
+  override def pretty: Pretty[CounterCheckpoint] = prettyOfClass(
+    param("counter", _.counter),
+    param("timestamp", _.timestamp),
+    paramIfDefined("latest topology client timestamp", _.latestTopologyClientTimestamp),
+  )
+}
 
 object CounterCheckpoint {
 
   /** We care very little about the event itself and just need the counter and timestamp */
-  def apply(event: SequencedEvent[_]): CounterCheckpoint =
-    CounterCheckpoint(event.counter, event.timestamp)
+  def apply(
+      event: SequencedEvent[_],
+      latestTopologyClientTimestamp: Option[CantonTimestamp],
+  ): CounterCheckpoint =
+    CounterCheckpoint(event.counter, event.timestamp, latestTopologyClientTimestamp)
+
+  implicit def getResultCounterCheckpoint: GetResult[CounterCheckpoint] = GetResult { r =>
+    val counter = r.<<[SequencerCounter]
+    val timestamp = r.<<[CantonTimestamp]
+    val latestTopologyClientTimestamp = r.<<[Option[CantonTimestamp]]
+    CounterCheckpoint(counter, timestamp, latestTopologyClientTimestamp)
+  }
 }
 
 sealed trait SavePayloadsError
@@ -241,8 +290,10 @@ object SaveCounterCheckpointError {
   /** We've attempted to write a counter checkpoint but found an existing checkpoint for this counter with a different timestamp.
     * This is very bad and suggests that we are serving inconsistent streams to the member.
     */
-  case class CounterCheckpointInconsistent(existingTimestamp: CantonTimestamp)
-      extends SaveCounterCheckpointError
+  case class CounterCheckpointInconsistent(
+      existingTimestamp: CantonTimestamp,
+      existingLatestTopologyClientTimestamp: Option[CantonTimestamp],
+  ) extends SaveCounterCheckpointError
 }
 
 sealed trait SaveLowerBoundError
@@ -397,8 +448,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
     */
   def saveCounterCheckpoint(
       memberId: SequencerMemberId,
-      counter: SequencerCounter,
-      ts: CantonTimestamp,
+      checkpoint: CounterCheckpoint,
   )(implicit traceContext: TraceContext): EitherT[Future, SaveCounterCheckpointError, Unit]
 
   /** Fetch a checkpoint with a counter value less than the provided counter. */

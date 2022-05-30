@@ -193,7 +193,7 @@ class JcePureCrypto(
     scheme match {
       case SymmetricKeyScheme.Aes128Gcm =>
         val key128 = generateRandomByteString(scheme.keySizeInBytes)
-        Right(SymmetricKey.create(CryptoKeyFormat.Raw, key128, scheme))
+        Right(SymmetricKey(CryptoKeyFormat.Raw, key128, scheme))
     }
 
   override def createSymmetricKey(
@@ -211,7 +211,7 @@ class JcePureCrypto(
       )
       key = scheme match {
         case SymmetricKeyScheme.Aes128Gcm =>
-          SymmetricKey.create(CryptoKeyFormat.Raw, bytes.unwrap, scheme)
+          SymmetricKey(CryptoKeyFormat.Raw, bytes.unwrap, scheme)
       }
     } yield key
   }

@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -21,12 +22,22 @@ trait DomainManagerNodeSequencerConfigStore extends AutoCloseable {
 }
 
 object DomainManagerNodeSequencerConfigStore {
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit executionContext: ExecutionContext
+  def apply(
+      storage: Storage,
+      protocolVersion: ProtocolVersion,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      executionContext: ExecutionContext
   ): DomainManagerNodeSequencerConfigStore =
     storage match {
       case _: MemoryStorage => new InMemoryDomainManagerNodeSequencerConfigStore
       case storage: DbStorage =>
-        new DbDomainManagerNodeSequencerConfigStore(storage, timeouts, loggerFactory)
+        new DbDomainManagerNodeSequencerConfigStore(
+          storage,
+          protocolVersion,
+          timeouts,
+          loggerFactory,
+        )
     }
 }

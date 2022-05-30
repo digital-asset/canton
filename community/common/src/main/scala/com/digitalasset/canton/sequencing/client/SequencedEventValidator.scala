@@ -86,7 +86,7 @@ class SequencedEventValidator(
     domainId: DomainId,
     sequencerId: SequencerId,
     syncCryptoApi: SyncCryptoClient,
-    timely: FutureSupervisor,
+    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends ValidateSequencedEvent
@@ -112,7 +112,7 @@ class SequencedEventValidator(
       ts: CantonTimestamp,
       context: => String,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Duration] =
-    timely.supervisedUS(context) {
+    futureSupervisor.supervisedUS(context)(
       syncCryptoApi
         .awaitIpsSnapshotUS(ts)
         .flatMap { snapshot =>
@@ -122,7 +122,7 @@ class SequencedEventValidator(
               .map(_.topologyChangeDelay.duration)
           }
         }
-    }
+    )
 
   private val priorEventRef: AtomicReference[Option[PriorEvent]] =
     new AtomicReference[Option[PriorEvent]](
@@ -251,7 +251,7 @@ class SequencedEventValidator(
           logger.debug(s"Wait for topology snapshot at $timestamp")
           for {
             snapshot <- EitherT.right(
-              timely.supervisedUS(
+              futureSupervisor.supervisedUS(
                 s"await topology ts $timestamp for event at ${event.timestamp}(tsOfSign=${event.signedEvent.timestampOfSigningKey}) with previous=$previousTsO and known=$topologyStateKnownUntil"
               )(
                 syncCryptoApi.awaitSnapshotUS(timestamp)

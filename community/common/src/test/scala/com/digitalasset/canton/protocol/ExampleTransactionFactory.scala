@@ -372,6 +372,8 @@ class ExampleTransactionFactory(
 )(implicit ec: ExecutionContext)
     extends EitherValues {
 
+  private val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+
   private def awaitCreateWithConfirmationPolicy(
       confirmationPolicy: ConfirmationPolicy,
       topologySnapshot: TopologySnapshot,
@@ -495,7 +497,12 @@ class ExampleTransactionFactory(
     val (informees, threshold) =
       Await.result(confirmationPolicy.informeesAndThreshold(node, topologySnapshot), 10.seconds)
     val viewCommonData =
-      ViewCommonData.create(cryptoOps)(informees, threshold, commonDataSalt(viewIndex))
+      ViewCommonData.create(cryptoOps)(
+        informees,
+        threshold,
+        commonDataSalt(viewIndex),
+        protocolVersion,
+      )
 
     val createWithSerialization = created.map { contract =>
       val coid = contract.contractId
@@ -526,6 +533,7 @@ class ExampleTransactionFactory(
       actionDescription,
       RollbackContext.empty,
       participantDataSalt(viewIndex),
+      protocolVersion,
     )
 
     TransactionView(cryptoOps)(viewCommonData, viewParticipantData, subviews)
@@ -552,7 +560,7 @@ class ExampleTransactionFactory(
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
       DeduplicationDuration(JDuration.ofSeconds(100)),
-    )(cryptoOps, None)
+    )(cryptoOps, protocolVersion)
 
   val commonMetadata: CommonMetadata =
     CommonMetadata(cryptoOps)(
@@ -561,6 +569,7 @@ class ExampleTransactionFactory(
       mediatorId,
       Salt.tryDeriveSalt(transactionSeed, 1, cryptoOps),
       transactionUuid,
+      protocolVersion,
     )
 
   val participantMetadata: ParticipantMetadata =
@@ -569,6 +578,7 @@ class ExampleTransactionFactory(
       submissionTime,
       Some(workflowId),
       Salt.tryDeriveSalt(transactionSeed, 2, cryptoOps),
+      protocolVersion,
     )
 
   def genTransactionTree(rootViews: TransactionView*): GenTransactionTree =

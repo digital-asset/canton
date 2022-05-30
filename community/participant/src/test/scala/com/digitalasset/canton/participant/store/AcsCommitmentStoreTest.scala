@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{ContractMetadata, TestDomainParameters}
+import com.digitalasset.canton.protocol.ContractMetadata
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.FutureUtil
@@ -34,8 +34,6 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
     SymbolicCrypto
       .tryCreate(Seq(Fingerprint.tryCreate("test")), Seq(), timeouts, loggerFactory)
       .privateCrypto
-
-  protected val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
 
   val localId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain"))
   val remoteId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant::domain"))
@@ -81,7 +79,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       localId,
       period(0, 1),
       dummyCommitment,
-      protocolVersion,
+      defaultProtocolVersion,
     )
   val dummySigned = SignedProtocolMessage(dummyCommitmentMsg, dummySignature)
 
@@ -291,7 +289,7 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         localId,
         period(2, 3),
         dummyCommitment,
-        protocolVersion,
+        defaultProtocolVersion,
       )
       val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature)
       val dummyMsg3 = AcsCommitment.create(
@@ -300,7 +298,7 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         localId,
         period(0, 1),
         dummyCommitment,
-        protocolVersion,
+        defaultProtocolVersion,
       )
       val dummySigned3 = SignedProtocolMessage(dummyMsg3, dummySignature)
 
@@ -325,7 +323,7 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         localId,
         period(0, 1),
         dummyCommitment2,
-        protocolVersion,
+        defaultProtocolVersion,
       )
       val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature)
 

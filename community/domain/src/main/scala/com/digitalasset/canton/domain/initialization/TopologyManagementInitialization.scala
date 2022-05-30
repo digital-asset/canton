@@ -158,6 +158,7 @@ object TopologyManagementInitialization {
             RegisterTopologyTransactionResponseStore(
               storage,
               crypto.pureCrypto,
+              domainTopologyManager.protocolVersion,
               timeouts,
               loggerFactory,
             ),

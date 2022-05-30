@@ -30,7 +30,7 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
   def mk[T <: TopologyStateUpdateMapping](
       mapping: T
   ): TopologyStateUpdate[TopologyChangeOp.Add] =
-    TopologyStateUpdate.createAdd(mapping)
+    TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion)
 
   val deserialize: ByteString => TopologyTransaction[TopologyChangeOp] =
     bytes =>
@@ -120,10 +120,12 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
 
     "domain parameters change" should {
       val dmp1 = DomainGovernanceTransaction(
-        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
+        defaultProtocolVersion,
       )
       val dmp2 = DomainGovernanceTransaction(
-        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters)
+        DomainParametersChange(DomainId(uid), defaultDynamicDomainParameters),
+        defaultProtocolVersion,
       )
       runTest(dmp1, dmp2)
     }

@@ -220,6 +220,10 @@ object Dependencies {
     "com.digitalasset.daml.driver.vmbc" % "vmbc-grpc" % vmbc_driver_libraries_version
 
   // From digitalasset.jfrog.io
+  lazy val vmbc_interceptors =
+    "com.digitalasset.daml.driver.vmbc" % "vmbc-grpc-interceptors" % vmbc_driver_libraries_version
+
+  // From digitalasset.jfrog.io
   lazy val vmbc_sequencer_protos =
     "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
 

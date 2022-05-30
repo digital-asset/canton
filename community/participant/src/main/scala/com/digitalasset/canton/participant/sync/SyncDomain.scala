@@ -137,7 +137,7 @@ class SyncDomain(
     new SeedGenerator(domainCrypto.crypto.pureCrypto)
 
   private val requestGenerator =
-    ConfirmationRequestFactory(participantId, domainId)(
+    ConfirmationRequestFactory(participantId, domainId, staticDomainParameters.protocolVersion)(
       domainCrypto.crypto.pureCrypto,
       seedGenerator,
       packageService,

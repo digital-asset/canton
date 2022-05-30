@@ -5,8 +5,15 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
+import com.daml.error.ErrorCode
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.config.RequireTypes.InstanceName
+import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion.{
@@ -107,7 +114,8 @@ object CantonVersion {
     ReleaseVersion.v2_1_1_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
-    ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
+    ReleaseVersion.v2_3_0 -> List(v2_0_0, v3_0_0),
   )
 
   private[version] def getSupportedProtocolsParticipantForRelease(
@@ -160,7 +168,7 @@ sealed trait CompanionTrait {
         }
       case _ =>
         Left(
-          s"Unable to convert string `$rawVersion` to a valid CantonVersion. A valid CantonVersion would for example be '1.2.3' with optionally the suffix '-SNAPSHOT''. "
+          s"Unable to convert string $rawVersion to a valid CantonVersion. A CantonVersion is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid CantonVersions."
         )
     }
   }
@@ -200,6 +208,8 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
   lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
   lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
+  lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
+
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time
@@ -238,7 +248,12 @@ object ProtocolVersion extends CompanionTrait {
   private[this] def apply(n: Int): ProtocolVersion = throw new UnsupportedOperationException(
     "Use create method"
   )
-  val latest: ProtocolVersion = ProtocolVersion.tryCreate(BuildInfo.protocolVersion)
+  private val allProtocolVersions: List[ProtocolVersion] =
+    BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList
+  val latest: ProtocolVersion =
+    allProtocolVersions.maxOption.getOrElse(
+      sys.error("Release needs to support at least one protocol version")
+    )
 
   /** Should be used when hardcoding a protocol version for a test to signify that a hardcoded protocol version is safe
     * in this instance.
@@ -303,7 +318,10 @@ object ProtocolVersion extends CompanionTrait {
   ): Either[HandshakeError, Unit] = {
     val clientSupportsRequiredVersion = clientSupportedVersions.contains(server)
     val clientMinVersionLargerThanReqVersion = clientMinimumProtocolVersion.exists(_ > server)
-    if (clientMinVersionLargerThanReqVersion)
+    // if dev-version support is on for participant and domain, ignore the min protocol version
+    if (clientSupportsRequiredVersion && server == ProtocolVersion.unstable_development)
+      Right(())
+    else if (clientMinVersionLargerThanReqVersion)
       Left(MinProtocolError(server, clientMinimumProtocolVersion, clientSupportsRequiredVersion))
     else if (!clientSupportsRequiredVersion)
       Left(VersionNotSupportedError(server, clientSupportedVersions))
@@ -314,11 +332,13 @@ object ProtocolVersion extends CompanionTrait {
   lazy val minimum_protocol_version: ProtocolVersion =
     ProtocolVersion(2, 0, 0) // Minimum stable protocol version introduced
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
+  lazy val v3_0_0: ProtocolVersion = ProtocolVersion(3, 0, 0)
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
   // passed in via propagating the protocol version set in the domain parameters
   lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
 }
 
+/** Trait for errors that are returned to clients when handshake fails. */
 sealed trait HandshakeError {
   def description: String
 }
@@ -341,6 +361,34 @@ final case class VersionNotSupportedError(
 ) extends HandshakeError {
   override def description: String =
     s"The protocol version required by the server (${server.fullVersion}) is not among the supported protocol versions by the client $clientSupportedVersions. "
+}
+
+object HandshakeErrors extends HandshakeErrorGroup {
+  // TODO(i9466): Add description/resolution annotations
+  object UnsafePvVersion2_0_0
+      extends ErrorCode("PROTOCOL_VERSION_2_0_0_IS_UNSAFE", MaliciousOrFaultyBehaviour) {
+    case class WarnSequencerClient(domainAlias: DomainAlias)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          s"This node is connecting to a sequencer using the unsafe protocol version " +
+            s"2.0.0 which should not be used in production. We recommend only connecting to sequencers with a later protocol version (such as 3.0.0)."
+        )
+    case class WarnDomain(name: InstanceName)(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          s"This domain node is configured to use the unsafe protocol version " +
+            s"2.0.0 which should not be used in production. We recommend migrating to a later protocol version (such as 3.0.0)."
+        )
+
+    case class WarnParticipant(name: InstanceName, minimumProtocolVersion: Option[ProtocolVersion])(
+        implicit val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          s"This participant node's configured minimum protocol version does not exclude the unsafe protocol version " +
+            s"2.0.0 which should not be used in production. We recommend configuring at least minimum protocol version 3.0.0."
+        ) {
+      override def logOnCreation: Boolean = false
+    }
+
+  }
 }
 
 /** Wrapper around a [[ProtocolVersion]] so we can verify during configuration loading that domain operators only

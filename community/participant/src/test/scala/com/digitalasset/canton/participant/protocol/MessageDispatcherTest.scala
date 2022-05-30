@@ -29,6 +29,7 @@ import com.digitalasset.canton.protocol.{
   RequestId,
   RequestProcessor,
   RootHash,
+  TestDomainParameters,
   TransferId,
   ViewHash,
   v0 => protocolv0,
@@ -1094,6 +1095,8 @@ object MessageDispatcherTest {
       override val verdict: Verdict,
       override val requestId: RequestId,
   ) extends RegularMediatorResult {
+    val representativeProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+
     override def toProtoSomeSignedProtocolMessage
         : protocolv0.SignedProtocolMessage.SomeSignedProtocolMessage =
       throw new UnsupportedOperationException(

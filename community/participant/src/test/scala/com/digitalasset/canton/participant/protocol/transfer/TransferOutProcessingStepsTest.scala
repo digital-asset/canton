@@ -656,7 +656,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       uuid: UUID = new UUID(6L, 7L),
   ): FullTransferOutTree = {
     val seed = seedGenerator.generateSaltSeed()
-    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid, defaultProtocolVersion)
   }
 
   def encryptTransferOutTree(

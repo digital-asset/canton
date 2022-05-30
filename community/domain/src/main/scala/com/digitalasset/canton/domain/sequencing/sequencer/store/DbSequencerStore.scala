@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
-import com.digitalasset.canton.{SequencerCounter, data}
+import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
@@ -706,7 +706,7 @@ class DbSequencerStore(
     // to make inclusive we add a microsecond (the smallest unit)
     // this comparison can then be used for the absolute lower bound if unset
     val inclusiveFromTimestamp =
-      fromTimestampO.map(_.addMicros(1)).getOrElse(CantonTimestamp.MinValue)
+      fromTimestampO.map(_.immediateSuccessor).getOrElse(CantonTimestamp.MinValue)
 
     def h2PostgresQuery(memberContainsBefore: String, memberContainsAfter: String) = sql"""
         select events.ts, events.node_index, events.event_type, events.message_id, events.sender, 
@@ -788,36 +788,37 @@ class DbSequencerStore(
 
   override def saveCounterCheckpoint(
       memberId: SequencerMemberId,
-      counter: SequencerCounter,
-      ts: CantonTimestamp,
+      checkpoint: CounterCheckpoint,
   )(implicit traceContext: TraceContext): EitherT[Future, SaveCounterCheckpointError, Unit] =
-    EitherT(
+    EitherT {
+      val CounterCheckpoint(counter, ts, latestTopologyClientTimestamp) = checkpoint
       storage.queryAndUpdate(
         for {
           _ <- profile match {
             case _: Postgres =>
-              sqlu"""insert into sequencer_counter_checkpoints (member, counter, ts)
-             values ($memberId, $counter, $ts)
+              sqlu"""insert into sequencer_counter_checkpoints (member, counter, ts, latest_topology_client_ts)
+             values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
              on conflict (member, counter) do nothing
              """
             case _: H2 =>
               sqlu"""merge into sequencer_counter_checkpoints using dual
                     on member = $memberId and counter = $counter
                     when not matched then
-                      insert (member, counter, ts) values ($memberId, $counter, $ts)
+                      insert (member, counter, ts, latest_topology_client_ts) 
+                      values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
                   """
             case _: Oracle =>
               sqlu""" insert /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_counter_checkpoints ( member, counter ) ) */
-            into sequencer_counter_checkpoints (member, counter, ts)
-          values ($memberId, $counter, $ts)
+            into sequencer_counter_checkpoints (member, counter, ts, latest_topology_client_ts)
+          values ($memberId, $counter, $ts, $latestTopologyClientTimestamp)
           """
           }
           id <- sql"""
-            select ts 
+            select ts, latest_topology_client_ts
               from sequencer_counter_checkpoints
               where member = $memberId and counter = $counter
               """
-            .as[CantonTimestamp]
+            .as[(CantonTimestamp, Option[CantonTimestamp])]
             .headOption
         } yield id,
         functionFullName,
@@ -830,14 +831,17 @@ class DbSequencerStore(
             )
           )
 
-        case Some(dbTimestamp) =>
+        case Some((storedTs, storedLatestTopologyClientTimestampO)) =>
           Either.cond(
-            dbTimestamp == ts,
+            storedTs == ts && storedLatestTopologyClientTimestampO == latestTopologyClientTimestamp,
             (),
-            SaveCounterCheckpointError.CounterCheckpointInconsistent(dbTimestamp),
+            SaveCounterCheckpointError.CounterCheckpointInconsistent(
+              storedTs,
+              storedLatestTopologyClientTimestampO,
+            ),
           )
       }
-    )
+    }
 
   override def fetchClosestCheckpointBefore(memberId: SequencerMemberId, counter: SequencerCounter)(
       implicit traceContext: TraceContext
@@ -845,16 +849,15 @@ class DbSequencerStore(
     storage
       .query(
         sql"""
-           select counter, ts 
+           select counter, ts, latest_topology_client_ts 
            from sequencer_counter_checkpoints
            where member = $memberId
              and counter < $counter
            order by counter desc
             #${storage.limit(1)}
-           """.as[(SequencerCounter, data.CantonTimestamp)].headOption,
+           """.as[CounterCheckpoint].headOption,
         functionFullName,
       )
-      .map(_.map(t => CounterCheckpoint(t._1, t._2)))
 
   override def acknowledge(
       member: SequencerMemberId,

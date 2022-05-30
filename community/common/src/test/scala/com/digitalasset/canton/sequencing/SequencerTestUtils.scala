@@ -6,10 +6,11 @@ package com.digitalasset.canton.sequencing
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, SignedContent}
-import com.digitalasset.canton.serialization.MemoizedEvidence
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 object SequencerTestUtils extends BaseTest {
@@ -23,7 +24,7 @@ object SequencerTestUtils extends BaseTest {
       Right(MockMessageContent)
   }
 
-  def sign[M <: MemoizedEvidence](content: M): SignedContent[M] =
+  def sign[M <: ProtocolVersionedMemoizedEvidence](content: M): SignedContent[M] =
     SignedContent(content, SymbolicCrypto.emptySignature, None)
 
   def mockDeliver(
@@ -34,7 +35,10 @@ object SequencerTestUtils extends BaseTest {
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
   ): Deliver[Nothing] = {
     val batch = Batch(List.empty)
-    new Deliver[Nothing](counter, timestamp, domainId, messageId, batch)(deserializedFrom)
+    new Deliver[Nothing](counter, timestamp, domainId, messageId, batch)(
+      ProtocolVersion.latestForTest,
+      deserializedFrom,
+    )
   }
 
 }

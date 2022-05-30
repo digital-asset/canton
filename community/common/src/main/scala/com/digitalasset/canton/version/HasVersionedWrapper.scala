@@ -25,7 +25,7 @@ trait HasProtoV0[ProtoClass <: scalapb.GeneratedMessage] {
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
     * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.MemoizedEvidence]]).
+    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
     */
   protected def toProtoV0: ProtoClass
 }
@@ -43,7 +43,7 @@ trait HasProtoV0WithVersion[ProtoClass <: scalapb.GeneratedMessage] {
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
     * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.MemoizedEvidence]]).
+    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
     */
   protected def toProtoV0(version: ProtocolVersion): ProtoClass
 }
@@ -62,7 +62,7 @@ trait HasVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage]
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
     * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.MemoizedEvidence]]).
+    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
     */
   protected def toProtoVersioned(version: ProtocolVersion): ProtoClass
 

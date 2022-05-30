@@ -25,7 +25,6 @@ import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -46,10 +45,10 @@ class ParticipantDomainTopologyServiceTest
         TopologyElementId.tryCreate("submissionId"),
         OwnerToKeyMapping(participantId, SymbolicCrypto.signingPublicKey("keyId")),
       ),
-    )(None),
+    )(defaultProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
-  )(ProtocolVersion.latestForTest, None)
+  )(defaultProtocolVersion, None)
   private val request =
     RegisterTopologyTransactionRequest(
       participantId,

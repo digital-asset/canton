@@ -110,6 +110,8 @@ object RequestProcessingStrategy {
       extends RequestProcessingStrategy
       with NamedLogging {
 
+    private val protocolVersion = manager.protocolVersion
+
     protected def awaitParticipantIsActive(participantId: ParticipantId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] =
@@ -225,7 +227,8 @@ object RequestProcessingStrategy {
                     pid,
                     ParticipantPermission.Submission,
                     TrustLevel.Ordinary,
-                  )
+                  ),
+                  protocolVersion,
                 ),
                 signingKey = None,
                 force = false,

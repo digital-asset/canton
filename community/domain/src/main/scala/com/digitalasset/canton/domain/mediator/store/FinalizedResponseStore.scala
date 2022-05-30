@@ -55,6 +55,7 @@ object FinalizedResponseStore {
   def apply(
       storage: Storage,
       cryptoApi: CryptoPureApi,
+      protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -62,7 +63,7 @@ object FinalizedResponseStore {
   ): FinalizedResponseStore = storage match {
     case _: MemoryStorage => new InMemoryFinalizedResponseStore(loggerFactory)
     case jdbc: DbStorage =>
-      new DbFinalizedResponseStore(jdbc, cryptoApi, timeouts, loggerFactory)
+      new DbFinalizedResponseStore(jdbc, cryptoApi, protocolVersion, timeouts, loggerFactory)
   }
 }
 
@@ -105,6 +106,7 @@ class InMemoryFinalizedResponseStore(override protected val loggerFactory: Named
 class DbFinalizedResponseStore(
     override protected val storage: DbStorage,
     cryptoApi: CryptoPureApi,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -120,7 +122,7 @@ class DbFinalizedResponseStore(
 
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
     ProtocolMessage
-      .fromEnvelopeContentByteString(ProtocolVersion.v2_0_0_Todo_i8793, cryptoApi)(
+      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
         ByteString.copyFrom(r.<<[Array[Byte]])
       )
       .fold[MediatorRequest](
@@ -136,7 +138,7 @@ class DbFinalizedResponseStore(
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =
     (r: MediatorRequest, pp: PositionedParameters) =>
       pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, ProtocolVersion.v2_0_0_Todo_i8793)
+        .toEnvelopeContentByteString(r, protocolVersion)
         .toByteArray
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =

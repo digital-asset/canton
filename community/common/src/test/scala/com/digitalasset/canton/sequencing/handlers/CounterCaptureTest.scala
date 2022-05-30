@@ -7,7 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{SequencerTestUtils, SerializedEventHandler}
-import com.digitalasset.canton.serialization.MemoizedEvidence
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -53,6 +53,6 @@ class CounterCaptureTest extends AnyWordSpec with BaseTest {
     }
   }
 
-  private def sign[A <: MemoizedEvidence](content: A): SignedContent[A] =
+  private def sign[A <: ProtocolVersionedMemoizedEvidence](content: A): SignedContent[A] =
     SignedContent(content, SymbolicCrypto.emptySignature, None)
 }

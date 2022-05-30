@@ -43,6 +43,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
     val domainId = DefaultTestIdentities.domainId
     val mediatorId = DefaultTestIdentities.mediator
+
     val alice = ConfirmingParty(LfPartyId.assertFromString("alice"), 3)
     val bob = ConfirmingParty(LfPartyId.assertFromString("bob"), 2)
     val charlie = PlainInformee(LfPartyId.assertFromString("charlie"))
@@ -50,9 +51,19 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     val solo = ParticipantId("solo")
 
     val viewCommonData2 =
-      ViewCommonData.create(hashOps)(Set(bob, charlie), NonNegativeInt.tryCreate(2), salt(54170))
+      ViewCommonData.create(hashOps)(
+        Set(bob, charlie),
+        NonNegativeInt.tryCreate(2),
+        salt(54170),
+        defaultProtocolVersion,
+      )
     val viewCommonData1 =
-      ViewCommonData.create(hashOps)(Set(alice, bob), NonNegativeInt.tryCreate(3), salt(54171))
+      ViewCommonData.create(hashOps)(
+        Set(alice, bob),
+        NonNegativeInt.tryCreate(3),
+        salt(54171),
+        defaultProtocolVersion,
+      )
     val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
     val view1 = TransactionView(hashOps)(viewCommonData1, b(8), view2 :: Nil)
 
@@ -64,6 +75,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       mediatorId,
       salt(5417),
       new UUID(0L, 0L),
+      defaultProtocolVersion,
     )
     def mkResponse(
         viewHash: ViewHash,
@@ -112,7 +124,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       it("should check the policy's minimum threshold") {
         val viewcommonDataThresholdTooLow =
-          ViewCommonData.create(hashOps)(Set(alice), NonNegativeInt.zero, salt(54172))
+          ViewCommonData.create(hashOps)(
+            Set(alice),
+            NonNegativeInt.zero,
+            salt(54172),
+            defaultProtocolVersion,
+          )
         val viewThresholdTooLow =
           TransactionView(hashOps)(viewcommonDataThresholdTooLow, b(100), Nil)
         val fullInformeeTreeThresholdTooLow = FullInformeeTree(
@@ -318,11 +335,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         Set(alice, bob, charlie),
         NonNegativeInt.tryCreate(3),
         salt(54170),
+        defaultProtocolVersion,
       )
       val viewCommonData2 = ViewCommonData.create(hashOps)(
         Set(alice, bob, dave),
         NonNegativeInt.tryCreate(3),
         salt(54171),
+        defaultProtocolVersion,
       )
       val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
       val view1 = TransactionView(hashOps)(viewCommonData1, b(8), Nil)
@@ -422,6 +441,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         mediatorId,
         salt(5417),
         new UUID(0L, 0L),
+        defaultProtocolVersion,
       )
       val fullInformeeTree =
         FullInformeeTree(

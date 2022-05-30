@@ -95,8 +95,6 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     remoteId2 -> Set(carol),
   )
 
-  protected val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
-
   def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
   def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
@@ -194,7 +192,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       (_, _) => FutureUnlessShutdown.unit,
       killSwitch,
       ParticipantTestMetrics.pruning,
-      protocolVersion,
+      defaultProtocolVersion,
       DefaultProcessingTimeouts.testing
         .copy(storageMaxRetryInterval = TimeoutDuration.tryFromDuration(1.millisecond)),
       loggerFactory,
@@ -524,7 +522,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
               localId,
               period,
               cmt,
-              protocolVersion,
+              defaultProtocolVersion,
             )
 
             snapshotF.flatMap { snapshot =>

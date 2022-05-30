@@ -21,6 +21,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
@@ -57,10 +59,13 @@ class HttpSequencerConnectClient(
 
   def handshake(domainAlias: DomainAlias, request: HandshakeRequest)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SequencerConnectClient.Error, HandshakeResponse] =
-    httpSequencerClient
+  ): EitherT[Future, SequencerConnectClient.Error, HandshakeResponse] = for {
+    res <- httpSequencerClient
       .handshakeUnauthenticated(request)(loggingContext.traceContext)
       .leftMap(toSequencerConnectError)
+    _ = if (res.serverVersion == ProtocolVersion.v2_0_0)
+      UnsafePvVersion2_0_0.WarnSequencerClient(domainAlias)
+  } yield res
 
   override def getAgreement(domainId: DomainId)(implicit
       traceContext: TraceContext
