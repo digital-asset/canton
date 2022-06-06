@@ -40,6 +40,7 @@ import scala.util.control.NonFatal
 class DbTransferStore(
     override protected val storage: DbStorage,
     domain: DomainId,
+    protocolVersion: ProtocolVersion,
     cryptoApi: CryptoPureApi,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -63,7 +64,10 @@ class DbTransferStore(
   )
   implicit val setParameterFullTransferOutTree: SetParameter[FullTransferOutTree] =
     (r: FullTransferOutTree, pp: PositionedParameters) =>
-      pp >> r.toByteString(ProtocolVersion.v2_0_0_Todo_i8793).toByteArray
+      pp >> r.toByteString(protocolVersion).toByteArray
+
+  private implicit val setParameterSerializableContract: SetParameter[SerializableContract] =
+    SerializableContract.getVersionedSetParameter(protocolVersion)
 
   private val protoConverterSequencedEventOpenEnvelope =
     SignedContent.versionedProtoConverter[SequencedEvent[DefaultOpenEnvelope]](

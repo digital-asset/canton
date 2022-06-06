@@ -28,7 +28,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbTy
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
-import com.digitalasset.canton.version.HasProtoV0
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 
@@ -98,13 +98,14 @@ object SequencedEventStore {
   def apply[Env <: Envelope[_]](
       storage: Storage,
       member: SequencerClientDiscriminator,
+      protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SequencedEventStore =
     storage match {
       case _: MemoryStorage => new InMemorySequencedEventStore(loggerFactory)
       case dbStorage: DbStorage =>
-        new DbSequencedEventStore(dbStorage, member, timeouts, loggerFactory)
+        new DbSequencedEventStore(dbStorage, member, protocolVersion, timeouts, loggerFactory)
     }
 
   sealed trait SearchCriterion extends Product with Serializable

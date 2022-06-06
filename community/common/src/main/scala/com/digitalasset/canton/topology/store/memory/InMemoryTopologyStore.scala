@@ -267,10 +267,10 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
 
-  override def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+  override def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
-  ): Future[Boolean] =
-    allTransactions.map(_.result.exists(_.transaction == transaction))
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
+    allTransactions.map(_.result.find(_.transaction == transaction))
 
   override def findPositiveTransactions(
       asOf: CantonTimestamp,

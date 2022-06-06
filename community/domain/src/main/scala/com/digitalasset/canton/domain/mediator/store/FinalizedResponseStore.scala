@@ -120,6 +120,11 @@ class DbFinalizedResponseStore(
   implicit val setParameterRequestId: SetParameter[RequestId] =
     (r: RequestId, pp: PositionedParameters) => SetParameter[CantonTimestamp].apply(r.unwrap, pp)
 
+  private implicit val setParameterVerdict: SetParameter[Verdict] =
+    Verdict.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
+    TraceContext.getVersionedSetParameter(protocolVersion)
+
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
     ProtocolMessage
       .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
@@ -137,9 +142,7 @@ class DbFinalizedResponseStore(
   )
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =
     (r: MediatorRequest, pp: PositionedParameters) =>
-      pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, protocolVersion)
-        .toByteArray
+      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("finalized-response-store")

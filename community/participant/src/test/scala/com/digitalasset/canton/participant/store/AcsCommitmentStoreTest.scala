@@ -518,13 +518,14 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         end: Int,
         cmt: AcsCommitment.CommitmentType,
     ) =
-      AcsCommitment(
+      AcsCommitment.create(
         domainId,
         remoteId,
         localId,
         CommitmentPeriod(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
         cmt,
-      )(ProtocolVersion.latestForTest, None)
+        ProtocolVersion.latestForTest,
+      )
 
     "work sensibly in a basic scenario" in {
       val queue = mk()

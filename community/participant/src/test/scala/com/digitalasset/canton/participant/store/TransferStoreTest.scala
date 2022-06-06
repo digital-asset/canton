@@ -23,7 +23,6 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -660,7 +659,6 @@ object TransferStoreTest {
         requestId,
         Verdict.Approve,
         mediatorMessage.allInformees,
-        ProtocolVersion.latestForTest,
       )
       val signedResult = SignedProtocolMessage(result, sign("TransferOutResult-mediator"))
       val batch = Batch.of(signedResult -> RecipientsTest.testInstance)

@@ -17,6 +17,7 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbStorageIdempotency, DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -38,6 +39,7 @@ trait DbContractStoreTest extends AsyncWordSpec with BaseTest with ContractStore
       createDbContractStoreForTesting(
         storage,
         DomainId.tryFromString("domain-contract-store::default"),
+        defaultProtocolVersion,
         domainIndex,
         loggerFactory,
       )
@@ -49,6 +51,7 @@ object DbContractStoreTest {
   def createDbContractStoreForTesting(
       storage: DbStorageIdempotency,
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       domainIndex: Int,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): DbContractStore = {
@@ -58,6 +61,7 @@ object DbContractStoreTest {
         domainId,
         domainIndex,
       ),
+      protocolVersion = protocolVersion,
       maxContractIdSqlInListSize = PositiveNumeric.tryCreate(2),
       cacheConfig = CachingConfigs.testing.contractStore,
       dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,

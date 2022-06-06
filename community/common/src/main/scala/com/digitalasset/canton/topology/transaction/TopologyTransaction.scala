@@ -207,7 +207,7 @@ object RequiredAuth {
 sealed trait TopologyTransaction[+Op <: TopologyChangeOp]
     extends ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
-    with HasProtocolVersionedWrapper[VersionedMessage[TopologyTransaction[TopologyChangeOp]]]
+    with HasProtocolVersionedWrapper[TopologyTransaction[TopologyChangeOp]]
     with HasProtoV0[v0.TopologyTransaction] {
   def op: Op
   def element: TopologyStateElement[TopologyMapping]
@@ -231,7 +231,7 @@ object TopologyTransaction
   override val name: String = "TopologyTransaction"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -285,7 +285,7 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
     op: Op,
     element: TopologyStateUpdateElement,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[Op] {
   override def toProtoV0: v0.TopologyTransaction = {
@@ -325,8 +325,9 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
     import TopologyChangeOp._
 
     (op: AddRemoveChangeOp) match {
-      case Add => TopologyStateUpdate(Remove, element)(representativeProtocolVersion)
-      case Remove => TopologyStateUpdate.createAdd(element.mapping, representativeProtocolVersion)
+      case Add => TopologyStateUpdate(Remove, element)(representativeProtocolVersion.unwrap)
+      case Remove =>
+        TopologyStateUpdate.createAdd(element.mapping, representativeProtocolVersion.unwrap)
     }
   }
 
@@ -397,7 +398,7 @@ object TopologyStateUpdate {
       mapping <- mappingRes
       id <- TopologyElementId.fromProtoPrimitive(protoTopologyTransaction.id)
     } yield new TopologyStateUpdate(op, TopologyStateUpdateElement(id, mapping))(
-      TopologyTransaction.protocolVersionRepresentativeFor(0),
+      TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
   }
@@ -409,13 +410,13 @@ object TopologyStateUpdate {
     TopologyStateUpdate(
       TopologyChangeOp.Add,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )(TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion))
+    )(protocolVersion)
 }
 
 sealed abstract case class DomainGovernanceTransaction(
     element: DomainGovernanceElement
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[TopologyChangeOp.Replace] {
   val op = TopologyChangeOp.Replace
@@ -470,7 +471,7 @@ object DomainGovernanceTransaction {
 
     mapping.map(mapping =>
       new DomainGovernanceTransaction(DomainGovernanceElement(mapping))(
-        TopologyTransaction.protocolVersionRepresentativeFor(0),
+        TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(0)),
         Some(bytes),
       ) {}
     )

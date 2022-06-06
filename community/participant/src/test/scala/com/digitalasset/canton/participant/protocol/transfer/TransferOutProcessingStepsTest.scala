@@ -675,6 +675,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     RootHashMessage(
       request.rootHash,
       originDomain,
+      defaultProtocolVersion,
       TransferOutViewType,
       SerializedRootHashMessagePayload.empty,
     )

@@ -526,7 +526,6 @@ class ConfirmationResponseProcessor(
             requestId,
             verdictWithInformeeCheck,
             informees,
-            protocolVersion,
           )
           SignedProtocolMessage
             .create(result, snapshot, crypto.pureCrypto)

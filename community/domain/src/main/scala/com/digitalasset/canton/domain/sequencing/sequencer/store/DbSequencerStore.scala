@@ -4,11 +4,9 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.data.EitherT
-import cats.instances.vector._
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
-import cats.syntax.reducible._
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -33,6 +31,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
@@ -55,6 +54,7 @@ import scala.util.{Failure, Success}
   */
 class DbSequencerStore(
     storage: DbStorage,
+    protocolVersion: ProtocolVersion,
     maxInClauseSize: PositiveNumeric[Int],
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -145,6 +145,9 @@ class DbSequencerStore(
           .andThen(_.map(arr => NonEmptyUtil.fromUnsafe(SortedSet(arr.toSeq: _*))))
     }
   }
+
+  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
+    TraceContext.getVersionedSetParameter(protocolVersion)
 
   /** Single char that is persisted with the event to indicate the type of event */
   sealed abstract class EventTypeDiscriminator(val value: Char)
@@ -833,7 +836,7 @@ class DbSequencerStore(
 
         case Some((storedTs, storedLatestTopologyClientTimestampO)) =>
           Either.cond(
-            storedTs == ts && storedLatestTopologyClientTimestampO == latestTopologyClientTimestamp,
+            storedTs == ts && (storedLatestTopologyClientTimestampO == latestTopologyClientTimestamp || storedLatestTopologyClientTimestampO.isEmpty),
             (),
             SaveCounterCheckpointError.CounterCheckpointInconsistent(
               storedTs,
@@ -967,7 +970,7 @@ class DbSequencerStore(
         case (memberId, ts) if !disabledMembers.contains(memberId) => ts
       })
       // just take the lowest
-      .map(NonEmpty.from(_).map(_.toNEF.minimum))
+      .map(NonEmpty.from(_).map(_.min1))
   }
 
   override protected[store] def pruneEvents(

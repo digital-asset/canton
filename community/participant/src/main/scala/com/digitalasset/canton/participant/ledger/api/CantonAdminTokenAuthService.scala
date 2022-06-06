@@ -29,8 +29,10 @@ object CantonAdminToken {
   *
   * Therefore, we create on each startup a master token which is only ever shared internally.
   */
-class CantonAdminTokenAuthService(adminToken: CantonAdminToken, parent: Seq[AuthService])
-    extends AuthService {
+class CantonAdminTokenAuthService(
+    adminToken: CantonAdminToken,
+    parent: Option[AuthService],
+) extends AuthService {
   override def decodeMetadata(headers: Metadata): CompletionStage[ClaimSet] = {
     val bearerTokenRegex = "Bearer (.*)".r
     val authToken = for {
@@ -47,15 +49,7 @@ class CantonAdminTokenAuthService(adminToken: CantonAdminToken, parent: Seq[Auth
   private val deny = CompletableFuture.completedFuture(ClaimSet.Unauthenticated: ClaimSet)
 
   private def decodeMetadataParent(headers: Metadata): CompletionStage[ClaimSet] = {
-    // iterate until we find one claim set which is not unauthenticated
-    parent.foldLeft(deny) { case (acc, elem) =>
-      acc.thenCompose { prevClaims =>
-        if (prevClaims != ClaimSet.Unauthenticated)
-          CompletableFuture.completedFuture(prevClaims)
-        else
-          elem.decodeMetadata(headers)
-      }
-    }
+    parent.fold[CompletionStage[ClaimSet]](deny)(elem => elem.decodeMetadata(headers))
   }
 
 }

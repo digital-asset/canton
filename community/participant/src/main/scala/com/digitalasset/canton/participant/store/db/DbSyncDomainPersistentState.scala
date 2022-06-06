@@ -19,11 +19,13 @@ import com.digitalasset.canton.store.db.{
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 class DbSyncDomainPersistentState(
     override val domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
     storage: DbStorage,
     override val pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
@@ -49,14 +51,21 @@ class DbSyncDomainPersistentState(
     new DbContractStore(
       storage,
       domainId,
+      protocolVersion,
       parameters.maxItemsInSqlClause,
       caching.contractStore,
       parameters.dbBatchAggregationConfig,
       processingTimeouts,
       loggerFactory,
     )
-  val transferStore =
-    new DbTransferStore(storage, domainId.item, pureCryptoApi, processingTimeouts, loggerFactory)
+  val transferStore = new DbTransferStore(
+    storage,
+    domainId.item,
+    protocolVersion,
+    pureCryptoApi,
+    processingTimeouts,
+    loggerFactory,
+  )
   val activeContractStore =
     new DbActiveContractStore(
       storage,
@@ -78,6 +87,7 @@ class DbSyncDomainPersistentState(
   val sequencedEventStore = new DbSequencedEventStore(
     storage,
     client,
+    protocolVersion,
     processingTimeouts,
     loggerFactory,
   )
@@ -91,8 +101,14 @@ class DbSyncDomainPersistentState(
     processingTimeouts,
     loggerFactory,
   )
-  val acsCommitmentStore =
-    new DbAcsCommitmentStore(storage, domainId, pureCryptoApi, processingTimeouts, loggerFactory)
+  val acsCommitmentStore = new DbAcsCommitmentStore(
+    storage,
+    domainId,
+    protocolVersion,
+    pureCryptoApi,
+    processingTimeouts,
+    loggerFactory,
+  )
 
   val parameterStore =
     new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)

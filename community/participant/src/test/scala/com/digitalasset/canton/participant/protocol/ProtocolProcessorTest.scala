@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import akka.stream.Materializer
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, TestHash}
@@ -125,6 +126,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val resultSc = 1L
   private val rc = 0L
   private val parameters = DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
+
+  private val protocolMessagePVRepresentative =
+    ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   private type TestInstance =
     ProtocolProcessor[
@@ -283,10 +287,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     randomnessMap = Map.empty,
     encryptedView = encryptedView,
     domainId = DefaultTestIdentities.domainId,
-  )
+  )(protocolMessagePVRepresentative)
   lazy val rootHashMessage = RootHashMessage(
     rootHash,
     DefaultTestIdentities.domainId,
+    defaultProtocolVersion,
     TestViewType,
     SerializedRootHashMessagePayload.empty,
   )
@@ -391,7 +396,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
 
     "leave the request state unchanged when doing a clean replay" in {
       val pendingData = TestPendingRequestData(rc, requestSc, Set.empty)
-      val (sut, persistent, ephemeral) =
+      val (sut, _persistent, ephemeral) =
         testProcessingSteps(
           overrideConstructedPendingRequestData = Some(pendingData),
           startingPoints = ProcessingStartingPoints.tryCreate(
@@ -409,11 +414,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val before = ephemeral.requestJournal.query(rc).value.futureValue
       before shouldEqual None
 
-      val () =
-        sut
-          .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
-          .onShutdown(fail())
-          .futureValue
+      sut
+        .processRequest(requestId.unwrap, rc, requestSc, someRequestBatch)
+        .onShutdown(fail())
+        .futureValue
+        .discard
       val requestState = ephemeral.requestJournal.query(rc).value.futureValue
       requestState shouldEqual None
     }
@@ -445,8 +450,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
 
       // Trigger the timeout for the request
-      val () =
-        ephemeral.requestTracker.tick(requestSc + 1, parameters.decisionTimeFor(requestId.unwrap))
+      ephemeral.requestTracker.tick(requestSc + 1, parameters.decisionTimeFor(requestId.unwrap))
 
       eventually() {
         val state = journal.query(rc).value.futureValue
@@ -465,7 +469,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         randomnessMap = Map.empty,
         encryptedView = encryptedViewWrongRH,
         domainId = DefaultTestIdentities.domainId,
-      )
+      )(protocolMessagePVRepresentative)
       val requestBatchWrongRH = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
@@ -498,7 +502,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         encryptedView =
           EncryptedView(TestViewType)(Encrypted.fromByteString(ByteString.EMPTY).value),
         domainId = DefaultTestIdentities.domainId,
-      )
+      )(protocolMessagePVRepresentative)
       val requestBatchDecryptError = RequestAndRootHashMessage(
         NonEmpty(Seq, OpenEnvelope(viewMessageDecryptError, someRecipients)),
         rootHashMessage,
@@ -529,17 +533,16 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       )
 
       val (sut, persistent, ephemeral) = testProcessingSteps()
-      val () =
-        loggerFactory
-          .assertLogs(
-            sut
-              .processRequest(requestId.unwrap, rc, requestSc, requestBatch)
-              .onShutdown(fail()),
-            _.errorMessage should include(
-              s"Mediator ${DefaultTestIdentities.mediator} declared in views is not the recipient $otherMediatorId of the root hash message"
-            ),
-          )
-          .futureValue
+      loggerFactory
+        .assertLogs(
+          sut
+            .processRequest(requestId.unwrap, rc, requestSc, requestBatch)
+            .onShutdown(fail()),
+          _.errorMessage should include(
+            s"Mediator ${DefaultTestIdentities.mediator} declared in views is not the recipient $otherMediatorId of the root hash message"
+          ),
+        )
+        .futureValue
 
     }
   }

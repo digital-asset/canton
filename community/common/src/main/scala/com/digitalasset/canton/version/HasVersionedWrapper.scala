@@ -170,16 +170,16 @@ trait HasVersionedMessageCompanion[
       )
   }
 
-  implicit def hasVersionedWrapperSetParameter(implicit
+  def getVersionedSetParameter(protocolVersion: ProtocolVersion)(implicit
       setParameterByteArray: SetParameter[Array[Byte]]
   ): SetParameter[ValueClass] = { (value, pp) =>
-    pp >> value.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
+    pp >> value.toByteArray(protocolVersion)
   }
 
-  implicit def hasVersionedWrapperSetParameterO(implicit
+  def getVersionedSetParameterO(protocolVersion: ProtocolVersion)(implicit
       setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
   ): SetParameter[Option[ValueClass]] =
-    (valueO, pp) => pp >> valueO.map(_.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793))
+    (valueO, pp) => pp >> valueO.map(_.toByteArray(protocolVersion))
 }
 
 trait HasMemoizedVersionedMessageCompanion[ValueClass <: HasVersionedWrapper[

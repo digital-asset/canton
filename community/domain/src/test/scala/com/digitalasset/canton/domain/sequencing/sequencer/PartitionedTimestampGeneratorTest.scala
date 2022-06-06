@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.BaseTestWordSpec
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
 
@@ -13,9 +14,9 @@ import java.time
 class PartitionedTimestampGeneratorTest extends BaseTestWordSpec {
   "ensures timestamps are unique for many writers even if time doesn't move" in {
     val clock = new SimClock(loggerFactory = loggerFactory)
-    val generator1 = new PartitionedTimestampGenerator(clock, 0, 3)
-    val generator2 = new PartitionedTimestampGenerator(clock, 1, 3)
-    val generator3 = new PartitionedTimestampGenerator(clock, 2, 3)
+    val generator1 = new PartitionedTimestampGenerator(clock, 0, PositiveInt.tryCreate(3))
+    val generator2 = new PartitionedTimestampGenerator(clock, 1, PositiveInt.tryCreate(3))
+    val generator3 = new PartitionedTimestampGenerator(clock, 2, PositiveInt.tryCreate(3))
 
     val g1ts1 = generator1.generateNext
     val g2ts1 = generator2.generateNext
@@ -40,8 +41,8 @@ class PartitionedTimestampGeneratorTest extends BaseTestWordSpec {
 
   "generating faster than clock is advancing" in {
     val clock = new SimClock(loggerFactory = loggerFactory)
-    val generator1 = new PartitionedTimestampGenerator(clock, 0, 2)
-    val generator2 = new PartitionedTimestampGenerator(clock, 1, 2)
+    val generator1 = new PartitionedTimestampGenerator(clock, 0, PositiveInt.tryCreate(2))
+    val generator2 = new PartitionedTimestampGenerator(clock, 1, PositiveInt.tryCreate(2))
 
     val timestamps = (0 until 10) flatMap { _ =>
       val ts1 = generator1.generateNext

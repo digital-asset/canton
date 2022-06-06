@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerCon
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Identifier, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
+import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 
 import java.time.{Duration, Instant}
@@ -44,6 +45,8 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
   type DomainLocalRef <: LocalDomainReference
   type DomainRemoteRef <: RemoteDomainReference
   type Status <: CantonStatus
+
+  def consoleLogger: Logger = super.noTracingLogger
 
   def health: CantonHealthAdministration[Status]
 

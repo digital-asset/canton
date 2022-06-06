@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayNa
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String256M}
 import com.digitalasset.canton.crypto.{PublicKey, SignatureCheckError}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -17,12 +18,14 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.{v0 => topoV0}
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   SequencedTime,
   SnapshotAuthorizationValidator,
 }
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStoreFactory
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactory
 import com.digitalasset.canton.topology.transaction._
@@ -31,6 +34,7 @@ import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
 final case class StoredTopologyTransaction[+Op <: TopologyChangeOp](
@@ -314,9 +318,13 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: Execution
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]]
 
-  def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+  final def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
-  ): Future[Boolean]
+  ): Future[Boolean] = findStored(transaction).map(_.nonEmpty)
+
+  def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]]
 
   /** Bootstrap a node state from a topology transaction collection */
   def bootstrap(
@@ -707,6 +715,24 @@ object TopologyStore {
       )
       res
     }
+  }
+
+  /** convenience method waiting until the last eligible transaction inserted into the source store has been dispatched successfully to the target domain */
+  def awaitTxObserved(
+      client: DomainTopologyClient,
+      transaction: SignedTopologyTransaction[TopologyChangeOp],
+      target: TopologyStore[DomainStore],
+      timeout: Duration,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): FutureUnlessShutdown[Boolean] = {
+    client.await(
+      // we know that the transaction is stored and effective once we find it in the target
+      // domain store and once the effective time (valid from) is smaller than the client timestamp
+      sp => target.findStored(transaction).map(_.exists(_.validFrom.value < sp.timestamp)),
+      timeout,
+    )
   }
 
 }

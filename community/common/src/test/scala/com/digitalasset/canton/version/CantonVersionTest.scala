@@ -55,6 +55,8 @@ class CantonVersionTest extends AnyWordSpec with BaseTest {
         1,
         Some("SNAPSHOT-rc"),
       )
+      ReleaseVersion.create("2.0.0-SNAPSHOT").value shouldBe ReleaseVersion.v2_0_0_snapshot
+      ReleaseVersion.create("2.1.0-rc1").value shouldBe ReleaseVersion.v2_1_0_rc1
 
       ProtocolVersion.create("1").left.value shouldBe a[String]
       ProtocolVersion.create("1.0.-1").left.value shouldBe a[String]
@@ -62,7 +64,8 @@ class CantonVersionTest extends AnyWordSpec with BaseTest {
       ProtocolVersion.create("foo.bar").left.value shouldBe a[String]
       ProtocolVersion.create("1.1.").left.value shouldBe a[String]
       ProtocolVersion.create("1.1.0snapshot").left.value shouldBe a[String]
-
+      ProtocolVersion.create("1.1.0.rc").left.value shouldBe a[String]
+      ProtocolVersion.create("1.1.0.1").left.value shouldBe a[String]
     }
 
     "should prove that releases are correctly compared" in {

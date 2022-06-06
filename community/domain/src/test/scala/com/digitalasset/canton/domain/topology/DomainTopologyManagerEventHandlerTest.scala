@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
@@ -39,28 +40,30 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
     )(defaultProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
-  )(defaultProtocolVersion, None)
-  private val request =
-    RegisterTopologyTransactionRequest(
+  )(signedTransactionProtocolVersionRepresentative, None)
+  private val request = RegisterTopologyTransactionRequest
+    .create(
       participantId,
       participantId,
       requestId,
       List(signedIdentityTransaction),
       domainId,
     )
+    .headOption
+    .value
   private val domainIdentityServiceResult =
-    RequestResult(
-      signedIdentityTransaction.uniquePath,
-      RegisterTopologyTransactionRequestState.Accepted,
+    RegisterTopologyTransactionResponse.Result(
+      signedIdentityTransaction.uniquePath.toProtoPrimitive,
+      RegisterTopologyTransactionResponse.State.Accepted,
     )
   private val response =
     RegisterTopologyTransactionResponse(
       participantId,
       participantId,
       requestId,
-      List(domainIdentityServiceResult.toProtoV0),
+      List(domainIdentityServiceResult),
       domainId,
-    )
+    )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion))
 
   "DomainIdentityManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
@@ -68,7 +71,9 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
 
       val sut = {
         val newRequest =
-          mock[List[SignedTopologyTransaction[TopologyChangeOp]] => Future[List[RequestResult]]]
+          mock[List[SignedTopologyTransaction[TopologyChangeOp]] => Future[
+            List[RegisterTopologyTransactionResponse.Result]
+          ]]
         when(newRequest.apply(List(signedIdentityTransaction)))
           .thenReturn(Future.successful(List(domainIdentityServiceResult)))
 

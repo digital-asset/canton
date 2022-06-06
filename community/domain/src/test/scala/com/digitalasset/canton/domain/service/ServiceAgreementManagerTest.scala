@@ -27,7 +27,14 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
       tmpf.write("test")
       val hasher = new SymbolicPureCrypto
       val sam =
-        ServiceAgreementManager.create(tmpf, new MemoryStorage, hasher, timeouts, loggerFactory)
+        ServiceAgreementManager.create(
+          tmpf,
+          new MemoryStorage,
+          hasher,
+          defaultProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
       sam.fold(fail(_), testCode(_))
     } finally tmpf.delete()
   }
@@ -64,6 +71,7 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
           File(file),
           new MemoryStorage,
           hasher,
+          defaultProtocolVersion,
           timeouts,
           loggerFactory,
         )

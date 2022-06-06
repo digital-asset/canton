@@ -97,6 +97,8 @@ object CantonTimestamp {
   def ofEpochMilli(milli: Long): CantonTimestamp =
     new CantonTimestamp(LfTimestamp.assertFromLong(micros = milli * 1000))
 
+  def ofEpochMicro(micros: Long): CantonTimestamp = assertFromLong(micros)
+
   /** Get Instant.now (try to use clock.now instead!)
     *
     *  Generally, try to use clock.now except for tests. Clock.now supports sim-clock such that

@@ -13,6 +13,7 @@ import scala.concurrent.Future
 /** Domain service on Grpc
   * @param sequencerConnection Tells remote participants how to connect to the domain sequencer(s).
   */
+@deprecated(since = "protocol version 3.0", message = "Use SequencerConnectService instead")
 class GrpcDomainService(
     agreementManager: Option[ServiceAgreementManager],
     protected val loggerFactory: NamedLoggerFactory,

@@ -164,6 +164,15 @@ trait FlagCloseable extends AutoCloseable {
     EitherT(performUnlessClosingF(name)(etf.value).unwrap.map(_.onShutdown(Left(onClosing))))
   }
 
+  def performUnlessClosingEitherU[E, R](name: String)(
+      etf: => EitherT[Future, E, R]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, E, R] = {
+    EitherT(performUnlessClosingF(name)(etf.value))
+  }
+
   def performUnlessClosingEitherTF[E, R](name: String, onClosing: => E)(
       etf: => EitherT[Future, E, Future[R]]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): EitherT[Future, E, Future[R]] = {

@@ -6,11 +6,9 @@ package com.digitalasset.canton.participant.domain
 import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverse._
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.admin.v0
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
@@ -51,24 +49,14 @@ case class DomainConnectionConfig(
   def addConnection(connection: String, additionalConnections: String*): DomainConnectionConfig =
     addConnection(new URI(connection), additionalConnections.map(new URI(_)): _*)
   def addConnection(connection: URI, additionalConnections: URI*): DomainConnectionConfig =
-    sequencerConnection match {
-      case GrpcSequencerConnection(endpoints, transportSecurity, customTrustCertificates) =>
-        val (newEndpoints, _) = Endpoint
-          .fromUris(NonEmpty(Seq, connection, additionalConnections: _*)) match {
-          case Left(err) =>
-            throw new IllegalArgumentException(s"invalid connection $connection : $err")
-          case Right(es) => es
-        }
-        copy(
-          sequencerConnection = GrpcSequencerConnection(
-            endpoints ++ newEndpoints,
-            transportSecurity,
-            customTrustCertificates,
-          )
+    copy(sequencerConnection =
+      sequencerConnection
+        .addConnection(connection, additionalConnections: _*)
+        .fold(
+          err => throw new IllegalArgumentException(s"invalid connection $connection : $err"),
+          identity[SequencerConnection],
         )
-      case _: HttpSequencerConnection =>
-        sys.error("Http sequencer does not support multiple connections")
-    }
+    )
 
   def certificates: Option[ByteString] = sequencerConnection match {
     case grpcConnection: GrpcSequencerConnection =>

@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 
 import scala.annotation.nowarn
 import scala.collection.mutable
@@ -192,7 +192,8 @@ class DomainTopologyManager(
   }
 
   // Representative for the class of protocol versions of SignedTopologyTransaction
-  private val signedTopologyTransactionRepresentativeProtocolVersion: ProtocolVersion =
+  private val signedTopologyTransactionRepresentativeProtocolVersion
+      : RepresentativeProtocolVersion =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
   private def checkCorrectProtocolVersion(
@@ -204,7 +205,7 @@ class DomainTopologyManager(
       (),
       DomainTopologyManagerError.WrongProtocolVersion.Failure(
         domainProtocolVersion = protocolVersion,
-        transactionProtocolVersion = transaction.representativeProtocolVersion,
+        transactionProtocolVersion = transaction.representativeProtocolVersion.unwrap,
       ),
     )
 

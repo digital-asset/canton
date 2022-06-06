@@ -38,7 +38,6 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
@@ -184,8 +183,10 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "fail to add if the signature is invalid" in {
         val validator = mk()
         import Factory._
-        val invalid =
-          ns1k2_k1.copy(signature = ns1k1_k1.signature)(ProtocolVersion.latestForTest, None)
+        val invalid = ns1k2_k1.copy(signature = ns1k1_k1.signature)(
+          signedTransactionProtocolVersionRepresentative,
+          None,
+        )
         for {
           (_, validatedTopologyTransactions) <- validator.validateAndUpdateHeadAuthState(
             ts(0),

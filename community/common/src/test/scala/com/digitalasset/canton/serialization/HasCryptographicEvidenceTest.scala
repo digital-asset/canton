@@ -4,7 +4,7 @@
 package com.digitalasset.canton.serialization
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.RepresentativeProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -85,7 +85,7 @@ class MemoizedEvidenceTest extends AnyWordSpec with BaseTest with HasCryptograph
 }
 
 sealed case class MemoizedEvidenceSUT(b: Byte)(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence {
 
@@ -103,13 +103,13 @@ object MemoizedEvidenceSUT {
     throw new UnsupportedOperationException("Use the public apply method instead")
 
   def apply(b: Byte): MemoizedEvidenceSUT =
-    new MemoizedEvidenceSUT(b)(ProtocolVersion.latestForTest, None)
+    new MemoizedEvidenceSUT(b)(RepresentativeProtocolVersion.v2, None)
 
   def fromByteString(bytes: ByteString): MemoizedEvidenceSUT = {
     if (bytes.size() != 2)
       throw new IllegalArgumentException(s"Only two bytes expected, got: ${bytes.toString}")
 
-    new MemoizedEvidenceSUT(bytes.byteAt(1))(ProtocolVersion.latestForTest, Some(bytes))
+    new MemoizedEvidenceSUT(bytes.byteAt(1))(RepresentativeProtocolVersion.v2, Some(bytes))
   }
 }
 

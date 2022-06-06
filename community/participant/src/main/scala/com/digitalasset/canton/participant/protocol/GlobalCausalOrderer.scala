@@ -21,9 +21,6 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-/** TODO(i5352):
-  * - Consider whether we need better performance here, or if the current implementation is sufficient
-  */
 class GlobalCausalOrderer(
     val participantId: ParticipantId,
     connectedDomains: DomainId => Boolean,

@@ -37,34 +37,17 @@ import com.digitalasset.canton.topology.store.{
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.{
+  Result => RequestResult
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
-import com.digitalasset.canton.version.HasProtoV0
 
 import scala.concurrent.{ExecutionContext, Future}
-
-sealed trait RegisterTopologyTransactionRequestState {
-  def errorString: Option[String] = None
-}
-
-object RegisterTopologyTransactionRequestState {
-
-  object Requested extends RegisterTopologyTransactionRequestState
-  case class Failed(error: String) extends RegisterTopologyTransactionRequestState {
-    override def errorString: Option[String] = Some(error)
-  }
-  object Rejected extends RegisterTopologyTransactionRequestState
-  object Accepted extends RegisterTopologyTransactionRequestState
-  object Duplicate extends RegisterTopologyTransactionRequestState
-
-  /** Unnecessary removes are marked as obsolete */
-  object Obsolete extends RegisterTopologyTransactionRequestState
-
-}
 
 /** Policy that determines whether/how the domain topology manager approves topology transactions. */
 sealed trait RequestProcessingStrategyConfig
@@ -91,13 +74,13 @@ trait RequestProcessingStrategy {
 
   def decide(transactions: List[SignedTopologyTransaction[TopologyChangeOp]])(implicit
       traceContext: TraceContext
-  ): Future[List[RegisterTopologyTransactionRequestState]]
+  ): Future[List[RegisterTopologyTransactionResponse.State]]
 
 }
 
 object RequestProcessingStrategy {
 
-  import RegisterTopologyTransactionRequestState._
+  import RegisterTopologyTransactionResponse.State._
 
   class AutoApproveStrategy(
       manager: DomainTopologyManager,
@@ -139,11 +122,11 @@ object RequestProcessingStrategy {
 
     override def decide(transactions: List[SignedTopologyTransaction[TopologyChangeOp]])(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionRequestState]] = {
+    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
 
       def toResult[T](
           eitherT: EitherT[Future, DomainTopologyManagerError, T]
-      ): Future[RegisterTopologyTransactionRequestState] =
+      ): Future[RegisterTopologyTransactionResponse.State] =
         eitherT
           .leftMap {
             case DomainTopologyManagerError.TopologyManagerParentError(
@@ -256,7 +239,7 @@ object RequestProcessingStrategy {
   class AutoRejectStrategy extends RequestProcessingStrategy {
     override def decide(transactions: List[SignedTopologyTransaction[TopologyChangeOp]])(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionRequestState]] =
+    ): Future[List[RegisterTopologyTransactionResponse.State]] =
       Future.successful(transactions.map(_ => Rejected))
   }
 
@@ -271,10 +254,10 @@ object RequestProcessingStrategy {
 
     override def decide(transactions: List[SignedTopologyTransaction[TopologyChangeOp]])(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionRequestState]] = {
+    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
       def process(
           transaction: SignedTopologyTransaction[TopologyChangeOp]
-      ): Future[RegisterTopologyTransactionRequestState] =
+      ): Future[RegisterTopologyTransactionResponse.State] =
         for {
           alreadyInStore <- store.exists(transaction)
           _ <-
@@ -294,29 +277,6 @@ object RequestProcessingStrategy {
   }
 }
 
-case class RequestResult(uniquePath: UniquePath, state: RegisterTopologyTransactionRequestState)
-    extends HasProtoV0[v0.RegisterTopologyTransactionResponse.Result] {
-  import RegisterTopologyTransactionRequestState._
-
-  override def toProtoV0: v0.RegisterTopologyTransactionResponse.Result = {
-    import v0.RegisterTopologyTransactionResponse.Result.State
-    def reply(state: State, errString: String) =
-      new v0.RegisterTopologyTransactionResponse.Result(
-        uniquePath = uniquePath.toProtoPrimitive,
-        state = state,
-        errorMessage = errString,
-      )
-    state match {
-      case Requested => reply(State.REQUESTED, "")
-      case Failed(err) => reply(State.FAILED, err)
-      case Rejected => reply(State.REJECTED, "")
-      case Accepted => reply(State.ACCEPTED, "")
-      case Duplicate => reply(State.DUPLICATE, "")
-      case Obsolete => reply(State.OBSOLETE, "")
-    }
-  }
-}
-
 private[domain] class DomainTopologyManagerRequestService(
     strategy: RequestProcessingStrategy,
     store: TopologyStore[TopologyStoreId],
@@ -325,7 +285,7 @@ private[domain] class DomainTopologyManagerRequestService(
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
-  import RegisterTopologyTransactionRequestState._
+  import RegisterTopologyTransactionResponse.State._
 
   def newRequest(
       res: List[SignedTopologyTransaction[TopologyChangeOp]]
@@ -342,8 +302,9 @@ private[domain] class DomainTopologyManagerRequestService(
     } yield {
       val (rest, result) = preCheckedTx.foldLeft((outcome, List.empty[RequestResult])) {
         case ((result :: rest, acc), (tx, Accepted)) =>
-          (rest, acc :+ RequestResult(tx.uniquePath, result))
-        case ((rest, acc), (tx, failed)) => (rest, acc :+ RequestResult(tx.uniquePath, failed))
+          (rest, acc :+ RequestResult(tx.uniquePath.toProtoPrimitive, result))
+        case ((rest, acc), (tx, failed)) =>
+          (rest, acc :+ RequestResult(tx.uniquePath.toProtoPrimitive, failed))
       }
       ErrorUtil.requireArgument(rest.isEmpty, "rest should be empty!")
       ErrorUtil.requireArgument(
@@ -356,7 +317,7 @@ private[domain] class DomainTopologyManagerRequestService(
 
   private def preCheck(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
-  )(implicit traceContext: TraceContext): Future[RegisterTopologyTransactionRequestState] = {
+  )(implicit traceContext: TraceContext): Future[RegisterTopologyTransactionResponse.State] = {
     (for {
       // check validity of signature
       _ <- EitherT
@@ -364,7 +325,7 @@ private[domain] class DomainTopologyManagerRequestService(
         .leftMap(err => Failed(s"Signature check failed with ${err}"))
       // check if transaction isn't already registered. note that this is checked again in the idm, so we just fail fast here
       _ <- EitherT(store.exists(transaction).map { alreadyExists =>
-        Either.cond[RegisterTopologyTransactionRequestState, Unit](!alreadyExists, (), Duplicate)
+        Either.cond[RegisterTopologyTransactionResponse.State, Unit](!alreadyExists, (), Duplicate)
       })
     } yield Accepted).merge
   }

@@ -38,7 +38,7 @@ import scala.collection.immutable
   * [[TestEnvironment]] also includes [[CommonTestAliases]] which will give you references to domains and participants commonly used in our tests.
   * If your test attempts to use a participant or domain which is not configured in your environment it will immediately fail.
   *
-  * By default sbt will attempt to run many tests concurrently. This can be problematic for starting many integration tests starting
+  * By default sbt will attempt to run many tests concurrently. This can be problematic as starting
   * many canton environments concurrently is very resource intensive. We use [[ConcurrentEnvironmentLimiter]] to limit
   * how many environments are running concurrently. By default this limit is 2 but can be modified by setting the system property [[ConcurrentEnvironmentLimiter.IntegrationTestConcurrencyLimit]].
   *

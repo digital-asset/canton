@@ -25,6 +25,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
@@ -86,7 +87,7 @@ object DatabaseSequencer {
 class DatabaseSequencer(
     writerStorageFactory: SequencerWriterStoreFactory,
     config: DatabaseSequencerConfig,
-    totalNodeCount: Int,
+    totalNodeCount: PositiveInt,
     eventSignaller: EventSignaller,
     keepAliveInterval: Option[NonNegativeFiniteDuration],
     onlineSequencerCheckConfig: OnlineSequencerCheckConfig,
@@ -105,6 +106,7 @@ class DatabaseSequencer(
   private val store: SequencerStore =
     SequencerStore(
       storage,
+      protocolVersion,
       config.writer.maxSqlInListSize,
       timeouts,
       loggerFactory,
@@ -176,6 +178,7 @@ class DatabaseSequencer(
       eventSignaller,
       topologyClientMember,
       futureSupervisor,
+      protocolVersion,
       timeouts,
       loggerFactory,
     )

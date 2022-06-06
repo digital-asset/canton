@@ -17,7 +17,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.google.protobuf.ByteString
@@ -235,10 +237,10 @@ sealed abstract case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
-    with HasProtocolVersionedWrapper[VersionedMessage[LegalIdentityClaim]]
+    with HasProtocolVersionedWrapper[LegalIdentityClaim]
     with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
@@ -262,7 +264,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
   override val name: String = "LegalIdentityClaim"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.LegalIdentityClaim)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -286,7 +288,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
       uid <- UniqueIdentifier.fromProtoPrimitive(claimP.uniqueIdentifier, "uniqueIdentifier")
       evidence <- LegalIdentityClaimEvidence.fromProtoOneOf(claimP.evidence)
     } yield new LegalIdentityClaim(uid, evidence)(
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
 }

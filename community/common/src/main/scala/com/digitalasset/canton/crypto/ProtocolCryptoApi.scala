@@ -12,12 +12,9 @@ object ProtocolCryptoApi {
       keyMaterial: SecureRandomness,
       outputBytes: Int,
       info: HkdfInfo,
-  ): Either[HkdfError, SecureRandomness] =
-    protocolVersion match {
-      case ProtocolVersion.unstable_development =>
-        hkdfOps.computeHkdf(keyMaterial.unwrap, outputBytes, info)
-      case _ =>
-        hkdfOps.hkdfExpand(keyMaterial, outputBytes, info)
-    }
-
+  ): Either[HkdfError, SecureRandomness] = protocolVersion match {
+    case pv if pv > ProtocolVersion.v2_0_0 =>
+      hkdfOps.computeHkdf(keyMaterial.unwrap, outputBytes, info)
+    case _ => hkdfOps.hkdfExpand(keyMaterial, outputBytes, info)
+  }
 }

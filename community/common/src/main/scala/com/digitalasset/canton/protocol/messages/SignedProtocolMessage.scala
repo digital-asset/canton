@@ -18,9 +18,11 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtoV0,
-  HasVersionedMessageWithContextCompanion,
-  HasVersionedWrapper,
+  HasProtocolVersionedWithContextCompanion,
+  HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 
@@ -33,13 +35,16 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.SignedProtocolMessage]
-    with HasVersionedWrapper[VersionedMessage[SignedProtocolMessage[M]]] {
+    with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
 
   override def domainId: DomainId = message.domainId
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[SignedProtocolMessage[M]] = VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def toProtoVersioned
+      : VersionedMessage[SignedProtocolMessage[SignedProtocolMessageContent]] =
+    SignedProtocolMessage.toProtoVersioned(this)
+
+  override def representativeProtocolVersion: RepresentativeProtocolVersion =
+    ProtocolMessage.protocolVersionRepresentativeFor(message.representativeProtocolVersion.unwrap)
 
   override protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = message.toProtoSomeSignedProtocolMessage
@@ -49,10 +54,10 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     )
   }
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(toProtoV0))
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -70,13 +75,17 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 }
 
 object SignedProtocolMessage
-    extends HasVersionedMessageWithContextCompanion[SignedProtocolMessage[_], HashOps] {
+    extends HasProtocolVersionedWithContextCompanion[SignedProtocolMessage[
+      SignedProtocolMessageContent
+    ], HashOps] {
   override val name: String = "SignedProtocolMessage"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SignedProtocolMessage) { (hashOps, proto) =>
-      fromProtoV0(hashOps)(proto)
-    }
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.SignedProtocolMessage)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   def create[M <: SignedProtocolMessageContent](
@@ -103,9 +112,10 @@ object SignedProtocolMessage
         identity,
       )
 
-  def fromProtoV0(hashOps: HashOps)(
-      signedMessageP: v0.SignedProtocolMessage
-  ): ParsingResult[SignedProtocolMessage[_]] = {
+  def fromProtoV0(
+      hashOps: HashOps,
+      signedMessageP: v0.SignedProtocolMessage,
+  ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
     import v0.SignedProtocolMessage.{SomeSignedProtocolMessage => Sm}
     val v0.SignedProtocolMessage(maybeSignatureP, messageBytes) = signedMessageP
     for {

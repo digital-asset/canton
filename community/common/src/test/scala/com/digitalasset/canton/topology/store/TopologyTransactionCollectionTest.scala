@@ -18,6 +18,8 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.concurrent.Future
+
 class TopologyTransactionCollectionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   private lazy val uid1 = UniqueIdentifier.tryFromProtoPrimitive("da::tluafed")
@@ -131,6 +133,16 @@ class TopologyTransactionCollectionTest extends AnyWordSpec with BaseTest with H
       Seq(addSignedTx, removeSignedTx, replaceSignedTx1, replaceSignedTx2)
     )
 
+    val isRemovePredicate =
+      (tx: SignedTopologyTransaction[TopologyChangeOp]) =>
+        tx.operation match {
+          case _: Remove => true
+          case _ => false
+        }
+
+    val isRemovePredicateF =
+      (tx: SignedTopologyTransaction[TopologyChangeOp]) => Future.successful(isRemovePredicate(tx))
+
     "split simple collections" in {
       val expectedResult = (
         SignedTopologyTransactions(Seq(addSignedTx)),
@@ -139,6 +151,13 @@ class TopologyTransactionCollectionTest extends AnyWordSpec with BaseTest with H
       )
 
       simpleTransactionCollection.split shouldBe expectedResult
+    }
+
+    "filter simple collections" in {
+      val expectedResult = SignedTopologyTransactions(Seq(removeSignedTx))
+
+      simpleTransactionCollection.filter(isRemovePredicate) shouldBe expectedResult
+      simpleTransactionCollection.filter(isRemovePredicateF).futureValue shouldBe expectedResult
     }
   }
 

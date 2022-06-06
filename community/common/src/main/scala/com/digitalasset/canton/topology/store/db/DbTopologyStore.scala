@@ -541,9 +541,10 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       sql"AND valid_until is NULL AND transaction_type = ${mapping.dbType}" ++ query,
     )
       .map { x =>
-        x.positiveTransactions.combine.result
-          .map(_.transaction)
-          .filter(_.transaction.element.mapping == mapping)
+        x.positiveTransactions.combine.result.collect {
+          case storedTx if storedTx.transaction.transaction.element.mapping == mapping =>
+            storedTx.transaction
+        }
       }
   }
 
@@ -651,16 +652,18 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     queryForTransactions(storeId, query4)
   }
 
-  override def exists(
+  override def findStored(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
-  )(implicit traceContext: TraceContext): Future[Boolean] =
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
     queryForTransactions(
       transactionStoreIdName,
       sql"AND" ++ pathQuery(
         transaction.uniquePath
       ) ++ sql" AND operation = ${transaction.operation}",
     )
-      .map(_.result.nonEmpty)
+      .map(_.result.headOption)
 
   /** query interface used by [[com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot]] */
   override def findPositiveTransactions(

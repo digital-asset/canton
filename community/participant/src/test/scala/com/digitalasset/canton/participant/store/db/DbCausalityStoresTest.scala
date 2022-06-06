@@ -5,14 +5,17 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.participant.GlobalOffset
+import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent}
 import com.digitalasset.canton.participant.store.{CausalityStoresTest, EventLogId}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 import slick.dbio.DBIOAction
+import slick.jdbc.SetParameter
 
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
 trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
@@ -53,7 +56,11 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
     val theStorage = storage
     import theStorage.api._
     import theStorage.converters._
-    import ParticipantStorageImplicits._
+
+    @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
+      TraceContext.getVersionedSetParameter(defaultProtocolVersion)
+    @nowarn("cat=unused") implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
+      ParticipantStorageImplicits.setLedgerSyncEvent(defaultProtocolVersion)
 
     val queries = events.flatMap {
       case (

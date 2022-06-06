@@ -44,7 +44,7 @@ object SequencerInitialization {
     for {
       // verify the server version first
       _ <- SequencerHandshake.handshake(
-        ProtocolVersion.supportedProtocolsDomain(devVersionSupport),
+        ProtocolVersion.supportedProtocolsDomain(includeDevelopmentVersions = devVersionSupport),
         minimumProtocolVersion = None,
         sequencerAdminClient,
         config,

@@ -415,7 +415,7 @@ abstract class TopologyManager[E <: CantonError](
             )
           )
           .toList
-          .traverse(x => build(x.transaction.reverse, None, x.representativeProtocolVersion))
+          .traverse(x => build(x.transaction.reverse, None, x.representativeProtocolVersion.unwrap))
       } yield reverse
     }
 

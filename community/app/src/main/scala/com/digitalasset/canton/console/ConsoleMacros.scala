@@ -384,7 +384,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           logger.warn(
             "Starting `daml json-api` which must have been installed separately from canton."
           )
-          backgroundRunner.add(name, cmd, name, manualStart = false)
+          backgroundRunner.tryAdd(name, cmd, name, manualStart = false)
           ensureWeClose()
         }
         BackgroundRunnerHelpers.waitUntilUp(Port.tryCreate(httpPort), 30)
@@ -399,8 +399,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           admin: Boolean,
           applicationId: String,
       ): Map[PartyId, String] = {
-        val secret = participant.config.ledgerApi.authServices
-          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret) =>
+        val secret = participant.config.ledgerApi.authService
+          .collect { case AuthServiceConfig.UnsafeJwtHmac256(secret) =>
             secret.unwrap
           }
           .getOrElse("notasecret")

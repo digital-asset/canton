@@ -11,14 +11,6 @@ import com.digitalasset.canton.crypto.{Crypto, DomainSyncCryptoClient}
 import com.digitalasset.canton.domain.Domain
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.metrics.DomainMetrics
-import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
-import com.digitalasset.canton.topology.{
-  DomainId,
-  DomainTopologyManagerId,
-  MediatorId,
-  Member,
-  SequencerId,
-}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
@@ -30,6 +22,8 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.store.{SendTrackerStore, SequencedEventStore}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -123,7 +117,9 @@ class DomainNodeSequencerClientFactory(
       cantonParameterConfig.loggingConfig,
       clientLoggerFactory,
       supportedProtocolVersions =
-        ProtocolVersion.supportedProtocolsDomain(cantonParameterConfig.devVersionSupport),
+        ProtocolVersion.supportedProtocolsDomain(includeDevelopmentVersions =
+          cantonParameterConfig.devVersionSupport
+        ),
       minimumProtocolVersion = None,
     )
   }

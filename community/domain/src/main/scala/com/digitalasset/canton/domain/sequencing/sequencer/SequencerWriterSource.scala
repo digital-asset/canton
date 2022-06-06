@@ -13,7 +13,7 @@ import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
-import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String256M}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
@@ -148,7 +148,7 @@ class SequencerWriterQueues private[sequencer] (
 object SequencerWriterSource {
   def apply(
       writerConfig: SequencerWriterConfig,
-      totalNodeCount: Int,
+      totalNodeCount: PositiveInt,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       cryptoApi: DomainSyncCryptoClient,
       store: SequencerWriterStore,

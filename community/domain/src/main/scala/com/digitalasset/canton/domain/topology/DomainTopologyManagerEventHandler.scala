@@ -41,7 +41,9 @@ import scala.util.control.NonFatal
   */
 class DomainTopologyManagerEventHandler(
     store: RegisterTopologyTransactionResponseStore,
-    newRequest: List[SignedTopologyTransaction[TopologyChangeOp]] => Future[List[RequestResult]],
+    newRequest: List[SignedTopologyTransaction[TopologyChangeOp]] => Future[
+      List[RegisterTopologyTransactionResponse.Result]
+    ],
     sequencerSendResponse: (
         OpenEnvelope[RegisterTopologyTransactionResponse],
         SendCallback,
@@ -107,9 +109,9 @@ class DomainTopologyManagerEventHandler(
         request.requestedBy,
         request.participant,
         request.requestId,
-        response.map(_.toProtoV0),
+        response,
         request.domainId,
-      )
+      )(request.representativeProtocolVersion)
       _ <- store.savePendingResponse(pendingResponse)
       result <- sendResponse(pendingResponse)
     } yield result

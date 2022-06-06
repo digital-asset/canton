@@ -16,6 +16,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.{DomainId, DomainMember}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.empty.Empty
 import io.grpc.{Status, StatusException}
 
@@ -23,6 +24,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcSequencerTopologyBootstrapService(
     id: DomainId,
+    protocolVersion: ProtocolVersion,
     syncCrypto: DomainSyncCryptoClient,
     client: SequencerClient,
     isInitialized: () => Future[Boolean],
@@ -68,6 +70,7 @@ class GrpcSequencerTopologyBootstrapService(
                   TopologyManagementInitialization
                     .sequenceInitialTopology(
                       id,
+                      protocolVersion,
                       client,
                       topologySnapshot.result.map(_.transaction),
                       DomainMember.listAll(id),

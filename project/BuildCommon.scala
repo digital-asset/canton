@@ -489,6 +489,7 @@ object BuildCommon {
           better_files,
           cats,
           cats_law % Test,
+          chimney,
           circe_core,
           circe_generic,
           circe_generic_extras,
@@ -620,6 +621,7 @@ object BuildCommon {
           akka_stream,
           akka_stream_testkit % Test,
           cats,
+          chimney,
           scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
         ),
         Compile / PB.targets := Seq(

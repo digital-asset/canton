@@ -8,7 +8,6 @@ import cats.implicits._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{Fingerprint, SigningPublicKey}
-import com.digitalasset.canton.domain.topology.RegisterTopologyTransactionRequestState._
 import com.digitalasset.canton.domain.topology.RequestProcessingStrategy.{
   AutoApproveStrategy,
   AutoRejectStrategy,
@@ -31,6 +30,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State._
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration._
@@ -148,7 +148,10 @@ class DomainTopologyManagerRequestServiceTest extends AsyncWordSpec with BaseTes
     "reject invalid signatures" in {
       val (_manager, _store, service) = generate()
       val p2SigKey = TestingIdentityFactory(loggerFactory).newSigningPublicKey(participant2)
-      val faulty = p1Mapping.copy(key = p2SigKey)(ProtocolVersion.latestForTest, None)
+      val faulty = p1Mapping.copy(key = p2SigKey)(
+        signedTransactionProtocolVersionRepresentative,
+        None,
+      )
       for {
         res <- service.newRequest(List(faulty))
       } yield {

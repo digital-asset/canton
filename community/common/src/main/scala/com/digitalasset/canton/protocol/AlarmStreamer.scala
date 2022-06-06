@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -18,4 +19,6 @@ trait AlarmStreamer {
   def alarm(throwable: Throwable)(implicit traceContext: TraceContext): Future[Unit]
 
   def alarm(message: String)(implicit traceContext: TraceContext): Future[Unit]
+
+  def alarm(cantonError: CantonError): Future[Unit]
 }

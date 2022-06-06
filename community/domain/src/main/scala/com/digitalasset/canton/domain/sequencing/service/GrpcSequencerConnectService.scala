@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.v0.{ServiceAgreement => protoServiceAgreement}
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -32,7 +33,7 @@ class GrpcSequencerConnectService(
     with GrpcHandshakeService
     with NamedLogging {
 
-  protected val serverVersion = staticDomainParameters.protocolVersion
+  protected val serverVersion: ProtocolVersion = staticDomainParameters.protocolVersion
 
   def getDomainId(request: GetDomainId.Request): Future[GetDomainId.Response] =
     Future.successful(GetDomainId.Response(domainId.toProtoPrimitive))

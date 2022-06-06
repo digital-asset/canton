@@ -342,6 +342,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
+        defaultProtocolVersion,
         mediatorRequest.viewType,
         SerializedRootHashMessagePayload.empty,
       )
@@ -464,6 +465,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         RootHashMessage(
           correctRootHash,
           domainId,
+          defaultProtocolVersion,
           correctViewType,
           SerializedRootHashMessagePayload.empty,
         )
@@ -512,7 +514,13 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val wrongViewType = TransferInViewType
       require(correctViewType != wrongViewType)
       val correctRootHashMessage =
-        RootHashMessage(rootHash, domainId, correctViewType, SerializedRootHashMessagePayload.empty)
+        RootHashMessage(
+          rootHash,
+          domainId,
+          defaultProtocolVersion,
+          correctViewType,
+          SerializedRootHashMessagePayload.empty,
+        )
       val wrongRootHashMessage = correctRootHashMessage.copy(rootHash = wrongRootHash)
       val wrongViewTypeRHM = correctRootHashMessage.copy(viewType = wrongViewType)
       val otherMember = DomainTopologyManagerId(domainId)
@@ -678,6 +686,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
+        defaultProtocolVersion,
         mediatorRequest.viewType,
         SerializedRootHashMessagePayload.empty,
       )
@@ -708,6 +717,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,
+        defaultProtocolVersion,
         ViewType.TransactionViewType,
         SerializedRootHashMessagePayload.empty,
       )
@@ -919,6 +929,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,
+        defaultProtocolVersion,
         ViewType.TransactionViewType,
         SerializedRootHashMessagePayload.empty,
       )

@@ -5,12 +5,17 @@ package com.digitalasset.canton.sequencing
 
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  Deliver,
+  MessageId,
+  SequencedEvent,
+  SignedContent,
+}
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 object SequencerTestUtils extends BaseTest {
@@ -36,9 +41,9 @@ object SequencerTestUtils extends BaseTest {
   ): Deliver[Nothing] = {
     val batch = Batch(List.empty)
     new Deliver[Nothing](counter, timestamp, domainId, messageId, batch)(
-      ProtocolVersion.latestForTest,
+      SequencedEvent.protocolVersionRepresentative,
       deserializedFrom,
-    )
+    ) {}
   }
 
 }

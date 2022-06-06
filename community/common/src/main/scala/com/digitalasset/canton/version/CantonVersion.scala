@@ -7,6 +7,7 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
 import com.daml.error.ErrorCode
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.buildinfo.BuildInfo
@@ -16,12 +17,8 @@ import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.ProtocolVersion.{
-  InvalidProtocolVersion,
-  UnsupportedVersion,
-  supportedProtocolsDomain,
-  supportedProtocolsParticipant,
-}
+import com.digitalasset.canton.version.CantonVersion.releaseVersionToProtocolVersions
+import com.digitalasset.canton.version.ProtocolVersion.{InvalidProtocolVersion, UnsupportedVersion}
 import com.google.common.annotations.VisibleForTesting
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -37,10 +34,13 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   def patch: Int
   def optSuffix: Option[String]
   def isSnapshot: Boolean = optSuffix.contains("SNAPSHOT")
+  def isStable: Boolean = optSuffix.isEmpty
   def fullVersion: String = s"$major.$minor.$patch${optSuffix.map("-" + _).getOrElse("")}"
 
   override def pretty: Pretty[CantonVersion] = prettyOfString(_ => fullVersion)
   def toProtoPrimitive: String = fullVersion
+
+  def raw: (Int, Int, Int, Option[String]) = (major, minor, patch, optSuffix)
 
   /* Compared according to the SemVer specification: https://semver.org/#spec-item-11
   (implementation was only tested when specifying a pre-release suffix, see `CantonVersionTest`, but not e.g. with a metadata suffix). */
@@ -60,7 +60,7 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
     }
   }
 
-  def suffixComparisonInternal(suffixes1: Seq[String], suffixes2: Seq[String]): Int = {
+  private def suffixComparisonInternal(suffixes1: Seq[String], suffixes2: Seq[String]): Int = {
     // partially adapted (and generalised) from gist.github.com/huntc/35f6cec0a47ce7ef62c0 (Apache 2 license)
     type PreRelease = Either[String, Int]
     def toPreRelease(s: String): PreRelease = Try(Right(s.toInt)).getOrElse(Left(s))
@@ -105,47 +105,23 @@ object CantonVersion {
   import ProtocolVersion._
   // At some point after Daml 3.0, this Map may diverge for domain and participant because we have
   // different compatibility guarantees for participants and domains and we will need to add separate maps for each
-  private val releaseVersionToProtocolVersions: Map[ReleaseVersion, List[ProtocolVersion]] = Map(
+  // don't make `releaseVersionToProtocolVersions` private - it's used in `console-reference.canton`
+  val releaseVersionToProtocolVersions: Map[ReleaseVersion, NonEmpty[List[ProtocolVersion]]] = Map(
     ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_0_0 -> List(v2_0_0),
     ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_1_0 -> List(v2_0_0),
     ReleaseVersion.v2_1_0_rc1 -> List(v2_0_0),
     ReleaseVersion.v2_1_1_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_1_1 -> List(v2_0_0),
     ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
+    ReleaseVersion.v2_2_0 -> List(v2_0_0),
     ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
+    ReleaseVersion.v2_2_0 -> List(v2_0_0),
     ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_0 -> List(v2_0_0, v3_0_0),
-  )
-
-  private[version] def getSupportedProtocolsParticipantForRelease(
-      release: ReleaseVersion,
-      includeDevelopmentVersions: Boolean,
-  ): List[ProtocolVersion] = {
-    releaseVersionToProtocolVersions.getOrElse(
-      release,
-      sys.error(
-        s"Please add the supported protocol versions of a participant of release version $release to `supportedProtocolsParticipant` in `CantonVersion.scala`."
-      ),
-    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
-  }
-
-  private def getDevelopmentVersions(includeDevelopmentVersions: Boolean): List[ProtocolVersion] =
-    if (includeDevelopmentVersions)
-      List(ProtocolVersion.unstable_development)
-    else List.empty
-
-  private[version] def getSupportedProtocolsDomainForRelease(
-      release: ReleaseVersion,
-      includeDevelopmentVersions: Boolean,
-  ): List[ProtocolVersion] = {
-    releaseVersionToProtocolVersions.getOrElse(
-      release,
-      sys.error(
-        s"Please add the supported protocol versions of domain nodes of release version $release to `supportedProtocolsDomain` in `CantonVersion.scala`."
-      ),
-    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
-  }
+    ReleaseVersion.v2_3_1_snapshot -> List(v2_0_0, v3_0_0),
+  ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
 
 }
 
@@ -153,12 +129,14 @@ sealed trait CompanionTrait {
   protected def createInternal(
       rawVersion: String
   ): Either[String, (Int, Int, Int, Option[String])] = {
+    val dev = ProtocolVersion.unstable_development.fullVersion
+
     // `?:` removes the capturing group, so we get a cleaner pattern-match statement
     val regex = raw"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,4})(?:-(.*))?".r
     rawVersion match {
       case regex(rawMajor, rawMinor, rawPatch, suffix) =>
         val parsedDigits = List(rawMajor, rawMinor, rawPatch).traverse(raw =>
-          Try(raw.toInt).toOption.toRight(s"Couldn't parse number $raw")
+          raw.toIntOption.toRight(s"Couldn't parse number $raw")
         )
         parsedDigits.flatMap {
           case List(major, minor, patch) =>
@@ -166,6 +144,10 @@ sealed trait CompanionTrait {
             Right((major, minor, patch, Option(suffix)))
           case _ => Left(s"Unexpected error while parsing version $rawVersion")
         }
+
+      // Since dev uses Int.MaxValue, it does not satisfy the regex above
+      case `dev` => Right(ProtocolVersion.unstable_development.raw)
+
       case _ =>
         Left(
           s"Unable to convert string $rawVersion to a valid CantonVersion. A CantonVersion is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid CantonVersions."
@@ -205,10 +187,13 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_1_0: ReleaseVersion = ReleaseVersion(2, 1, 0)
   lazy val v2_1_0_rc1: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("rc1"))
   lazy val v2_1_1_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 1, Some("SNAPSHOT"))
+  lazy val v2_1_1: ReleaseVersion = ReleaseVersion(2, 1, 1)
   lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
   lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
+  lazy val v2_2_0: ReleaseVersion = ReleaseVersion(2, 2, 0)
   lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
   lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
+  lazy val v2_3_1_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 1, Some("SNAPSHOT"))
 
 }
 
@@ -271,21 +256,45 @@ object ProtocolVersion extends CompanionTrait {
   def fromProtoPrimitive(rawVersion: String): ParsingResult[ProtocolVersion] =
     ProtocolVersion.create(rawVersion).leftMap(StringConversionError)
 
+  private def getDevelopmentVersions(
+      includeDevelopmentVersions: Boolean
+  ): List[ProtocolVersion] =
+    if (includeDevelopmentVersions)
+      List(ProtocolVersion.unstable_development)
+    else List.empty
+
   /** Returns the protocol versions supported by the participant of the current release.
     */
-  def supportedProtocolsParticipant(includeDevelopmentVersions: Boolean): Seq[ProtocolVersion] =
-    CantonVersion.getSupportedProtocolsParticipantForRelease(
-      ReleaseVersion.current,
-      includeDevelopmentVersions,
-    )
+  def supportedProtocolsParticipant(
+      release: ReleaseVersion = ReleaseVersion.current,
+      includeDevelopmentVersions: Boolean,
+  ): NonEmpty[List[ProtocolVersion]] = {
+    releaseVersionToProtocolVersions.getOrElse(
+      release,
+      sys.error(
+        s"Please add the supported protocol versions of a participant of release version $release to `releaseVersionToProtocolVersions` in `CantonVersion.scala`."
+      ),
+    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
+  }
 
-  /** Returns the protocol versions supported by domain nodes of the current release.
+  /** Returns the protocol versions supported by the domain of the current release.
     */
-  def supportedProtocolsDomain(includeDevelopmentVersions: Boolean): Seq[ProtocolVersion] =
-    CantonVersion.getSupportedProtocolsDomainForRelease(
-      ReleaseVersion.current,
-      includeDevelopmentVersions,
-    )
+  def supportedProtocolsDomain(
+      release: ReleaseVersion = ReleaseVersion.current,
+      includeDevelopmentVersions: Boolean,
+  ): NonEmpty[List[ProtocolVersion]] = {
+    releaseVersionToProtocolVersions.getOrElse(
+      release,
+      sys.error(
+        s"Please add the supported protocol versions of domain nodes of release version $release to `releaseVersionToProtocolVersions` in `CantonVersion.scala`."
+      ),
+    ) ++ getDevelopmentVersions(includeDevelopmentVersions)
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
+  def getLatestSupportedProtocolDomain(release: ReleaseVersion): ProtocolVersion = {
+    supportedProtocolsDomain(release, includeDevelopmentVersions = false).max
+  }
 
   final case class InvalidProtocolVersion(override val description: String) extends FailureReason
   final case class UnsupportedVersion(version: ProtocolVersion, supported: Seq[ProtocolVersion])
@@ -328,7 +337,7 @@ object ProtocolVersion extends CompanionTrait {
     else Right(())
   }
 
-  lazy val unstable_development: ProtocolVersion = ProtocolVersion(0, 0, 0, Some("DEV"))
+  lazy val unstable_development: ProtocolVersion = ProtocolVersion(Int.MaxValue, 0, 0, Some("DEV"))
   lazy val minimum_protocol_version: ProtocolVersion =
     ProtocolVersion(2, 0, 0) // Minimum stable protocol version introduced
   lazy val v2_0_0: ProtocolVersion = ProtocolVersion(2, 0, 0)
@@ -336,6 +345,7 @@ object ProtocolVersion extends CompanionTrait {
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
   // passed in via propagating the protocol version set in the domain parameters
   lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
+
 }
 
 /** Trait for errors that are returned to clients when handshake fails. */
@@ -407,9 +417,14 @@ object DomainProtocolVersion {
         _ <- Either.cond(
           // we support development versions when parsing, but catch dev versions without
           // the safety flag during config validation
-          supportedProtocolsDomain(includeDevelopmentVersions = true).contains(version),
+          ProtocolVersion
+            .supportedProtocolsDomain(includeDevelopmentVersions = true)
+            .contains(version),
           (),
-          UnsupportedVersion(version, supportedProtocolsDomain(includeDevelopmentVersions = false)),
+          UnsupportedVersion(
+            version,
+            ProtocolVersion.supportedProtocolsDomain(includeDevelopmentVersions = false),
+          ),
         )
       } yield DomainProtocolVersion(version)
     }
@@ -432,11 +447,13 @@ object ParticipantProtocolVersion {
         version <- ProtocolVersion.create(str).leftMap[FailureReason](InvalidProtocolVersion)
         _ <- Either.cond(
           // same as domain: support parsing of dev
-          supportedProtocolsParticipant(includeDevelopmentVersions = true).contains(version),
+          ProtocolVersion
+            .supportedProtocolsParticipant(includeDevelopmentVersions = true)
+            .contains(version),
           (),
           UnsupportedVersion(
             version,
-            supportedProtocolsParticipant(includeDevelopmentVersions = false),
+            ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions = false),
           ),
         )
       } yield ParticipantProtocolVersion(version)

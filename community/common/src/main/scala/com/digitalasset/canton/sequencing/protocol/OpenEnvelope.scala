@@ -10,7 +10,6 @@ import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolM
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 /** An [[OpenEnvelope]] contains a not serialized protocol message
@@ -25,8 +24,8 @@ case class OpenEnvelope[+M <: ProtocolMessage](
   override protected def content: M = protocolMessage
 
   /** Returns the serialized contents of the envelope */
-  protected def contentAsByteString(version: ProtocolVersion): ByteString =
-    ProtocolMessage.toEnvelopeContentByteString(protocolMessage, version)
+  protected def contentAsByteString: ByteString =
+    ProtocolMessage.toEnvelopeContentByteString(protocolMessage)
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def traverse[F[_], MM <: ProtocolMessage](
@@ -46,8 +45,7 @@ case class OpenEnvelope[+M <: ProtocolMessage](
   }
 
   /** Closes the envelope by serializing the contents */
-  def closeEnvelope(version: ProtocolVersion): ClosedEnvelope =
-    ClosedEnvelope(contentAsByteString(version), recipients)
+  def closeEnvelope: ClosedEnvelope = ClosedEnvelope(contentAsByteString, recipients)
 }
 
 object OpenEnvelope {

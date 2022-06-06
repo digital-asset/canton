@@ -34,7 +34,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor
 
-private[domain] trait SequencerRuntimeFactory {
+trait SequencerRuntimeFactory {
   def create(
       domainId: DomainId,
       crypto: Crypto,

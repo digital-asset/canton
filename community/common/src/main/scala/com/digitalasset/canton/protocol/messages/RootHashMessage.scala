@@ -13,7 +13,12 @@ import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.google.protobuf.ByteString
 
 /** One root hash message is sent for each participant involved in a mediator request that requires root hash messages.
@@ -23,21 +28,22 @@ import com.google.protobuf.ByteString
   * The mediator also checks that all payloads have the same serialization and,
   * if it can parse the mediator request envelope, that the payload fits to the mediator request.
   */
-case class RootHashMessage[+Payload <: RootHashMessagePayload](
+sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
     rootHash: RootHash,
     override val domainId: DomainId,
     viewType: ViewType,
     payload: Payload,
-) extends ProtocolMessage
+)(val representativeProtocolVersion: RepresentativeProtocolVersion)
+    extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.RootHashMessage]
     with PrettyPrinting {
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
 
   override def toProtoV0: v0.RootHashMessage = v0.RootHashMessage(
@@ -68,9 +74,35 @@ case class RootHashMessage[+Payload <: RootHashMessagePayload](
       if (payload eq payload2) this.asInstanceOf[RootHashMessage[Payload2]]
       else this.copy(payload = payload2)
     }
+
+  def copy[Payload2 <: RootHashMessagePayload](
+      rootHash: RootHash = rootHash,
+      payload: Payload2 = payload,
+      viewType: ViewType = viewType,
+  ): RootHashMessage[Payload2] =
+    new RootHashMessage(
+      rootHash,
+      domainId,
+      viewType,
+      payload,
+    )(representativeProtocolVersion) {}
+
 }
 
 object RootHashMessage {
+  def apply[Payload <: RootHashMessagePayload](
+      rootHash: RootHash,
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+      viewType: ViewType,
+      payload: Payload,
+  ): RootHashMessage[Payload] = new RootHashMessage(
+    rootHash,
+    domainId,
+    viewType,
+    payload,
+  )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+
   def fromProtoV0[Payload <: RootHashMessagePayload](
       payloadDeserializer: ByteString => ParsingResult[Payload]
   )(
@@ -82,7 +114,12 @@ object RootHashMessage {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       payloadO <- payloadDeserializer(payloadP)
-    } yield RootHashMessage(rootHash, domainId, viewType, payloadO)
+    } yield new RootHashMessage(
+      rootHash,
+      domainId,
+      viewType,
+      payloadO,
+    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit

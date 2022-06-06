@@ -11,7 +11,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{HasProtoV0, RepresentativeProtocolVersion}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 
@@ -39,6 +39,11 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
 
   override def requestUuid: UUID = commonData.uuid
 
+  lazy val representativeProtocolVersion: RepresentativeProtocolVersion =
+    ProtocolMessage.protocolVersionRepresentativeFor(
+      commonData.representativeProtocolVersion.unwrap
+    )
+
   override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
     val confirmingParties = commonData.confirmingParties
     val threshold = NonNegativeInt.tryCreate(confirmingParties.size)
@@ -51,7 +56,6 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
-      protocolVersion: ProtocolVersion,
   ): MediatorResult with SignedProtocolMessageContent = {
     val informees = commonData.stakeholders
     require(
@@ -63,17 +67,17 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
       informees,
       TransferInDomainId(domainId),
       verdict,
-      protocolVersion,
+      representativeProtocolVersion.unwrap,
     )
   }
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(
       someEnvelopeContent =
         v0.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV0)
     )
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(
       someEnvelopeContent =
         v1.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV0)

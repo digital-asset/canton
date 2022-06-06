@@ -11,7 +11,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{HasProtoV0, ProtobufVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.google.protobuf.ByteString
@@ -23,8 +23,10 @@ import java.util.UUID
   * @param tree The transfer-out view tree blinded for the mediator
   * @throws java.lang.IllegalArgumentException if the common data is blinded or the view is not blinded
   */
-case class TransferOutMediatorMessage(tree: TransferOutViewTree)
-    extends MediatorRequest
+case class TransferOutMediatorMessage(
+    tree: TransferOutViewTree,
+    representativeProtocolVersion: RepresentativeProtocolVersion,
+) extends MediatorRequest
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.TransferOutMediatorMessage] {
@@ -51,7 +53,6 @@ case class TransferOutMediatorMessage(tree: TransferOutViewTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
-      protocolVersion: ProtocolVersion,
   ): MediatorResult with SignedProtocolMessageContent = {
     val informees = commonData.stakeholders ++ commonData.adminParties
     require(
@@ -63,17 +64,17 @@ case class TransferOutMediatorMessage(tree: TransferOutViewTree)
       informees,
       TransferOutDomainId(domainId),
       verdict,
-      protocolVersion,
+      representativeProtocolVersion.unwrap,
     )
   }
 
   override def toProtoV0: v0.TransferOutMediatorMessage =
     v0.TransferOutMediatorMessage(tree = Some(tree.toProtoV0))
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
 
   override def rootHash: Option[RootHash] = Some(tree.rootHash)
@@ -97,7 +98,10 @@ object TransferOutMediatorMessage {
         tree.view.isBlinded,
         OtherError(s"Transfer-out view data is not blinded in request ${tree.rootHash}"),
       )
-    } yield TransferOutMediatorMessage(tree)
+    } yield TransferOutMediatorMessage(
+      tree,
+      ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+    )
 
   def fromByteString(
       crypto: CryptoPureApi

@@ -26,7 +26,12 @@ trait DbServiceAgreementAcceptanceStoreTest
 
   "DbServiceAgreementAcceptanceStore" can {
     behave like serviceAgreementAcceptanceStore(
-      new DbServiceAgreementAcceptanceStore(storage, timeouts, loggerFactory)
+      new DbServiceAgreementAcceptanceStore(
+        storage,
+        defaultProtocolVersion,
+        timeouts,
+        loggerFactory,
+      )
     )
   }
 }

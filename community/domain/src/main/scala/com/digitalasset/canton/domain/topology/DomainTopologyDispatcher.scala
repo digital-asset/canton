@@ -50,6 +50,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
 import io.functionmeta.functionFullName
 
@@ -524,6 +525,7 @@ private[domain] object DomainTopologyDispatcher {
 
     val sender = new DomainTopologySender.Impl(
       domainId,
+      domainTopologyManager.protocolVersion,
       client,
       timeTracker,
       clock,
@@ -607,6 +609,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
 
   class Impl(
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       client: SequencerClient,
       timeTracker: DomainTimeTracker,
       clock: Clock,
@@ -640,7 +643,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
               for {
                 message <-
                   DomainTopologyTransactionMessage
-                    .create(batch.toList, snapshot, domainId)
+                    .create(batch.toList, snapshot, domainId, protocolVersion)
                     .leftMap(_.toString)
                     .mapK(FutureUnlessShutdown.outcomeK)
                 _ <- ensureDelivery(

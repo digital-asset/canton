@@ -31,6 +31,7 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedView,
   EncryptedViewMessageV0,
   InformeeMessage,
+  ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.topology.transaction.ParticipantPermission._
@@ -256,7 +257,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             createdRandomnessMap.fmap(_.encrypted),
             encryptedView,
             transactionFactory.domainId,
-          ),
+          )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)),
           recipients,
         )
     }

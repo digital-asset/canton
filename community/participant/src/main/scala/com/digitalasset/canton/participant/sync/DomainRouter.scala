@@ -573,7 +573,8 @@ class DomainRouter(
       ]
       domainId <-
         if (nonEmptyDomainIds.size == 1) {
-          EitherT.rightT(nonEmptyDomainIds.head): EitherT[Future, TransactionRoutingError, DomainId]
+          EitherT
+            .rightT(nonEmptyDomainIds.head1): EitherT[Future, TransactionRoutingError, DomainId]
         } else {
           EitherT.rightT(
             nonEmptyDomainIds.maxBy(id => priorityOfDomain(id) -> id.toProtoPrimitive)(
@@ -762,7 +763,7 @@ object DomainRouter {
   )(domainId: DomainId): Int = {
     val maybePriority = for {
       domainAlias <- domainAliasManager.aliasForDomainId(domainId)
-      config <- domainConnectionConfigStore.get(domainAlias).toOption
+      config <- domainConnectionConfigStore.get(domainAlias).toOption.map(_.config)
     } yield config.priority
 
     // If the participant is disconnected from the domain while this code is evaluated,

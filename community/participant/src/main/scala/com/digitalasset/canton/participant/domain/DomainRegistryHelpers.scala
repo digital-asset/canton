@@ -20,7 +20,6 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.domain.DomainRegistryError.HandshakeErrors.DomainIdMismatch
 import com.digitalasset.canton.participant.domain.DomainRegistryHelpers.DomainHandle
-import com.digitalasset.canton.participant.domain.grpc.ParticipantInitializeTopology
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
@@ -31,7 +30,6 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
-import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.{
@@ -50,7 +48,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
   def participantId: ParticipantId
   protected def participantNodeParameters: ParticipantNodeParameters
-  protected def aliasManager: DomainAliasManager
+  def aliasManager: DomainAliasManager
 
   implicit def ec: ExecutionContextExecutor
   implicit def materializer: Materializer
@@ -92,7 +90,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
         FutureUnlessShutdown.outcomeK
       )
       indexedDomainId <- EitherT
-        .right(IndexedDomain.indexed(syncDomainPersistentStateFactory.indexedStringStore)(domainId))
+        .right(syncDomainPersistentStateFactory.indexedDomainId(domainId))
         .mapK(FutureUnlessShutdown.outcomeK)
 
       // Perform the version handshake
@@ -143,7 +141,11 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
 
       // fetch or create persistent state for the domain
       persistentState <- syncDomainPersistentStateFactory
-        .lookupOrCreatePersistentState(config.domain, indexedDomainId, staticDomainParameters)
+        .lookupOrCreatePersistentState(
+          config.domain,
+          indexedDomainId,
+          staticDomainParameters,
+        )
         .mapK(FutureUnlessShutdown.outcomeK)
 
       domainLoggerFactory = loggerFactory.append("domain", config.domain.unwrap)
@@ -221,7 +223,9 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
           futureSupervisor,
           participantNodeParameters.loggingConfig,
           domainLoggerFactory,
-          ProtocolVersion.supportedProtocolsParticipant(protocolConfig.devVersionSupport),
+          ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions =
+            protocolConfig.devVersionSupport
+          ),
           protocolConfig.minimumProtocolVersion,
         )
       }
@@ -301,7 +305,9 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
         .handshake(
           alias,
           HandshakeRequest(
-            ProtocolVersion.supportedProtocolsParticipant(protocolConfig.devVersionSupport),
+            ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions =
+              protocolConfig.devVersionSupport
+            ),
             protocolConfig.minimumProtocolVersion,
           ),
         )

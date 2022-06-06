@@ -6,10 +6,9 @@ package com.digitalasset.canton.util
 import cats.{Monad, Order}
 import cats.syntax.either._
 import com.daml.lf.data._
-import com.daml.lf.transaction.{Node, TransactionVersion}
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value
 import com.digitalasset.canton.{LfPartyId, LfValue, LfVersioned}
-import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol._
 
 import scala.annotation.nowarn
@@ -65,13 +64,17 @@ object LfTransactionUtil {
       ),
     )
 
-  def fromGlobalKeyWithMaintainers(global: LfGlobalKeyWithMaintainers): LfKeyWithMaintainers =
+  def fromGlobalKeyWithMaintainers(
+      global: LfGlobalKeyWithMaintainers
+  ): LfKeyWithMaintainers =
     LfKeyWithMaintainers(global.globalKey.key, global.maintainers)
 
   /** Get the IDs and metadata of contracts used within a single
     * [[com.digitalasset.canton.protocol.package.LfActionNode]]
     */
-  def usedContractIdWithMetadata(node: LfActionNode): Option[WithContractMetadata[LfContractId]] = {
+  def usedContractIdWithMetadata(
+      node: LfActionNode
+  ): Option[WithContractMetadata[LfContractId]] = {
     node match {
       case _: LfNodeCreate => None
       case nf: LfNodeFetch =>
@@ -113,7 +116,7 @@ object LfTransactionUtil {
   }
 
   /** Get the IDs and metadata of all the used contracts of a [[com.digitalasset.canton.protocol.package.LfVersionedTransaction]] */
-  def usedContractIdsWithMetadata(
+  private def usedContractIdsWithMetadata(
       tx: LfVersionedTransaction
   ): Set[WithContractMetadata[LfContractId]] = {
     val nodes = tx.nodes.values.collect { case an: LfActionNode => an }.toSet
@@ -133,7 +136,9 @@ object LfTransactionUtil {
   }
 
   /** Get the IDs and metadata of all the created contracts of a single [[com.digitalasset.canton.protocol.package.LfNode]]. */
-  def createdContractIdWithMetadata(node: LfNode): Option[WithContractMetadata[LfContractId]] =
+  def createdContractIdWithMetadata(
+      node: LfNode
+  ): Option[WithContractMetadata[LfContractId]] =
     node match {
       case nc: LfNodeCreate =>
         Some(
@@ -223,85 +228,6 @@ object LfTransactionUtil {
     }
   }
 
-  /** Checks that the transaction is consistent w.r.t. contract keys, taking into account all nodes
-    * instead of only-by key nodes as done by Daml engine when run in mode
-    * [[com.daml.lf.transaction.ContractKeyUniquenessMode.On]].
-    *
-    * For example, if a transaction fetches a contract by contract id and creates
-    * another contract that has the same contract key as the fetched contract, Daml engine will
-    * not complain about duplicate contract keys because the fetch does not have the
-    * [[com.daml.lf.transaction.Node.Action.byKey]] field set.
-    *
-    * @throws java.lang.IllegalArgumentException if transaction's keys contain contract Ids.
-    * @see com.daml.lf.speedy.PartialTransaction.keys for Daml engine's tracking of unique keys
-    */
-  def duplicatedContractKeys(tx: LfVersionedTransaction): Set[LfGlobalKey] = {
-    // TODO(#6754): Define and/or fix up the semantics and also move to the daml-repo
-
-    case class State(
-        active: Set[(LfGlobalKey, RollbackScope)],
-        duplicates: Set[LfGlobalKey],
-        rbContext: RollbackContext,
-    ) {
-      def created(key: LfGlobalKey): State =
-        if (
-          active.exists { case (keyActive, rbScopeActive) =>
-            keyActive == key && rbContext.embeddedInScope(rbScopeActive)
-          }
-        ) {
-          copy(duplicates = duplicates + key, active = active + ((key, rbContext.rollbackScope)))
-        } else copy(active = active + ((key, rbContext.rollbackScope)))
-      def consumed(key: LfGlobalKey): State =
-        // Subtract active key using exact match of the rollback scope. This works because:
-        // 1. If the create node is in a sub-scope (in the sense of being strictly embedded) or an unrelated scope, then
-        //    the exercise cannot see the contract. So if we assume that the given transaction is internally consistent
-        //    (for contracts, not keys), then this case cannot happen.
-        // 2. If the create node is in a super-scope (in the sense of the exercise being strictly embedded), then the
-        //    key remains active.
-        copy(active = active - ((key, rbContext.rollbackScope)))
-      def referenced(key: LfGlobalKey): State =
-        // TODO(#6754): Resolve whether a plain exercise should bring the contract key of the input contract into scope
-        copy(active = active + ((key, rbContext.rollbackScope)))
-      def pushRollbackNode: State =
-        copy(rbContext = rbContext.enterRollback)
-      def popRollbackNode: State =
-        copy(rbContext = rbContext.exitRollback)
-    }
-
-    foldExecutionOrderM[cats.Id, State](
-      tx.transaction,
-      State(Set.empty, Set.empty, RollbackContext.empty),
-    ) {
-      case (
-            _,
-            LfNodeExercises(_, templateId, _, _, true, _, _, _, _, _, _, _, Some(key), _, _),
-            state,
-          ) =>
-        state.consumed(LfGlobalKey.assertBuild(templateId, key.key))
-      case (
-            _,
-            LfNodeExercises(_, templateId, _, _, false, _, _, _, _, _, _, _, Some(key), _, _),
-            state,
-          ) =>
-        state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
-      case (_, _, state) => state // non-key exercise
-    } {
-      case (_, LfNodeCreate(_, templateId, _, _, _, _, Some(key), _), state) =>
-        state.created(LfGlobalKey.assertBuild(templateId, key.key))
-      case (_, LfNodeFetch(_, templateId, _, _, _, Some(key), _, _), state) =>
-        state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
-      case (_, Node.NodeLookupByKey(templateId, key, Some(_), _), state) =>
-        state.referenced(LfGlobalKey.assertBuild(templateId, key.key))
-      case (_, _, state) => state // non key create/lookup/fetch
-    } { case (_, _: LfNodeExercises, state) =>
-      state
-    } { case (_, _: LfNodeRollback, state) =>
-      state.pushRollbackNode
-    } { case (_, _: LfNodeRollback, state) =>
-      state.popRollbackNode
-    }.duplicates
-  }
-
   def keyWithMaintainers(node: LfActionNode): Option[LfKeyWithMaintainers] = node match {
     case c: LfNodeCreate => c.key
     case f: LfNodeFetch => f.key
@@ -330,7 +256,9 @@ object LfTransactionUtil {
     checkNoContractIdInKey(key.unversioned).map(LfVersioned(key.version, _))
 
   /** Given internally consistent transactions, compute their consumed contract ids. */
-  def consumedContractIds(transactions: Iterable[LfVersionedTransaction]): Set[LfContractId] =
+  def consumedContractIds(
+      transactions: Iterable[LfVersionedTransaction]
+  ): Set[LfContractId] =
     transactions.foldLeft(Set.empty[LfContractId]) { case (consumed, tx) =>
       consumed | tx.consumedContracts
     }

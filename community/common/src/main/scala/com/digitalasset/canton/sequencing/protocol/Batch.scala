@@ -157,11 +157,8 @@ object Batch {
     Batch(newEnvs)
   }
 
-  def closeEnvelopes[T <: ProtocolMessage](
-      batch: Batch[OpenEnvelope[T]],
-      version: ProtocolVersion,
-  ): Batch[ClosedEnvelope] = {
-    val closedEnvs = batch.envelopes.map(env => env.closeEnvelope(version))
+  def closeEnvelopes[T <: ProtocolMessage](batch: Batch[OpenEnvelope[T]]): Batch[ClosedEnvelope] = {
+    val closedEnvs = batch.envelopes.map(env => env.closeEnvelope)
     Batch(closedEnvs)
   }
 }

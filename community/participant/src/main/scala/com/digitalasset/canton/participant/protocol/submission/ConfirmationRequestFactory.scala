@@ -257,12 +257,22 @@ object ConfirmationRequestFactory {
   }
 
   /** Indicates that the given transaction is contract key-inconsistent. */
-  case class ContractKeyConsistencyError(errors: Set[LfGlobalKey])
+  case class ContractKeyConsistencyError(key: LfGlobalKey)
       extends ConfirmationRequestCreationError
       with PrettyPrinting {
     override def pretty: Pretty[ContractKeyConsistencyError] =
       prettyOfClass(
-        param("keys", _.errors)
+        param("key", _.key)
+      )
+  }
+
+  /** Indicates that the given transaction yields a duplicate for a key. */
+  case class ContractKeyDuplicateError(key: LfGlobalKey)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractKeyDuplicateError] =
+      prettyOfClass(
+        param("key", _.key)
       )
   }
 

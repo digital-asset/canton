@@ -23,14 +23,12 @@ import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncCloseable}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.protocol.messages.{ProtocolMessage, ProtocolMessageV0}
-import com.digitalasset.canton.protocol.{v0 => protocolV0}
+import com.digitalasset.canton.protocol.{TestDomainParameters, v0 => protocolV0}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
@@ -42,9 +40,14 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  ReleaseVersion,
+  RepresentativeProtocolVersion,
+}
 import io.grpc.netty.NettyServerBuilder
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.ArgumentMatchersSugar
@@ -299,8 +302,11 @@ class GrpcSequencerIntegrationTest
         protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
       )
 
+    override def representativeProtocolVersion: RepresentativeProtocolVersion =
+      ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
+
     override def domainId: DomainId = DefaultTestIdentities.domainId
-    override def toProtoEnvelopeContentV0(version: ProtocolVersion): protocolV0.EnvelopeContent =
+    override def toProtoEnvelopeContentV0: protocolV0.EnvelopeContent =
       protocolV0.EnvelopeContent(
         protocolV0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )

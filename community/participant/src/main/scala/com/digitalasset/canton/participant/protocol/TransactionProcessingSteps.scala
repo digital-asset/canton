@@ -50,6 +50,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.{
   ConfirmationRequestCreationError,
   ContractKeyConsistencyError,
+  ContractKeyDuplicateError,
   MalformedLfTransaction,
   MalformedSubmitter,
   TransactionTreeFactoryError,
@@ -83,7 +84,7 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, IterableUtil, LfTransactionUtil}
+import com.digitalasset.canton.util.{ErrorUtil, IterableUtil}
 import com.digitalasset.canton.{
   DiscardOps,
   LedgerSubmissionId,
@@ -291,14 +292,24 @@ class TransactionProcessingSteps(
             //
             // TODO(M40) As this is merely an optimization, ensure that we test validation with transactions
             //  that fail this check.
-            val duplicates = LfTransactionUtil.duplicatedContractKeys(wfTransaction.unwrap)
-            EitherTUtil.condUnitET[Future](
-              duplicates.isEmpty,
-              causeWithTemplate(
-                "Domain with unique contract keys semantics",
-                ContractKeyConsistencyError(duplicates),
-              ),
-            )
+
+            val result = wfTransaction.withoutVersion.contractKeyInputs match {
+              case Left(LfTransaction.DuplicateKeys(key)) =>
+                causeWithTemplate(
+                  "Domain with unique contract keys semantics",
+                  ContractKeyDuplicateError(key),
+                ).asLeft
+
+              case Left(LfTransaction.InconsistentKeys(key)) =>
+                causeWithTemplate(
+                  "Domain with unique contract keys semantics",
+                  ContractKeyConsistencyError(key),
+                ).asLeft
+
+              case Right(_) => ().asRight
+            }
+
+            EitherT.fromEither[Future](result)
           } else EitherT.pure[Future, TransactionSubmissionTrackingData.RejectionCause](())
         confirmationPolicy <- EitherT(
           ConfirmationPolicy
@@ -325,7 +336,6 @@ class TransactionProcessingSteps(
 
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a confirmation request
-        // TODO(phoebe) pass persistent state to confirmation request factory
         request <- confirmationRequestTimer.timeEitherT(
           confirmationRequestFactory
             .createConfirmationRequest(
@@ -1499,7 +1509,6 @@ class TransactionProcessingSteps(
         rootViewsWithContractKeys = NonEmptyUtil.fromUnsafe(perRootViewInputKeysB.result()),
         uckFreeKeysOfHostedMaintainers = freeKeys,
         uckUpdatedKeysOfHostedMaintainers = updatedKeys,
-        //TODO(i5352): Unit test this
         hostedInformeeStakeholders = informeeStakeholders.filter(s => hostsParty(Set(s))),
       )
       usedAndCreated

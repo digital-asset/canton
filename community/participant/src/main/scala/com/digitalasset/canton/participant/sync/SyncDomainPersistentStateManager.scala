@@ -6,7 +6,10 @@ package com.digitalasset.canton.participant.sync
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
-import com.digitalasset.canton.participant.store.SyncDomainPersistentState
+import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
+  SyncDomainPersistentState,
+}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
 
@@ -44,6 +47,9 @@ class SyncDomainPersistentStateManager(
   def get(domainId: DomainId): Option[SyncDomainPersistentState] = domainStates.get(domainId)
 
   override def getAll: Map[DomainId, SyncDomainPersistentState] = domainStates.toMap
+
+  def getStatusOf(domainId: DomainId): Option[DomainConnectionConfigStore.Status] =
+    this.aliasResolution.connectionStateForDomain(domainId)
 
   def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState] =
     for {

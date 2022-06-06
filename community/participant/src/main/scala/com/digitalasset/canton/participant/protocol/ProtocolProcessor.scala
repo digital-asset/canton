@@ -544,7 +544,7 @@ abstract class ProtocolProcessor[
         _activenessResult <- EitherT.right[steps.RequestError](requestFutures.activenessResult)
 
         _existingData = steps.pendingRequestMap(ephemeral).putIfAbsent(requestId, pendingData)
-        // TODO(Phoebe/Andreas): Handle existing request data (validation here)
+        // TODO(Andreas): Handle existing request data (validation here)
 
         _ <- EitherT.right[steps.RequestError](
           unlessCleanReplay(rc)(
@@ -889,12 +889,15 @@ abstract class ProtocolProcessor[
       )
 
       _ <- ifThenET(!cleanReplay) {
-        //TODO(i5352): This is messy
         for {
           _unit <- {
             logger.info(
               show"Finalizing ${steps.requestKind.unquoted} request at $requestId with event ${maybeEvent}."
             )
+            // Schedule publication of the event with the associated causality update.
+            // Note that both fields are optional.
+            // Some events (such as rejection events) are not associated with causality updates.
+            // Additionally, we may process a causality update without an associated event (this happens on transfer-in)
             EitherT.right[steps.ResultError](
               ephemeral.recordOrderPublisher
                 .schedulePublication(

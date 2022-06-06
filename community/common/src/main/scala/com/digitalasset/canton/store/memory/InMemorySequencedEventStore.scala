@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store.memory
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -44,14 +45,12 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
   private val timestampOfCounter: mutable.SortedMap[SequencerCounter, CantonTimestamp] =
     mutable.SortedMap.empty
 
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
   def store(
       events: Seq[OrdinarySerializedEvent]
   )(implicit traceContext: TraceContext): Future[Unit] =
-    if (events.isEmpty) Future.unit
-    else {
+    NonEmpty.from(events).fold(Future.unit) { events =>
       logger.debug(
-        show"Storing delivery events from ${events.head.timestamp} to ${events.last.timestamp}."
+        show"Storing delivery events from ${events.head1.timestamp} to ${events.last1.timestamp}."
       )
 
       blocking(lock.synchronized {

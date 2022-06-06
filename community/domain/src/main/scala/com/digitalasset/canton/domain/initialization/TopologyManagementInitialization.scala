@@ -47,6 +47,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.duration._
@@ -70,6 +71,7 @@ object TopologyManagementInitialization {
 
   def sequenceInitialTopology(
       id: DomainId,
+      protocolVersion: ProtocolVersion,
       client: SequencerClient,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       domainMembers: Set[DomainMember],
@@ -83,7 +85,7 @@ object TopologyManagementInitialization {
     val logger = loggerFactory.getLogger(getClass)
     for {
       content <- DomainTopologyTransactionMessage
-        .tryCreate(transactions.toList, recentSnapshot, id)
+        .tryCreate(transactions.toList, recentSnapshot, id, protocolVersion)
       batch = domainMembers.map(member => OpenEnvelope(content, Recipients.cc(member)))
       _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient.sendWithRetries(
@@ -141,6 +143,7 @@ object TopologyManagementInitialization {
           SequencedEventStore(
             storage,
             managerDiscriminator,
+            domainTopologyManager.protocolVersion,
             timeouts,
             dispatcherLoggerFactory,
           )
@@ -207,6 +210,7 @@ object TopologyManagementInitialization {
             authorizedTopologySnapshot <- domainTopologyManager.store.headTransactions(traceContext)
             _ <- sequenceInitialTopology(
               id,
+              domainTopologyManager.protocolVersion,
               newClient,
               authorizedTopologySnapshot.result.map(_.transaction),
               DomainMember.list(id, addressSequencerAsDomainMember),

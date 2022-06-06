@@ -23,7 +23,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.HasProtoV0
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import slick.jdbc.GetResult
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -115,6 +115,7 @@ object ServiceAgreementManager {
       agreementFile: File,
       storage: Storage,
       hasher: HashOps,
+      protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): Either[String, ServiceAgreementManager] = {
@@ -126,7 +127,12 @@ object ServiceAgreementManager {
       hash = hasher.build(HashPurpose.AgreementId).addWithoutLengthPrefix(agreementText).finish()
       agreementId <- ServiceAgreementId.create(hash.toHexString)
       agreement = ServiceAgreement(agreementId, agreementTextLenLimit)
-      store = ServiceAgreementAcceptanceStore.create(storage, timeouts, loggerFactory)
+      store = ServiceAgreementAcceptanceStore.create(
+        storage,
+        protocolVersion,
+        timeouts,
+        loggerFactory,
+      )
     } yield new ServiceAgreementManager(agreement, store, loggerFactory)
   }
 }

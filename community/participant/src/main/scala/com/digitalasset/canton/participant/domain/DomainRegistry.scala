@@ -34,6 +34,9 @@ trait DomainRegistry extends AutoCloseable {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[DomainRegistryError, DomainHandle]]
 
+  /** Returns a builder for the sequencer client */
+  def sequencerConnectClientBuilder: SequencerConnectClient.Builder
+
 }
 
 sealed trait DomainRegistryError extends Product with Serializable with CantonError

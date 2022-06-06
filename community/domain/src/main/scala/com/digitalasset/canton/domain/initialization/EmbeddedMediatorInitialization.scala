@@ -66,6 +66,7 @@ object EmbeddedMediatorInitialization {
       sequencedEventStore = SequencedEventStore(
         storage,
         mediatorDiscriminator,
+        protocolVersion,
         timeouts,
         loggerFactory,
       )
