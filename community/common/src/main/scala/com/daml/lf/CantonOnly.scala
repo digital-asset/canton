@@ -4,8 +4,10 @@
 package com.daml.lf
 
 import com.daml.lf.data.ImmArray
+import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.{Engine, EngineConfig}
-import com.daml.lf.language.LanguageVersion
+import com.daml.lf.language.{Ast, LanguageVersion}
+import com.daml.lf.speedy.Compiler
 import com.daml.lf.transaction.{
   ContractKeyUniquenessMode,
   Transaction,
@@ -102,4 +104,13 @@ object CantonOnly {
   def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
     versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
 
+  def tryBuildCompiledPackages(
+      darMap: Map[PackageId, Ast.Package],
+      enableLfDev: Boolean,
+  ): PureCompiledPackages = {
+    PureCompiledPackages.assertBuild(
+      darMap,
+      if (enableLfDev) Compiler.Config.Dev else Compiler.Config.Default,
+    )
+  }
 }

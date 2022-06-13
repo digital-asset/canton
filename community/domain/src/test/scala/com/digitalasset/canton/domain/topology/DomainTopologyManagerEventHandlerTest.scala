@@ -10,13 +10,14 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCallback, SendResult}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.BaseTest
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
@@ -39,37 +40,46 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
     )(defaultProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
-  )(defaultProtocolVersion, None)
-  private val request =
-    RegisterTopologyTransactionRequest(
+  )(signedTransactionProtocolVersionRepresentative, None)
+  private val request = RegisterTopologyTransactionRequest
+    .create(
       participantId,
       participantId,
       requestId,
       List(signedIdentityTransaction),
       domainId,
     )
+    .headOption
+    .value
   private val domainIdentityServiceResult =
-    RequestResult(
-      signedIdentityTransaction.uniquePath,
-      RegisterTopologyTransactionRequestState.Accepted,
+    RegisterTopologyTransactionResponse.Result(
+      signedIdentityTransaction.uniquePath.toProtoPrimitive,
+      RegisterTopologyTransactionResponse.State.Accepted,
     )
   private val response =
     RegisterTopologyTransactionResponse(
       participantId,
       participantId,
       requestId,
-      List(domainIdentityServiceResult.toProtoV0),
+      List(domainIdentityServiceResult),
       domainId,
-    )
+    )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion))
 
   "DomainIdentityManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
       val store = new InMemoryRegisterTopologyTransactionResponseStore()
 
       val sut = {
-        val newRequest =
-          mock[List[SignedTopologyTransaction[TopologyChangeOp]] => Future[List[RequestResult]]]
-        when(newRequest.apply(List(signedIdentityTransaction)))
+
+        val requestHandler =
+          mock[DomainTopologyManagerRequestService.Handler]
+        when(
+          requestHandler.newRequest(
+            any[Member],
+            any[ParticipantId],
+            any[List[SignedTopologyTransaction[TopologyChangeOp]]],
+          )(any[TraceContext])
+        )
           .thenReturn(Future.successful(List(domainIdentityServiceResult)))
 
         val sequencerSendResponse = mock[
@@ -93,7 +103,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
 
         new DomainTopologyManagerEventHandler(
           store,
-          newRequest,
+          requestHandler,
           sequencerSendResponse,
           timeouts,
           loggerFactory,

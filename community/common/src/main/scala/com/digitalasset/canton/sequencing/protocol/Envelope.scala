@@ -24,11 +24,11 @@ trait Envelope[+M] extends HasProtoV0WithVersion[v0.Envelope] with PrettyPrintin
   protected def content: M
 
   /** Returns the serialized contents of the envelope */
-  protected def contentAsByteString(version: ProtocolVersion): ByteString
+  protected def contentAsByteString: ByteString
 
   // TODO(i8816): Consider refactoring toProtoV0 interface here
   override def toProtoV0(version: ProtocolVersion): v0.Envelope = v0.Envelope(
-    content = contentAsByteString(version),
+    content = contentAsByteString,
     recipients = Some(recipients.toProtoV0),
   )
 }

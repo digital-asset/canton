@@ -95,6 +95,7 @@ class SingleDomainCausalTrackerTest
       val cm =
         CausalityMessage(
           domain2,
+          defaultProtocolVersion,
           id,
           VectorClock(domain1, localTs = outTime, alice, Map(domain1 -> outTime)),
         )
@@ -212,6 +213,7 @@ class SingleDomainCausalTrackerTest
       val cmAlice =
         CausalityMessage(
           domain4,
+          defaultProtocolVersion,
           transfer1ID,
           VectorClock(
             domain1,
@@ -225,6 +227,7 @@ class SingleDomainCausalTrackerTest
       val cmBob =
         CausalityMessage(
           domain4,
+          defaultProtocolVersion,
           transfer1ID,
           VectorClock(
             domain1,

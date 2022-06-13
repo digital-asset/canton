@@ -8,11 +8,13 @@ import com.daml.jwt.{ECDSAVerifier, HMAC256Verifier, JwksVerifier, RSA256Verifie
 import com.daml.ledger.api.auth.{AuthService, AuthServiceJWT, AuthServiceWildcard}
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
-import com.daml.platform.apiserver.configuration.RateLimitingConfig
-import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
+import com.daml.platform.apiserver.{
+  ApiServerConfig => DamlApiServerConfig,
+  AuthServiceConfig => DamlAuthServiceConfig,
+}
 import com.daml.platform.configuration.{
   CommandConfiguration,
-  IndexConfiguration => DamlIndexConfiguration,
+  IndexServiceConfig => DamlIndexServiceConfig,
 }
 import com.daml.platform.indexer.{IndexerStartupMode, IndexerConfig => DamlIndexerConfig}
 import com.daml.platform.usermanagement.UserManagementConfig
@@ -20,12 +22,20 @@ import com.digitalasset.canton.config.RequireTypes._
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
+import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton.{
+  DefaultPostgresTcpKeepalivesCount,
+  DefaultPostgresTcpKeepalivesIdle,
+  DefaultPostgresTcpKeepalivesInterval,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import io.netty.handler.ssl.{ClientAuth, SslContext}
+import io.scalaland.chimney.dsl._
 import monocle.macros.syntax.lens._
+
+import scala.jdk.DurationConverters._
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig {
@@ -171,12 +181,15 @@ case class RemoteParticipantConfig(
 
 sealed trait AuthServiceConfig {
   def create(): AuthService
+  def damlConfig: DamlAuthServiceConfig
 }
+
 object AuthServiceConfig {
 
   /** [default] Allows everything */
   object Wildcard extends AuthServiceConfig {
     override def create(): AuthService = AuthServiceWildcard
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.Wildcard
   }
 
   /** [UNSAFE] Enables JWT-based authorization with shared secret HMAC256 signing: USE THIS EXCLUSIVELY FOR TESTING */
@@ -188,6 +201,9 @@ object AuthServiceConfig {
         throw new IllegalArgumentException(s"Invalid hmac secret ($secret): $err")
       )
     override def create(): AuthService = AuthServiceJWT(verifier)
+
+    override def damlConfig: DamlAuthServiceConfig =
+      DamlAuthServiceConfig.UnsafeJwtHmac256(secret.unwrap)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by RSA256 with a public key loaded from the given X509 certificate file (.crt) */
@@ -196,6 +212,8 @@ object AuthServiceConfig {
       .fromCrtFile(certificate)
       .valueOr(err => throw new IllegalArgumentException(s"Failed to create RSA256 verifier: $err"))
     override def create(): AuthService = AuthServiceJWT(verifier)
+
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtRs256Crt(certificate)
   }
 
   /** "Enables JWT-based authorization, where the JWT is signed by ECDSA256 with a public key loaded from the given X509 certificate file (.crt)" */
@@ -207,6 +225,8 @@ object AuthServiceConfig {
         throw new IllegalArgumentException(s"Failed to create ECDSA256 verifier: $err")
       )
     override def create(): AuthService = AuthServiceJWT(verifier)
+
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs256Crt(certificate)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by ECDSA512 with a public key loaded from the given X509 certificate file (.crt) */
@@ -218,12 +238,16 @@ object AuthServiceConfig {
         throw new IllegalArgumentException(s"Failed to create ECDSA512 verifier: $err")
       )
     override def create(): AuthService = AuthServiceJWT(verifier)
+
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs512Crt(certificate)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by RSA256 with a public key loaded from the given JWKS URL */
   case class JwtRs256Jwks(url: NonEmptyString) extends AuthServiceConfig {
     private val verifier = JwksVerifier(url.unwrap)
     override def create(): AuthService = AuthServiceJWT(verifier)
+
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtRs256Jwks(url.unwrap)
   }
 
 }
@@ -239,15 +263,14 @@ object AuthServiceConfig {
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
   * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
   * @param eventsProcessingParallelism parallelism for loading and decoding ledger events
-  * @param bufferedStreamsPageSize  buffer size for streaming events
   * @param activeContractsService    configurations pertaining to the ledger api server's "active contracts service"
   * @param commandService            configurations pertaining to the ledger api server's "command service"
   * @param managementServiceTimeout  ledger api server management service maximum duration. Duration has to be finite
   *                                  as the ledger api server uses java.time.duration that does not support infinite scala durations.
-  * @param synchronousCommitMode     Postgres-specific indexer synchronous commit mode (defaults to "local")
-  * @param authServices              type of authentication services used by ledger-api server. If empty, we use a wildcard.
+  * @param postgresDataSourceConfig config for ledger api server when using postgres
+  * @param authService              type of authentication services used by ledger-api server. If empty, we use a wildcard.
   *                                  Otherwise, the first service response that does not say "unauthenticated" will be used.
-  * @param keepAlive                 keep-alive configuration for ledger api requests
+  * @param keepAliveServer                 keep-alive configuration for ledger api requests
   * @param maxContractStateCacheSize       maximum caffeine cache size of mutable state cache of contracts
   * @param maxContractKeyStateCacheSize    maximum caffeine cache size of mutable state cache of contract keys
   * @param maxInboundMessageSize     maximum inbound message size
@@ -267,14 +290,14 @@ case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
     eventsPageSize: Int = LedgerApiServerConfig.DefaultEventsPageSize,
     eventsProcessingParallelism: Int = LedgerApiServerConfig.DefaultEventsProcessingParallelism,
-    bufferedStreamsPageSize: Int = DamlIndexConfiguration.DefaultBufferedStreamsPageSize,
+    bufferedStreamsPageSize: Int = DamlIndexServiceConfig.DefaultBufferedStreamsPageSize,
     activeContractsService: ActiveContractsServiceConfig = ActiveContractsServiceConfig(),
     commandService: CommandServiceConfig = CommandServiceConfig(),
     userManagementService: UserManagementServiceConfig = UserManagementServiceConfig(),
-    rateLimitingConfig: Option[RateLimitingConfig] = Some(RateLimitingConfig.default),
     managementServiceTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultManagementServiceTimeout,
-    synchronousCommitMode: String = LedgerApiServerConfig.DefaultSynchronousCommitMode,
+    postgresDataSourceConfig: PostgresDataSourceConfigCanton =
+      PostgresDataSourceConfigCanton(), //TODO(i9425): Consider exposing the full DataSourceProperties instead
     authServices: Seq[AuthServiceConfig] = Seq.empty,
     keepAliveServer: Option[KeepAliveServerConfig] = Some(KeepAliveServerConfig()),
     maxContractStateCacheSize: Long = LedgerApiServerConfig.DefaultMaxContractStateCacheSize,
@@ -319,35 +342,42 @@ object LedgerApiServerConfig {
   val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
 
-  // By default synchronous commit locally but don't await ACKs when replicated
-  val DefaultSynchronousCommitMode: String = "LOCAL"
-
   /** the following case class match will help us detect any additional configuration options added
     * when we upgrade the Daml code. if the below match fails because there are more config options,
     * add them to our "LedgerApiServerConfig".
     */
-  private def _completenessCheck(
-      config: DamlApiServerConfig
-  ): LedgerApiServerConfig =
-    config match {
-      case DamlApiServerConfig(
-            _participantId,
-            port,
-            address,
-            _jdbcUrl,
-            _databaseConnectionPoolSize, // configured by CantonLedgerApiServerWrapper based on available threads
-            _databaseConnectionTimeout,
-            tlsConfiguration,
-            _maxInboundMessageSize, // configured via participant.maxInboundMessageSize
-            _initialLedgerConfiguration, // not used by canton - always None
-            _configurationLoadTimeout, // time the ledger api submit services wait for canton to send time model configuration
-            DamlIndexConfiguration(
-              _archiveFiles,
-              _eventPageSize, // configured via participant.eventsPageSize,
+  private def _completenessCheck( //TODO(i9425): Consider splitting this into two separate completeness checks
+      apiServerConfig: DamlApiServerConfig,
+      indexServiceConfig: DamlIndexServiceConfig,
+  ): LedgerApiServerConfig = {
+
+    (apiServerConfig, indexServiceConfig) match {
+      case (
+            DamlApiServerConfig(
+              address,
+              _apiStreamShutdownTimeout,
+              _authentication, // configured via canton's AuthServiceConfig
+              _command,
+              _configurationLoadTimeout, // time the ledger api submit services wait for canton to send time model configuration
+              _initialLedgerConfiguration, // not used by canton - always None
+              managementServiceTimeout,
+              _maxInboundMessageSize, // configured via participant.maxInboundMessageSize
+              _party, //TODO(i9425): consider exposing this
+              port,
+              _portFile,
+              _rateLimitingConfig,
+              _seeding,
+              _timeProviderType,
+              tlsConfiguration,
+              _userManagement,
+            ),
+            DamlIndexServiceConfig(
+              _eventsPageSize, // configured via participant.eventsPageSize,
               _eventsProcessingParallelism,
               _bufferedStreamsPageSize,
               acsIdPageSize,
               _acsIdPageBufferSize,
+              _acsIdPageWorkingMemoryBytes,
               acsIdFetchingParallelism,
               acsContractFetchingParallelism,
               acsGlobalParallelism,
@@ -355,13 +385,8 @@ object LedgerApiServerConfig {
               _maxContractKeyStateCacheSize,
               _maxTransactionsInMemoryFanOutBufferSize,
               _enableInMemoryFanOutForLedgerApi,
-              _apiStreamShutdownTimeout,
+              _apiStreamShutdownTimeout2, //TODO(i9425): Is this the same config option as apiStreamShutdownTimeout in DamlApiServerConfig, or should we expose it?
             ),
-            _portFile,
-            _seeding,
-            managementServiceTimeout,
-            _userManagementConfig,
-            _rateLimitingConfig,
           ) =>
         def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
           import ServerAuthRequirementConfig._
@@ -408,9 +433,10 @@ object LedgerApiServerConfig {
             acsContractFetchingParallelism,
             acsGlobalParallelism,
           ),
-          managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout),
+          managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout.toJava),
         )
     }
+  }
 
   def ledgerApiServerTlsConfigFromCantonServerConfig(
       tlsCantonConfig: TlsServerConfig
@@ -448,12 +474,12 @@ object LedgerApiServerConfig {
   * Note _completenessCheck performed in LedgerApiServerConfig above
   */
 case class ActiveContractsServiceConfig(
-    acsIdPageSize: Int = DamlIndexConfiguration.DefaultAcsIdPageSize,
-    acsIdPageBufferSize: Int = DamlIndexConfiguration.DefaultAcsIdPageBufferSize,
-    acsIdFetchingParallelism: Int = DamlIndexConfiguration.DefaultAcsIdFetchingParallelism,
+    acsIdPageSize: Int = DamlIndexServiceConfig.DefaultAcsIdPageSize,
+    acsIdPageBufferSize: Int = DamlIndexServiceConfig.DefaultAcsIdPageBufferSize,
+    acsIdFetchingParallelism: Int = DamlIndexServiceConfig.DefaultAcsIdFetchingParallelism,
     acsContractFetchingParallelism: Int =
-      DamlIndexConfiguration.DefaultAcsContractFetchingParallelism,
-    acsGlobalParallelism: Int = DamlIndexConfiguration.DefaultAcsGlobalParallelism,
+      DamlIndexServiceConfig.DefaultAcsContractFetchingParallelism,
+    acsGlobalParallelism: Int = DamlIndexServiceConfig.DefaultAcsGlobalParallelism,
 )
 
 /** Ledger api command service specific configurations
@@ -464,10 +490,10 @@ case class ActiveContractsServiceConfig(
   */
 case class CommandServiceConfig(
     trackerRetentionPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration(
-      CommandConfiguration.default.trackerRetentionPeriod
+      CommandConfiguration.Default.trackerRetentionPeriod
     ),
-    inputBufferSize: Int = CommandConfiguration.default.inputBufferSize,
-    maxCommandsInFlight: Int = CommandConfiguration.default.maxCommandsInFlight,
+    inputBufferSize: Int = CommandConfiguration.Default.inputBufferSize,
+    maxCommandsInFlight: Int = CommandConfiguration.Default.maxCommandsInFlight,
 ) {
   // This helps us detect if any CommandService configuration are added in the daml repo.
   private def _completenessCheck(config: CommandConfiguration): CommandServiceConfig =
@@ -480,11 +506,22 @@ case class CommandServiceConfig(
         )
     }
 
-  def damlConfig = CommandConfiguration(
-    trackerRetentionPeriod = trackerRetentionPeriod.unwrap,
-    inputBufferSize = inputBufferSize,
-    maxCommandsInFlight = maxCommandsInFlight,
-  )
+  def damlConfig: CommandConfiguration =
+    this.into[CommandConfiguration].disableDefaultValues.transform
+}
+
+object CommandServiceConfig {
+  // This only serves to detect changes upstream (e.g., deletion of a field)
+  def fromDaml(config: CommandConfiguration): CommandServiceConfig = {
+    config
+      .into[CommandServiceConfig]
+      .disableDefaultValues
+      .withFieldComputed(
+        _.trackerRetentionPeriod,
+        c => NonNegativeFiniteDuration(c.trackerRetentionPeriod),
+      )
+      .transform
+  }
 }
 
 /** Ledger api user management service specific configurations
@@ -504,29 +541,43 @@ case class UserManagementServiceConfig(
     maxUsersPageSize: Int = UserManagementConfig.DefaultMaxUsersPageSize,
 ) {
 
-  // This helps us detect if any UserManagementConfig configuration are added in the daml repo.
-  private def _completenessCheck(config: UserManagementConfig): UserManagementServiceConfig =
-    config match {
-      case UserManagementConfig(
-            enabled,
-            maximumCacheSize,
-            cacheExpiryAfterWriteInSeconds,
-            maxUsersPageSize,
-          ) =>
-        UserManagementServiceConfig(
-          enabled,
-          maximumCacheSize,
-          cacheExpiryAfterWriteInSeconds,
-          maxUsersPageSize,
-        )
-    }
+  def damlConfig: UserManagementConfig = {
+    this.into[UserManagementConfig].disableDefaultValues.transform
+  }
+}
 
-  def damlConfig = UserManagementConfig(
-    enabled = enabled,
-    maxCacheSize = maxCacheSize,
-    cacheExpiryAfterWriteInSeconds = cacheExpiryAfterWriteInSeconds,
-    maxUsersPageSize = maxUsersPageSize,
-  )
+object UserManagementServiceConfig {
+  // This only serves to detect changes upstream (e.g., deletion of a field)
+  def fromDaml(config: UserManagementConfig): UserManagementServiceConfig = {
+    config
+      .into[UserManagementServiceConfig]
+      .disableDefaultValues
+      .withFieldConst(_.maxRightsPerUser, UserManagementConfig.MaxRightsPerUser)
+      .transform
+  }
+}
+
+final case class PostgresDataSourceConfigCanton(
+    synchronousCommit: Option[String] = None,
+    // TCP keepalive configuration for postgres. See https://www.postgresql.org/docs/13/runtime-config-connection.html#RUNTIME-CONFIG-CONNECTION-SETTINGS for details
+    tcpKeepalivesIdle: Option[Int] =
+      DefaultPostgresTcpKeepalivesIdle, // corresponds to: tcp_keepalives_idle
+    tcpKeepalivesInterval: Option[Int] =
+      DefaultPostgresTcpKeepalivesInterval, // corresponds to: tcp_keepalives_interval
+    tcpKeepalivesCount: Option[Int] =
+      DefaultPostgresTcpKeepalivesCount, // corresponds to: tcp_keepalives_count
+)
+
+object PostgresDataSourceConfigCanton {
+  // By default synchronous commit locally but don't await ACKs when replicated
+  val DefaultSynchronousCommitMode: String = "LOCAL"
+
+  // TODO(i9425): pick up defaults from ledger-api code
+  val DefaultPostgresTcpKeepalivesIdle: Option[Int] = Some(10)
+  val DefaultPostgresTcpKeepalivesInterval: Option[Int] = Some(1)
+  val DefaultPostgresTcpKeepalivesCount: Option[Int] = Some(5)
+
+  //TODO(i9425): consider adding a completeness check
 }
 
 /** Ledger api indexer specific configurations
@@ -548,9 +599,6 @@ case class IndexerConfig(
     schemaMigrationAttempts: Int = IndexerStartupMode.DefaultSchemaMigrationAttempts,
     schemaMigrationAttemptBackoff: NonNegativeFiniteDuration =
       IndexerConfig.DefaultSchemaMigrationAttemptBackoff,
-    postgresTcpKeepalivesIdle: Option[Int] = IndexerConfig.DefaultPostgresTcpKeepalivesIdle,
-    postgresTcpKeepalivesInterval: Option[Int] = IndexerConfig.DefaultPostgresTcpKeepalivesInterval,
-    postgresTcpKeepalivesCount: Option[Int] = IndexerConfig.DefaultPostgresTcpKeepalivesCount,
 )
 
 object IndexerConfig {
@@ -560,10 +608,6 @@ object IndexerConfig {
     NonNegativeFiniteDuration.ofSeconds(
       IndexerStartupMode.DefaultSchemaMigrationAttemptBackoff.toSeconds
     )
-  // See com.daml.platform.indexer.IndexerConfig for background on the tcp postgres configurations.
-  val DefaultPostgresTcpKeepalivesIdle: Option[Int] = Some(10)
-  val DefaultPostgresTcpKeepalivesInterval: Option[Int] = Some(1)
-  val DefaultPostgresTcpKeepalivesCount: Option[Int] = Some(5)
 
   /** The following case class match will help us detect any additional configuration options added
     * when we upgrade the Daml libraries. If the below match fails because there are more config options,
@@ -572,21 +616,16 @@ object IndexerConfig {
   private def _completenessCheck(config: DamlIndexerConfig): IndexerConfig =
     config match {
       case DamlIndexerConfig(
-            _participantIdUsedFromLedgerApiConfig,
-            _jdbcUrlUsedFromLedgerApiConfig,
-            startupMode, // not configurable in canton and decided based on participant-HA replica role
-            restartDelay,
-            _asyncCommitModeUsedFromLedgerApiConfig,
-            maxInputBufferSize,
-            inputMappingParallelism,
             batchingParallelism,
-            ingestionParallelism,
-            submissionBatchSize,
+            _dataSourceProperties, //TODO(i9425): consider exposing these instead of the more specific PostgresDataSourceConfig
             enableCompression,
-            _haConfig, // consider making a subset of these settings configurable once the ha-dust settles
-            postgresTcpKeepalivesIdle,
-            postgresTcpKeepalivesInterval,
-            postgresTcpKeepalivesCount,
+            _highAvailability, // consider making a subset of these settings configurable once the ha-dust settles
+            ingestionParallelism,
+            inputMappingParallelism,
+            maxInputBufferSize,
+            restartDelay,
+            startupMode, // not configurable in canton and decided based on participant-HA replica role
+            submissionBatchSize,
           ) =>
         val (schemaMigrationAttempts, schemaMigrationAttemptBackoff) = (startupMode match {
           case IndexerStartupMode.ValidateAndStart => None
@@ -615,9 +654,6 @@ object IndexerConfig {
           schemaMigrationAttempts = schemaMigrationAttempts,
           schemaMigrationAttemptBackoff =
             NonNegativeFiniteDuration.ofSeconds(schemaMigrationAttemptBackoff.toSeconds),
-          postgresTcpKeepalivesIdle = postgresTcpKeepalivesIdle,
-          postgresTcpKeepalivesInterval = postgresTcpKeepalivesInterval,
-          postgresTcpKeepalivesCount = postgresTcpKeepalivesCount,
         )
     }
 

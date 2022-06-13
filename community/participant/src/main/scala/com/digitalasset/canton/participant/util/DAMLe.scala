@@ -13,7 +13,7 @@ import com.daml.lf.engine._
 import com.daml.lf.interpretation.{Error => LfInterpretationError}
 import com.daml.lf.language.Ast.Package
 import com.daml.lf.transaction.Versioned
-import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfPartyId, LfVersioned}
+import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -103,7 +103,11 @@ class DAMLe(
       expectFailure: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Error, (LfVersionedTransaction, TransactionMetadata)] = {
+  ): EitherT[
+    Future,
+    Error,
+    (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+  ] = {
 
     def peelAwayRootLevelRollbackNode(
         tx: LfVersionedTransaction
@@ -163,7 +167,11 @@ class DAMLe(
       txWithMetadata <- EitherT(handleResult(contracts, result))
       (tx, metadata) = txWithMetadata
       txNoRootRollback <- EitherT.fromEither[Future](peelAwayRootLevelRollbackNode(tx))
-    } yield txNoRootRollback -> TransactionMetadata.fromLf(ledgerTime, metadata)
+    } yield (
+      txNoRootRollback,
+      TransactionMetadata.fromLf(ledgerTime, metadata),
+      metadata.globalKeyMapping,
+    )
   }
 
   def contractWithMetadata(contractInstance: LfContractInst, supersetOfSignatories: Set[LfPartyId])(
@@ -183,7 +191,7 @@ class DAMLe(
         Some(DAMLe.zeroSeed),
         expectFailure = false,
       )
-      (transaction, _metadata) = transactionWithMetadata
+      (transaction, _metadata, _resolver) = transactionWithMetadata
       md = transaction.nodes(transaction.roots(0)) match {
         case nc @ LfNodeCreate(
               _cid,

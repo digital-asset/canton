@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
 import cats.syntax.foldable._
-import cats.syntax.functor._
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,6 +18,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, Sequenc
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -46,12 +46,20 @@ class SyncDomainPersistentStateFactory(
       aliasManager: DomainAliasManager
   )(implicit traceContext: TraceContext): Future[Unit] = {
 
-    def checkForDomainParameters(
-        parameterStore: DomainParameterStore
-    )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+    def getProtocolVersion(domainId: DomainId)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, String, ProtocolVersion] =
       EitherT
-        .fromOptionF(parameterStore.lastParameters, "No domain parameters in store")
-        .void
+        .fromOptionF(
+          DomainParameterStore(
+            storage,
+            domainId,
+            parameters.processingTimeouts,
+            loggerFactory,
+          ).lastParameters,
+          "No domain parameters in store",
+        )
+        .map(_.protocolVersion)
 
     aliasManager.aliases.toList.traverse_ { alias =>
       val resultE = for {
@@ -59,16 +67,20 @@ class SyncDomainPersistentStateFactory(
           aliasManager.domainIdForAlias(alias).toRight("Unknown domain-id")
         )
         domainIdIndexed <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
-        persistentState = createPersistentState(alias, domainIdIndexed)
+        protocolVersion <- getProtocolVersion(domainId)
+        persistentState = createPersistentState(alias, domainIdIndexed, protocolVersion)
         _lastProcessedPresent <- persistentState.sequencedEventStore
           .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))
           .leftMap(_ => "No persistent event")
-        _ <- checkForDomainParameters(persistentState.parameterStore)
         _ = logger.debug(s"Discovered existing state for $alias")
       } yield syncDomainPersistentStateManager.put(persistentState)
 
       resultE.valueOr(error => logger.debug(s"No state for $alias discovered: ${error}"))
     }
+  }
+
+  def indexedDomainId(domainId: DomainId): Future[IndexedDomain] = {
+    IndexedDomain.indexed(this.indexedStringStore)(domainId)
   }
 
   /** Retrieves the [[SyncDomainPersistentState]] from the [[com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager]]
@@ -86,7 +98,8 @@ class SyncDomainPersistentStateFactory(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, DomainRegistryError, SyncDomainPersistentState] = {
-    val persistentState = createPersistentState(domainAlias, domainId)
+    val persistentState =
+      createPersistentState(domainAlias, domainId, domainParameters.protocolVersion)
     for {
       _ <- checkAndUpdateDomainParameters(
         domainAlias,
@@ -107,6 +120,7 @@ class SyncDomainPersistentStateFactory(
   private def createPersistentState(
       alias: DomainAlias,
       domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
   ): SyncDomainPersistentState =
     syncDomainPersistentStateManager
       .get(domainId.item)
@@ -115,6 +129,7 @@ class SyncDomainPersistentStateFactory(
           storage,
           alias,
           domainId,
+          protocolVersion,
           pureCryptoApi,
           parameters.stores,
           parameters.cachingConfigs,
@@ -140,12 +155,8 @@ class SyncDomainPersistentStateFactory(
             parameterStore.setParameters(newParameters)
           )
         case Some(oldParameters) =>
-          // We exclude protocolVersion from the equality check
-          val oldParametersForComparison =
-            oldParameters.copy(protocolVersion = newParameters.protocolVersion)
-
           EitherT.cond[Future](
-            oldParametersForComparison == newParameters,
+            oldParameters == newParameters,
             (),
             DomainRegistryError.ConfigurationErrors.DomainParametersChanged
               .Error(oldParametersO, newParameters): DomainRegistryError,
@@ -175,12 +186,13 @@ class SyncDomainPersistentStateFactory(
       )
       _ <- EitherT.cond[Future](!uckMode, (), ()).leftFlatMap { _ =>
         // If we're connecting to a UCK domain,
-        // make sure that we haven't been connected to a different domain before
-        val allDomains = syncDomainPersistentStateManager.getAll.keySet
+        // make sure that we haven't been connected to a different domain before (unless we are doing a migration here)
+        val allActiveDomains = syncDomainPersistentStateManager.getAll.keySet
+          .filter(syncDomainPersistentStateManager.getStatusOf(_).exists(_.isActive))
         EitherTUtil.condUnitET[Future](
-          allDomains.forall(_ == domainId),
+          allActiveDomains.forall(_ == domainId),
           DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
-            s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allDomains
+            s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
               .mkString(", ")}"
           ): DomainRegistryError,
         )

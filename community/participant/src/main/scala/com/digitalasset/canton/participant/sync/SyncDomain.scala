@@ -21,8 +21,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
-import com.digitalasset.canton.participant.domain.grpc.SequencerBasedRegisterTopologyTransactionHandle
-import com.digitalasset.canton.participant.domain.{DomainHandle, DomainRegistryError}
+import com.digitalasset.canton.participant.domain.{
+  DomainHandle,
+  DomainRegistryError,
+  SequencerBasedRegisterTopologyTransactionHandle,
+}
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
 import com.digitalasset.canton.participant.metrics.{PruningMetrics, SyncDomainMetrics}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
@@ -583,6 +586,7 @@ class SyncDomain(
           .domainConnected(
             domainHandle.domainAlias,
             domainId,
+            staticDomainParameters.protocolVersion,
             registerIdentityTransactionHandle,
             domainHandle.topologyClient,
             domainHandle.topologyStore,
@@ -616,7 +620,7 @@ class SyncDomain(
           requestAfter = previous,
           limit = fetchLimit,
         )
-        // TODO(phoebe): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
+        // TODO(i9500): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
         // this up. It may be helpful to use the `RateLimiter`
         eithers <- MonadUtil
           .sequentialTraverse(pendingTransfers)({ data =>
@@ -683,6 +687,7 @@ class SyncDomain(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       transaction: WellFormedTransaction[WithoutSuffixes],
   )(implicit
       traceContext: TraceContext
@@ -693,7 +698,7 @@ class SyncDomain(
     ) {
       ErrorUtil.requireState(ready, "Cannot submit transaction before recovery")
       transactionProcessor
-        .submit(submitterInfo, transactionMeta, transaction)
+        .submit(submitterInfo, transactionMeta, keyResolver, transaction)
         .onShutdown(Left(SubmissionDuringShutdown.Rejection()))
     }
 

@@ -161,7 +161,7 @@ trait DbMigrations { this: NamedLogging =>
     def attempt: EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
       withDb { createdDb =>
         ResourceUtil.withResource(createdDb) { db: JdbcBackend.Database =>
-          //TODO(phoebe): The DataSource could be created from the DbConfig, without first having to create the whole
+          //TODO(i9497): The DataSource could be created from the DbConfig, without first having to create the whole
           // Database. Swap to this more light-weight approach.
           val dataSource = db.source
           val conn = dataSource.createConnection()

@@ -139,9 +139,7 @@ class GrpcTopologyManagerReadService(
         .inspect(
           stateStore =
             // the topology manager does not write to the state store, so a state store query does not make sense
-            if (
-              storeId == TopologyStoreId.AuthorizedStore || storeId == TopologyStoreId.RequestedStore
-            )
+            if (storeId == TopologyStoreId.AuthorizedStore)
               false
             else baseQuery.useStateStore,
           timeQuery = baseQuery.timeQuery,

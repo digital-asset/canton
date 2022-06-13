@@ -51,10 +51,12 @@ import com.digitalasset.canton.version.{
   VersionedMessage,
 }
 import com.digitalasset.canton.{
+  LedgerApplicationId,
   LedgerParticipantId,
   LedgerSubmissionId,
   LedgerTransactionId,
   LfPackageId,
+  LfWorkflowId,
   ProtoDeserializationError,
   checked,
 }
@@ -643,11 +645,13 @@ object SerializableTransactionId
       LedgerTransactionId
     )
 object SerializableApplicationId
-    extends SerializableStringModule[Ref.ApplicationId, Ref.ApplicationId.type](Ref.ApplicationId)
+    extends SerializableStringModule[LedgerApplicationId, Ref.ApplicationId.type](
+      LedgerApplicationId
+    )
 object SerializableCommandId
     extends SerializableStringModule[Ref.CommandId, Ref.CommandId.type](Ref.CommandId)
 object SerializableWorkflowId
-    extends SerializableStringModule[Ref.WorkflowId, Ref.WorkflowId.type](Ref.WorkflowId)
+    extends SerializableStringModule[LfWorkflowId, Ref.WorkflowId.type](LfWorkflowId)
 object SerializablePackageId
     extends SerializableStringModule[LfPackageId, LfPackageId.type](LfPackageId)
 

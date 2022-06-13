@@ -248,7 +248,7 @@ object TopologyTimestampPlusEpsilonTracker {
           .findPositiveTransactions(
             asOf = asOfExclusive,
             asOfInclusive = false,
-            includeSecondary = true,
+            includeSecondary = false,
             types = Seq(DomainTopologyTransactionType.DomainParameters),
             filterUid = None,
             filterNamespace = None,

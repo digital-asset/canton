@@ -7,7 +7,10 @@ import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingIdentityFactory}
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
+import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
+  RegisterTopologyTransactionResponse,
+}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.BaseTest
@@ -23,8 +26,24 @@ trait RegisterTopologyTransactionResponseStoreTest {
 
   private val requestId1 = String255.tryCreate("requestId1")
   private val requestId2 = String255.tryCreate("requestId2")
-  private val response1 = RegisterTopologyTransactionResponse(p1, p1, requestId1, List(), da)
-  private val response2 = RegisterTopologyTransactionResponse(p1, p1, requestId2, List(), da)
+
+  private lazy val representativeProtocolVersion =
+    ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
+
+  private val response1 = RegisterTopologyTransactionResponse(
+    p1,
+    p1,
+    requestId1,
+    List(),
+    da,
+  )(representativeProtocolVersion)
+  private val response2 = RegisterTopologyTransactionResponse(
+    p1,
+    p1,
+    requestId2,
+    List(),
+    da,
+  )(representativeProtocolVersion)
 
   def registerTopologyTransactionResponseStore(
       mk: () => RegisterTopologyTransactionResponseStore

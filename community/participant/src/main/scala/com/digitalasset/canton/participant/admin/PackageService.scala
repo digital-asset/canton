@@ -20,7 +20,7 @@ import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
@@ -102,6 +102,17 @@ class PackageService(
   ): Future[Option[Package]] =
     getLfArchive(packageId).map(_.map(Decode.assertDecodeArchive(_)._2))
 
+  private def neededForAdminWorkflow(
+      packageId: PackageId
+  )(implicit elc: ErrorLoggingContext): Either[PackageRemovalError, Unit] = {
+    val isAdminWorkflow = AdminWorkflowServices.AdminWorkflowPackages.keySet.contains(packageId)
+    if (isAdminWorkflow) {
+      Left(new PackageRemovalErrorCode.CannotRemoveAdminWorkflowPackage(packageId))
+    } else {
+      Right(())
+    }
+  }
+
   def removePackage(
       packageId: PackageId,
       force: Boolean,
@@ -114,6 +125,7 @@ class PackageService(
       val isVetted = inspectionOps.packageVetted(packageId)
 
       for {
+        _notAdminWf <- EitherT.fromEither[Future](neededForAdminWorkflow(packageId))
         _used <- isUsed
         vetted <- isVetted
         removed <- {
@@ -170,6 +182,8 @@ class PackageService(
 
     val mainPkg = readPackageId(dar.main)
     for {
+      _notAdminWf <- EitherT.fromEither[Future](neededForAdminWorkflow((mainPkg)))
+
       _mainUnused <- inspectionOps
         .packageUnused(mainPkg)
         .leftMap(err => new MainPackageInUse(err.pkg, darDescriptor, err.contract, err.domain))

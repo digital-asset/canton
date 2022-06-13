@@ -25,9 +25,10 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEitherIterable
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{BatchAggregator, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.github.blemale.scaffeine.AsyncCache
 import io.functionmeta.functionFullName
-import slick.jdbc.GetResult
+import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -35,6 +36,7 @@ import scala.util.{Failure, Success}
 class DbContractStore(
     override protected val storage: DbStorage,
     domainIdIndexed: IndexedDomain,
+    protocolVersion: ProtocolVersion,
     maxContractIdSqlInListSize: PositiveNumeric[Int],
     cacheConfig: CacheConfig,
     dbQueryBatcherConfig: BatchAggregatorConfig,
@@ -67,6 +69,9 @@ class DbContractStore(
     val contract = SerializableContract(contractId, contractInstance, metadata, ledgerCreateTime)
     StoredContract(contract, requestCounter, creatingTransactionIdO)
   }
+
+  private implicit val setParameterContractMetadata: SetParameter[ContractMetadata] =
+    ContractMetadata.getVersionedSetParameter(protocolVersion)
 
   private val cache: AsyncCache[LfContractId, Option[StoredContract]] =
     cacheConfig.buildScaffeine().buildAsync[LfContractId, Option[StoredContract]]()

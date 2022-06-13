@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   EncryptedViewMessageV0,
   EncryptedViewMessageV1,
+  ProtocolMessage,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -89,9 +90,10 @@ object EncryptedViewMessageFactory {
             viewTree.domainId,
             viewEncryptionScheme,
           )(
-            Some(informeeParticipants)
+            Some(informeeParticipants),
+            ProtocolMessage.protocolVersionRepresentativeFor(ProtocolVersion.unstable_development),
           )
-        case _ =>
+        case protocolVersion =>
           val randomnessMapV0 = randomnessMap.fmap(_.encrypted)
           EncryptedViewMessageV0[VT](
             signature,
@@ -99,7 +101,7 @@ object EncryptedViewMessageFactory {
             randomnessMapV0,
             encryptedView,
             viewTree.domainId,
-          )
+          )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion))
       }
     } yield message
   }

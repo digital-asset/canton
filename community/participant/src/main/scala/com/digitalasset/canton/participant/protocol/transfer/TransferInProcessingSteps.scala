@@ -14,8 +14,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine.{Error => LfError}
 import com.daml.lf.interpretation.{Error => LfInterpretationError}
-import com.daml.nonempty.NonEmptyUtil
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError => _, EncryptionError => _, _}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data._
@@ -45,7 +44,6 @@ import com.digitalasset.canton.participant.sync.{LedgerEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
@@ -60,7 +58,6 @@ import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
-import scala.annotation.nowarn
 import scala.collection.concurrent
 import scala.collection.immutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -197,6 +194,7 @@ class TransferInProcessingSteps(
         RootHashMessage(
           rootHash,
           domainId,
+          protocolVersion,
           ViewType.TransferInViewType,
           EmptyRootHashMessagePayload,
         )
@@ -378,10 +376,8 @@ class TransferInProcessingSteps(
       } yield ()
     }
 
-    //TODO(i5352): Tie this in
     // The transferring participant must send on the causal state at the time of the transfer-out.
     // This state is sent to all participants hosting a party that the transferring participant confirms for.
-    @nowarn("cat=unused")
     def checkCausalityState(
         confirmFor: Set[LfPartyId]
     ): EitherT[Future, TransferProcessorError, List[(CausalityMessage, Recipients)]] = {
@@ -414,7 +410,7 @@ class TransferInProcessingSteps(
 
           causalityMessages = {
             recipients.flatMap { case (clock, hostedBy) =>
-              val msg = CausalityMessage(domainId, transferId, clock)
+              val msg = CausalityMessage(domainId, protocolVersion, transferId, clock)
               logger.debug(
                 s"Sending causality message for $transferId with clock $clock to $hostedBy"
               )

@@ -15,6 +15,7 @@ import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -35,6 +36,12 @@ class DbCryptoPrivateStore(
     storage.metrics.loadGaugeM("crypto-private-store-insert")
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
+
+  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private implicit val setParameterEncryptionPrivateKey: SetParameter[EncryptionPrivateKey] =
+    EncryptionPrivateKey.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterSigningPrivateKey: SetParameter[SigningPrivateKey] =
+    SigningPrivateKey.getVersionedSetParameter(protocolVersion)
 
   private def queryKeys[K: GetResult](purpose: KeyPurpose): DbAction.ReadOnly[Set[K]] =
     sql"select data, name from crypto_private_keys where purpose = $purpose"

@@ -74,6 +74,7 @@ import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.ScheduledExecutorService
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 case class SequencerAuthenticationConfig(
@@ -210,7 +211,13 @@ class SequencerRuntime(
       withNewTraceContext { implicit traceContext =>
         logger.debug(s"Creating sequencer client for ${clientDiscriminator}")
         val sequencedEventStore =
-          SequencedEventStore(storage, clientDiscriminator, timeouts, loggerFactory)
+          SequencedEventStore(
+            storage,
+            clientDiscriminator,
+            staticDomainParameters.protocolVersion,
+            timeouts,
+            loggerFactory,
+          )
 
         val client = new SequencerClient(
           domainId,
@@ -373,6 +380,7 @@ class SequencerRuntime(
           .bindService(
             new GrpcSequencerTopologyBootstrapService(
               domainId,
+              staticDomainParameters.protocolVersion,
               syncCrypto,
               client,
               () => isInitialized,
@@ -391,14 +399,14 @@ class SequencerRuntime(
     * That's because embedded sequencers (especially the CCF sequencer) still rely on the domain having its own domain service, so in that case we do not
     * register it twice.
     */
+  @nowarn("cat=deprecation")
   def registerDomainService(
       register: ServerServiceDefinition => Unit
   )(implicit ec: ExecutionContext): Unit = {
-    register(
-      v0.DomainServiceGrpc.bindService(
-        new GrpcDomainService(authenticationConfig.agreementManager, loggerFactory),
-        executionContext,
-      )
+
+    v0.DomainServiceGrpc.bindService(
+      new GrpcDomainService(authenticationConfig.agreementManager, loggerFactory),
+      executionContext,
     )
 
     register(

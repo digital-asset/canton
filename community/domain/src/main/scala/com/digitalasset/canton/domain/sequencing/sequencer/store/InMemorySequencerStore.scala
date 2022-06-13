@@ -192,7 +192,10 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
     val existingDataO = Option(memberCheckpoints.putIfAbsent(counter, data))
 
     EitherT.cond[Future](
-      existingDataO.forall(_ == data),
+      existingDataO.forall(existing => {
+        val CheckpointDataAtCounter(existingTs, existingLatestTopologyTs) = existing
+        existingTs == ts && (existingLatestTopologyTs == latestTopologyClientTimestamp || existingLatestTopologyTs.isEmpty)
+      }),
       (),
       existingDataO
         .getOrElse(throw new RuntimeException("Option.forall must hold on None"))

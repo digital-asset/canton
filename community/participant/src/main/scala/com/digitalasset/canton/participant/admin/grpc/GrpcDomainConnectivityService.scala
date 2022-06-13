@@ -82,4 +82,5 @@ class GrpcDomainConnectivityService(service: DomainConnectivityService)(implicit
         GetDomainIdResponse(domainId = domainId.toProtoPrimitive)
       }
     }
+
 }

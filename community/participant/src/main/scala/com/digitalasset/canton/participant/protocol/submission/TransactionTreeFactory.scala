@@ -32,6 +32,9 @@ trait TransactionTreeFactory {
 
   /** Converts a `transaction: LfTransaction` to the corresponding transaction tree, if possible.
     *
+    * @param keyResolver The key resolutions recorded while interpreting the transaction.
+    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]].
+    *
     * @see TransactionTreeConversionError for error cases
     */
   def createTransactionTree(
@@ -44,12 +47,16 @@ trait TransactionTreeFactory {
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
+      keyResolver: LfKeyResolver,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree]
 
   /** Reconstructs a transaction view from a reinterpreted action description,
     * using the supplied salts.
+    *
+    * @param keyResolver The key resolutions recorded while re-interpreting the subaction.
+    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]].
     *
     * @throws java.lang.IllegalArgumentException if `subaction` does not contain exactly one root node
     */
@@ -63,6 +70,7 @@ trait TransactionTreeFactory {
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
       rbContext: RollbackContext,
+      keyResolver: LfKeyResolver,
   )(implicit traceContext: TraceContext): EitherT[
     Future,
     TransactionTreeConversionError,

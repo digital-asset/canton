@@ -20,14 +20,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClient,
 }
 import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.sequencing.{
-  AsyncResult,
-  HandlerResult,
-  ResubscriptionStart,
-  UnsignedEnvelopeBox,
-  UnsignedProtocolEventHandler,
-}
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 
@@ -41,7 +34,7 @@ import scala.util.control.NonFatal
   */
 class DomainTopologyManagerEventHandler(
     store: RegisterTopologyTransactionResponseStore,
-    newRequest: List[SignedTopologyTransaction[TopologyChangeOp]] => Future[List[RequestResult]],
+    requestHandler: DomainTopologyManagerRequestService.Handler,
     sequencerSendResponse: (
         OpenEnvelope[RegisterTopologyTransactionResponse],
         SendCallback,
@@ -102,14 +95,23 @@ class DomainTopologyManagerEventHandler(
       request: RegisterTopologyTransactionRequest
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
-      response <- newRequest(request.transactions)
+      // TODO(i4933) we need to add a signature to the request
+      //   - signature must match participant
+      //   - config flag / domain parameter ensuring that participant only sends transactions related to itself
+      //   - initial registration must not contain anything other than a cert and some keys
+      //   - initial registration must be limited to a handful of certs and keys (100, configurable)
+      response <- requestHandler.newRequest(
+        request.requestedBy,
+        request.participant,
+        request.transactions,
+      )
       pendingResponse = RegisterTopologyTransactionResponse(
         request.requestedBy,
         request.participant,
         request.requestId,
-        response.map(_.toProtoV0),
+        response,
         request.domainId,
-      )
+      )(request.representativeProtocolVersion)
       _ <- store.savePendingResponse(pendingResponse)
       result <- sendResponse(pendingResponse)
     } yield result

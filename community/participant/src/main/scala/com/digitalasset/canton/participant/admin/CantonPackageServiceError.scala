@@ -60,6 +60,15 @@ object CantonPackageServiceError extends PackageServiceErrorGroup {
         )
 
     @Resolution(
+      s"""Packages needed for admin workflows cannot be removed."""
+    )
+    class CannotRemoveAdminWorkflowPackage(val pkg: PackageId)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends PackageRemovalError(
+          s"""Removal of package $pkg failed as packages needed for admin workflows cannot be removed."""
+        )
+
+    @Resolution(
       s"""To cleanly remove the package, you must first revoke authorization for the package."""
     )
     class PackageVetted(pkg: PackageId)(implicit

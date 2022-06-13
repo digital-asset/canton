@@ -156,9 +156,7 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setParameterRegisterTopologyTransactionRequest
       : SetParameter[RegisterTopologyTransactionRequest] =
     (r: RegisterTopologyTransactionRequest, pp: PositionedParameters) =>
-      pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, protocolVersion)
-        .toByteArray
+      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
       : GetResult[RegisterTopologyTransactionResponse] = GetResult(r =>
@@ -190,9 +188,7 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setRegisterTopologyTransactionResponse
       : SetParameter[RegisterTopologyTransactionResponse] =
     (r: RegisterTopologyTransactionResponse, pp: PositionedParameters) =>
-      pp >> ProtocolMessage
-        .toEnvelopeContentByteString(r, protocolVersion)
-        .toByteArray
+      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
 
   override def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
       traceContext: TraceContext

@@ -16,6 +16,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.duration.{Duration => PbDuration}
 import io.circe.Encoder
+import io.scalaland.chimney.Transformer
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.Duration
@@ -161,6 +162,8 @@ final case class NonNegativeFiniteDuration(duration: Duration)
 }
 
 object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {
+  implicit val forgetRefinement: Transformer[NonNegativeFiniteDuration, Duration] = _.duration
+
   val Zero: NonNegativeFiniteDuration = NonNegativeFiniteDuration(Duration.ZERO)
 }
 

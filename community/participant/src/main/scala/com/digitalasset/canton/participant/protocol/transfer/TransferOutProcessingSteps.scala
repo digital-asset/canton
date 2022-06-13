@@ -184,6 +184,7 @@ class TransferOutProcessingSteps(
         RootHashMessage(
           rootHash,
           domainId,
+          protocolVersion,
           ViewType.TransferOutViewType,
           EmptyRootHashMessagePayload,
         )

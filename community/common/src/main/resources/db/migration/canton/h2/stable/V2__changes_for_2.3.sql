@@ -14,3 +14,7 @@ DROP TABLE crypto_hmac_secret;
 -- NULL if the sequencer counter checkpoint was generated before this column was added.
 alter table sequencer_counter_checkpoints
     add column latest_topology_client_ts bigint;
+
+-- Add state to participant domain connection configurations
+ALTER TABLE participant_domain_connection_configs ADD status CHAR(1) DEFAULT 'A' NOT NULL;
+ALTER TABLE participant_domains ADD status CHAR(1) DEFAULT 'A' NOT NULL;

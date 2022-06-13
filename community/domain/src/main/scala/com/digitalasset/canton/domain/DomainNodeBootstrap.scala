@@ -413,7 +413,14 @@ class DomainNodeBootstrap(
         agreementManager <- config.serviceAgreement
           .traverse { agreementFile =>
             ServiceAgreementManager
-              .create(agreementFile.toScala, storage, crypto.pureCrypto, timeouts, loggerFactory)
+              .create(
+                agreementFile.toScala,
+                storage,
+                crypto.pureCrypto,
+                staticDomainParameters.protocolVersion,
+                timeouts,
+                loggerFactory,
+              )
           }
           .toEitherT[Future]
 
@@ -446,8 +453,6 @@ class DomainNodeBootstrap(
           config.topology,
           manager,
           topologyClient,
-          clock,
-          topologyStoreFactory,
           parameters.processingTimeouts,
           loggerFactory,
         )

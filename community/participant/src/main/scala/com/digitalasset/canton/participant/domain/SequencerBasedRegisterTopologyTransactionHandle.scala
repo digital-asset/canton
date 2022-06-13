@@ -1,9 +1,10 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain.grpc
+package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
+import cats.syntax.traverse._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
@@ -16,7 +17,6 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
-import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
@@ -58,23 +58,24 @@ class SequencerBasedRegisterTopologyTransactionHandle(
 
   override def submit(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
-  ): FutureUnlessShutdown[Seq[v0.RegisterTopologyTransactionResponse.Result]] =
-    service
-      .registerTopologyTransaction(
-        RegisterTopologyTransactionRequest(
-          requestedBy = requestedBy,
-          participant = participantId,
-          requestId = String255.tryCreate(UUID.randomUUID().toString),
-          transactions = transactions.toList,
-          domainId = domainId,
-        )
+  ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponse.Result]] =
+    RegisterTopologyTransactionRequest
+      .create(
+        requestedBy = requestedBy,
+        participant = participantId,
+        requestId = String255.tryCreate(UUID.randomUUID().toString),
+        transactions = transactions.toList,
+        domainId = domainId,
       )
-      .map(_.toProtoV0.results)
+      .toList
+      .traverse(service.registerTopologyTransaction)
+      .map(_.map(_.results))
+      .map(_.flatten)
 
   override def onClosed(): Unit = service.close()
 }
 
-private[grpc] class ParticipantDomainTopologyService(
+private[domain] class ParticipantDomainTopologyService(
     domainId: DomainId,
     send: (
         TraceContext,
@@ -145,7 +146,7 @@ private[grpc] class ParticipantDomainTopologyService(
       s" requested by ${request.requestedBy} "
     else " "}with requestId = ${request.requestId}"
 
-  private[grpc] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
+  private[domain] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
     envs.withTraceContext { implicit traceContext => envs =>
       HandlerResult.asynchronous(performUnlessClosingF(s"${getClass.getSimpleName}-processor") {
         Future {

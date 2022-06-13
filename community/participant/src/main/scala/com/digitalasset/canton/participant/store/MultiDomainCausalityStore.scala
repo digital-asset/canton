@@ -31,12 +31,11 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
 
   // A cross-domain store used by transferring participants to propagate causality information from transfer-out to transfer-in
   // This can be accessed concurrently across different domains
-  // TODO(i5352): Retrieve this state from the database instead of keeping it in memory
+  // TODO(i9515): Retrieve this state from the database instead of keeping it in memory
   protected val transferStore: TrieMap[TransferId, Map[LfPartyId, VectorClock]] =
     new TrieMap()
 
   // Use to synchronize between a transfer's origin domain and target domain on a transferring participant
-  // TODO(i5352): This leaks memory. Discard entries once no longer needed.
   protected val transferOutPromises: TrieMap[TransferId, Promise[Unit]] =
     new TrieMap()
 
@@ -62,6 +61,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
     storedPromise.future.map { case () =>
       val mapO = transferStore.get(id)
       ErrorUtil.requireState(mapO.isDefined, s"No causal state for transfer $id")
+      transferOutPromises.remove(id)
       mapO.fold(Map.empty[LfPartyId, VectorClock])(m => m)
     }
   }

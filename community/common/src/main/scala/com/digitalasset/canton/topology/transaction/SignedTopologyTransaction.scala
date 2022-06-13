@@ -8,13 +8,15 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.serialization.{ProtocolVersionedMemoizedEvidence, ProtoConverter}
+import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.google.protobuf.ByteString
@@ -37,9 +39,9 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     key: SigningPublicKey,
     signature: Signature,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     val deserializedFrom: Option[ByteString] = None,
-) extends HasProtocolVersionedWrapper[VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]]]
+) extends HasProtocolVersionedWrapper[SignedTopologyTransaction[TopologyChangeOp]]
     with HasProtoV0[v0.SignedTopologyTransaction]
     with ProtocolVersionedMemoizedEvidence
     with Product
@@ -82,7 +84,7 @@ object SignedTopologyTransaction
   override val name: String = "SignedTopologyTransaction"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.SignedTopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -124,7 +126,7 @@ object SignedTopologyTransaction
         "signature",
         transactionP.signature,
       )
-      protocolVersion = supportedProtoVersions.protocolVersionRepresentativeFor(0)
+      protocolVersion = supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(0))
     } yield SignedTopologyTransaction(transaction, publicKey, signature)(
       protocolVersion,
       Some(bytes),

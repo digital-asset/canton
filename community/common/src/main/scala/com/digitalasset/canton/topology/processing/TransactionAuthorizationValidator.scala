@@ -3,28 +3,21 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.DiscardOps
-import cats.syntax.traverse._
 import cats.instances.list._
 import cats.instances.option._
+import cats.syntax.traverse._
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction.{
   AuthorizedIdentifierDelegation,
   AuthorizedNamespaceDelegation,
 }
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction.{
-  DomainTopologyTransactionType,
-  IdentifierDelegation,
-  NamespaceDelegation,
-  RequiredAuth,
-  SignedTopologyTransaction,
-  TopologyChangeOp,
-}
+import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
@@ -45,31 +38,37 @@ trait TransactionAuthorizationValidator {
 
   def isCurrentlyAuthorized(sit: SignedTopologyTransaction[TopologyChangeOp]): Boolean = {
     val authKey = sit.key.fingerprint
-    sit.transaction.element.mapping.requiredAuth match {
-      case RequiredAuth.Ns(namespace, rootDelegation) =>
-        getAuthorizationGraphForNamespace(namespace).isValidAuthorizationKey(
-          authKey,
-          requireRoot = rootDelegation,
-        )
-      case RequiredAuth.Uid(uids) => uids.forall(isAuthorizedForUid(_, authKey))
-    }
+    if (NamespaceDelegation.isRootCertificate(sit)) true
+    else
+      sit.transaction.element.mapping.requiredAuth match {
+        case RequiredAuth.Ns(namespace, rootDelegation) =>
+          getAuthorizationGraphForNamespace(namespace).isValidAuthorizationKey(
+            authKey,
+            requireRoot = rootDelegation,
+          )
+        case RequiredAuth.Uid(uids) => uids.forall(isAuthorizedForUid(_, authKey))
+      }
   }
 
   def authorizationChainFor(
       sit: SignedTopologyTransaction[TopologyChangeOp]
   ): Option[AuthorizationChain] = {
     val authKey = sit.key.fingerprint
-    sit.transaction.element.mapping.requiredAuth match {
-      case RequiredAuth.Ns(namespace, rootDelegation) =>
-        getAuthorizationGraphForNamespace(namespace).authorizationChain(
-          authKey,
-          requireRoot = rootDelegation,
-        )
-      case RequiredAuth.Uid(uids) =>
-        uids.toList
-          .traverse(authorizationChainFor(_, authKey))
-          .map(_.foldLeft(AuthorizationChain(Seq(), Seq())) { case (acc, elem) => acc.merge(elem) })
-    }
+    if (NamespaceDelegation.isRootCertificate(sit)) Some(AuthorizationChain(Seq(), Seq()))
+    else
+      sit.transaction.element.mapping.requiredAuth match {
+        case RequiredAuth.Ns(namespace, rootDelegation) =>
+          getAuthorizationGraphForNamespace(namespace).authorizationChain(
+            authKey,
+            requireRoot = rootDelegation,
+          )
+        case RequiredAuth.Uid(uids) =>
+          uids.toList
+            .traverse(authorizationChainFor(_, authKey))
+            .map(_.foldLeft(AuthorizationChain(Seq(), Seq())) { case (acc, elem) =>
+              acc.merge(elem)
+            })
+      }
   }
 
   protected def authorizationChainFor(
@@ -114,7 +113,10 @@ trait TransactionAuthorizationValidator {
   protected def getAuthorizationGraphForNamespace(
       namespace: Namespace
   ): AuthorizationGraph =
-    namespaceCache.getOrElseUpdate(namespace, new AuthorizationGraph(namespace, loggerFactory))
+    namespaceCache.getOrElseUpdate(
+      namespace,
+      new AuthorizationGraph(namespace, extraDebugInfo = false, loggerFactory),
+    )
 
   protected def loadAuthorizationGraphs(timestamp: CantonTimestamp, namespaces: Set[Namespace])(
       implicit
@@ -141,7 +143,7 @@ trait TransactionAuthorizationValidator {
             !namespaceCache.isDefinedAt(namespace),
             s"graph shouldnt exist before loading ${namespaces} vs ${namespaceCache.keySet}",
           )
-          val graph = new AuthorizationGraph(namespace, loggerFactory)
+          val graph = new AuthorizationGraph(namespace, extraDebugInfo = false, loggerFactory)
           namespaceCache.put(namespace, graph)
           // use un-authorized batch load. while we are checking for proper authorization when we
           // add a certificate the first time, we allow for the situation where an intermediate certificate

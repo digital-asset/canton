@@ -10,6 +10,7 @@ import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.{
@@ -111,7 +112,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
       logger.error("Writer flow failed", _), {
         SequencerWriterSource(
           testWriterConfig,
-          totalNodeCount = 1,
+          totalNodeCount = PositiveInt.tryCreate(1),
           keepAliveInterval,
           TestDomainParameters.domainSyncCryptoApi(
             DefaultTestIdentities.domainId,

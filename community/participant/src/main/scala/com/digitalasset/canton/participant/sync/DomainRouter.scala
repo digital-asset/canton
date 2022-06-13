@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.sync
 import cats.data.{EitherT, OptionT}
 import cats.implicits._
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
-import com.daml.lf.data.Ref
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
@@ -47,7 +46,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
-import com.digitalasset.canton.{DomainAlias, LfPartyId}
+import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId, LfWorkflowId}
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
@@ -73,6 +72,7 @@ class DomainRouter(
     submit: DomainId => (
         SubmitterInfo,
         TransactionMeta,
+        LfKeyResolver,
         WellFormedTransaction[WithoutSuffixes],
         TraceContext,
     ) => EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]],
@@ -96,6 +96,7 @@ class DomainRouter(
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       transaction: LfSubmittedTransaction,
   )(implicit
       traceContext: TraceContext
@@ -161,6 +162,7 @@ class DomainRouter(
             domainOfInputContracts,
             submitterInfo,
             transactionMeta,
+            keyResolver,
             wfTransaction,
             lfSubmitters,
             informees,
@@ -174,6 +176,7 @@ class DomainRouter(
           submitTransactionSingleDomain(
             submitterInfo,
             transactionMeta,
+            keyResolver,
             wfTransaction,
             lfSubmitters,
             inputContractMetadata.map(m => m.unwrap),
@@ -198,6 +201,7 @@ class DomainRouter(
       domainOfInputContracts: List[(LfContractId, Option[ContractData])],
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       submitters: Set[LfPartyId],
       informees: Set[LfPartyId],
@@ -233,6 +237,7 @@ class DomainRouter(
             submitterInfo,
             submitters,
             transactionMeta,
+            keyResolver,
             informees,
           )
         else {
@@ -262,6 +267,7 @@ class DomainRouter(
   def submitTransactionSingleDomain(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       submitters: Set[LfPartyId],
       inputContractIds: Set[LfContractId],
@@ -277,6 +283,7 @@ class DomainRouter(
       transactionSubmitted <- submit(domainId)(
         submitterInfo,
         transactionMeta,
+        keyResolver,
         wfTransaction,
         traceContext,
       )
@@ -290,6 +297,7 @@ class DomainRouter(
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]] = {
@@ -307,6 +315,7 @@ class DomainRouter(
           submitterInfo,
           transfers,
           transactionMeta,
+          keyResolver,
         )
       }
   }
@@ -318,6 +327,7 @@ class DomainRouter(
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       informees: Set[LfPartyId],
   )(implicit
       traceContext: TraceContext
@@ -362,6 +372,7 @@ class DomainRouter(
           submitterInfo,
           domainRank.transfers,
           transactionMeta,
+          keyResolver,
         )
       }
     }
@@ -373,6 +384,7 @@ class DomainRouter(
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       informees: Set[LfPartyId],
   )(implicit
       traceContext: TraceContext
@@ -396,6 +408,7 @@ class DomainRouter(
             submitterInfo,
             submitters,
             transactionMeta,
+            keyResolver,
             informees,
           )
         case Some(targetDomain) => // Use the domain given by the workflow ID
@@ -406,6 +419,7 @@ class DomainRouter(
             submitterInfo,
             submitters,
             transactionMeta,
+            keyResolver,
           )
       }
     } yield res
@@ -486,6 +500,7 @@ class DomainRouter(
       submitterInfo: SubmitterInfo,
       transfers: Map[LfContractId, LfPartyId],
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]] = {
@@ -500,6 +515,7 @@ class DomainRouter(
       submissionResult <- submit(targetDomain)(
         submitterInfo,
         transactionMeta,
+        keyResolver,
         wfTransaction,
         traceContext,
       )
@@ -508,7 +524,7 @@ class DomainRouter(
 
   private def chooseDomain(
       submitters: Set[LfPartyId],
-      maybeWorkflowId: Option[Ref.WorkflowId],
+      maybeWorkflowId: Option[LfWorkflowId],
       inputContractIds: Set[LfContractId],
       informees: Set[LfPartyId],
   ): EitherT[Future, TransactionRoutingError, DomainId] = {
@@ -552,7 +568,7 @@ class DomainRouter(
   }
 
   private def chooseDomainWithAliasEqualToWorkflowId2(
-      maybeWorkflowId: Option[Ref.WorkflowId]
+      maybeWorkflowId: Option[LfWorkflowId]
   ): Either[String, Option[DomainId]] = {
     for {
       domainAliasO <- maybeWorkflowId.traverse(DomainAlias.create(_))
@@ -573,7 +589,8 @@ class DomainRouter(
       ]
       domainId <-
         if (nonEmptyDomainIds.size == 1) {
-          EitherT.rightT(nonEmptyDomainIds.head): EitherT[Future, TransactionRoutingError, DomainId]
+          EitherT
+            .rightT(nonEmptyDomainIds.head1): EitherT[Future, TransactionRoutingError, DomainId]
         } else {
           EitherT.rightT(
             nonEmptyDomainIds.maxBy(id => priorityOfDomain(id) -> id.toProtoPrimitive)(
@@ -762,7 +779,7 @@ object DomainRouter {
   )(domainId: DomainId): Int = {
     val maybePriority = for {
       domainAlias <- domainAliasManager.aliasForDomainId(domainId)
-      config <- domainConnectionConfigStore.get(domainAlias).toOption
+      config <- domainConnectionConfigStore.get(domainAlias).toOption.map(_.config)
     } yield config.priority
 
     // If the participant is disconnected from the domain while this code is evaluated,
@@ -771,9 +788,14 @@ object DomainRouter {
     maybePriority.getOrElse(Integer.MIN_VALUE)
   }
 
+  /** We intentially do not store the `keyResolver` in [[com.digitalasset.canton.protocol.WellFormedTransaction]]
+    * because we do not (yet) need to deal with merging the mappings
+    * in [[com.digitalasset.canton.protocol.WellFormedTransaction.merge]].
+    */
   private def submit(connectedDomains: collection.Map[DomainId, SyncDomain])(domainId: DomainId)(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       tx: WellFormedTransaction[WithoutSuffixes],
       traceContext: TraceContext,
   )(implicit
@@ -787,7 +809,7 @@ object DomainRouter {
       )
       _ <- EitherT.cond[Future](domain.ready, (), SubmissionDomainNotReady.Error(domainId))
       result <- wrapSubmissionError(domain.domainId)(
-        domain.submitTransaction(submitterInfo, transactionMeta, tx)(traceContext)
+        domain.submitTransaction(submitterInfo, transactionMeta, keyResolver, tx)(traceContext)
       )
     } yield result
 

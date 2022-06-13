@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, LfCommand, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -43,28 +43,26 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       rootSeed: Option[LfHash],
       inRollback: Boolean,
       traceContext: TraceContext,
-  ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata)] = {
+  ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] = {
 
     ledgerTime shouldEqual factory.ledgerTime
     submissionTime shouldEqual factory.submissionTime
 
-    val (_viewTree, (reinterpretedTx, metadata), _witnesses) =
-      example.reinterpretedSubtransactions.find { case (viewTree, (tx, md), _) =>
+    val (_viewTree, (reinterpretedTx, metadata, keyResolver), _witnesses) =
+      example.reinterpretedSubtransactions.find { case (viewTree, (tx, md, keyResolver), _) =>
         viewTree.viewParticipantData.rootAction.command == cmd &&
           // Commands are otherwise not sufficiently unique (whereas with nodes, we can produce unique nodes, e.g.
           // based on LfNodeCreate.agreementText not part of LfCreateCommand.
           rootSeed == md.seeds.get(tx.roots(0))
       }.value
 
-    EitherT.rightT[Future, DAMLeError](reinterpretedTx -> metadata)
+    EitherT.rightT[Future, DAMLeError]((reinterpretedTx, metadata, keyResolver))
   }
 
   def viewsWithNoInputKeys(
       rootViews: Seq[TransactionViewTree]
-  ): NonEmpty[Seq[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])]] =
-    NonEmptyUtil.fromUnsafe(
-      rootViews.map(_ -> Map.empty[LfGlobalKey, Option[LfContractId]]).toList
-    )
+  ): NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]] =
+    NonEmptyUtil.fromUnsafe(rootViews.map(_ -> Map.empty))
 
   val transactionTreeFactory: TransactionTreeFactoryImpl =
     new TransactionTreeFactoryImpl(
@@ -79,7 +77,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   def check(
       mcc: ModelConformanceChecker,
-      views: NonEmpty[Seq[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])]],
+      views: NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]],
       ips: TopologySnapshot = factory.topologySnapshot,
   ): EitherT[Future, Error, Result] = {
     val rootViewTrees = views.map(_._1)
@@ -163,7 +161,9 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
       val error = DAMLeError(mock[engine.Error])
       val sut = new ModelConformanceChecker(
         (_, _, _, _, _, _, _, _) =>
-          EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata)](error),
+          EitherT.leftT[Future, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)](
+            error
+          ),
         transactionTreeFactory,
         loggerFactory,
       )
@@ -196,7 +196,9 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
         )
         val sut = new ModelConformanceChecker(
           (_, _, _, _, _, _, _, _) =>
-            EitherT.pure[Future, DAMLeError](reinterpreted -> subviewMissing.metadata),
+            EitherT.pure[Future, DAMLeError](
+              (reinterpreted, subviewMissing.metadata, subviewMissing.keyResolver)
+            ),
           transactionTreeFactory,
           loggerFactory,
         )

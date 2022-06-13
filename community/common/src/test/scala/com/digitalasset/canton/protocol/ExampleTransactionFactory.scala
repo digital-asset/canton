@@ -638,6 +638,8 @@ class ExampleTransactionFactory(
 
   case object EmptyTransaction extends ExampleTransaction {
 
+    override def keyResolver: LfKeyResolver = Map.empty
+
     override def cryptoOps: HashOps with RandomOps = ExampleTransactionFactory.this.cryptoOps
 
     override def toString: String = "empty transaction"
@@ -657,8 +659,9 @@ class ExampleTransactionFactory(
     override def informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
       (Set.empty[LfPartyId], informeeTree())
 
-    override def reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] =
+    override def reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] =
       Seq.empty
 
     override def rootTransactionViewTrees: Seq[TransactionViewTree] = Seq.empty
@@ -713,6 +716,14 @@ class ExampleTransactionFactory(
     def metadata: TransactionMetadata =
       mkMetadata(nodeSeed.fold(Map.empty[LfNodeId, LfHash])(seed => Map(nodeId -> seed)))
 
+    override def keyResolver: LfKeyResolver = LfTransactionUtil.keyWithMaintainers(node) match {
+      case None => Map.empty
+      case Some(kWithM) =>
+        val gkey = LfGlobalKey.assertBuild(node.templateId, kWithM.key)
+        val resolution = LfTransactionUtil.usedContractIdWithMetadata(node).map(_.unwrap)
+        Map(gkey -> resolution)
+    }
+
     override lazy val versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(Seq(0), lfNode)
 
@@ -750,12 +761,13 @@ class ExampleTransactionFactory(
     override lazy val versionedSuffixedTransaction: LfVersionedTransaction =
       transaction(Seq(0), node)
 
-    override lazy val reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] =
+    override lazy val reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] =
       Seq(
         (
           rootTransactionViewTree(view0),
-          (transaction(Seq(0), reinterpretedNode) -> metadata),
+          (transaction(Seq(0), reinterpretedNode), metadata, keyResolver),
           Witnesses(List(view0.viewCommonData.tryUnwrap.informees)),
         )
       )
@@ -894,7 +906,6 @@ class ExampleTransactionFactory(
     override def reinterpretedNode: LfNodeExercises = node
 
     override def consuming: Boolean = true
-
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
@@ -990,6 +1001,8 @@ class ExampleTransactionFactory(
     override def versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(examples.map(_.nodeId.index), examples.map(_.lfNode): _*)
 
+    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
+
     override def rootViewDecompositions: Seq[NewView] =
       examples.flatMap(_.rootViewDecompositions)
 
@@ -1008,14 +1021,15 @@ class ExampleTransactionFactory(
     override def informeeTreeBlindedFor: (Set[LfPartyId], InformeeTree) =
       (Set.empty, informeeTree(rootViews.map(blinded): _*))
 
-    override def reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] = {
+    override def reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] = {
       val blindedRootViews = rootViews.map(blinded)
       examples.zipWithIndex.map { case (example, i) =>
         val rootViewsWithOneViewUnblinded = blindedRootViews.updated(i, rootViews(i))
         (
           rootTransactionViewTree(rootViewsWithOneViewUnblinded: _*),
-          (transactionFrom(Seq(i), i, example.reinterpretedNode) -> example.metadata),
+          (transactionFrom(Seq(i), i, example.reinterpretedNode), example.metadata, Map.empty),
           Witnesses(List(example.view0.viewCommonData.tryUnwrap.informees)),
         )
       }
@@ -1161,6 +1175,8 @@ class ExampleTransactionFactory(
         LfNodeId(8) -> create1310seed,
       )
     )
+
+    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
 
     override lazy val rootViewDecompositions: Seq[NewView] = {
       val v0 = awaitCreateWithConfirmationPolicy(
@@ -1387,12 +1403,17 @@ class ExampleTransactionFactory(
     val fetch11Abs: LfNodeFetch = genFetch11(create10.coid)
     val exercise13Abs: LfNodeExercises = genExercise13(create12.coid)
 
-    override lazy val reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] =
+    override lazy val reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] =
       Seq(
         (
           transactionViewTree0,
-          (transaction(Seq(0), lfCreate0), mkMetadata(seeds.filter(_._1 == LfNodeId(0)))),
+          (
+            transaction(Seq(0), lfCreate0),
+            mkMetadata(seeds.filter(_._1 == LfNodeId(0))),
+            Map.empty,
+          ),
           Witnesses(List(transactionViewTree0.informees)),
         ),
         (
@@ -1409,35 +1430,40 @@ class ExampleTransactionFactory(
               lfCreate130,
               lfExercise131,
               lfCreate1310,
-            ) -> mkMetadata(
+            ),
+            mkMetadata(
               seeds.filter(seed =>
                 Seq(1, 2, 3, 4, 5, 6, 7, 8).map(LfNodeId.apply).contains(seed._1)
               )
-            )
+            ),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree1.informees)),
         ),
         (
           transactionViewTree10,
           (
-            transactionFrom(Seq(6), 6, lfCreate130) -> mkMetadata(seeds.filter(_._1 == LfNodeId(6)))
+            transactionFrom(Seq(6), 6, lfCreate130),
+            mkMetadata(seeds.filter(_._1 == LfNodeId(6))),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree10.informees, transactionViewTree1.informees)),
         ),
         (
           transactionViewTree11,
           (
-            transactionFrom(Seq(7), 7, lfExercise131, lfCreate1310) ->
-              mkMetadata(seeds.filter(seed => Seq(7, 8).map(LfNodeId.apply).contains(seed._1)))
+            transactionFrom(Seq(7), 7, lfExercise131, lfCreate1310),
+            mkMetadata(seeds.filter(seed => Seq(7, 8).map(LfNodeId.apply).contains(seed._1))),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree11.informees, transactionViewTree1.informees)),
         ),
         (
           transactionViewTree110,
           (
-            transactionFrom(Seq(8), 8, lfCreate1310) -> mkMetadata(
-              seeds.filter(_._1 == LfNodeId(8))
-            )
+            transactionFrom(Seq(8), 8, lfCreate1310),
+            mkMetadata(seeds.filter(_._1 == LfNodeId(8))),
+            Map.empty,
           ),
           Witnesses(
             List(
@@ -1617,6 +1643,8 @@ class ExampleTransactionFactory(
         LfNodeId(8) -> create2seed,
       )
     )
+
+    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
 
     override lazy val rootViewDecompositions: Seq[NewView] = {
       val v0 = awaitCreateWithConfirmationPolicy(
@@ -1922,12 +1950,17 @@ class ExampleTransactionFactory(
     val create120reinterpret: LfNodeCreate =
       genCreate3X(lfCreate120Id, genCreate120Inst(create100Id))
 
-    override lazy val reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] =
+    override lazy val reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] =
       Seq(
         (
           transactionViewTree0,
-          (transaction(Seq(0), lfCreate0) -> mkMetadata(seeds.filter(_._1 == LfNodeId(0)))),
+          (
+            transaction(Seq(0), lfCreate0),
+            mkMetadata(seeds.filter(_._1 == LfNodeId(0))),
+            Map.empty,
+          ),
           Witnesses(List(transactionViewTree0.informees)),
         ),
         (
@@ -1943,23 +1976,30 @@ class ExampleTransactionFactory(
               exercise12,
               lfCreate120,
               lfCreate13,
-            ) -> mkMetadata(
+            ),
+            mkMetadata(
               seeds.filter(seed => Seq(1, 2, 3, 4, 5, 6, 7).map(LfNodeId.apply).contains(seed._1))
-            )
+            ),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree1.informees)),
         ),
         (
           transactionViewTree10,
           (
-            transactionFrom(Seq(2), 2, exercise10, lfCreate100) ->
-              mkMetadata(seeds.filter(seed => Seq(2, 3).map(LfNodeId.apply).contains(seed._1)))
+            transactionFrom(Seq(2), 2, exercise10, lfCreate100),
+            mkMetadata(seeds.filter(seed => Seq(2, 3).map(LfNodeId.apply).contains(seed._1))),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree10.informees, transactionViewTree1.informees)),
         ),
         (
           transactionViewTree100,
-          (transaction(Seq(0), lfCreate100) -> mkMetadata(Map(LfNodeId(0) -> create100seed))),
+          (
+            transaction(Seq(0), lfCreate100),
+            mkMetadata(Map(LfNodeId(0) -> create100seed)),
+            Map.empty,
+          ),
           Witnesses(
             List(
               transactionViewTree100.informees,
@@ -1971,15 +2011,19 @@ class ExampleTransactionFactory(
         (
           transactionViewTree11,
           (
-            transactionFrom(Seq(5), 5, exercise12, create120reinterpret) ->
-              mkMetadata(seeds.filter(seed => Seq(5, 6).map(LfNodeId.apply).contains(seed._1)))
+            transactionFrom(Seq(5), 5, exercise12, create120reinterpret),
+            mkMetadata(seeds.filter(seed => Seq(5, 6).map(LfNodeId.apply).contains(seed._1))),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree11.informees, transactionViewTree1.informees)),
         ),
         (
           transactionViewTree110,
-          (transaction(Seq(0), create120reinterpret) ->
-            mkMetadata(Map(LfNodeId(0) -> create120seed))),
+          (
+            transaction(Seq(0), create120reinterpret),
+            mkMetadata(Map(LfNodeId(0) -> create120seed)),
+            Map.empty,
+          ),
           Witnesses(
             List(
               transactionViewTree110.informees,
@@ -1990,8 +2034,7 @@ class ExampleTransactionFactory(
         ),
         (
           transactionViewTree2,
-          (transaction(Seq(0), lfCreate2) ->
-            mkMetadata(Map(LfNodeId(0) -> create2seed))),
+          (transaction(Seq(0), lfCreate2), mkMetadata(Map(LfNodeId(0) -> create2seed)), Map.empty),
           Witnesses(List(transactionViewTree2.informees)),
         ),
       )
@@ -2122,6 +2165,8 @@ class ExampleTransactionFactory(
         LfNodeId(6) -> exercise13seed,
       )
     )
+
+    override def keyResolver: LfKeyResolver = Map.empty // No keys involved here
 
     override def rootViewDecompositions: Seq[TransactionViewDecomposition.NewView] = {
       val v0 = awaitCreateWithConfirmationPolicy(
@@ -2254,12 +2299,17 @@ class ExampleTransactionFactory(
     val transactionViewTree10: TransactionViewTree =
       nonRootTransactionViewTree(blinded(view0), leafsBlinded(view1, view10))
 
-    override def reinterpretedSubtransactions
-        : Seq[(TransactionViewTree, (LfVersionedTransaction, TransactionMetadata), Witnesses)] =
+    override def reinterpretedSubtransactions: Seq[
+      (TransactionViewTree, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver), Witnesses)
+    ] =
       Seq(
         (
           transactionViewTree0,
-          (transaction(Seq(0), lfCreate0) -> mkMetadata(seeds.filter(_._1 == LfNodeId(0)))),
+          (
+            transaction(Seq(0), lfCreate0),
+            mkMetadata(seeds.filter(_._1 == LfNodeId(0))),
+            Map.empty,
+          ),
           Witnesses(List(transactionViewTree0.informees)),
         ),
         (
@@ -2274,17 +2324,20 @@ class ExampleTransactionFactory(
               lfCreate110,
               lfExercise12,
               lfExercise13,
-            ) -> mkMetadata(
+            ),
+            mkMetadata(
               seeds.filter(seed => Seq(1, 2, 3, 4, 5, 6).map(LfNodeId.apply).contains(seed._1))
-            )
+            ),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree1.informees)),
         ),
         (
           transactionViewTree10,
           (
-            transactionFrom(Seq(3), 3, exercise11, lfCreate110) ->
-              mkMetadata(seeds.filter(seed => Seq(3, 4).map(LfNodeId.apply).contains(seed._1)))
+            transactionFrom(Seq(3), 3, exercise11, lfCreate110),
+            mkMetadata(seeds.filter(seed => Seq(3, 4).map(LfNodeId.apply).contains(seed._1))),
+            Map.empty,
           ),
           Witnesses(List(transactionViewTree10.informees, transactionViewTree1.informees)),
         ),

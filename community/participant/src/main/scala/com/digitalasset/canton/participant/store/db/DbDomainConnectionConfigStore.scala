@@ -11,7 +11,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
+import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
+  StoredDomainConnectionConfig,
+}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
@@ -20,7 +23,9 @@ import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
+import slick.jdbc.SetParameter
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,7 +44,11 @@ class DbDomainConnectionConfigStore private[store] (
     storage.metrics.loadGaugeM("domain-connection-config-store")
 
   // Eagerly maintained cache of domain config indexed by DomainAlias
-  private val domainConfigCache = TrieMap.empty[DomainAlias, DomainConnectionConfig]
+  private val domainConfigCache = TrieMap.empty[DomainAlias, StoredDomainConnectionConfig]
+
+  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private implicit val setParameterDomainConnectionConfig: SetParameter[DomainConnectionConfig] =
+    DomainConnectionConfig.getVersionedSetParameter(protocolVersion)
 
   // Load all configs from the DB into the cache
   private[store] def initialize()(implicit
@@ -47,19 +56,24 @@ class DbDomainConnectionConfigStore private[store] (
   ): Future[DomainConnectionConfigStore] =
     for {
       configs <- getAllInternal
-      _ = configs.foreach(s => domainConfigCache.put(s.domain, s))
+      _ = configs.foreach(s => domainConfigCache.put(s.config.domain, s))
     } yield this
 
   private def getInternal(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MissingConfigForAlias, DomainConnectionConfig] = {
+  ): EitherT[
+    Future,
+    MissingConfigForAlias,
+    StoredDomainConnectionConfig,
+  ] = {
     processingTime.metric.eitherTEvent {
       EitherT {
         storage
           .query(
-            sql"""select config from participant_domain_connection_configs where domain_alias = $domainAlias"""
-              .as[DomainConnectionConfig]
-              .headOption,
+            sql"""select config, status from participant_domain_connection_configs where domain_alias = $domainAlias"""
+              .as[(DomainConnectionConfig, DomainConnectionConfigStore.Status)]
+              .headOption
+              .map(_.map(StoredDomainConnectionConfig.tupled)),
             functionFullName,
           )
           .map(_.toRight(MissingConfigForAlias(domainAlias)))
@@ -69,11 +83,12 @@ class DbDomainConnectionConfigStore private[store] (
 
   private def getAllInternal(implicit
       traceContext: TraceContext
-  ): Future[Seq[DomainConnectionConfig]] =
+  ): Future[Seq[StoredDomainConnectionConfig]] =
     processingTime.metric.event {
       storage.query(
-        sql"""select config from participant_domain_connection_configs"""
-          .as[DomainConnectionConfig],
+        sql"""select config, status from participant_domain_connection_configs"""
+          .as[(DomainConnectionConfig, DomainConnectionConfigStore.Status)]
+          .map(_.map(StoredDomainConnectionConfig.tupled)),
         functionFullName,
       )
     }
@@ -84,7 +99,8 @@ class DbDomainConnectionConfigStore private[store] (
   }
 
   override def put(
-      config: DomainConnectionConfig
+      config: DomainConnectionConfig,
+      status: DomainConnectionConfigStore.Status,
   )(implicit traceContext: TraceContext): EitherT[Future, AlreadyAddedForAlias, Unit] = {
 
     val domainAlias = config.domain
@@ -93,12 +109,12 @@ class DbDomainConnectionConfigStore private[store] (
       case _: DbStorage.Profile.Oracle =>
         sqlu"""insert 
                /*+ IGNORE_ROW_ON_DUPKEY_INDEX ( PARTICIPANT_DOMAIN_CONNECTION_CONFIGS ( domain_alias ) ) */
-               into participant_domain_connection_configs(domain_alias, config)
-               values ($domainAlias, $config)"""
+               into participant_domain_connection_configs(domain_alias, config, status)
+               values ($domainAlias, $config, $status)"""
       case _ =>
         sqlu"""insert 
-               into participant_domain_connection_configs(domain_alias, config)
-               values ($domainAlias, $config)
+               into participant_domain_connection_configs(domain_alias, config, status)
+               values ($domainAlias, $config, $status)
                on conflict do nothing"""
     }
 
@@ -120,7 +136,7 @@ class DbDomainConnectionConfigStore private[store] (
                 )
               }
               .map { existingConfig =>
-                Either.cond(existingConfig == config, (), AlreadyAddedForAlias(domainAlias))
+                Either.cond(existingConfig.config == config, (), AlreadyAddedForAlias(domainAlias))
               }
           }
         case _ =>
@@ -130,7 +146,7 @@ class DbDomainConnectionConfigStore private[store] (
       }
     } yield {
       // Eagerly update cache
-      val _ = domainConfigCache.put(config.domain, config)
+      val _ = domainConfigCache.put(config.domain, StoredDomainConnectionConfig(config, status))
     }
   }
 
@@ -148,12 +164,35 @@ class DbDomainConnectionConfigStore private[store] (
       )
     } yield {
       // Eagerly update cache
-      val _ = domainConfigCache.put(config.domain, config)
+      val _ = domainConfigCache.updateWith(config.domain)(_.map(_.copy(config = config)))
     }
   }
 
-  override def get(alias: DomainAlias): Either[MissingConfigForAlias, DomainConnectionConfig] =
+  override def get(
+      alias: DomainAlias
+  ): Either[MissingConfigForAlias, StoredDomainConnectionConfig] =
     domainConfigCache.get(alias).toRight(MissingConfigForAlias(alias))
 
-  override def getAll(): Seq[DomainConnectionConfig] = domainConfigCache.values.toSeq
+  override def getAll(): Seq[StoredDomainConnectionConfig] = domainConfigCache.values.toSeq
+
+  def setStatus(
+      source: DomainAlias,
+      status: DomainConnectionConfigStore.Status,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, MissingConfigForAlias, Unit] = {
+    val updateAction = sqlu"""update participant_domain_connection_configs
+                              set status=$status
+                              where domain_alias=$source"""
+    for {
+      _ <- getInternal(source) // Make sure an existing config exists for the alias
+      _ <- EitherT.right(
+        processingTime.metric.event(storage.update_(updateAction, functionFullName))
+      )
+    } yield {
+      // Eagerly update cache
+      val _ = domainConfigCache.updateWith(source)(_.map(_.copy(status = status)))
+    }
+  }
+
 }

@@ -22,9 +22,11 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TracingConfig
 
 import java.util.concurrent.TimeUnit
+import scala.annotation.nowarn
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 
+@nowarn("cat=deprecation")
 private[domain] class GrpcDomainServiceClient(
     traceContextPropagation: TracingConfig.Propagation,
     protected val loggerFactory: NamedLoggerFactory,

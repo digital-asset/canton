@@ -10,6 +10,7 @@ import cats.syntax.bifunctor._
 import cats.syntax.functor._
 import cats.syntax.option._
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
@@ -47,7 +48,7 @@ case class OnlineSequencerCheckConfig(
 )
 
 object TotalNodeCountValues {
-  val SingleSequencerTotalNodeCount: Int = 1
+  val SingleSequencerTotalNodeCount: PositiveInt = PositiveInt.tryCreate(1)
 
   /** We need to allocate a range of available DbLockCounters so need to specify a maximum number of sequencer writers
     * that can concurrently exist.
@@ -356,7 +357,7 @@ object SequencerWriter {
   def apply(
       writerConfig: SequencerWriterConfig,
       writerStorageFactory: SequencerWriterStoreFactory,
-      totalNodeCount: Int,
+      totalNodeCount: PositiveInt,
       keepAliveInterval: Option[NonNegativeFiniteDuration],
       processingTimeout: ProcessingTimeout,
       storage: Storage,

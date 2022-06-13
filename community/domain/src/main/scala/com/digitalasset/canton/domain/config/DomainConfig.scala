@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.config
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerConfig
-import com.digitalasset.canton.domain.topology.RequestProcessingStrategyConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
@@ -178,10 +177,11 @@ final case class RemoteDomainConfig(
 /** Configuration parameters for the domain topology manager.
   *
   * @param requireParticipantCertificate requires a participant to provide a certificate of its identity before being added to the domain.
-  * @param permissioning determines whether/how the topology manager approves topology transactions
+  * @param open if set to true (default), the domain is open. Anyone who is able to connect to a sequencer node
+  *             can join. If false, new participants are only accepted if their ParticipantState has already been
+  *             registered (equivalent to allow-listing).
   */
 final case class TopologyConfig(
     requireParticipantCertificate: Boolean = false,
-    permissioning: RequestProcessingStrategyConfig =
-      RequestProcessingStrategyConfig.AutoApprove(true),
+    open: Boolean = true,
 )

@@ -9,7 +9,10 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
+import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
+  StoredDomainConnectionConfig,
+}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
@@ -25,36 +28,61 @@ class InMemoryDomainConnectionConfigStore(protected override val loggerFactory: 
   private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
   private val configuredDomainMap =
-    new ConcurrentHashMap[DomainAlias, DomainConnectionConfig].asScala
+    new ConcurrentHashMap[DomainAlias, StoredDomainConnectionConfig].asScala
 
   override def put(
-      config: DomainConnectionConfig
+      config: DomainConnectionConfig,
+      status: DomainConnectionConfigStore.Status,
   )(implicit traceContext: TraceContext): EitherT[Future, AlreadyAddedForAlias, Unit] =
     EitherT.fromEither[Future](
       configuredDomainMap
-        .putIfAbsent(config.domain, config)
+        .putIfAbsent(
+          config.domain,
+          StoredDomainConnectionConfig(config, status),
+        )
         .fold[Either[AlreadyAddedForAlias, Unit]](Right(()))(existingConfig =>
-          Either.cond(config == existingConfig, (), AlreadyAddedForAlias(config.domain))
+          Either.cond(config == existingConfig.config, (), AlreadyAddedForAlias(config.domain))
         )
     )
 
   override def replace(
       config: DomainConnectionConfig
   )(implicit traceContext: TraceContext): EitherT[Future, MissingConfigForAlias, Unit] =
-    EitherT.fromEither[Future](configuredDomainMap.replace(config.domain, config) match {
-      case Some(_) =>
-        Right(())
-      case None =>
-        Left(MissingConfigForAlias(config.domain))
-    })
+    replaceInternal(config.domain, _.copy(config = config))
 
-  override def get(alias: DomainAlias): Either[MissingConfigForAlias, DomainConnectionConfig] =
+  private def replaceInternal(
+      alias: DomainAlias,
+      modifier: StoredDomainConnectionConfig => StoredDomainConnectionConfig,
+  ): EitherT[Future, MissingConfigForAlias, Unit] = {
+    EitherT.fromEither[Future](
+      configuredDomainMap.updateWith(alias)(_.map(modifier)) match {
+        case Some(_) =>
+          Right(())
+        case None =>
+          Left(MissingConfigForAlias(alias))
+      }
+    )
+  }
+
+  override def get(
+      alias: DomainAlias
+  ): Either[MissingConfigForAlias, StoredDomainConnectionConfig] =
     configuredDomainMap.get(alias).toRight(MissingConfigForAlias(alias))
 
-  override def getAll(): Seq[DomainConnectionConfig] = configuredDomainMap.values.toSeq
+  override def getAll(): Seq[StoredDomainConnectionConfig] =
+    configuredDomainMap.values.toSeq
 
   /** We have no cache so is effectively a noop. */
   override def refreshCache()(implicit traceContext: TraceContext): Future[Unit] = Future.unit
 
   override def close(): Unit = ()
+
+  override def setStatus(
+      source: DomainAlias,
+      status: DomainConnectionConfigStore.Status,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, MissingConfigForAlias, Unit] =
+    replaceInternal(source, _.copy(status = status))
+
 }

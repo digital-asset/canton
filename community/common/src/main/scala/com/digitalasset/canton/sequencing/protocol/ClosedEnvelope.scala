@@ -9,7 +9,6 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 /** A [[ClosedEnvelope]]'s contents are serialized as a [[com.google.protobuf.ByteString]]. */
@@ -17,7 +16,7 @@ case class ClosedEnvelope(
     bytes: ByteString,
     override val recipients: Recipients,
 ) extends Envelope[ByteString] {
-  override protected def contentAsByteString(version: ProtocolVersion): ByteString = bytes
+  override protected def contentAsByteString: ByteString = bytes
   override protected def content: ByteString = bytes
 
   def openEnvelope[M <: ProtocolMessage](

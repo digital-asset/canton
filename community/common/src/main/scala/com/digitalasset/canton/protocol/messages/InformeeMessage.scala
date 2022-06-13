@@ -11,7 +11,7 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{HasProtoV0, RepresentativeProtocolVersion}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.google.protobuf.ByteString
@@ -37,6 +37,9 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
 
   override def mediatorId: MediatorId = fullInformeeTree.mediatorId
 
+  lazy val representativeProtocolVersion: RepresentativeProtocolVersion =
+    ProtocolMessage.protocolVersionRepresentativeFor(fullInformeeTree.protocolVersion)
+
   override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     fullInformeeTree.informeesAndThresholdByView
 
@@ -44,13 +47,12 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
       requestId: RequestId,
       verdict: Verdict,
       recipientParties: Set[LfPartyId],
-      protocolVersion: ProtocolVersion,
   ): TransactionResultMessage =
     TransactionResultMessage(
       requestId,
       verdict,
       fullInformeeTree.informeeTreeUnblindedFor(recipientParties),
-      protocolVersion,
+      representativeProtocolVersion.unwrap,
     )
 
   // Implementing a `toProto<version>` method allows us to compose serializable classes.
@@ -69,10 +71,10 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
     // indicate the version of the nested Protobuf message via calling `toProto<version>
     v0.InformeeMessage(fullInformeeTree = Some(fullInformeeTree.toProtoV0))
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
 
   override def confirmationPolicy: ConfirmationPolicy = fullInformeeTree.confirmationPolicy

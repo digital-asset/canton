@@ -17,7 +17,7 @@ import com.digitalasset.canton.version.{
   HasProtoV0,
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
-  ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.google.protobuf.ByteString
@@ -28,7 +28,7 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     content: A,
     signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasProtocolVersionedWrapper[VersionedMessage[SignedContent[A]]]
+) extends HasProtocolVersionedWrapper[SignedContent[A]]
     with HasProtoV0[v0.SignedContent] {
   override def toProtoVersioned: VersionedMessage[SignedContent[A]] =
     VersionedMessage(toProtoV0.toByteString, 0)
@@ -36,7 +36,8 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
   /** We use [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]] here because only v0 is defined
     * for SignedContent. This can be revisited when this wrapper will evolve.
     */
-  def representativeProtocolVersion: ProtocolVersion = ProtocolVersion.v2_0_0
+  def representativeProtocolVersion: RepresentativeProtocolVersion =
+    RepresentativeProtocolVersion.v2
 
   def getCryptographicEvidence: ByteString = content.getCryptographicEvidence
 

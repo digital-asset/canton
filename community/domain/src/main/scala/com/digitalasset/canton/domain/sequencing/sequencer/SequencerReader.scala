@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
@@ -63,6 +64,7 @@ class SequencerReader(
     eventSignaller: EventSignaller,
     topologyClientMember: Member,
     futureSupervisor: FutureSupervisor,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -164,6 +166,7 @@ class SequencerReader(
           signingTimestamp,
           latestTopologyClientTimestamp,
           futureSupervisor,
+          protocolVersion,
           // This warning should only trigger on unauthenticated members,
           // but batches addressed to unauthenticated members must not specify a signing key timestamp.
           warnIfApproximate = true,
@@ -229,6 +232,7 @@ class SequencerReader(
               event.timestamp,
               previousTopologyClientTimestamp,
               futureSupervisor,
+              protocolVersion,
               warnIfApproximate = warnIfApproximate,
             )(implicitly, ErrorLoggingContext.fromTracedLogger(logger)(eventTraceContext))
             .map(None -> _)

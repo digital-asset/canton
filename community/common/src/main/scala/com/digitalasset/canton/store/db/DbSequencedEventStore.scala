@@ -21,7 +21,7 @@ import com.digitalasset.canton.store._
 import com.digitalasset.canton.store.db.DbSequencedEventStore._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
-import com.digitalasset.canton.version.{UntypedVersionedMessage, VersionedMessage}
+import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -31,6 +31,7 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
 class DbSequencedEventStore(
     override protected val storage: DbStorage,
     client: SequencerClientDiscriminator,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -105,6 +106,9 @@ class DbSequencedEventStore(
           }
       }
     }
+
+  private implicit val traceContextSetParameter: SetParameter[TraceContext] =
+    TraceContext.getVersionedSetParameter(protocolVersion)
 
   override def store(
       events: Seq[OrdinarySerializedEvent]

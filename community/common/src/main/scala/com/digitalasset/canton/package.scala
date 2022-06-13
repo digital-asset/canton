@@ -8,6 +8,7 @@ import com.daml.lf.command.ReplayCommand
 import com.daml.lf.data.{IdString, Ref, Time}
 import com.daml.lf.transaction.Versioned
 import com.daml.lf.value.Value
+import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey}
 
 import scala.annotation.nowarn
 
@@ -83,6 +84,13 @@ package object canton {
 
   type LfLookupByKeyCommand = LfCommand.LookupByKey
   val LfLookupByKeyCommand: LfCommand.LookupByKey.type = LfCommand.LookupByKey
+
+  type LfWorkflowId = Ref.WorkflowId
+  val LfWorkflowId: Ref.WorkflowId.type = Ref.WorkflowId
+
+  // TODO(#9386) replace with ContractStateMachine.KeyResolver
+  type LfKeyResolver = Map[LfGlobalKey, Option[LfContractId]]
+  val lfKeyResolver: Map.type = Map
 
   /** The counter assigned by the sequencer to messages sent to the participant.
     * The counter is specific to every participant.

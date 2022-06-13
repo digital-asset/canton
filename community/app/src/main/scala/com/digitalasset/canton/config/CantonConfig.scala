@@ -10,7 +10,6 @@ import cats.syntax.functor._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.daml.platform.apiserver.SeedService.Seeding
-import com.daml.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
   CannotReadFilesError,
@@ -28,7 +27,6 @@ import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.domain.config._
 import com.digitalasset.canton.domain.sequencing.sequencer._
-import com.digitalasset.canton.domain.topology.RequestProcessingStrategyConfig
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsPrefix, MetricsReporterConfig}
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -82,7 +80,7 @@ object CheckConfig {
 }
 
 /** Configuration of health server backend. */
-final case class HealthServerConfig(address: String = "127.0.0.1", port: Port)
+final case class HealthServerConfig(address: String = "0.0.0.0", port: Port)
 
 /** Configuration to expose a health endpoint on the given `server` running the configured check
   * @param server Server details for hosting the health endpoint
@@ -716,8 +714,8 @@ object CantonConfig {
       deriveReader[AuthServiceConfig.Wildcard.type]
     lazy implicit val authServiceConfigReader: ConfigReader[AuthServiceConfig] =
       deriveReader[AuthServiceConfig]
-    lazy implicit val rateLimitingConfigReader: ConfigReader[RateLimitingConfig] =
-      deriveReader[RateLimitingConfig]
+    lazy implicit val postgresDataSourceConfigReader: ConfigReader[PostgresDataSourceConfigCanton] =
+      deriveReader[PostgresDataSourceConfigCanton]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
       deriveReader[LedgerApiServerConfig]
     lazy implicit val activeContractsServiceConfigReader
@@ -729,18 +727,6 @@ object CantonConfig {
       deriveReader[UserManagementServiceConfig]
     lazy implicit val indexerConfigReader: ConfigReader[IndexerConfig] =
       deriveReader[IndexerConfig]
-    lazy implicit val requestProcessingStrategyConfigAutoApproveReader
-        : ConfigReader[RequestProcessingStrategyConfig.AutoApprove] =
-      deriveReader[RequestProcessingStrategyConfig.AutoApprove]
-    lazy implicit val requestProcessingStrategyConfigQueueReader
-        : ConfigReader[RequestProcessingStrategyConfig.Queue.type] =
-      deriveReader[RequestProcessingStrategyConfig.Queue.type]
-    lazy implicit val requestProcessingStrategyConfigRejectReader
-        : ConfigReader[RequestProcessingStrategyConfig.Reject.type] =
-      deriveReader[RequestProcessingStrategyConfig.Reject.type]
-    lazy implicit val requestProcessingStrategyConfigReader
-        : ConfigReader[RequestProcessingStrategyConfig] =
-      deriveReader[RequestProcessingStrategyConfig]
     lazy implicit val identityConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
@@ -1057,8 +1043,8 @@ object CantonConfig {
       deriveWriter[AuthServiceConfig.Wildcard.type]
     lazy implicit val authServiceConfigWriter: ConfigWriter[AuthServiceConfig] =
       deriveWriter[AuthServiceConfig]
-    lazy implicit val rateLimitingConfigWriter: ConfigWriter[RateLimitingConfig] =
-      deriveWriter[RateLimitingConfig]
+    lazy implicit val postgresDataSourceWriter: ConfigWriter[PostgresDataSourceConfigCanton] =
+      deriveWriter[PostgresDataSourceConfigCanton]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
     lazy implicit val activeContractsServiceConfigWriter
@@ -1070,18 +1056,6 @@ object CantonConfig {
       deriveWriter[UserManagementServiceConfig]
     lazy implicit val indexerConfigWriter: ConfigWriter[IndexerConfig] =
       deriveWriter[IndexerConfig]
-    lazy implicit val requestProcessingStrategyConfigAutoApproveWriter
-        : ConfigWriter[RequestProcessingStrategyConfig.AutoApprove] =
-      deriveWriter[RequestProcessingStrategyConfig.AutoApprove]
-    lazy implicit val requestProcessingStrategyConfigQueueWriter
-        : ConfigWriter[RequestProcessingStrategyConfig.Queue.type] =
-      deriveWriter[RequestProcessingStrategyConfig.Queue.type]
-    lazy implicit val requestProcessingStrategyConfigRejectWriter
-        : ConfigWriter[RequestProcessingStrategyConfig.Reject.type] =
-      deriveWriter[RequestProcessingStrategyConfig.Reject.type]
-    lazy implicit val requestProcessingStrategyConfigWriter
-        : ConfigWriter[RequestProcessingStrategyConfig] =
-      deriveWriter[RequestProcessingStrategyConfig]
     lazy implicit val identityConfigWriter: ConfigWriter[TopologyConfig] =
       deriveWriter[TopologyConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileWriter

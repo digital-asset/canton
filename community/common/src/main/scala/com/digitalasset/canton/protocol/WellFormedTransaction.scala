@@ -569,14 +569,14 @@ object WellFormedTransaction {
     val versions = transactions.map(_.tx.version).distinct
     for {
       ledgerTime <- Either.cond(
-        ledgerTimes.size == 1,
+        ledgerTimes.sizeCompare(1) == 0,
         ledgerTimes.head1,
-        s"Different ledger times: ${ledgerTimes.toList.mkString(", ")}",
+        s"Different ledger times: ${ledgerTimes.mkString(", ")}",
       )
       submissionTime <- Either.cond(
-        submissionTimes.size == 1,
+        submissionTimes.sizeCompare(1) == 0,
         submissionTimes.head1,
-        s"Different submission times: ${submissionTimes.toList.mkString(", ")}",
+        s"Different submission times: ${submissionTimes.mkString(", ")}",
       )
       version = CantonOnly.maxTransactionVersion(versions)
       _ <- MonadUtil

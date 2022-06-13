@@ -172,6 +172,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
           List(
             CausalityMessage(
               domain2,
+              defaultProtocolVersion,
               id,
               VectorClock(
                 id.originDomain,

@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.domain.grpc
+package com.digitalasset.canton.participant.domain
 
 import akka.stream.Materializer
 import cats.data.EitherT
@@ -11,7 +11,6 @@ import com.digitalasset.canton.crypto.{HashOps, RandomOps}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
-import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
@@ -59,7 +58,7 @@ object ParticipantInitializeTopology {
       tracer: Tracer,
       traceContext: TraceContext,
       loggingContext: ErrorLoggingContext,
-  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
     val unauthenticatedMember =
       UnauthenticatedMemberId.tryCreate(participantId.uid.namespace)(cryptoOps)
 
@@ -110,10 +109,11 @@ object ParticipantInitializeTopology {
           )
         )
         // push the initial set of topology transactions to the domain and stop using the unauthenticated member
-        _ <- DomainOnboardingOutbox
+        success <- DomainOnboardingOutbox
           .initiateOnboarding(
             alias,
             domainId,
+            protocolVersion,
             participantId,
             handle,
             authorizedStore,
@@ -125,7 +125,7 @@ object ParticipantInitializeTopology {
             DomainRegistryError.DomainRegistryInternalError
               .InitialOnboardingError(_): DomainRegistryError
           )
-      } yield ()
+      } yield success
     }
 
     for {
@@ -147,7 +147,7 @@ object ParticipantInitializeTopology {
         loggerFactory,
       )
 
-      _ <- pushTopologyAndVerify(unauthenticatedSequencerClient, domainTimeTracker)
+      success <- pushTopologyAndVerify(unauthenticatedSequencerClient, domainTimeTracker)
       _ = {
         unauthenticatedSequencerClient.closeSubscription()
         domainTimeTracker.close()
@@ -157,6 +157,7 @@ object ParticipantInitializeTopology {
         .mapK(FutureUnlessShutdown.outcomeK)
     } yield {
       unauthenticatedSequencerClient.close()
+      success
     }
   }
 }

@@ -25,7 +25,7 @@ import scala.collection.immutable.HashMap
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-//TODO(i5352): Ensure that the performance impact of these classes is low, currently they are not efficient but it may be enough
+//TODO(i9525): Ensure that the performance impact of these classes is low, currently they are not efficient but it may be enough
 
 /** Class to create event vector clocks for events on a single domain.
   *

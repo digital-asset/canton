@@ -77,7 +77,7 @@ class PackageInspectionOpsImpl(
   override def packageVetted(
       pkg: PackageId
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
-    //TODO(i7860): Unit test this.
+    //TODO(i9505): Consider unit testing this
 
     import cats.implicits._
 
@@ -173,7 +173,7 @@ class PackageInspectionOpsImpl(
       _signedTx <- topologyManager.authorize(
         tx,
         signingKey = None,
-        tx.representativeProtocolVersion,
+        tx.representativeProtocolVersion.unwrap,
         force,
       )
     } yield ()

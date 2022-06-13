@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
@@ -626,6 +627,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
 object SequencerStore {
   def apply(
       storage: Storage,
+      protocolVersion: ProtocolVersion,
       maxInClauseSize: PositiveNumeric[Int],
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -633,6 +635,6 @@ object SequencerStore {
     storage match {
       case _: MemoryStorage => new InMemorySequencerStore(loggerFactory)
       case dbStorage: DbStorage =>
-        new DbSequencerStore(dbStorage, maxInClauseSize, timeouts, loggerFactory)
+        new DbSequencerStore(dbStorage, protocolVersion, maxInClauseSize, timeouts, loggerFactory)
     }
 }

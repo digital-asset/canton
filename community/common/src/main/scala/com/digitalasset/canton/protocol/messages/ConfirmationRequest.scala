@@ -27,6 +27,7 @@ case class ConfirmationRequest(
       domainId = informeeMessage.domainId,
       viewType = ViewType.TransactionViewType,
       payload = EmptyRootHashMessagePayload,
+      protocolVersion = informeeMessage.representativeProtocolVersion.unwrap,
     )
     val participants = viewEnvelopes.flatMap { envelope =>
       envelope.protocolMessage.participants

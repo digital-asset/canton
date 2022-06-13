@@ -78,7 +78,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
           val clock =
             VectorClock(txOutId.originDomain, txOutTs, alice, Map(writeToDomain -> txOutTs))
-          val cmsg = CausalityMessage(txOutId.originDomain, txOutId, clock)
+          val cmsg = CausalityMessage(txOutId.originDomain, defaultProtocolVersion, txOutId, clock)
           val written = globalStoore.registerCausalityMessages(List(cmsg))
 
           val () = written.futureValue

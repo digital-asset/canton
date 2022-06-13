@@ -11,6 +11,7 @@ import com.digitalasset.canton.domain.service.store.memory.InMemoryServiceAgreem
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -30,13 +31,18 @@ trait ServiceAgreementAcceptanceStore {
 
 object ServiceAgreementAcceptanceStore {
 
-  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
+  def create(
+      storage: Storage,
+      protocolVersion: ProtocolVersion,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
   ): ServiceAgreementAcceptanceStore =
     storage match {
       case _: MemoryStorage => new InMemoryServiceAgreementAcceptanceStore(loggerFactory)
       case dbStorage: DbStorage =>
-        new DbServiceAgreementAcceptanceStore(dbStorage, timeouts, loggerFactory)
+        new DbServiceAgreementAcceptanceStore(dbStorage, protocolVersion, timeouts, loggerFactory)
     }
 
 }

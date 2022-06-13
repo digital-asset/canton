@@ -22,6 +22,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
+  PositiveInt,
   String255,
 }
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
@@ -33,6 +34,7 @@ import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
+import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
@@ -263,31 +265,64 @@ class RepairService(
     * @param sourceDomainId the id of the source domain from which to move contracts
     * @param targetDomainId the id of the target domain to which to move contracts
     * @param skipInactive   whether to only move contracts that are active in the source domain
+    * @param batchSize      how big the batches should be used during the migration
+    */
+  def changeDomainAwait(
+      contractIds: Seq[LfContractId],
+      sourceDomainId: DomainId,
+      targetDomainId: DomainId,
+      skipInactive: Boolean,
+      batchSize: PositiveInt,
+  )(implicit traceContext: TraceContext): Either[String, Unit] = {
+
+    lockAndAwaitEitherT(
+      "repair.change_domain", {
+        changeDomain(
+          contractIds,
+          sourceDomainId,
+          targetDomainId,
+          skipInactive,
+          batchSize,
+        )
+      },
+    )
+  }
+
+  /** Change the association of a contract from one domain to another
+    *
+    * This function here allows us to manually insert a transfer out / in into the respective
+    * journals in order to move a contract from one domain to another. It obviously depends on
+    * all the counter parties running the same command. Otherwise, the participants will start
+    * to complain and possibly break.
+    *
+    * @param skipInactive if true, then the migration will skip contracts in the contractId list that are inactive
     */
   def changeDomain(
       contractIds: Seq[LfContractId],
       sourceDomainId: DomainId,
       targetDomainId: DomainId,
       skipInactive: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] =
-    lockAndAwaitEitherT(
-      "repair.change_domain", {
-        for {
-          _ <- EitherT.cond[Future](contractIds.nonEmpty, (), "No contracts to move specified")
+      batchSize: PositiveInt,
+  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+    if (contractIds.isEmpty) EitherT.rightT(())
+    else
+      for {
 
-          repairSource <- initRepairRequestAndVerifyPreconditions(sourceDomainId)
-          repairTarget <- initRepairRequestAndVerifyPreconditions(targetDomainId)
+        repairSource <- initRepairRequestAndVerifyPreconditions(sourceDomainId)
+        repairTarget <- initRepairRequestAndVerifyPreconditions(targetDomainId)
 
-          // Note the following purposely fails if any contract fails which results in not all contracts being processed.
-          _ <- MonadUtil.sequentialTraverse_(contractIds)(cid =>
-            moveContract(repairSource, repairTarget, cid, skipInactive)
-          )
+        // Note the following purposely fails if any contract fails which results in not all contracts being processed.
+        _ <- moveContractsBatched(
+          contractIds,
+          repairSource,
+          repairTarget,
+          skipInactive,
+          batchSize,
+        )
 
-          // If all has gone well, bump the clean head to both domains transactionally
-          _ <- commitRepairs(repairTarget, repairSource)
-        } yield ()
-      },
-    )
+        // If all has gone well, bump the clean head to both domains transactionally
+        _ <- commitRepairs(repairTarget, repairSource)
+      } yield ()
 
   def ignoreEvents(domain: DomainId, from: SequencerCounter, to: SequencerCounter, force: Boolean)(
       implicit traceContext: TraceContext
@@ -578,7 +613,6 @@ class RepairService(
       )
       // Not checking that the participant hosts a stakeholder as we might be cleaning up contracts
       // on behalf of stakeholders no longer around.
-
       contractToArchiveInEvent <- acsStatus match {
         case None =>
           EitherT.cond[Future](
@@ -635,77 +669,206 @@ class RepairService(
     } yield contractToArchiveInEvent
   }
 
-  /** Move contract from `repairSource` to `repairTarget`. */
-  private def moveContract(
+  private def moveContractsBatched(
+      cids: Seq[LfContractId],
       repairSource: RepairRequest,
       repairTarget: RepairRequest,
-      cid: LfContractId,
+      skipInactive: Boolean,
+      batchSize: PositiveInt,
+  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+    cids
+      .grouped(batchSize.value)
+      .toSeq
+      .traverse_(moveContracts(_, repairSource, repairTarget, skipInactive))
+
+  /** Move contract from `repairSource` to `repairTarget`. */
+  private def moveContracts(
+      cids: Seq[LfContractId],
+      repairSource: RepairRequest,
+      repairTarget: RepairRequest,
       skipInactive: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
-
-    def moveActiveContract(): EitherT[Future, String, Unit] = {
-
-      for {
-        contractStatusAtTarget <- readContractAcsState(repairTarget.domainPersistence, cid)
-        _ <- contractStatusAtTarget match {
-          case None | Some(ActiveContractStore.TransferredAway(_)) =>
-            for {
-              contract <- readContract(repairSource, cid)
-              // Check that the participant hosts a stakeholder
-              stakeholders <- readStakeholders(repairSource, cid)
-
-              // At least one stakeholder is hosted locally in the target domain
-              _localStakeholder <- EitherT(
-                stakeholders.toSeq
-                  .findM(hostsParty(repairTarget.topologySnapshot))
-                  .map { oneLocalStakeholderO =>
-                    oneLocalStakeholderO.toRight(
-                      log(
-                        show"Not allowed to move contract ${contract.contractId} without local target domain stakeholders ${stakeholders}"
-                      )
-                    )
-                  }
+    def determineSourceContractsToMigrate(
+        source: Map[LfContractId, ContractState]
+    ): EitherT[Future, String, List[LfContractId]] = {
+      EitherT.fromEither(
+        cids
+          .map(cid => (cid, source.get(cid).map(_.status)))
+          .toList
+          .traverse {
+            case (cid, None) =>
+              Either.cond(
+                skipInactive,
+                None,
+                log(s"Contract ${cid} does not exist in source domain and cannot be moved."),
               )
+            case (cid, Some(ActiveContractStore.Active)) => Right(Some(cid))
+            case (cid, Some(ActiveContractStore.Archived)) =>
+              Either.cond(
+                skipInactive,
+                None,
+                log(s"Contract $cid has been archived and cannot be moved."),
+              )
+            case (cid, Some(ActiveContractStore.TransferredAway(target))) =>
+              Either
+                .cond(
+                  skipInactive,
+                  None,
+                  log(s"Contract $cid has been transferred to $target and cannot be moved."),
+                )
+          }
+          .map(_.flatten)
+      )
+    }
 
-              _ <- persistContract(repairTarget, contract)
-              _ <- persistTransferOut(repairSource, repairTarget.domainId, cid)
-              _ <- persistTransferIn(repairTarget, repairSource.domainId, cid)
-            } yield ()
-          case Some(targetStatus) =>
-            EitherT.leftT[Future, Unit](
+    def determineTargetContractsToMigrate(
+        sourceContracts: List[LfContractId],
+        targetStatus: Map[LfContractId, ContractState],
+    ): EitherT[Future, String, List[LfContractId]] = {
+      val filteredE =
+        sourceContracts.map(cid => (cid, targetStatus.get(cid).map(_.status))).traverse {
+          case (cid, None | Some(ActiveContractStore.TransferredAway(_))) => Right(cid)
+          case (cid, Some(targetState)) =>
+            Left(
               log(
-                s"Active contract ${cid} in source domain exists in target domain with status $targetStatus. Use 'repair.add' or 'repair.purge' instead."
+                s"Active contract ${cid} in source domain exists in target domain with status $targetState. Use 'repair.add' or 'repair.purge' instead."
               )
             )
         }
+      def checkStakeholders(
+          cid: LfContractId,
+          stakeholders: Set[LfPartyId],
+      ): EitherT[Future, String, Unit] = {
+        // At least one stakeholder is hosted locally in the target domain
+        EitherT(
+          stakeholders.toSeq
+            .findM(hostsParty(repairTarget.topologySnapshot))
+            .map { oneLocalStakeholderO =>
+              oneLocalStakeholderO
+                .toRight(
+                  log(
+                    show"Not allowed to move contract ${cid} without at least one stakeholder of ${stakeholders} existing locally on the target domain asOf=${repairTarget.topologySnapshot.timestamp}"
+                  )
+                )
+                .map(_ => ())
+            }
+        )
+      }
+      for {
+        filtered <- EitherT.fromEither[Future](filteredE)
+        stakeholders <- readStakeholders(repairSource, filtered.toSet)
+        _ <- filtered.traverse { cid =>
+          checkStakeholders(cid, stakeholders.getOrElse(cid, Set.empty))
+        }
+      } yield filtered
+    }
+
+    def adjustContractKeys(
+        request: RepairRequest,
+        contracts: List[SerializableContract],
+        newStatus: ContractKeyJournal.Status,
+    ): EitherT[Future, String, List[LfGlobalKey]] =
+      if (!request.domainParameters.uniqueContractKeys)
+        EitherT.rightT(List.empty)
+      else {
+        for {
+          keys <- EitherT.right(
+            contracts.traverseFilter(contract =>
+              getKeyIfOneMaintainerIsLocal(
+                request.topologySnapshot,
+                contract.metadata.maybeKeyWithMaintainers,
+              )
+            )
+          )
+          _ <- request.domainPersistence.contractKeyJournal
+            .addKeyStateUpdates(keys.map(_ -> newStatus).toMap, request.timeOfChange)
+            .leftMap(x => log(x.toString))
+        } yield keys
+      }
+
+    def persistContracts(cids: List[LfContractId]): EitherT[Future, String, Unit] = {
+      val loadedET = cids
+        .traverse { cid =>
+          for {
+            // first, read the contract from the store such that we can store it in the target domain
+            serializedSource <- readContract(repairSource, cid)
+            serializedTargetO <- EitherT(
+              repairTarget.domainPersistence.contractStore
+                .lookupContract(cid)
+                .value
+                .map(Right(_): Either[String, Option[SerializableContract]])
+            )
+            _ <- serializedTargetO.fold(EitherT.rightT[Future, String](())) { serializedTarget =>
+              EitherTUtil.condUnitET[Future](
+                serializedTargetO.forall(_ == serializedSource),
+                s"Contract ${cid} already exists in the contract store, but differs from contract to be created. Contract to be created ${serializedSource} versus existing contract ${serializedTarget}.",
+              )
+            }
+          } yield (serializedTargetO.isEmpty, serializedSource)
+        }
+
+      for {
+        loaded <- loadedET
+        allContracts = loaded.map(_._2)
+        filtered = loaded.collect {
+          case (notInTarget, contract) if notInTarget => contract
+        }
+        _ <- adjustContractKeys(repairSource, allContracts, ContractKeyJournal.Unassigned)
+        _ <- adjustContractKeys(repairTarget, allContracts, ContractKeyJournal.Assigned)
+        // finally, persist contracts
+        _ <- EitherT.right(
+          repairTarget.domainPersistence.contractStore.storeCreatedContracts(
+            repairTarget.rc,
+            repairTarget.transactionId,
+            filtered,
+          )
+        )
       } yield ()
+
+    }
+
+    def persistTransferOutAndIn(
+        cids: List[LfContractId]
+    ): EitherT[Future, String, Unit] = {
+
+      // Note: this supports crash recovery, as we only activate these changes once we commit using clean-head logic
+      val outF = repairSource.domainPersistence.activeContractStore
+        .transferOutContracts(
+          cids.map(cid => (cid -> repairTarget.domainId)),
+          repairSource.timeOfChange,
+        )
+        .toEitherT
+        .leftMap(e => log(s"Failed to mark contracts as transferred out: ${e}"))
+
+      val inF = repairTarget.domainPersistence.activeContractStore
+        .transferInContracts(
+          cids.map(cid => (cid -> repairSource.domainId)),
+          repairTarget.timeOfChange,
+        )
+        .toEitherT
+        .leftMap(e => log(s"Failed to mark contracts as transferred in: ${e}"))
+
+      for {
+        _ <- outF
+        _ <- inF
+      } yield ()
+
     }
 
     for {
-      contractStatusAtSource <- readContractAcsState(repairSource.domainPersistence, cid)
-
-      _ <- contractStatusAtSource match {
-        case None =>
-          EitherT.cond[Future](
-            skipInactive,
-            (),
-            log(s"Contract ${cid} does not exist in source domain and cannot be moved."),
-          )
-        case Some(ActiveContractStore.Active) => moveActiveContract()
-        case Some(ActiveContractStore.Archived) =>
-          EitherT.cond[Future](
-            skipInactive,
-            (),
-            log(s"Contract $cid has been archived and cannot be moved."),
-          )
-        case Some(ActiveContractStore.TransferredAway(target)) =>
-          EitherT
-            .cond[Future](
-              skipInactive,
-              (),
-              log(s"Contract $cid has been transferred to $target and cannot be moved."),
-            )
-      }
+      contractStatusAtSource <- EitherT.right(
+        repairSource.domainPersistence.activeContractStore.fetchStates(cids)
+      )
+      sourceContractsToMigrate <- determineSourceContractsToMigrate(contractStatusAtSource)
+      contractStatusAtTarget <- EitherT.right(
+        repairTarget.domainPersistence.activeContractStore.fetchStates(sourceContractsToMigrate)
+      )
+      contractsToMigrate <- determineTargetContractsToMigrate(
+        sourceContractsToMigrate,
+        contractStatusAtTarget,
+      )
+      _ <- persistContracts(contractsToMigrate)
+      _ <- persistTransferOutAndIn(contractsToMigrate)
     } yield ()
 
   }
@@ -736,7 +899,7 @@ class RepairService(
       )(storedContract =>
         EitherTUtil.condUnitET[Future](
           storedContract == contract,
-          s"Contract ${contract.contractId} already exists in the ContractStore, but differs from contract to be created. Contract to be created ${contract} versus existing contract ${storedContract}.",
+          s"Contract ${contract.contractId} already exists in the contract store, but differs from contract to be created. Contract to be created ${contract} versus existing contract ${storedContract}.",
         )
       )
 
@@ -767,16 +930,6 @@ class RepairService(
       _ <- persistArchival(repair)(cid)
     } yield ()
 
-  private def persistTransferOut(repair: RepairRequest, to: DomainId, cid: LfContractId)(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, String, Unit] =
-    // Reflect removal as transfer-out (in case of move) in ACS journal.
-    // Note that we keep around the contract in the ContractStore and only reflect the removal in the ACS(-journal)
-    repair.domainPersistence.activeContractStore
-      .transferOutContract(cid, repair.timeOfChange, to)
-      .toEitherT // ignores warnings as source domain is not expected to be taken live again (for same reason that we tolerate pending sequencer requests)
-      .leftMap(e => log(s"Failed to mark contract ${cid} as transferred out: ${e}"))
-
   private def readContract(repair: RepairRequest, cid: LfContractId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, SerializableContract] =
@@ -784,17 +937,15 @@ class RepairService(
       .lookupContractE(cid)
       .leftMap(e => log(s"Failed to look up contract ${cid} in domain ${repair.domainAlias}: ${e}"))
 
-  private def readStakeholders(repair: RepairRequest, cid: LfContractId)(implicit
+  private def readStakeholders(repair: RepairRequest, cids: Set[LfContractId])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, Set[LfPartyId]] =
+  ): EitherT[Future, String, Map[LfContractId, Set[LfPartyId]]] =
     repair.domainPersistence.contractStore
-      .lookupStakeholders(Set(cid))
-      .bimap(
-        e =>
-          log(
-            s"Failed to look up stakeholder of contract ${cid} in domain ${repair.domainAlias}: ${e}"
-          ),
-        _.getOrElse(cid, Set.empty),
+      .lookupStakeholders(cids)
+      .leftMap(e =>
+        log(
+          s"Failed to look up stakeholder of contracts in domain ${repair.domainAlias}: ${e}"
+        )
       )
 
   private def scheduleUpstreamEventPublishUponDomainStart[C](
@@ -972,10 +1123,8 @@ class RepairService(
         parameters.cachingConfigs,
         loggerFactory,
       )
-
       domainParameters <- OptionT(persistentState.parameterStore.lastParameters)
         .toRight(log(s"No static domains parameters found for $domainAlias"))
-
       repair = RepairRequest(
         domainId,
         domainAlias,

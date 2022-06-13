@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store._
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -43,6 +44,7 @@ object SyncDomainPersistentState {
       storage: Storage,
       domainAlias: DomainAlias,
       domainId: IndexedDomain,
+      protocolVersion: ProtocolVersion,
       pureCryptoApi: CryptoPureApi,
       parameters: ParticipantStoreConfig,
       caching: CachingConfigs,
@@ -63,6 +65,7 @@ object SyncDomainPersistentState {
       case db: DbStorage =>
         new DbSyncDomainPersistentState(
           domainId,
+          protocolVersion,
           db,
           pureCryptoApi,
           parameters,

@@ -7,7 +7,10 @@ import java.util.concurrent.atomic.AtomicReference
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.store.DomainAliasAndIdStore
+import com.digitalasset.canton.participant.store.{
+  DomainAliasAndIdStore,
+  DomainConnectionConfigStore,
+}
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
 import com.digitalasset.canton.tracing.TraceContext
@@ -21,9 +24,11 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 trait DomainAliasResolution extends AutoCloseable {
   def domainIdForAlias(alias: DomainAlias): Option[DomainId]
   def aliasForDomainId(id: DomainId): Option[DomainAlias]
+  def connectionStateForDomain(id: DomainId): Option[DomainConnectionConfigStore.Status]
 }
 
 class DomainAliasManager private (
+    configStore: DomainConnectionConfigStore,
     domainAliasAndIdStore: DomainAliasAndIdStore,
     initialDomainAliasMap: Map[DomainAlias, DomainId],
     protected val loggerFactory: NamedLoggerFactory,
@@ -62,7 +67,16 @@ class DomainAliasManager private (
   override def aliasForDomainId(id: DomainId): Option[DomainAlias] = Option(
     domainAliasMap.get().inverse().get(id)
   )
+
+  override def connectionStateForDomain(
+      domainId: DomainId
+  ): Option[DomainConnectionConfigStore.Status] = for {
+    alias <- aliasForDomainId(domainId)
+    conf <- configStore.get(alias).toOption
+  } yield conf.status
+
   def aliases: Set[DomainAlias] = Set(domainAliasMap.get().keySet().asScala.toSeq: _*)
+  def ids: Set[DomainId] = Set(domainAliasMap.get().values().asScala.toSeq: _*)
 
   private def addMapping(domainAlias: DomainAlias, domainId: DomainId)(implicit
       traceContext: TraceContext
@@ -86,12 +100,18 @@ class DomainAliasManager private (
 
 object DomainAliasManager {
   def apply(
+      configStore: DomainConnectionConfigStore,
       domainAliasAndIdStore: DomainAliasAndIdStore,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContextExecutor, traceContext: TraceContext): Future[DomainAliasManager] =
     for {
       domainAliasMap <- domainAliasAndIdStore.aliasToDomainIdMap
-    } yield new DomainAliasManager(domainAliasAndIdStore, domainAliasMap, loggerFactory)
+    } yield new DomainAliasManager(
+      configStore,
+      domainAliasAndIdStore,
+      domainAliasMap,
+      loggerFactory,
+    )
 
   sealed trait Error
   final case class GenericError(reason: String) extends Error

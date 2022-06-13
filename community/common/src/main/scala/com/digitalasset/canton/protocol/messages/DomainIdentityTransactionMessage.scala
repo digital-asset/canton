@@ -13,16 +13,22 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
-case class DomainTopologyTransactionMessage private (
+sealed abstract case class DomainTopologyTransactionMessage private (
     domainTopologyManagerSignature: Signature,
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
-) extends ProtocolMessage
+)(val representativeProtocolVersion: RepresentativeProtocolVersion)
+    extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.DomainTopologyTransactionMessage]
@@ -38,25 +44,18 @@ case class DomainTopologyTransactionMessage private (
     )
   }
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(
       v0.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV0)
     )
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(
       v1.EnvelopeContent.SomeEnvelopeContent.DomainTopologyTransactionMessage(toProtoV0)
     )
 }
 
 object DomainTopologyTransactionMessage {
-
-  private[this] def apply(
-      domainTopologyManagerSignature: Signature,
-      transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
-      domainId: DomainId,
-  ): DomainTopologyTransactionMessage =
-    throw new UnsupportedOperationException("Use the public create/tryCreate methods instead")
 
   implicit val domainIdentityTransactionMessageCast
       : ProtocolMessageContentCast[DomainTopologyTransactionMessage] = {
@@ -80,6 +79,7 @@ object DomainTopologyTransactionMessage {
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
       syncCrypto: DomainSnapshotSyncCryptoApi,
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
@@ -87,18 +87,25 @@ object DomainTopologyTransactionMessage {
     val hashToSign = hash(transactions, domainId, syncCrypto.crypto.pureCrypto)
     syncCrypto
       .sign(hashToSign)
-      .map(signature => new DomainTopologyTransactionMessage(signature, transactions, domainId))
+      .map(signature =>
+        new DomainTopologyTransactionMessage(
+          signature,
+          transactions,
+          domainId,
+        )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+      )
   }
 
   def tryCreate(
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
       crypto: DomainSnapshotSyncCryptoApi,
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): Future[DomainTopologyTransactionMessage] =
-    create(transactions, crypto, domainId).fold(
+    create(transactions, crypto, domainId, protocolVersion).fold(
       err =>
         throw new IllegalStateException(
           s"Failed to create domain topology transaction message: $err"
@@ -124,6 +131,10 @@ object DomainTopologyTransactionMessage {
         message.signature,
       )
       domainUid <- UniqueIdentifier.fromProtoPrimitive(message.domainId, "domainId")
-    } yield new DomainTopologyTransactionMessage(signature, succeededContent, DomainId(domainUid))
+    } yield new DomainTopologyTransactionMessage(
+      signature,
+      succeededContent,
+      DomainId(domainUid),
+    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
 }

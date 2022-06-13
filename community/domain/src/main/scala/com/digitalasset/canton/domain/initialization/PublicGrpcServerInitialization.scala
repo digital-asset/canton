@@ -21,10 +21,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.ServerInterceptors
 import io.grpc.protobuf.services.ProtoReflectionService
 
+import scala.annotation.nowarn
 import scala.concurrent.ExecutionContextExecutorService
 
 object PublicGrpcServerInitialization {
 
+  @nowarn("cat=deprecation") // Can be removed once we don't use DomainService
   def apply(
       config: DomainConfig,
       metrics: MetricHandle.Factory,

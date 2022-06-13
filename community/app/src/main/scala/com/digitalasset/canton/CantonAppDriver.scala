@@ -93,6 +93,8 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
       mergedUserConfigsE.valueOr { _ =>
         sys.exit(1)
       }
+    // ConfigFactory is constructed using the context of the ClassLoader, i.e.,
+    // mergedConfig may also contain, e.g., "akka" config options
     val mergedConfig = mergedUserConfigs.withFallback(ConfigFactory.load())
 
     val configFromMap = {

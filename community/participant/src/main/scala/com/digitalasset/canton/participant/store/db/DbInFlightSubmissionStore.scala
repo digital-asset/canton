@@ -34,7 +34,9 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
+import slick.jdbc.SetParameter
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -55,6 +57,9 @@ class DbInFlightSubmissionStore(
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("in-flight-submission-store")
+
+  private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
+    SubmissionTrackingData.getVersionedSetParameter(ProtocolVersion.v2_0_0_Todo_i8793)
 
   override def lookup(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
@@ -284,6 +289,12 @@ object DbInFlightSubmissionStore {
     import storage.converters._
 
     override def kind: String = "in-flight submission"
+
+    private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+    private implicit val setParameterTraceContext: SetParameter[TraceContext] =
+      TraceContext.getVersionedSetParameter(protocolVersion)
+    private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
+      SubmissionTrackingData.getVersionedSetParameter(protocolVersion)
 
     override def executeBatch(
         submissions: NonEmpty[Seq[Traced[InFlightSubmission[UnsequencedSubmission]]]]

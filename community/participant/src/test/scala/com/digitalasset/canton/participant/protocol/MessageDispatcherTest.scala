@@ -29,7 +29,6 @@ import com.digitalasset.canton.protocol.{
   RequestId,
   RequestProcessor,
   RootHash,
-  TestDomainParameters,
   TransferId,
   ViewHash,
   v0 => protocolv0,
@@ -47,7 +46,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, Un
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.{BaseTest, DiscardOps, LfPartyId, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.mockito.ArgumentMatchers.{eq => isEq}
@@ -66,6 +65,9 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   val participantId = ParticipantId.tryFromProtoPrimitive("messageDispatcher::participant")
   val mediatorId = MediatorId(domainId)
   val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
+
+  private val protocolMessagePVRepresentative =
+    ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   case class Fixture(
       messageDispatcher: MessageDispatcher,
@@ -273,7 +275,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       Map.empty,
       encryptedTestView,
       domainId,
-    )
+    )(protocolMessagePVRepresentative)
 
   val encryptedOtherTestView = EncryptedView(OtherTestViewType)(mockEncryptedViewTree)
   val encryptedOtherTestViewMessage =
@@ -283,7 +285,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       Map.empty,
       encryptedOtherTestView,
       domainId,
-    )
+    )(protocolMessagePVRepresentative)
 
   val requestId = RequestId(CantonTimestamp.Epoch)
   val testMediatorResult =
@@ -299,6 +301,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
   val causalityMessage = CausalityMessage(
     domainId,
+    defaultProtocolVersion,
     TransferId(originDomain, CantonTimestamp.Epoch),
     VectorClock(
       originDomain,
@@ -612,11 +615,12 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           Map.empty,
           encryptedUnknownTestView,
           domainId,
-        )
+        )(protocolMessagePVRepresentative)
       val rootHashMessage =
         RootHashMessage(
           rootHash(1),
           domainId,
+          defaultProtocolVersion,
           UnknownTestViewType,
           SerializedRootHashMessagePayload.empty,
         )
@@ -683,7 +687,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         val sc = 2L
         val ts = CantonTimestamp.ofEpochSecond(2)
         val rootHashMessage =
-          RootHashMessage(rootHash(1), domainId, viewType, SerializedRootHashMessagePayload.empty)
+          RootHashMessage(
+            rootHash(1),
+            domainId,
+            defaultProtocolVersion,
+            viewType,
+            SerializedRootHashMessagePayload.empty,
+          )
         val event =
           mkDeliver(
             Batch.of[ProtocolMessage](
@@ -703,7 +713,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
       "expect a valid root hash message" in {
         val rootHashMessage =
-          RootHashMessage(rootHash(1), domainId, viewType, SerializedRootHashMessagePayload.empty)
+          RootHashMessage(
+            rootHash(1),
+            domainId,
+            defaultProtocolVersion,
+            viewType,
+            SerializedRootHashMessagePayload.empty,
+          )
         val otherParticipant = ParticipantId.tryFromProtoPrimitive("other::participant")
         // Batch -> expected alarms -> expected reaction
         val badBatches = List(
@@ -816,7 +832,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
       "crash upon root hash messages for multiple mediators" in {
         val rootHashMessage =
-          RootHashMessage(rootHash(1), domainId, viewType, SerializedRootHashMessagePayload.empty)
+          RootHashMessage(
+            rootHash(1),
+            domainId,
+            defaultProtocolVersion,
+            viewType,
+            SerializedRootHashMessagePayload.empty,
+          )
         val fatalBatches = List(
           Batch.of[ProtocolMessage](
             view -> Recipients.cc(participantId),
@@ -862,7 +884,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
       "not get confused about additional envelopes" in {
         val rootHashMessage =
-          RootHashMessage(rootHash(1), domainId, viewType, SerializedRootHashMessagePayload.empty)
+          RootHashMessage(
+            rootHash(1),
+            domainId,
+            defaultProtocolVersion,
+            viewType,
+            SerializedRootHashMessagePayload.empty,
+          )
         val badBatches = List(
           Batch.of[ProtocolMessage](
             view -> Recipients.cc(participantId),
@@ -921,7 +949,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         val sc = initSc - 1L
         val ts = CantonTimestamp.ofEpochSecond(2)
         val rootHashMessage =
-          RootHashMessage(rootHash(1), domainId, viewType, SerializedRootHashMessagePayload.empty)
+          RootHashMessage(
+            rootHash(1),
+            domainId,
+            defaultProtocolVersion,
+            viewType,
+            SerializedRootHashMessagePayload.empty,
+          )
         val event =
           mkDeliver(
             Batch.of[ProtocolMessage](
@@ -1095,7 +1129,7 @@ object MessageDispatcherTest {
       override val verdict: Verdict,
       override val requestId: RequestId,
   ) extends RegularMediatorResult {
-    val representativeProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+    def representativeProtocolVersion: RepresentativeProtocolVersion = ???
 
     override def toProtoSomeSignedProtocolMessage
         : protocolv0.SignedProtocolMessage.SomeSignedProtocolMessage =

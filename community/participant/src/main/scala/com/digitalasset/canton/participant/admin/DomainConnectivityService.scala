@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import cats.implicits._
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.DomainConnectivityErrorGroup
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
@@ -15,18 +15,10 @@ import com.digitalasset.canton.participant.domain._
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInternalError.DomainIsMissingInternally
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
-import com.digitalasset.canton.sequencing.{
-  GrpcSequencerConnection,
-  HttpSequencerConnection,
-  SequencerConnection,
-}
+import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, HttpSequencerConnection}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.participant.admin.DomainConnectivityService.DomainConnectionInfo
-import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.topology.DomainId
 import io.grpc.StatusRuntimeException
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -35,11 +27,7 @@ class DomainConnectivityService(
     sync: CantonSyncService,
     aliasManager: DomainAliasManager,
     agreementService: AgreementService,
-    sequencerConnectClientBuilder: DomainConnectionConfig => EitherT[
-      Future,
-      DomainRegistryError,
-      SequencerConnectClient,
-    ],
+    sequencerConnectClientBuilder: SequencerConnectClient.Builder,
     timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -121,6 +109,8 @@ class DomainConnectivityService(
     Future.successful(
       v0.ListConfiguredDomainsResponse(
         results = configuredDomains
+          .filter(_.status.isActive)
+          .map(_.config)
           .map(cnf =>
             new v0.ListConfiguredDomainsResponse.Result(
               config = Some(cnf.toProtoV0),
@@ -190,28 +180,21 @@ class DomainConnectivityService(
   ): EitherT[Future, StatusRuntimeException, DomainConnectionInfo] = {
     for {
       alias <- mapErr(DomainAlias.create(domainAlias))
-      connection <- mapErrNew(
+      connectionConfig <- mapErrNew(
         sync
           .domainConnectionConfigByAlias(alias)
           .leftMap(_ => SyncServiceUnknownDomain.Error(alias))
+          .map(_.config)
       )
-      sequencerConnectClient <- mapErrNew(sequencerConnectClientBuilder(connection))
-      domainInfo <- getDomainInfo(alias, sequencerConnectClient).thereafter(_ =>
-        sequencerConnectClient.close()
-      )
-      (domainId, staticDomainParameters) = domainInfo
-    } yield DomainConnectionInfo(connection.sequencerConnection, domainId, staticDomainParameters)
+      result <- DomainConnectionInfo
+        .fromConfig(sequencerConnectClientBuilder)(connectionConfig)
+        .leftMap(err =>
+          DomainRegistryError.ConnectionErrors.DomainIsNotAvailable
+            .Error(connectionConfig.domain, err.message)
+            .asGrpcError
+        )
+    } yield result
   }
-
-  private def getDomainInfo(alias: DomainAlias, sequencerConnectClient: SequencerConnectClient)(
-      implicit traceContext: TraceContext
-  ): EitherT[Future, StatusRuntimeException, (DomainId, StaticDomainParameters)] =
-    (for {
-      domainId <- sequencerConnectClient.getDomainId(alias)
-      staticDomainParameters <- sequencerConnectClient.getDomainParameters(alias)
-    } yield (domainId, staticDomainParameters))
-      .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
-      .leftMap(_.asGrpcError)
 
   /** Accept the agreement for the domain */
   def acceptAgreement(domainAlias: String, agreementId: String)(implicit
@@ -237,12 +220,4 @@ class DomainConnectivityService(
   def getDomainId(domainAlias: String)(implicit traceContext: TraceContext): Future[DomainId] =
     EitherTUtil.toFuture(getDomainConnectionInfo(domainAlias).map(_.domainId))
 
-}
-
-object DomainConnectivityService extends DomainConnectivityErrorGroup {
-  private case class DomainConnectionInfo(
-      connection: SequencerConnection,
-      domainId: DomainId,
-      parameters: StaticDomainParameters,
-  )
 }

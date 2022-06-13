@@ -47,6 +47,22 @@ sealed trait SequencerConnection
     VersionedMessage(toProtoV0.toByteString, 0)
 
   override def toProtoV0: v0.SequencerConnection
+
+  def addConnection(
+      connection: String,
+      additionalConnections: String*
+  ): Either[String, SequencerConnection] =
+    addConnection(new URI(connection), additionalConnections.map(new URI(_)): _*)
+
+  def addConnection(
+      connection: URI,
+      additionalConnections: URI*
+  ): Either[String, SequencerConnection]
+
+  def addConnection(
+      connection: SequencerConnection,
+      additionalConnections: SequencerConnection*
+  ): Either[String, SequencerConnection]
 }
 
 case class HttpSequencerConnection(urls: HttpSequencerEndpoints, certificate: X509CertificatePem)
@@ -70,6 +86,20 @@ case class HttpSequencerConnection(urls: HttpSequencerEndpoints, certificate: X5
       param("urls", _.urls),
       param("certificate", _.certificate.unwrap),
     )
+
+  override def addConnection(
+      connection: URI,
+      additionalConnections: URI*
+  ): Either[String, SequencerConnection] =
+    Left("Http sequencer does not support multiple connections")
+
+  override def addConnection(
+      connection: SequencerConnection,
+      additionalConnections: SequencerConnection*
+  ): Either[String, SequencerConnection] = Left(
+    "Http sequencer does not support multiple connections"
+  )
+
 }
 
 final case class GrpcSequencerConnection(
@@ -100,6 +130,21 @@ final case class GrpcSequencerConnection(
       param("transportSecurity", _.transportSecurity),
       param("customTrustCertificates", _.customTrustCertificates),
     )
+
+  override def addConnection(
+      connection: URI,
+      additionalConnections: URI*
+  ): Either[String, SequencerConnection] =
+    for {
+      newEndpoints <- Endpoint
+        .fromUris(NonEmpty(Seq, connection, additionalConnections: _*))
+    } yield copy(endpoints = endpoints ++ newEndpoints._1)
+
+  override def addConnection(
+      connection: SequencerConnection,
+      additionalConnections: SequencerConnection*
+  ): Either[String, SequencerConnection] =
+    SequencerConnection.merge(this +: connection +: additionalConnections)
 }
 
 object GrpcSequencerConnection {

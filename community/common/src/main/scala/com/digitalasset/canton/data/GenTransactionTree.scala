@@ -49,7 +49,9 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.google.protobuf.ByteString
@@ -574,9 +576,10 @@ case class FullInformeeTree(tree: GenTransactionTree)
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
-  def domainId: DomainId = checked(tree.commonMetadata.tryUnwrap).domainId
-
-  def mediatorId: MediatorId = checked(tree.commonMetadata.tryUnwrap).mediatorId
+  private lazy val commonMetadata: CommonMetadata = checked(tree.commonMetadata.tryUnwrap)
+  lazy val domainId: DomainId = commonMetadata.domainId
+  lazy val mediatorId: MediatorId = commonMetadata.mediatorId
+  lazy val protocolVersion: ProtocolVersion = commonMetadata.representativeProtocolVersion.unwrap
 
   /** Yields the informee tree unblinded for a defined set of parties.
     * If a view common data is already blinded, then it remains blinded even if one of the given parties is a stakeholder.
@@ -665,10 +668,10 @@ sealed abstract case class SubmitterMetadata private (
     dedupPeriod: DeduplicationPeriod,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[SubmitterMetadata](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[SubmitterMetadata]]
+    with HasProtocolVersionedWrapper[SubmitterMetadata]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -710,7 +713,7 @@ object SubmitterMetadata
   override val name: String = "SubmitterMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.SubmitterMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -816,7 +819,7 @@ object SubmitterMetadata
       salt,
       submissionId,
       dedupPeriod,
-    )(hashOps, protocolVersionRepresentativeFor(0), Some(bytes)) {}
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
   }
 }
 
@@ -832,10 +835,10 @@ sealed abstract case class CommonMetadata private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[CommonMetadata](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[CommonMetadata]]
+    with HasProtocolVersionedWrapper[CommonMetadata]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -872,7 +875,7 @@ object CommonMetadata
   override val name: String = "CommonMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.CommonMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -915,7 +918,7 @@ object CommonMetadata
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
     } yield new CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
       hashOps,
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
 }
@@ -933,10 +936,10 @@ sealed abstract case class ParticipantMetadata private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ParticipantMetadata](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[ParticipantMetadata]]
+    with HasProtocolVersionedWrapper[ParticipantMetadata]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -968,7 +971,7 @@ object ParticipantMetadata
   override val name: String = "ParticipantMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.ParticipantMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -1010,7 +1013,7 @@ object ParticipantMetadata
         .leftMap(_.inField("salt"))
     } yield new ParticipantMetadata(let, submissionTime, workflowId, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
 }

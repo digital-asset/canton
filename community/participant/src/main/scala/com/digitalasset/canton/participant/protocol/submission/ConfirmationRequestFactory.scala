@@ -60,8 +60,8 @@ class ConfirmationRequestFactory(
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       confirmationPolicy: ConfirmationPolicy,
       submitterInfo: SubmitterInfo,
-      ledgerTime: CantonTimestamp,
       workflowId: Option[WorkflowId],
+      keyResolver: LfKeyResolver,
       mediatorId: MediatorId,
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       contractInstanceOfId: SerializableContractOfId,
@@ -71,6 +71,7 @@ class ConfirmationRequestFactory(
       traceContext: TraceContext
   ): EitherT[Future, ConfirmationRequestCreationError, ConfirmationRequest] = {
     val transactionUuid = seedGenerator.generateUuid()
+    val ledgerTime = wfTransaction.metadata.ledgerTime
 
     val randomnessLength = EncryptedViewMessage.computeRandomnessLength(cryptoSnapshot)
     val keySeed =
@@ -94,6 +95,7 @@ class ConfirmationRequestFactory(
           transactionUuid,
           cryptoSnapshot.ipsSnapshot,
           contractInstanceOfId,
+          keyResolver,
         )
         .leftMap(TransactionTreeFactoryError)
 
@@ -257,12 +259,22 @@ object ConfirmationRequestFactory {
   }
 
   /** Indicates that the given transaction is contract key-inconsistent. */
-  case class ContractKeyConsistencyError(errors: Set[LfGlobalKey])
+  case class ContractKeyConsistencyError(key: LfGlobalKey)
       extends ConfirmationRequestCreationError
       with PrettyPrinting {
     override def pretty: Pretty[ContractKeyConsistencyError] =
       prettyOfClass(
-        param("keys", _.errors)
+        param("key", _.key)
+      )
+  }
+
+  /** Indicates that the given transaction yields a duplicate for a key. */
+  case class ContractKeyDuplicateError(key: LfGlobalKey)
+      extends ConfirmationRequestCreationError
+      with PrettyPrinting {
+    override def pretty: Pretty[ContractKeyDuplicateError] =
+      prettyOfClass(
+        param("key", _.key)
       )
   }
 
