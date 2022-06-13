@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import cats.data.OptionT
+import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
@@ -92,6 +92,20 @@ class SyncStateInspection(
       traceContext: TraceContext
   ): Future[Option[DomainId]] =
     participantNodePersistentState.multiDomainEventLog.lookupTransactionDomain(transactionId).value
+
+  /** returns the potentially big ACS of a given domain */
+  def findAcs(
+      domain: DomainAlias
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] = {
+    val persistentState = syncDomainPersistentStateManager.getByAlias(domain)
+    EitherT(
+      persistentState
+        .map(currentAcsSnapshot)
+        .getOrElse(Future.successful(Left(SyncStateInspection.NoSuchDomain(domain))))
+    )
+  }
 
   /** searches the pcs and returns the contract and activeness flag */
   def findContracts(
@@ -384,4 +398,7 @@ object SyncStateInspection {
 
   private def getOrFail[T](opt: Option[T], domain: DomainAlias): T =
     opt.getOrElse(throw new IllegalArgumentException(s"no such domain [${domain}]"))
+
+  case class NoSuchDomain(alias: DomainAlias) extends AcsError
+
 }

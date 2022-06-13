@@ -19,7 +19,6 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeBootstrap
-import com.digitalasset.canton.domain.topology.RequestProcessingStrategyConfig
 import com.digitalasset.canton.environment.Environment._
 import com.digitalasset.canton.health.HealthServer
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -188,7 +187,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
   private def autoConnectLocalNodes(): Either[StartupError, Unit] = {
     val activeDomains = domains.running
       .filter(_.isActive)
-      .filter(_.config.topology.permissioning == RequestProcessingStrategyConfig.AutoApprove(true))
+      .filter(_.config.topology.open)
     def toDomainConfig(domain: DomainNodeBootstrap): Either[StartupError, DomainConnectionConfig] =
       (for {
         connection <- domain.config.sequencerConnectionConfig.toConnection

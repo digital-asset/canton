@@ -3,6 +3,10 @@
 
 package com.digitalasset.canton.external
 
+import java.io.{IOException, InputStream, StringWriter}
+import java.nio.BufferOverflowException
+import java.util.concurrent.TimeUnit
+
 import better.files.File
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{ProcessingTimeout, RequireTypes}
@@ -13,25 +17,29 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 import org.slf4j.event.Level
 
-import java.io.{IOException, InputStream, StringWriter}
-import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters._
 
-class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory: NamedLoggerFactory)
-    extends NamedLogging
+/** Handler that exposes lifecycle methods for managing a background process.
+  * @tparam ProcessInfo type of information about the process that will show up in error messages
+  */
+class BackgroundRunnerHandler[ProcessInfo](
+    timeouts: ProcessingTimeout,
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging
     with AutoCloseable
     with NoTracing {
 
   private sealed trait ProcessHandle {
-    def info: T
+    def info: ProcessInfo
   }
-  private case class Configured(name: String, command: Seq[String], info: T) extends ProcessHandle {
+  private case class Configured(name: String, command: Seq[String], info: ProcessInfo)
+      extends ProcessHandle {
     def start(): Running =
       Running(name, runner = new BackgroundRunner(name, command, timeouts, loggerFactory), info)
   }
-  private case class Running(name: String, runner: BackgroundRunner, info: T)
+  private case class Running(name: String, runner: BackgroundRunner, info: ProcessInfo)
       extends ProcessHandle {
     def kill(force: Boolean = false): Configured = {
       runner.kill(force)
@@ -44,8 +52,8 @@ class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory:
 
   private val external = new TrieMap[String, ProcessHandle]()
 
-  def add(instanceName: String, command: Seq[String], info: T, manualStart: Boolean)(implicit
-      traceContext: TraceContext
+  def tryAdd(instanceName: String, command: Seq[String], info: ProcessInfo, manualStart: Boolean)(
+      implicit traceContext: TraceContext
   ): Unit = {
     ErrorUtil.requireArgument(
       !external.contains(instanceName),
@@ -59,7 +67,27 @@ class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory:
     external.put(instanceName, if (!manualStart) configured.start() else configured).discard
   }
 
-  def start(instanceName: String): Unit = {
+  /** Stop and remove a background process. Idempotent as it doesn't require that the background process was
+    * previously added.
+    */
+  def stopAndRemove(instanceName: String): Unit = {
+    val prev = external.remove(instanceName)
+    prev match {
+      case Some(processHandle: Running) => processHandle.kill().discard
+      case _ => ()
+    }
+  }
+
+  def tryIsRunning(instanceName: String): Boolean = {
+    external.get(instanceName) match {
+      case Some(_: Configured) => false
+      case Some(_: Running) => true
+      case None =>
+        ErrorUtil.internalError(new IllegalStateException(s"${instanceName} is not registered"))
+    }
+  }
+
+  def tryStart(instanceName: String): Unit = {
     perform(
       instanceName,
       {
@@ -89,7 +117,7 @@ class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory:
     }
   }
 
-  def kill(instanceName: String, force: Boolean = true): Unit = {
+  def tryKill(instanceName: String, force: Boolean = true): Unit = {
     perform(
       instanceName,
       {
@@ -104,7 +132,7 @@ class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory:
     )
   }
 
-  def restart(instanceName: String): Unit = {
+  def tryRestart(instanceName: String): Unit = {
     perform(
       instanceName,
       {
@@ -119,7 +147,7 @@ class BackgroundRunnerHandler[T](timeouts: ProcessingTimeout, val loggerFactory:
     )
   }
 
-  def info(instanceName: String): T = {
+  def tryInfo(instanceName: String): ProcessInfo = {
     external
       .getOrElse(
         instanceName,
@@ -174,7 +202,7 @@ class BackgroundRunner(
                 case Level.TRACE => logger.trace(msg)
               }
               buf.getBuffer.setLength(0)
-            } else {
+            } else { // if this if-condition is taken 2^30 times in a row, a buffer overflow error occurs
               buf.write(b)
             }
             b = parent.read()
@@ -182,6 +210,14 @@ class BackgroundRunner(
         } catch {
           case e: IOException =>
             logger.debug(s"External process was closed ${e.getMessage}")
+          case e: BufferOverflowException =>
+            logger.debug(
+              "A BufferOverflowException occurred when writing to the external log file. " +
+                "The cause is likely that there is a configuration error that leads to the external process to fail," +
+                " and indefinitely output non-sense data to the output, leading to the buffer overflow exception. " +
+                s"To find the root cause error, you will likely need to check the logs of the external process $name" +
+                s"Error message of the exception: ${e.getMessage}"
+            )
         }
       }
     }

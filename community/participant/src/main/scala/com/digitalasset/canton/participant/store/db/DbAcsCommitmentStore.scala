@@ -39,7 +39,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
-import slick.jdbc.{GetResult, PositionedParameters, TransactionIsolation}
+import slick.jdbc.{GetResult, PositionedParameters, SetParameter, TransactionIsolation}
 
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
@@ -48,6 +48,7 @@ import scala.math.Ordering.Implicits._
 class DbAcsCommitmentStore(
     override protected val storage: DbStorage,
     override val domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
     cryptoApi: CryptoPureApi,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -253,7 +254,7 @@ class DbAcsCommitmentStore(
     val sender = commitment.message.sender
     val from = commitment.message.period.fromExclusive
     val to = commitment.message.period.toInclusive
-    val serialized = commitment.toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
+    val serialized = commitment.toByteArray
 
     val upsertQuery = storage.profile match {
       case _: DbStorage.Profile.H2 =>
@@ -513,9 +514,10 @@ class DbAcsCommitmentStore(
     }
 
   override val runningCommitments =
-    new DbIncrementalCommitmentStore(storage, domainId, timeouts, loggerFactory)
+    new DbIncrementalCommitmentStore(storage, domainId, protocolVersion, timeouts, loggerFactory)
 
-  override val queue = new DbCommitmentQueue(storage, domainId, timeouts, loggerFactory)
+  override val queue =
+    new DbCommitmentQueue(storage, domainId, protocolVersion, timeouts, loggerFactory)
 
   override def onClosed(): Unit = Lifecycle.close(runningCommitments, queue)(logger)
 }
@@ -523,6 +525,7 @@ class DbAcsCommitmentStore(
 class DbIncrementalCommitmentStore(
     override protected val storage: DbStorage,
     domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -535,6 +538,9 @@ class DbIncrementalCommitmentStore(
 
   protected val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("acs-snapshot-store")
+
+  private implicit val setParameterStoredParties: SetParameter[StoredParties] =
+    StoredParties.getVersionedSetParameter(protocolVersion)
 
   override def get()(implicit
       traceContext: TraceContext
@@ -680,6 +686,7 @@ class DbIncrementalCommitmentStore(
 class DbCommitmentQueue(
     override protected val storage: DbStorage,
     domainId: IndexedDomain,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -690,7 +697,7 @@ class DbCommitmentQueue(
   import storage.api._
 
   private implicit val acsCommitmentReader =
-    AcsCommitment.getAcsCommitmentResultReader(domainId.item)
+    AcsCommitment.getAcsCommitmentResultReader(domainId.item, protocolVersion)
 
   protected val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("acs-commitment-queue")

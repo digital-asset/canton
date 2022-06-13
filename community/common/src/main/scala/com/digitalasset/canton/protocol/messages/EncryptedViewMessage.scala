@@ -21,7 +21,9 @@ import com.digitalasset.canton.version.{
   HasProtoV0,
   HasProtoV1,
   HasVersionedToByteString,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -183,7 +185,8 @@ case class EncryptedViewMessageV0[+VT <: ViewType] private (
     randomnessMap: Map[ParticipantId, Encrypted[SecureRandomness]],
     encryptedView: EncryptedView[VT],
     override val domainId: DomainId,
-) extends EncryptedViewMessage[VT]
+)(val representativeProtocolVersion: RepresentativeProtocolVersion)
+    extends EncryptedViewMessage[VT]
     with HasProtoV0[v0.EncryptedViewMessage]
     with ProtocolMessageV0 {
 
@@ -199,14 +202,14 @@ case class EncryptedViewMessageV0[+VT <: ViewType] private (
       viewType = viewType.toProtoEnum,
     )
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV0))
 
   override def viewEncryptionScheme: SymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm
 
   override protected def updateView[VT2 <: ViewType](
       newView: EncryptedView[VT2]
-  ): EncryptedViewMessage[VT2] = copy(encryptedView = newView)
+  ): EncryptedViewMessage[VT2] = copy(encryptedView = newView)(representativeProtocolVersion)
 }
 
 case class EncryptedViewMessageV1[+VT <: ViewType] private (
@@ -217,7 +220,8 @@ case class EncryptedViewMessageV1[+VT <: ViewType] private (
     override val domainId: DomainId,
     viewEncryptionScheme: SymmetricKeyScheme,
 )(
-    informeeParticipants: Option[Set[ParticipantId]]
+    informeeParticipants: Option[Set[ParticipantId]],
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
 ) extends EncryptedViewMessage[VT]
     with ProtocolMessageV1
     with HasProtoV1[v1.EncryptedViewMessage] {
@@ -235,12 +239,13 @@ case class EncryptedViewMessageV1[+VT <: ViewType] private (
     viewType = viewType.toProtoEnum,
   )
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV1))
 
   override protected def updateView[VT2 <: ViewType](
       newView: EncryptedView[VT2]
-  ): EncryptedViewMessage[VT2] = copy(encryptedView = newView)(informeeParticipants)
+  ): EncryptedViewMessage[VT2] =
+    copy(encryptedView = newView)(informeeParticipants, representativeProtocolVersion)
 }
 
 object EncryptedViewMessageV0 {
@@ -294,7 +299,7 @@ object EncryptedViewMessageV0 {
       randomnessMap,
       encryptedView,
       DomainId(domainUid),
-    )
+    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0)))
   }
 
   def decryptRandomness[VT <: ViewType](
@@ -378,7 +383,8 @@ object EncryptedViewMessageV1 {
       DomainId(domainUid),
       viewEncryptionScheme,
     )(
-      None
+      None,
+      ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(1)),
     )
   }
 

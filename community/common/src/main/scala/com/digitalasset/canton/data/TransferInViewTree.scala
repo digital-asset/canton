@@ -31,7 +31,9 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedToByteString,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.LfPartyId
@@ -92,7 +94,7 @@ object TransferInViewTree
   * @param stakeholders The stakeholders of the transferred contract
   * @param uuid The uuid of the transfer-in request
   */
-case class TransferInCommonData private (
+sealed abstract case class TransferInCommonData private (
     override val salt: Salt,
     targetDomain: DomainId,
     targetMediator: MediatorId,
@@ -100,10 +102,10 @@ case class TransferInCommonData private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[TransferInCommonData]]
+    with HasProtocolVersionedWrapper[TransferInCommonData]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -139,25 +141,12 @@ object TransferInCommonData
   override val name: String = "TransferInCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
-
-  private[this] def apply(
-      salt: Salt,
-      targetDomain: DomainId,
-      targetMediator: MediatorId,
-      stakeholders: Set[LfPartyId],
-      uuid: UUID,
-  )(
-      hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): TransferInCommonData =
-    throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -171,7 +160,7 @@ object TransferInCommonData
       hashOps,
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    )
+    ) {}
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
       bytes: ByteString
@@ -186,9 +175,9 @@ object TransferInCommonData
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
     } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    )
+    ) {}
   }
 }
 
@@ -200,7 +189,7 @@ object TransferInCommonData
   * @param contract The contract to be transferred including the instance
   * @param transferOutResultEvent The signed deliver event of the transfer-out result message
   */
-case class TransferInView private (
+sealed abstract case class TransferInView private (
     override val salt: Salt,
     submitter: LfPartyId,
     contract: SerializableContract,
@@ -208,10 +197,10 @@ case class TransferInView private (
     transferOutResultEvent: DeliveredTransferOutResult,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInView](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[TransferInView]]
+    with HasProtocolVersionedWrapper[TransferInView]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -246,25 +235,12 @@ object TransferInView
   override val name: String = "TransferInView"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
-
-  private[this] def apply(
-      salt: Salt,
-      submitter: LfPartyId,
-      contract: SerializableContract,
-      creatingTransactionid: TransactionId,
-      transferOutResultEvent: DeliveredTransferOutResult,
-  )(
-      hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): TransferInView =
-    throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -278,7 +254,7 @@ object TransferInView
       hashOps,
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    )
+    ) {}
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInViewP: v0.TransferInView)(
       bytes: ByteString
@@ -316,7 +292,7 @@ object TransferInView
       contract,
       creatingTransactionId,
       transferOutResultEvent,
-    )(hashOps, protocolVersionRepresentativeFor(0), Some(bytes))
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
   }
 }
 

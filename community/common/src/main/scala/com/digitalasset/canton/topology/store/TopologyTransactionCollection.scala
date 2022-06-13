@@ -5,6 +5,7 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import cats.syntax.traverseFilter._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
@@ -23,6 +24,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
 }
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.version._
+
+import scala.concurrent.{ExecutionContext, Future}
 
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[StoredTopologyTransaction[Op]]
@@ -215,6 +218,9 @@ final case class PositiveStoredTopologyTransactions(
 final case class SignedTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[SignedTopologyTransaction[Op]]
 ) {
+  def isEmpty: Boolean = result.isEmpty
+  def size: Int = result.size
+
   def collectOfType[T <: TopologyChangeOp](implicit
       checker: TopologyChangeOp.OpTypeChecker[T]
   ): SignedTopologyTransactions[T] = SignedTopologyTransactions(
@@ -251,6 +257,12 @@ final case class SignedTopologyTransactions[+Op <: TopologyChangeOp](
 
   def filter(predicate: SignedTopologyTransaction[Op] => Boolean): SignedTopologyTransactions[Op] =
     this.copy(result = result.filter(predicate))
+
+  def filter(
+      predicate: SignedTopologyTransaction[Op] => Future[Boolean]
+  )(implicit executionContext: ExecutionContext): Future[SignedTopologyTransactions[Op]] = {
+    result.traverseFilter(tx => predicate(tx).map(Option.when(_)(tx))).map(this.copy)
+  }
 }
 
 final case class PositiveSignedTopologyTransactions(

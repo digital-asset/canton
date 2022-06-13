@@ -15,7 +15,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
-  ProtocolVersion,
+  RepresentativeProtocolVersion,
   UntypedVersionedMessage,
   VersionedMessage,
 }
@@ -30,7 +30,7 @@ sealed trait SequencedEvent[+Env]
     with Serializable
     with ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
-    with HasProtocolVersionedWrapper[VersionedMessage[SequencedEvent[Env]]] {
+    with HasProtocolVersionedWrapper[SequencedEvent[Env]] {
 
   /** a sequence counter for each recipient.
     */
@@ -60,7 +60,8 @@ sealed trait SequencedEvent[+Env]
 }
 
 object SequencedEvent {
-  private[protocol] def protocolVersionRepresentativeFor: ProtocolVersion = ProtocolVersion.v2_0_0
+  private[sequencing] def protocolVersionRepresentative: RepresentativeProtocolVersion =
+    RepresentativeProtocolVersion.v2
 
   def fromByteString[Env <: Envelope[_]](
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
@@ -112,28 +113,26 @@ object SequencedEvent {
               .required("DeliverError", mbMsgIdP)
               .flatMap(MessageId.fromProtoPrimitive)
           } yield new DeliverError(counter, timestamp, domainId, msgId, deliverErrorReason)(
-            protocolVersionRepresentativeFor,
+            protocolVersionRepresentative,
             Some(bytes),
-          )
+          ) {}
         case (None, Some(batch)) =>
           mbMsgIdP match {
             case None =>
               Right(
                 new Deliver(counter, timestamp, domainId, None, batch)(
-                  protocolVersionRepresentativeFor,
+                  protocolVersionRepresentative,
                   Some(bytes),
-                )
+                ) {}
               )
             case Some(msgId) =>
               MessageId
                 .fromProtoPrimitive(msgId)
-                .flatMap(e =>
-                  Right(
-                    new Deliver(counter, timestamp, domainId, Some(e), batch)(
-                      protocolVersionRepresentativeFor,
-                      Some(bytes),
-                    )
-                  )
+                .map(msgId =>
+                  new Deliver(counter, timestamp, domainId, Some(msgId), batch)(
+                    protocolVersionRepresentative,
+                    Some(bytes),
+                  ) {}
                 )
           }
       }): ParsingResult[SequencedEvent[Env]]
@@ -141,14 +140,16 @@ object SequencedEvent {
   }
 }
 
-case class DeliverError private[sequencing] (
+sealed abstract case class DeliverError private[sequencing] (
     override val counter: SequencerCounter,
     override val timestamp: CantonTimestamp,
     override val domainId: DomainId,
     messageId: MessageId,
     reason: DeliverErrorReason,
-)(val representativeProtocolVersion: ProtocolVersion, val deserializedFrom: Option[ByteString])
-    extends SequencedEvent[Nothing]
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val deserializedFrom: Option[ByteString],
+) extends SequencedEvent[Nothing]
     with NoCopy {
   override def toProtoVersioned: VersionedMessage[SequencedEvent[Nothing]] =
     VersionedMessage(toProtoV0.toByteString, 0)
@@ -178,15 +179,6 @@ case class DeliverError private[sequencing] (
 }
 
 object DeliverError {
-  private[this] def apply(
-      counter: SequencerCounter,
-      timestamp: CantonTimestamp,
-      domainId: DomainId,
-      messageId: MessageId,
-      reason: DeliverErrorReason,
-  )(representativeProtocolVersion: ProtocolVersion, deserializedFrom: Option[ByteString]) =
-    throw new UnsupportedOperationException("Use the public apply method instead")
-
   def create(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
@@ -195,9 +187,9 @@ object DeliverError {
       reason: DeliverErrorReason,
   ) =
     new DeliverError(counter, timestamp, domainId, messageId, reason)(
-      SequencedEvent.protocolVersionRepresentativeFor,
+      SequencedEvent.protocolVersionRepresentative,
       None,
-    )
+    ) {}
 }
 
 /** Intuitively, the member learns all envelopes addressed to it. It learns some recipients of
@@ -215,8 +207,10 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     override val domainId: DomainId,
     messageId: Option[MessageId],
     batch: Batch[Env],
-)(val representativeProtocolVersion: ProtocolVersion, val deserializedFrom: Option[ByteString])
-    extends SequencedEvent[Env]
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val deserializedFrom: Option[ByteString],
+) extends SequencedEvent[Env]
     with NoCopy {
 
   /** Is this deliver event a receipt for a message that the receiver previously sent?
@@ -232,7 +226,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     timestamp = Some(timestamp.toProtoPrimitive),
     domainId = domainId.toProtoPrimitive,
     messageId = messageId.map(_.toProtoPrimitive),
-    batch = Some(batch.toProtoV0(representativeProtocolVersion)),
+    batch = Some(batch.toProtoV0(representativeProtocolVersion.unwrap)),
     deliverErrorReason = None,
   )
 
@@ -243,7 +237,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       new Deliver(counter, timestamp, domainId, messageId, _)(
         representativeProtocolVersion,
         deserializedFrom,
-      )
+      ) {}
     )
 
   @VisibleForTesting
@@ -257,7 +251,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     new Deliver[Env2](counter, timestamp, domainId, messageId, batch)(
       representativeProtocolVersion,
       None,
-    )
+    ) {}
 
   override def pretty: Pretty[this.type] =
     prettyOfClass(
@@ -274,7 +268,10 @@ object Deliver {
       domainId: DomainId,
       messageId: Option[MessageId],
       batch: Batch[Env],
-  )(representativeProtocolVersion: ProtocolVersion, deserializedFrom: Option[ByteString]) =
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ) =
     throw new UnsupportedOperationException("Use the public apply method instead")
 
   def create[Env <: Envelope[_]](
@@ -285,9 +282,9 @@ object Deliver {
       batch: Batch[Env],
   ): Deliver[Env] =
     new Deliver[Env](counter, timestamp, domainId, messageId, batch)(
-      SequencedEvent.protocolVersionRepresentativeFor,
+      SequencedEvent.protocolVersionRepresentative,
       None,
-    )
+    ) {}
 
   def fromSequencedEvent[Env <: Envelope[_]](
       deliverEvent: SequencedEvent[Env]

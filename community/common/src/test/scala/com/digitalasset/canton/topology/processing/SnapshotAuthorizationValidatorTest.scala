@@ -81,11 +81,15 @@ class SnapshotAuthorizationValidatorTest
         _ <- append(ns1k1_k1, okm1bk5_k1)
         empty1 <- validator.authorizedBy(p1p2F_k2)
         empty2 <- validator.authorizedBy(okm1ak5_k2)
+        empty3 <- validator.authorizedBy(ns1k3_k2)
         chain <- validator.authorizedBy(okm1bk5_k1)
+        chain2 <- validator.authorizedBy(ns1k1_k1)
       } yield {
         empty1 shouldBe empty
         empty2 shouldBe empty
+        empty3 shouldBe empty
         check(chain, Seq(ns1k1_k1))
+        check(chain2, Seq()) // root cert is
       }
 
     }

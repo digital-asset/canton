@@ -31,6 +31,7 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedView,
   EncryptedViewMessageV0,
   InformeeMessage,
+  ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.topology.transaction.ParticipantPermission._
@@ -124,6 +125,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           transactionUuid: UUID,
           _topologySnapshot: TopologySnapshot,
           _contractOfId: SerializableContractOfId,
+          _keyResolver: LfKeyResolver,
       )(implicit
           traceContext: TraceContext
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -152,6 +154,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           topologySnapshot: TopologySnapshot,
           contractOfId: SerializableContractOfId,
           _rbContext: RollbackContext,
+          _keyResolver: LfKeyResolver,
       )(implicit traceContext: TraceContext): EitherT[
         Future,
         TransactionTreeConversionError,
@@ -256,7 +259,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             createdRandomnessMap.fmap(_.encrypted),
             encryptedView,
             transactionFactory.domainId,
-          ),
+          )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)),
           recipients,
         )
     }
@@ -301,8 +304,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               example.wellFormedUnsuffixedTransaction,
               ConfirmationPolicy.Vip,
               submitterInfo,
-              ledgerTime,
               workflowId,
+              example.keyResolver,
               mediator,
               newCryptoSnapshot,
               contractInstanceOfId,
@@ -331,8 +334,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             singleFetch.wellFormedUnsuffixedTransaction,
             ConfirmationPolicy.Vip,
             submitterInfo,
-            ledgerTime,
             workflowId,
+            singleFetch.keyResolver,
             mediator,
             emptyCryptoSnapshot,
             contractInstanceOfId,
@@ -365,8 +368,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             singleFetch.wellFormedUnsuffixedTransaction,
             ConfirmationPolicy.Vip,
             submitterInfo,
-            ledgerTime,
             workflowId,
+            singleFetch.keyResolver,
             mediator,
             confirmationOnlyCryptoSnapshot,
             contractInstanceOfId,
@@ -396,8 +399,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             singleFetch.wellFormedUnsuffixedTransaction,
             ConfirmationPolicy.Vip,
             submitterInfo,
-            ledgerTime,
             workflowId,
+            singleFetch.keyResolver,
             mediator,
             newCryptoSnapshot,
             contractInstanceOfId,
@@ -424,8 +427,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             singleFetch.wellFormedUnsuffixedTransaction,
             ConfirmationPolicy.Vip,
             submitterInfo,
-            ledgerTime,
             workflowId,
+            singleFetch.keyResolver,
             mediator,
             submitterOnlyCryptoSnapshot,
             contractInstanceOfId,
@@ -457,8 +460,8 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             singleFetch.wellFormedUnsuffixedTransaction,
             ConfirmationPolicy.Vip,
             submitterInfo,
-            ledgerTime,
             workflowId,
+            singleFetch.keyResolver,
             mediator,
             noKeyCryptoSnapshot,
             contractInstanceOfId,

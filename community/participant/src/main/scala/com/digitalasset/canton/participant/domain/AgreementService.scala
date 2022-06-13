@@ -72,7 +72,7 @@ class AgreementService(
   ): EitherT[Future, AgreementServiceError, Option[ServiceAgreement]] =
     for {
       optAgreement <- {
-        if (protocolVersion == ProtocolVersion.unstable_development) {
+        if (protocolVersion > ProtocolVersion.v2_0_0) {
           val client = new GrpcSequencerConnectClient(
             sequencerConnection,
             timeouts,

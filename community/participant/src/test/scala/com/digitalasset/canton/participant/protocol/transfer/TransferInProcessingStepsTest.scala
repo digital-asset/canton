@@ -893,6 +893,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     RootHashMessage(
       tree.rootHash,
       tree.domainId,
+      defaultProtocolVersion,
       TransferInViewType,
       SerializedRootHashMessagePayload.empty,
     )

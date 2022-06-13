@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.store.memory.{
 import com.digitalasset.canton.{BaseTest, DomainAlias}
 import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
   MultiDomainEventLog,
   ParticipantEventLog,
   SingleDimensionEventLogTest,
@@ -48,6 +49,9 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
       override def domainIdForAlias(alias: DomainAlias): Option[DomainId] = None
       override def aliasForDomainId(id: DomainId): Option[DomainAlias] = None
       override def close(): Unit = ()
+      override def connectionStateForDomain(
+          id: DomainId
+      ): Option[DomainConnectionConfigStore.Status] = Some(DomainConnectionConfigStore.Active)
     }
     val persistentStateManager = new SyncDomainPersistentStateManager(
       noDomainResolution,

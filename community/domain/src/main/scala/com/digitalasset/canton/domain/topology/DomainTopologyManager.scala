@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 
 import scala.annotation.nowarn
 import scala.collection.mutable
@@ -92,7 +92,7 @@ object DomainTopologyManager {
   * set the participant state to enabled.
   */
 class DomainTopologyManager(
-    val id: UniqueIdentifier,
+    val id: UniqueIdentifier, // TODO(ratko) remove redundancy to managerId
     clock: Clock,
     override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     addParticipantHook: DomainTopologyManager.AddMemberHook,
@@ -107,7 +107,8 @@ class DomainTopologyManager(
       store,
       timeouts,
       loggerFactory,
-    )(ec) {
+    )(ec)
+    with RequestProcessingStrategy.ManagerHooks {
 
   val managerId = DomainTopologyManagerId(id)
 
@@ -149,10 +150,10 @@ class DomainTopologyManager(
   ): Future[Map[KeyOwner, Seq[PublicKey]]] =
     store.findInitialState(id)
 
-  def addParticipant(
+  override def addParticipant(
       participantId: ParticipantId,
       x509: Option[X509Cert],
-  ): EitherT[Future, DomainTopologyManagerError, Unit] = {
+  )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
     addParticipantHook(participantId, x509)
   }
 
@@ -192,7 +193,8 @@ class DomainTopologyManager(
   }
 
   // Representative for the class of protocol versions of SignedTopologyTransaction
-  private val signedTopologyTransactionRepresentativeProtocolVersion: ProtocolVersion =
+  private val signedTopologyTransactionRepresentativeProtocolVersion
+      : RepresentativeProtocolVersion =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
   private def checkCorrectProtocolVersion(
@@ -204,7 +206,7 @@ class DomainTopologyManager(
       (),
       DomainTopologyManagerError.WrongProtocolVersion.Failure(
         domainProtocolVersion = protocolVersion,
-        transactionProtocolVersion = transaction.representativeProtocolVersion,
+        transactionProtocolVersion = transaction.representativeProtocolVersion.unwrap,
       ),
     )
 
@@ -222,12 +224,13 @@ class DomainTopologyManager(
     if (transaction.operation == TopologyChangeOp.Remove) EitherT.pure(())
     else
       transaction.transaction.element.mapping match {
-        case ParticipantState(side, _, participant, permission, _) if side != RequestSide.To =>
-          checkParticipantHasKeys(participant, permission)
+        case ParticipantState(side, _, participant, permission, _) =>
+          checkParticipantHasKeys(side, participant, permission)
         case _ => EitherT.pure(())
       }
 
   private def checkParticipantHasKeys(
+      side: RequestSide,
       participantId: ParticipantId,
       permission: ParticipantPermission,
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
@@ -239,19 +242,31 @@ class DomainTopologyManager(
             CantonTimestamp.MaxValue,
             asOfInclusive = false,
             includeSecondary = false,
-            Seq(DomainTopologyTransactionType.OwnerToKeyMapping),
-            filterUid = Some(Seq(participantId.uid)),
+            types = Seq(
+              DomainTopologyTransactionType.OwnerToKeyMapping,
+              DomainTopologyTransactionType.ParticipantState,
+            ),
+            filterUid = Some(
+              Seq(participantId.uid)
+            ), // unique path is using participant id for both types of topo transactions
             filterNamespace = None,
           )
         )
-        keys = txs.adds.toTopologyState
+        keysAndSides = txs.adds.toTopologyState
           .map(_.mapping)
-          .collect { case OwnerToKeyMapping(`participantId`, key) =>
-            key
+          .foldLeft((KeyCollection(Seq(), Seq()), false)) {
+            case ((keys, sides), OwnerToKeyMapping(`participantId`, key)) =>
+              (keys.addTo(key), sides)
+            case (
+                  (keys, _),
+                  ParticipantState(otherSide, domain, `participantId`, permission, _),
+                ) if permission.isActive && managerId.domainId == domain && side != otherSide =>
+              (keys, true)
+            case (acc, _) => acc
           }
-          .foldLeft(KeyCollection(Seq(), Seq()))((acc, elem) => acc.addTo(elem))
+        (keys, hasOtherSide) = keysAndSides
         _ <- EitherT.cond[Future](
-          keys.hasBothKeys(),
+          keys.hasBothKeys() || (!hasOtherSide && side != RequestSide.Both),
           (),
           DomainTopologyManagerError.ParticipantNotInitialized
             .Failure(participantId, keys): DomainTopologyManagerError,
@@ -309,6 +324,30 @@ class DomainTopologyManager(
     sequentialQueue.execute(fut, description)
   }
 
+  override def issueParticipantStateForDomain(participantId: ParticipantId)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainTopologyManagerError, Unit] = {
+    authorize(
+      TopologyStateUpdate.createAdd(
+        ParticipantState(
+          RequestSide.From,
+          managerId.domainId,
+          participantId,
+          ParticipantPermission.Submission,
+          TrustLevel.Ordinary,
+        ),
+        protocolVersion,
+      ),
+      signingKey = None,
+      force = false,
+      replaceExisting = true,
+    ).map(_ => ())
+  }
+
+  override def addFromRequest(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, DomainTopologyManagerError, Unit] =
+    add(transaction, force = true, replaceExisting = true, allowDuplicateMappings = true)
 }
 
 sealed trait DomainTopologyManagerError extends CantonError
@@ -334,9 +373,9 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
 
   @Explanation(
     """This error is returned if a domain topology manager attempts to activate a 
-      participant without having previously registered the necessary keys."""
+      participant without having all necessary data, such as keys or domain trust certificates."""
   )
-  @Resolution("""Register the necessary keys and try again.""")
+  @Resolution("""Register the necessary keys or trust certificates and try again.""")
   object ParticipantNotInitialized
       extends ErrorCode(
         id = "PARTICIPANT_NOT_INITIALIZED",
@@ -346,6 +385,24 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "The participant can not be enabled without registering the necessary keys first"
+        )
+        with DomainTopologyManagerError
+    case class Reject(participantId: ParticipantId, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(reason)
+        with DomainTopologyManagerError
+  }
+
+  object InvalidOrFaultyOnboardingRequest
+      extends ErrorCode(
+        id = "MALICOUS_OR_FAULTY_ONBOARDING_REQUEST",
+        ErrorCategory.MaliciousOrFaultyBehaviour,
+      ) {
+    case class Failure(participantId: ParticipantId, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "The participant submitted invalid or insufficient topology transactions during onboarding"
         )
         with DomainTopologyManagerError
   }

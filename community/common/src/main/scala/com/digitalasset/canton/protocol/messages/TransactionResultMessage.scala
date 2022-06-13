@@ -18,7 +18,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
@@ -31,14 +33,16 @@ import com.google.protobuf.ByteString
   * @param verdict          the finalized verdict on the request
   * @param notificationTree the informee tree unblinded for the parties hosted by the receiving participant
   */
-case class TransactionResultMessage private (
+sealed abstract case class TransactionResultMessage(
     override val requestId: RequestId,
     override val verdict: Verdict,
     notificationTree: InformeeTree,
-)(val representativeProtocolVersion: ProtocolVersion, val deserializedFrom: Option[ByteString])
-    extends RegularMediatorResult
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val deserializedFrom: Option[ByteString],
+) extends RegularMediatorResult
     with NoCopy
-    with HasProtocolVersionedWrapper[VersionedMessage[TransactionResultMessage]]
+    with HasProtocolVersionedWrapper[TransactionResultMessage]
     with HasProtoV0[v0.TransactionResultMessage]
     with PrettyPrinting {
 
@@ -89,7 +93,7 @@ object TransactionResultMessage
   override val name: String = "TransactionResultMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransactionResultMessage) { case (hashOps, proto) =>
         fromProtoV0(proto, hashOps)
@@ -97,12 +101,6 @@ object TransactionResultMessage
       _.toProtoV0.toByteString,
     )
   )
-
-  private[this] def apply(requestId: RequestId, verdict: Verdict, notificationTree: InformeeTree)(
-      representativeProtocolVersion: ProtocolVersion,
-      deseializedFrom: Option[ByteString],
-  ): TransactionResultMessage =
-    throw new UnsupportedOperationException("Use the public apply method instead")
 
   def apply(
       requestId: RequestId,
@@ -113,7 +111,7 @@ object TransactionResultMessage
     new TransactionResultMessage(requestId, verdict, notificationTree)(
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    )
+    ) {}
 
   private def fromProtoV0(protoResultMessage: v0.TransactionResultMessage, hashOps: HashOps)(
       bytes: ByteString
@@ -131,9 +129,9 @@ object TransactionResultMessage
         .leftWiden[ProtoDeserializationError]
       notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
     } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    )
+    ) {}
 
   implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] = {
     case m: TransactionResultMessage => Some(m)

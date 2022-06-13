@@ -213,9 +213,7 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
     }
 
     "load with files that cannot be read" should {
-
       "will log errors for all files that can't be read" in {
-
         val result = loggerFactory.assertLogs(
           loadFiles(Seq("file-1", "file-2")),
           _.mdc("err-context") should (include("file-1") and include("file-2")),
@@ -228,9 +226,17 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
       "return a ValidationError during loading" in {
         val result = loggerFactory.assertLogs(
           loadFiles(Seq(simpleConf, "invalid-configs/duplicate-storage.conf")),
-          _.errorMessage should (include("Failed to validate the configuration") and include(
-            "participant1"
-          ) and include("participant2")),
+          _.errorMessage should (include("Failed to validate the configuration")
+            and include("participant1") and include("participant2")),
+        )
+        result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
+      }
+      "not log the password when url or jdbcUrl is set" in {
+        val result = loggerFactory.assertLogs(
+          loadFiles(Seq(simpleConf, "invalid-configs/storage-url-with-password.conf")),
+          _.errorMessage should (include("Failed to validate the configuration")
+            and include("participant1") and include("participant2")
+            and not include "password=" and not include "supersafe"),
         )
         result.left.value shouldBe a[ConfigErrors.ValidationError.Error]
       }

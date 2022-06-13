@@ -55,6 +55,10 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 }
 
 object SequencerConnectClient {
+
+  type Builder =
+    (DomainConnectionConfig, ErrorLoggingContext) => EitherT[Future, Error, SequencerConnectClient]
+
   sealed trait Error {
     def message: String
   }
@@ -67,6 +71,17 @@ object SequencerConnectClient {
     final case class Transport(message: String) extends Error
   }
 
+  def makeBuilder(
+      crypto: Crypto,
+      timeouts: ProcessingTimeout,
+      traceContextPropagation: TracingConfig.Propagation,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContextExecutor
+  ): Builder = { case (config, context) =>
+    apply(config, crypto, timeouts, traceContextPropagation, loggerFactory)(ec, context)
+  }
+
   def apply(
       config: DomainConnectionConfig,
       crypto: Crypto,
@@ -76,12 +91,11 @@ object SequencerConnectClient {
   )(implicit
       ec: ExecutionContextExecutor,
       loggingContext: ErrorLoggingContext,
-      traceContext: TraceContext,
-  ): EitherT[Future, DomainRegistryError, SequencerConnectClient] =
+  ): EitherT[Future, Error, SequencerConnectClient] = {
     for {
       client <- config.sequencerConnection match {
         case connection: GrpcSequencerConnection =>
-          EitherT.rightT[Future, DomainRegistryError](
+          EitherT.rightT[Future, Error](
             new GrpcSequencerConnectClient(
               connection,
               timeouts,
@@ -97,11 +111,10 @@ object SequencerConnectClient {
               timeouts,
               traceContextPropagation,
               loggerFactory,
-            )
-              .leftMap[DomainRegistryError](
-                DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
-              )
+            )(ec, loggingContext.traceContext)
+              .leftMap[Error](str => Error.Transport(str))
           } yield new HttpSequencerConnectClient(httpClient, loggerFactory)
       }
     } yield client
+  }
 }

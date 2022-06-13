@@ -19,7 +19,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.LfPartyId
@@ -54,10 +56,10 @@ case class MediatorResponse private (
     confirmingParties: Set[LfPartyId],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends SignedProtocolMessageContent
-    with HasProtocolVersionedWrapper[VersionedMessage[MediatorResponse]]
+    with HasProtocolVersionedWrapper[MediatorResponse]
     with HasProtoV0[v0.MediatorResponse]
     with HasDomainId
     with NoCopy {
@@ -107,7 +109,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   override val name: String = "MediatorResponse"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.MediatorResponse)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -126,7 +128,10 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       rootHash: Option[RootHash],
       confirmingParties: Set[LfPartyId],
       domainId: DomainId,
-  )(representativeProtocolVersion: ProtocolVersion, deserializedFrom: Option[ByteString]) =
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion,
+      deserializedFrom: Option[ByteString],
+  ) =
     throw new UnsupportedOperationException("Use the public apply method")
 
   // Variant of "tryCreate" that returns Left(...) instead of throwing an exception.
@@ -152,7 +157,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
         rootHash,
         confirmingParties,
         domainId,
-        protocolVersionRepresentativeFor(protocolVersion),
+        protocolVersion,
       )
     )
 
@@ -225,7 +230,10 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             rootHashO,
             confirmingParties.toSet,
             domainId,
-          )(supportedProtoVersions.protocolVersionRepresentativeFor(protoVersion = 0), Some(bytes))
+          )(
+            supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+            Some(bytes),
+          )
         )
         .leftMap(err => InvariantViolation(err.toString))
     } yield response

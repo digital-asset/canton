@@ -8,8 +8,6 @@ import cats.data.EitherT
 import cats.implicits._
 import com.codahale.metrics.SharedMetricRegistries
 import com.daml.api.util.TimeProvider
-import com.daml.caching
-import scala.jdk.DurationConverters._
 import com.daml.ledger.api.health.HealthChecks
 import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationFeatures,
@@ -20,17 +18,11 @@ import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
-import com.daml.platform.apiserver.{
-  ApiServerConfig,
-  LedgerFeatures,
-  StandaloneApiServer,
-  StandaloneIndexService,
-  TimeServiceBackend,
-}
+import com.daml.platform.apiserver._
 import com.daml.platform.configuration.{
-  IndexConfiguration => LedgerIndexConfiguration,
   PartyConfiguration,
   ServerRole,
+  IndexServiceConfig => LedgerIndexServiceConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
@@ -38,7 +30,9 @@ import com.daml.platform.indexer.{
   StandaloneIndexerServer,
   IndexerConfig => DamlIndexerConfig,
 }
-import com.daml.platform.store.{DbSupport, DbType, LfValueTranslationCache}
+import com.daml.platform.services.time.TimeProviderType
+import com.daml.platform.store.backend.postgresql.PostgresDataSourceConfig
+import com.daml.platform.store.{DbSupport, LfValueTranslationCache}
 import com.daml.platform.usermanagement.PersistentUserManagementStore
 import com.daml.ports.{Port => DamlPort}
 import com.daml.resources.FutureResourceOwner
@@ -69,6 +63,7 @@ import java.time.{Duration => JDuration}
 import java.util.UUID.randomUUID
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.DurationConverters._
 import scala.util.{Failure, Success}
 
 /** Wrapper of Ledger Api Server to manage start, stop, and erasing of state.
@@ -153,29 +148,21 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           config.storageConfig,
           config.participantId,
         )
-        asyncCommitMode <- asyncCommitMode(config.serverConfig.synchronousCommitMode)
-          .leftMap(FailedToConfigureIndexer)
 
         indexerConfig = DamlIndexerConfig(
-          participantId = config.participantId,
-          jdbcUrl = ledgerApiStorage.jdbcUrl,
           startupMode = IndexerStartupMode.MigrateAndStart(false),
           restartDelay = config.indexerConfig.restartDelay.toScala,
           // updatePreparationParallelism not configurable as applicable only to pipelined indexer that will be removed
-          asyncCommitMode = asyncCommitMode,
           maxInputBufferSize = config.indexerConfig.maxInputBufferSize.unwrap,
           inputMappingParallelism = config.indexerConfig.inputMappingParallelism.unwrap,
           batchingParallelism = config.indexerConfig.batchingParallelism.unwrap,
           ingestionParallelism = config.indexerConfig.ingestionParallelism.unwrap,
           submissionBatchSize = config.indexerConfig.submissionBatchSize,
           enableCompression = config.indexerConfig.enableCompression,
-          haConfig = config.indexerLockIds.fold(HaConfig()) {
+          highAvailability = config.indexerLockIds.fold(HaConfig()) {
             case IndexerLockIds(mainLockId, workerLockId) =>
               HaConfig(indexerLockId = mainLockId, indexerWorkerLockId = workerLockId)
           },
-          postgresTcpKeepalivesIdle = config.indexerConfig.postgresTcpKeepalivesIdle,
-          postgresTcpKeepalivesInterval = config.indexerConfig.postgresTcpKeepalivesInterval,
-          postgresTcpKeepalivesCount = config.indexerConfig.postgresTcpKeepalivesCount,
         )
       } yield (ledgerApiStorage, indexerConfig)
 
@@ -184,11 +171,9 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       .flatMap { case (ledgerApiStorage, indexerConfig) =>
         val uniquifier = randomUUID.toString
 
-        val ledgerIndexConfiguration = LedgerIndexConfiguration(
-          archiveFiles = List.empty,
+        val ledgerIndexConfiguration = LedgerIndexServiceConfig(
           eventsPageSize = config.serverConfig.eventsPageSize,
           eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
-          bufferedStreamsPageSize = config.serverConfig.bufferedStreamsPageSize,
           acsIdPageSize = config.serverConfig.activeContractsService.acsIdPageSize,
           acsIdPageBufferSize = config.serverConfig.activeContractsService.acsIdPageBufferSize,
           acsIdFetchingParallelism =
@@ -196,30 +181,57 @@ object CantonLedgerApiServerWrapper extends NoTracing {
           acsContractFetchingParallelism =
             config.serverConfig.activeContractsService.acsContractFetchingParallelism,
           acsGlobalParallelism = config.serverConfig.activeContractsService.acsGlobalParallelism,
+          maxContractStateCacheSize =
+            config.serverConfig.maxContractStateCacheSize, // TODO(i9425) @Sergey: should that use SizedCache.Configuration ?
+          maxContractKeyStateCacheSize =
+            config.serverConfig.maxContractKeyStateCacheSize, // TODO(i9425) @Sergey: should that use SizedCache.Configuration ?
+          maxTransactionsInMemoryFanOutBufferSize =
+            config.serverConfig.maxTransactionsInMemoryFanOutBufferSize.toInt,
+          enableInMemoryFanOutForLedgerApi = config.serverConfig.enableInMemoryFanOutForLedgerApi,
+          apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.duration.toScala,
+        )
+
+        val connectionPoolConfig = DbSupport.ConnectionPoolConfig(
+          connectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
+          connectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
+        )
+
+        val dbConfig = DbSupport.DbConfig(
+          jdbcUrl = ledgerApiStorage.jdbcUrl,
+          connectionPool = connectionPoolConfig,
+          postgres = PostgresDataSourceConfig(
+            tcpKeepalivesIdle = config.serverConfig.postgresDataSourceConfig.tcpKeepalivesIdle,
+            tcpKeepalivesInterval =
+              config.serverConfig.postgresDataSourceConfig.tcpKeepalivesInterval,
+            tcpKeepalivesCount = config.serverConfig.postgresDataSourceConfig.tcpKeepalivesCount,
+          ),
         )
 
         val ledgerApiServerConfig = ApiServerConfig(
-          participantId = config.participantId,
-          port = DamlPort(config.serverConfig.port.unwrap),
           address = Some(config.serverConfig.address),
-          jdbcUrl = ledgerApiStorage.jdbcUrl,
-          databaseConnectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
-          databaseConnectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
-          tlsConfig = config.serverConfig.tls
-            .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
-          maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
+          apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap.toScala,
+          authentication = ApiServerConfig.DefaultAuthentication,
+          command = config.serverConfig.commandService.damlConfig,
+          configurationLoadTimeout = config.serverConfig.configurationLoadTimeout.toScala,
           initialLedgerConfiguration =
             None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
-          configurationLoadTimeout =
-            JDuration.ofNanos(config.serverConfig.configurationLoadTimeout.unwrap.toNanos),
-          indexConfiguration = ledgerIndexConfiguration,
+          managementServiceTimeout = config.serverConfig.managementServiceTimeout.toScala,
+          maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
+          party = PartyConfiguration.Default,
+          port = DamlPort(config.serverConfig.port.unwrap),
           portFile = None,
           seeding = config.cantonParameterConfig.contractIdSeeding,
-          managementServiceTimeout =
-            JDuration.ofNanos(config.serverConfig.managementServiceTimeout.unwrap.toNanos),
-          userManagementConfig = config.serverConfig.userManagementService.damlConfig,
-          rateLimitingConfig = config.serverConfig.rateLimitingConfig,
+          timeProviderType = config.testingTimeService match {
+            case Some(_) => TimeProviderType.Static
+            case None => TimeProviderType.WallClock
+          },
+          tls = config.serverConfig.tls
+            .map(LedgerApiServerConfig.ledgerApiServerTlsConfigFromCantonServerConfig),
+          userManagement = config.serverConfig.userManagementService.damlConfig,
         )
+
+        val participantDataSourceConfig =
+          DbSupport.ParticipantDataSourceConfig(ledgerApiStorage.jdbcUrl)
 
         // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.
         val (indexer, ledgerApiServerResource) =
@@ -227,12 +239,15 @@ object CantonLedgerApiServerWrapper extends NoTracing {
             val metrics = new Metrics(
               SharedMetricRegistries.getOrCreate(s"${config.participantId}-$uniquifier")
             )
+
+            val lfValueTranslationCacheConfig = LfValueTranslationCache.Config(
+              eventsMaximumSize = config.serverConfig.maxEventCacheWeight,
+              contractsMaximumSize = config.serverConfig.maxContractCacheWeight,
+            )
+
             val lfValueTranslationCache =
               LfValueTranslationCache.Cache.newInstrumentedInstance(
-                eventConfiguration =
-                  caching.SizedCache.Configuration(config.serverConfig.maxEventCacheWeight),
-                contractConfiguration =
-                  caching.SizedCache.Configuration(config.serverConfig.maxContractCacheWeight),
+                config = lfValueTranslationCacheConfig,
                 metrics = metrics,
               )
 
@@ -248,6 +263,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
             val indexerResource = for {
               _ <- tryCreateSchemaAsResource(ledgerApiStorage, config.logger).acquire()
               reportsHealth <- new StandaloneIndexerServer(
+                config.participantId,
+                participantDataSourceConfig = participantDataSourceConfig,
                 config.syncService,
                 indexerConfig.copy(startupMode = indexerStartupMode),
                 metrics,
@@ -258,6 +275,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
 
             val startableStoppableIndexer =
               new StartableStoppableIndexer(
+                config.participantId,
+                participantDataSourceConfig = participantDataSourceConfig,
                 indexerConfig,
                 metrics,
                 lfValueTranslationCache,
@@ -285,10 +304,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
 
               dbSupport <- DbSupport
                 .owner(
-                  jdbcUrl = ledgerApiServerConfig.jdbcUrl,
+                  dbConfig = dbConfig,
                   serverRole = ServerRole.ApiServer,
-                  connectionPoolSize = ledgerApiServerConfig.databaseConnectionPoolSize,
-                  connectionTimeout = ledgerApiServerConfig.databaseConnectionTimeout,
                   metrics = metrics,
                 )
                 .acquire()
@@ -319,16 +336,9 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                 indexService = indexService,
                 userManagementStore = userManagementStore,
                 ledgerId = config.ledgerId,
+                participantId = config.participantId,
                 config = ledgerApiServerConfig,
-                commandConfig = config.serverConfig.commandService.damlConfig,
-                partyConfig = PartyConfiguration.default,
                 optWriteService = Some(config.syncService),
-                authService = {
-                  new CantonAdminTokenAuthService(
-                    config.adminToken,
-                    config.serverConfig.authServices.map(_.create()),
-                  )
-                },
                 healthChecks = new HealthChecks(
                   "read" -> config.syncService,
                   "write" -> (() => config.syncService.currentWriteHealth()),
@@ -336,7 +346,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                 ),
                 metrics = config.metrics,
                 timeServiceBackend = config.testingTimeService,
-                engine = config.engine,
+                otherServices = Nil, // TODO(#9425) do we want to make that configurable?
                 otherInterceptors = List(
                   new ApiRequestLogger(
                     config.loggerFactory,
@@ -347,6 +357,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                     .build()
                     .newServerInterceptor(),
                 ),
+                engine = config.engine,
                 servicesExecutionContext = ec,
                 checkOverloaded = config.syncService.checkOverloaded,
                 ledgerFeatures = LedgerFeatures(
@@ -364,9 +375,10 @@ object CantonLedgerApiServerWrapper extends NoTracing {
                     maxDeduplicationDurationEnforced = false,
                   ),
                 ),
-                userManagementConfig = config.serverConfig.userManagementService.damlConfig,
-                apiStreamShutdownTimeout =
-                  config.serverConfig.apiStreamShutdownTimeout.duration.toScala,
+                authService = new CantonAdminTokenAuthService(
+                  config.adminToken,
+                  parent = config.serverConfig.authServices.map(_.create()),
+                ),
               ).acquire()
             } yield ()
 
@@ -399,14 +411,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       ledgerApiStorage.createSchema().valueOr { err =>
         logger.error(s"Failed to create schema for ledger API server", err)
       }
-    }
-
-  private def asyncCommitMode(mode: String): Either[String, DbType.AsyncCommitMode] =
-    mode.toUpperCase() match {
-      case DbType.SynchronousCommit.setting => Right(DbType.SynchronousCommit)
-      case DbType.LocalSynchronousCommit.setting => Right(DbType.LocalSynchronousCommit)
-      case DbType.AsynchronousCommit.setting => Right(DbType.AsynchronousCommit)
-      case unknownMode => Left(s"Unsupported synchronous_commit mode: $unknownMode")
     }
 
   /** Config for indexer migrate schema entry point

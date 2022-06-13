@@ -16,6 +16,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
 import com.digitalasset.canton.version.ProtocolVersion
 
+import java.net.URI
+
 private[config] trait ConfigValidations[C <: CantonConfig] {
   final def validate(config: C): Validated[NonEmpty[Seq[String]], Unit] =
     validations.traverse_(_(config))
@@ -29,7 +31,25 @@ object CommunityConfigValidations
   import TraceContext.Implicits.Empty._
   override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
-  case class DbAccess(url: String, user: Option[String])
+  case class DbAccess(url: String, user: Option[String]) {
+    private lazy val urlNoPassword = {
+      val uri = new URI(
+        url.replace("jdbc:", "")
+      )
+      val queryNoPassword = Option(uri.getQuery)
+        .getOrElse("")
+        .split('&')
+        .map(param =>
+          if (param.startsWith("password=")) ""
+          else param
+        )
+        .mkString
+      new URI(uri.getScheme, uri.getAuthority, uri.getPath, queryNoPassword, uri.getFragment)
+    }
+
+    override def toString: String =
+      s"DbAccess($urlNoPassword, $user)"
+  }
 
   private val Valid: Validated[NonEmpty[Seq[String]], Unit] = Validated.valid(())
   type Validation = CantonCommunityConfig => Validated[NonEmpty[Seq[String]], Unit]

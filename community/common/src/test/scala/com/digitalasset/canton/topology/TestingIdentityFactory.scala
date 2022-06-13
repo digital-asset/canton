@@ -30,7 +30,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration._
@@ -297,6 +297,9 @@ class TestingIdentityFactory(
       case _ => throw new IllegalStateException(s"Multiple domain parameters are valid at $ts")
     }
 
+  private val signedTxProtocolRepresentative: RepresentativeProtocolVersion =
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.latestForTest)
+
   private def mkReplace(
       mapping: DomainGovernanceMapping
   ): SignedTopologyTransaction[TopologyChangeOp.Replace] = SignedTopologyTransaction(
@@ -306,7 +309,7 @@ class TestingIdentityFactory(
     ),
     mock[SigningPublicKey],
     mock[Signature],
-  )(ProtocolVersion.latestForTest, None)
+  )(signedTxProtocolRepresentative, None)
 
   private def mkAdd(
       mapping: TopologyStateUpdateMapping
@@ -317,7 +320,7 @@ class TestingIdentityFactory(
     )(defaultProtocolVersion),
     mock[SigningPublicKey],
     mock[Signature],
-  )(ProtocolVersion.latestForTest, None)
+  )(signedTxProtocolRepresentative, None)
 
   private def genKeyCollection(
       owner: KeyOwner

@@ -39,8 +39,6 @@ import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.domain.{
   AgreementService,
   DomainAliasManager,
-  DomainRegistryError,
-  SequencerConnectClient,
   DomainConnectionConfig => CantonDomainConnectionConfig,
 }
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
@@ -308,7 +306,7 @@ class ParticipantNodeBootstrap(
         DomainConnectionConfigStore(storage, timeouts, loggerFactory)
       )
       domainAliasManager <- EitherT.right[String](
-        DomainAliasManager(registeredDomainsStore, loggerFactory)
+        DomainAliasManager(domainConnectionConfigStore, registeredDomainsStore, loggerFactory)
       )
       syncDomainPersistentStateManager = new SyncDomainPersistentStateManager(
         domainAliasManager,
@@ -523,24 +521,11 @@ class ParticipantNodeBootstrap(
         )
       setStartableStoppableIndexer(ledgerApiServer.indexer)
 
-      val sequencerConnectClientBuilder: domain.DomainConnectionConfig => EitherT[
-        Future,
-        DomainRegistryError,
-        SequencerConnectClient,
-      ] =
-        SequencerConnectClient(
-          _,
-          sync.syncCrypto.crypto,
-          cantonParameterConfig.processingTimeouts,
-          cantonParameterConfig.tracing.propagation,
-          loggerFactory,
-        )
-
       val stateService = new DomainConnectivityService(
         sync,
         domainAliasManager,
         agreementService,
-        sequencerConnectClientBuilder,
+        domainRegistry.sequencerConnectClientBuilder,
         cantonParameterConfig.processingTimeouts,
         loggerFactory,
       )

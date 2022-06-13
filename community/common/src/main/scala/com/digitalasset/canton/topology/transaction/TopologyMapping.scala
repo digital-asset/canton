@@ -17,7 +17,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.google.protobuf.ByteString
@@ -87,13 +89,23 @@ final case class NamespaceDelegation(
 
   override def dbType: DomainTopologyTransactionType = NamespaceDelegation.dbType
 
-  override def requiredAuth: RequiredAuth = RequiredAuth.Ns(namespace, true)
+  override def requiredAuth: RequiredAuth =
+    RequiredAuth.Ns(namespace, true)
 
 }
 
 object NamespaceDelegation {
 
   def dbType: DomainTopologyTransactionType = DomainTopologyTransactionType.NamespaceDelegation
+
+  /** Returns true if the given transaction is a self-signed root certificate */
+  def isRootCertificate(sit: SignedTopologyTransaction[TopologyChangeOp]): Boolean =
+    sit.transaction.element.mapping match {
+      case nd: NamespaceDelegation =>
+        nd.namespace.fingerprint == sit.key.fingerprint && nd.isRootDelegation && nd.target.fingerprint == nd.namespace.fingerprint &&
+          sit.operation == TopologyChangeOp.Add
+      case _ => false
+    }
 
   def fromProtoV0(
       value: v0.NamespaceDelegation
@@ -235,10 +247,10 @@ sealed abstract case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
-    with HasProtocolVersionedWrapper[VersionedMessage[LegalIdentityClaim]]
+    with HasProtocolVersionedWrapper[LegalIdentityClaim]
     with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
@@ -262,7 +274,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
   override val name: String = "LegalIdentityClaim"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.LegalIdentityClaim)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -286,7 +298,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
       uid <- UniqueIdentifier.fromProtoPrimitive(claimP.uniqueIdentifier, "uniqueIdentifier")
       evidence <- LegalIdentityClaimEvidence.fromProtoOneOf(claimP.evidence)
     } yield new LegalIdentityClaim(uid, evidence)(
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
 }

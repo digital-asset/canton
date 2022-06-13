@@ -1,4 +1,4 @@
-sdk-version: 2.3.0-snapshot.20220525.9963.0.12a488f6
+sdk-version: 2.3.0-snapshot.20220608.10056.0.944cc314
 name: bank
 exposed-modules: 
 - Bank

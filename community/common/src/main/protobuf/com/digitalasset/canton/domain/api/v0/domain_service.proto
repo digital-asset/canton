@@ -7,7 +7,7 @@ package com.digitalasset.canton.domain.api.v0;
 
 import "com/digitalasset/canton/domain/api/v0/service_agreement.proto";
 
-// TODO(#9244) Deprecate this service
 service DomainService {
+    option deprecated = true;
     rpc GetServiceAgreement(GetServiceAgreementRequest) returns (GetServiceAgreementResponse);
 }

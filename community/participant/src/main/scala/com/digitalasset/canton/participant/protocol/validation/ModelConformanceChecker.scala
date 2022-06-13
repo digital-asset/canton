@@ -36,7 +36,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 }
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfCommand, LfPartyId, checked}
+import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -56,7 +56,11 @@ class ModelConformanceChecker(
         Option[LfHash],
         Boolean,
         TraceContext,
-    ) => EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata)],
+    ) => EitherT[
+      Future,
+      DAMLeError,
+      (LfVersionedTransaction, TransactionMetadata, LfKeyResolver),
+    ],
     val transactionTreeFactory: TransactionTreeFactory,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -70,9 +74,7 @@ class ModelConformanceChecker(
     * @return the resulting LfTransaction with [[com.digitalasset.canton.protocol.LfContractId]]s only
     */
   def check(
-      rootViewsWithInputKeys: NonEmpty[Seq[
-        (TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])
-      ]],
+      rootViewsWithInputKeys: NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]],
       requestCounter: RequestCounter,
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
@@ -104,7 +106,7 @@ class ModelConformanceChecker(
 
   private def checkView(
       view: TransactionViewTree,
-      resolvedKeys: Map[LfGlobalKey, Option[LfContractId]],
+      resolvedKeys: LfKeyResolver,
       requestCounter: RequestCounter,
       ledgerTime: CantonTimestamp,
       submissionTime: CantonTimestamp,
@@ -141,7 +143,8 @@ class ModelConformanceChecker(
         traceContext,
       )
         .leftWiden[Error]
-      (lfTx, metadata) = lfTxAndMetadata
+      (lfTx, metadata, resolver) = lfTxAndMetadata
+      // TODO(#9386) Figure out the relation between `resolvedKeys` and `resolver`
       wfTx <- EitherT
         .fromEither[Future](
           WellFormedTransaction.normalizeAndCheck(lfTx, metadata, WithoutSuffixes)
@@ -159,6 +162,7 @@ class ModelConformanceChecker(
           transactionUuid = view.transactionUuid,
           topologySnapshot = topologySnapshot,
           contractOfId = TransactionTreeFactory.contractInstanceLookup(lookupWithKeys),
+          keyResolver = resolver,
         )
       ).leftMap(err =>
         TransactionTreeError(lfTx, s"Failed to construct transaction view tree: $err")
@@ -194,7 +198,7 @@ object ModelConformanceChecker {
         rootSeed: Option[LfHash],
         expectFailure: Boolean,
         traceContext: TraceContext,
-    ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata)] =
+    ): EitherT[Future, DAMLeError, (LfVersionedTransaction, TransactionMetadata, LfKeyResolver)] =
       damle
         .reinterpret(
           contracts,

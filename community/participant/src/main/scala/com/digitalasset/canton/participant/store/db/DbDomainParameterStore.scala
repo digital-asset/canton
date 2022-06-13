@@ -13,7 +13,9 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
+import slick.jdbc.SetParameter
 
+import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbDomainParameterStore(
@@ -33,7 +35,11 @@ class DbDomainParameterStore(
 
   def setParameters(
       newParameters: StaticDomainParameters
-  )(implicit traceContext: TraceContext): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    @nowarn("cat=unused") implicit val setParameterStaticDomainParameters
+        : SetParameter[StaticDomainParameters] =
+      StaticDomainParameters.getVersionedSetParameter(newParameters.protocolVersion)
+
     processingTime.metric.event {
       // We do not check equality of the parameters on the serialized format in the DB query because serialization may
       // be different even though the parameters are the same
@@ -69,6 +75,7 @@ class DbDomainParameterStore(
           }
       }
     }
+  }
 
   def lastParameters(implicit
       traceContext: TraceContext

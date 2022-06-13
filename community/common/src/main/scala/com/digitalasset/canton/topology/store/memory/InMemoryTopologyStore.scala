@@ -12,7 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
 import com.digitalasset.canton.topology.store._
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Positive, Remove}
 import com.digitalasset.canton.topology.transaction._
@@ -34,7 +34,10 @@ class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLo
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   override def forId[StoreId <: TopologyStoreId](storeId: StoreId): TopologyStore[StoreId] =
     stores
-      .getOrElseUpdate(storeId, new InMemoryTopologyStore(storeId, loggerFactory))
+      .getOrElseUpdate(
+        storeId,
+        new InMemoryTopologyStore(storeId, loggerFactory),
+      )
       .asInstanceOf[TopologyStore[StoreId]]
 
   def allNonDiscriminated(implicit
@@ -47,7 +50,7 @@ class InMemoryTopologyStoreFactory(override protected val loggerFactory: NamedLo
   ): Seq[TopologyStore[TopologyStoreId]] =
     original.collect {
       case (DomainStore(_, disc), store) if disc.isEmpty => store
-      case (_, store) => store
+      case (AuthorizedStore, store) => store
     }.toSeq
 
   override def partyMetadataStore(): PartyMetadataStore = metadata
@@ -125,6 +128,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     def toStoredTransaction: StoredTopologyTransaction[Op] =
       StoredTopologyTransaction(sequenced, from, until, transaction)
 
+    // TODO(i9591) clean me up and remove duplication
     def secondaryUid: Option[UniqueIdentifier] = transaction match {
       case SignedTopologyTransaction(
             TopologyStateUpdate(
@@ -267,10 +271,10 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     filteredState(blocking(synchronized(topologyTransactionStore.toSeq)), _ => true)
 
-  override def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
+  override def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
-  ): Future[Boolean] =
-    allTransactions.map(_.result.exists(_.transaction == transaction))
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
+    allTransactions.map(_.result.find(_.transaction == transaction))
 
   override def findPositiveTransactions(
       asOf: CantonTimestamp,
@@ -402,6 +406,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
           topologyStateStore.update(idx, item.copy(until = Some(effective)))
         }
       }
+
       // INSERT IGNORE (sit)
       positive.foreach { sit =>
         if (

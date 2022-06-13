@@ -58,6 +58,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       treeFactory: TransactionTreeFactoryImpl,
       transaction: WellFormedTransaction[WithoutSuffixes],
       contractInstanceOfId: SerializableContractOfId,
+      keyResolver: LfKeyResolver,
       actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
       snapshot: TopologySnapshot = factory.topologySnapshot,
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -72,6 +73,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
       factory.transactionUuid,
       snapshot,
       contractInstanceOfId,
+      keyResolver,
     )
   }
 
@@ -86,8 +88,8 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             treeFactory,
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
-          ).value
-            .flatMap(_ should equal(Right(example.transactionTree)))
+            example.keyResolver,
+          ).value.flatMap(_ should equal(Right(example.transactionTree)))
         }
       }
     }
@@ -105,12 +107,12 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
           treeFactory,
           example.wellFormedUnsuffixedTransaction,
           failedLookup(errorMessage),
-        ).value
-          .flatMap(
-            _ shouldEqual Left(
-              ContractLookupError(example.contractId.asInstanceOf[LfContractId], errorMessage)
-            )
+          example.keyResolver,
+        ).value.flatMap(
+          _ shouldEqual Left(
+            ContractLookupError(example.contractId.asInstanceOf[LfContractId], errorMessage)
           )
+        )
       }
     }
 
@@ -123,6 +125,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
           treeFactory,
           example.wellFormedUnsuffixedTransaction,
           successfulLookup(example),
+          example.keyResolver,
           actAs = List.empty,
         ).value
           .flatMap(_ should equal(Left(SubmitterMetadataError("The actAs set must not be empty."))))
@@ -139,10 +142,9 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
           treeFactory,
           example.wellFormedUnsuffixedTransaction,
           successfulLookup(example),
+          example.keyResolver,
           snapshot = defaultTestingIdentityFactory.topologySnapshot(),
-        ).value
-          .flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) =>
-          })
+        ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
       }
       "fail if some dependency is not vetted" in {
 
@@ -152,6 +154,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             treeFactory,
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
+            example.keyResolver,
             snapshot = defaultTestingIdentityFactory.topologySnapshot(
               packages = Seq(ExampleTransactionFactory.packageId),
               packageDependencies = x =>
@@ -175,6 +178,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             treeFactory,
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
+            example.keyResolver,
             snapshot = defaultTestingIdentityFactory.topologySnapshot(
               packages = Seq(ExampleTransactionFactory.packageId),
               packageDependencies = x =>

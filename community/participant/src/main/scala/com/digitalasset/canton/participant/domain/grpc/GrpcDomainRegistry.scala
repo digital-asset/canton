@@ -11,7 +11,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.lifecycle._
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain._
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -102,22 +102,34 @@ class GrpcDomainRegistry(
     }
   }
 
+  def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
+    (config: DomainConnectionConfig, context: ErrorLoggingContext) =>
+      SequencerConnectClient(
+        config,
+        cryptoApiProvider.crypto,
+        participantNodeParameters.processingTimeouts,
+        participantNodeParameters.tracing.propagation,
+        loggerFactory,
+      )(ec, context)
+  }
+
   override def connect(
       config: DomainConnectionConfig,
       syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[DomainRegistryError, DomainHandle]] = {
+
     val sequencerConnection = config.sequencerConnection
 
     val runE = for {
-      sequencerConnectClient <- SequencerConnectClient(
-        config,
-        cryptoApiProvider.crypto,
-        timeouts,
-        participantNodeParameters.tracing.propagation,
-        loggerFactory,
-      ).mapK(FutureUnlessShutdown.outcomeK)
+      sequencerConnectClient <- sequencerConnectClientBuilder(config, loggingContext)
+        .leftMap(err =>
+          DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
+        )
+        .mapK(
+          FutureUnlessShutdown.outcomeK
+        )
 
       agreementClient = new AgreementClient(agreementService, sequencerConnection, loggerFactory)
 

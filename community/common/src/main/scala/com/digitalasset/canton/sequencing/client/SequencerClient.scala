@@ -307,7 +307,7 @@ class SequencerClient(
         member,
         messageId,
         sendType.isRequest,
-        Batch.closeEnvelopes(batch, staticDomainParameters.protocolVersion),
+        Batch.closeEnvelopes(batch),
         maxSequencingTime,
         timestampOfSigningKey,
       )

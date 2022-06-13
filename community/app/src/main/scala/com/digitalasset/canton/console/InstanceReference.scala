@@ -5,7 +5,7 @@ package com.digitalasset.canton.console
 
 import com.digitalasset.canton._
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
-import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
 import com.digitalasset.canton.console.commands._
@@ -22,11 +22,13 @@ import com.digitalasset.canton.participant.config.{
   LocalParticipantConfig,
   RemoteParticipantConfig,
 }
+import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.util.hashing.MurmurHash3
 
@@ -266,6 +268,13 @@ trait DomainReference
   @Help.Summary("Manage the mediator")
   @Help.Group("Mediator")
   def mediator: MediatorAdministrationGroup = mediator_
+
+  @Help.Summary(
+    "Yields a domain connection config with default values except for the domain alias and the sequencer connection. " +
+      "May throw an exception if the domain alias or sequencer connection is misconfigured."
+  )
+  def defaultDomainConnection: DomainConnectionConfig =
+    DomainConnectionConfig(DomainAlias.tryCreate(name), sequencerConnection)
 }
 
 trait RemoteDomainReference extends DomainReference with GrpcRemoteInstanceReference {
@@ -282,6 +291,7 @@ trait RemoteDomainReference extends DomainReference with GrpcRemoteInstanceRefer
         err => sys.error(s"Domain $name has invalid sequencer connection config: $err"),
         identity,
       )
+
 }
 
 trait CommunityDomainReference {
@@ -587,17 +597,61 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
         |As repair commands are powerful tools to recover from unforeseen data corruption, but dangerous under normal
         |operation, use of this command requires (temporarily) enabling the "features.enable-repair-commands"
         |configuration. In addition repair commands can run for an unbounded time depending on the number of
-        |contract ids passed in. Be sure to not connect the participant to either domain until the call returns."""
+        |contract ids passed in. Be sure to not connect the participant to either domain until the call returns.
+        
+        Arguments:
+        - contractIds - set of contract ids that should be moved to the new domain
+        - sourceDomain - alias of the source domain
+        - targetDomain - alias of the target domain
+        - skipInactive - (default true) whether to skip inactive contracts mentioned in the contractIds list
+        - batchSize - (default 100) how many contracts to write at once to the database"""
     )
     def change_domain(
         contractIds: Seq[LfContractId],
         sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
         skipInactive: Boolean = true,
+        batchSize: Int = 100,
     ): Unit =
       runRepairCommand(tc =>
-        access(_.sync.changeDomainRepair(contractIds, sourceDomain, targetDomain, skipInactive)(tc))
+        access(
+          _.sync.changeDomainRepair(
+            contractIds,
+            sourceDomain,
+            targetDomain,
+            skipInactive,
+            PositiveInt.tryCreate(batchSize),
+          )(tc)
+        )
       )
+
+    @Help.Summary("Migrate domain to a new version.")
+    @Help.Description(
+      """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
+         This method will register the new domain, connect to it and then re-associate all contracts on the source
+         domain to the target domain. Please note that this migration needs to be done by all participants 
+         at the same time. The domain should only be used once all participants have finished their migration."""
+    )
+    def migrate_domain(
+        source: DomainAlias,
+        target: DomainConnectionConfig,
+        expectedTargetVersion: ProtocolVersion,
+    ): Unit = {
+      implicit val ec = consoleEnvironment.environment.executionContext
+      runRepairCommand(tc =>
+        consoleEnvironment.commandTimeouts.unbounded.await()(
+          access(
+            _.sync
+              .migrateDomain(source, target, expectedTargetVersion)(tc)
+              .leftMap(_.asGrpcError.getStatus.getDescription)
+              .value
+              .onShutdown {
+                Left(("Aborted due to shutdown. Please restart me."))
+              }
+          )
+        )
+      )
+    }
 
     @Help.Summary("Mark sequenced events as ignored.")
     @Help.Description(

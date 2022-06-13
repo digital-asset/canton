@@ -38,7 +38,6 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
@@ -48,6 +47,7 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
 
   import SigningKeys._
 
+  val domainId = domainManager.domainId
   val ns1 = Namespace(key1.fingerprint)
   val ns6 = Namespace(key6.fingerprint)
   val uid1a = UniqueIdentifier(Identifier.tryCreate("one"), ns1)
@@ -71,9 +71,31 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val id6k4_k1 = mkAdd(IdentifierDelegation(uid6, key4), key1)
 
   val okm1ak5_k3 = mkAdd(OwnerToKeyMapping(participant1, key5), key3)
+  val okm1ak1E_k3 = mkAdd(OwnerToKeyMapping(participant1, EncryptionKeys.key1), key3)
   val okm1ak5_k2 = mkAdd(OwnerToKeyMapping(participant1, key5), key2)
   val okm1bk5_k1 = mkAdd(OwnerToKeyMapping(participant1, key5), key1)
   val okm1bk5_k4 = mkAdd(OwnerToKeyMapping(participant1, key5), key4)
+
+  val ps1d1T_k3 = mkAdd(
+    ParticipantState(
+      RequestSide.To,
+      domainManager.domainId,
+      participant1,
+      ParticipantPermission.Submission,
+      TrustLevel.Ordinary,
+    ),
+    key3,
+  )
+  val ps1d1F_k1 = mkAdd(
+    ParticipantState(
+      RequestSide.From,
+      domainManager.domainId,
+      participant1,
+      ParticipantPermission.Submission,
+      TrustLevel.Ordinary,
+    ),
+    key1,
+  )
 
   val defaultDomainParameters = TestDomainParameters.defaultDynamic
 
@@ -184,8 +206,10 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "fail to add if the signature is invalid" in {
         val validator = mk()
         import Factory._
-        val invalid =
-          ns1k2_k1.copy(signature = ns1k1_k1.signature)(ProtocolVersion.latestForTest, None)
+        val invalid = ns1k2_k1.copy(signature = ns1k1_k1.signature)(
+          signedTransactionProtocolVersionRepresentative,
+          None,
+        )
         for {
           (_, validatedTopologyTransactions) <- validator.validateAndUpdateHeadAuthState(
             ts(0),

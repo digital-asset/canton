@@ -113,6 +113,7 @@ object SyncCryptoClient {
       desiredTimestamp: CantonTimestamp,
       previousTimestampO: Option[CantonTimestamp],
       futureSupervisor: FutureSupervisor,
+      protocolVersion: ProtocolVersion,
       warnIfApproximate: Boolean = true,
   )(implicit
       executionContext: ExecutionContext,
@@ -128,11 +129,14 @@ object SyncCryptoClient {
       )
       previousTimestampO match {
         case None =>
-          if (warnIfApproximate) {
-            loggingContext.logger.warn(
+          lazy val msg =
+            s"Using approximate topology snapshot for desired timestamp $desiredTimestamp"
+          if (warnIfApproximate && protocolVersion != ProtocolVersion.v2_0_0)
+            loggingContext.logger.warn(msg)
+          else
+            loggingContext.logger.info(
               s"Using approximate topology snapshot for desired timestamp $desiredTimestamp"
             )
-          }
           Future.successful(client.currentSnapshotApproximation)
         case Some(previousTimestamp) =>
           if (desiredTimestamp <= previousTimestamp.immediateSuccessor)

@@ -5,16 +5,20 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLogTest}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 import slick.dbio.DBIOAction
+import slick.jdbc.SetParameter
 
 import java.util.concurrent.Semaphore
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, Future, blocking}
 
@@ -60,7 +64,11 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
     val theStorage = storage
     import theStorage.api._
     import theStorage.converters._
-    import ParticipantStorageImplicits._
+
+    @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
+      TraceContext.getVersionedSetParameter(defaultProtocolVersion)
+    @nowarn("cat=unused") implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
+      ParticipantStorageImplicits.setLedgerSyncEvent(defaultProtocolVersion)
 
     val queries = events.map {
       case (id, tsEvent @ TimestampedEvent(event, localOffset, requestSequencerCounter, eventId)) =>

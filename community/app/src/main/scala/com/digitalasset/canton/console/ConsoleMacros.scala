@@ -384,7 +384,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           logger.warn(
             "Starting `daml json-api` which must have been installed separately from canton."
           )
-          backgroundRunner.add(name, cmd, name, manualStart = false)
+          backgroundRunner.tryAdd(name, cmd, name, manualStart = false)
           ensureWeClose()
         }
         BackgroundRunnerHelpers.waitUntilUp(Port.tryCreate(httpPort), 30)

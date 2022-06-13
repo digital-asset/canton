@@ -321,11 +321,7 @@ class ReplayingSendsSequencerClientTransport(
       val content = event.signedEvent.content
 
       updateMetrics(content)
-
-      content match {
-        case DeliverError(counter, _, _, _, _) => updateLastDeliver(counter)
-        case Deliver(counter, _, _, _, _) => updateLastDeliver(counter)
-      }
+      updateLastDeliver(content.counter)
 
       Future(Right(()))
     }

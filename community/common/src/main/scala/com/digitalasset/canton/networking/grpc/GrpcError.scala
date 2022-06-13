@@ -173,7 +173,11 @@ object GrpcError {
           case Some(_: java.net.UnknownHostException) => (false, " Is the url correct?", true)
           case _ =>
             // Mentioning TLS again, because sometimes we don't get an SSLException despite an SSL problem.
-            (true, " Is the server running? Are you using the right TLS settings?", false)
+            (
+              true,
+              " Is the server running? Did you configure the server address as 0.0.0.0? Are you using the right TLS settings?",
+              false,
+            )
         }
       case UNIMPLEMENTED =>
         (true, " Is the server initialized or is the server incompatible?", true)

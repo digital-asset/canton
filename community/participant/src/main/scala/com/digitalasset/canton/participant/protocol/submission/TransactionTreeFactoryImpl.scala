@@ -137,6 +137,7 @@ class TransactionTreeFactoryImpl(
       transactionUuid: UUID,
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
+      keyResolver: LfKeyResolver, // TODO(#9386) use this parameter
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
@@ -211,6 +212,7 @@ class TransactionTreeFactoryImpl(
       topologySnapshot: TopologySnapshot,
       contractOfId: SerializableContractOfId,
       rbContext: RollbackContext,
+      keyResolver: LfKeyResolver, // TODO(#9386) use this parameter
   )(implicit traceContext: TraceContext): EitherT[
     Future,
     TransactionTreeConversionError,

@@ -123,6 +123,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       eventSignaller,
       topologyClientMember,
       FutureSupervisor.Noop,
+      ProtocolVersion.latestForTest,
       timeouts,
       loggerFactory,
     )

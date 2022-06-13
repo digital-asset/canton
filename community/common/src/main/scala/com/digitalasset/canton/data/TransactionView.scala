@@ -32,7 +32,9 @@ import com.digitalasset.canton.version.{
   HasProtoV0,
   HasProtocolVersionedWrapper,
   HasVersionedToByteString,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.{
@@ -266,7 +268,7 @@ object ParticipantTransactionView {
 // Optional parameters are strongly discouraged, as each parameter needs to be consciously set in a production context.
 case class ViewCommonData private (informees: Set[Informee], threshold: NonNegativeInt, salt: Salt)(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewCommonData](hashOps)
     // The class needs to implement MemoizedEvidence, because we want that serialize always yields the same ByteString.
@@ -275,7 +277,7 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
     with ProtocolVersionedMemoizedEvidence
     // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
     // the version of the serialized Protobuf message
-    with HasProtocolVersionedWrapper[VersionedMessage[ViewCommonData]]
+    with HasProtocolVersionedWrapper[ViewCommonData]
     with HasProtoV0[v0.ViewCommonData]
     with NoCopy {
 
@@ -328,7 +330,7 @@ object ViewCommonData
   override val name: String = "ViewCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.ViewCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -391,7 +393,7 @@ object ViewCommonData
       threshold <- NonNegativeInt.create(viewCommonDataP.threshold).leftMap(_.inField("threshold"))
     } yield new ViewCommonData(informees.toSet, threshold, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     )
 
@@ -436,10 +438,10 @@ case class ViewParticipantData private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[ViewParticipantData]]
+    with HasProtocolVersionedWrapper[ViewParticipantData]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
   {
@@ -633,7 +635,7 @@ object ViewParticipantData
   override val name: String = "ViewParticipantData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -649,7 +651,7 @@ object ViewParticipantData
       salt: Salt,
   )(
       hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
+      representativeProtocolVersion: RepresentativeProtocolVersion,
       deserializedFrom: Option[ByteString],
   ) =
     throw new UnsupportedOperationException("Use the public apply method instead")
@@ -781,7 +783,7 @@ object ViewParticipantData
           actionDescription = actionDescription,
           rollbackContext = rollbackContext,
           salt = salt,
-        )(hashOps, protocolVersionRepresentativeFor(0), Some(bytes))
+        )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes))
       ).leftMap(ProtoDeserializationError.OtherError(_))
     } yield viewParticipantData
 

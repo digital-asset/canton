@@ -10,7 +10,6 @@ import scala.annotation.tailrec
 object MonadUtil {
 
   /** The caller must ensure that the underlying data structure of the iterator is immutable */
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
   def foldLeftM[M[_], S, A](initialState: S, iter: Iterator[A])(
       step: (S, A) => M[S]
   )(implicit monad: Monad[M]): M[S] =

@@ -25,7 +25,9 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
+import slick.jdbc.SetParameter
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -41,6 +43,14 @@ class DbCommandDeduplicationStore(
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("command-deduplication-store")
+
+  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private implicit val setParameterStoredParties: SetParameter[StoredParties] =
+    StoredParties.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterTraceContext: SetParameter[TraceContext] =
+    TraceContext.getVersionedSetParameter(protocolVersion)
+  private implicit val setParameterTraceContextO: SetParameter[Option[TraceContext]] =
+    TraceContext.getVersionedSetParameterO(protocolVersion)
 
   override def lookup(
       changeIdHash: ChangeIdHash

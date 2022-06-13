@@ -9,14 +9,26 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedWithContextCompanion,
+  HasRepresentativeProtocolVersion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 
 /** Parent trait of messages that are sent through the sequencer
   */
-trait ProtocolMessage extends Product with Serializable with HasDomainId with PrettyPrinting {
+trait ProtocolMessage
+    extends Product
+    with Serializable
+    with HasDomainId
+    with PrettyPrinting
+    with HasRepresentativeProtocolVersion {
+  def representativeProtocolVersion: RepresentativeProtocolVersion
 
   /** The ID of the domain over which this message is supposed to be sent. */
   def domainId: DomainId
@@ -28,32 +40,47 @@ trait ProtocolMessage extends Product with Serializable with HasDomainId with Pr
 }
 
 trait ProtocolMessageV0 extends ProtocolMessage {
-  def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent
+  protected[messages] def toProtoEnvelopeContentV0: v0.EnvelopeContent
 }
 
 trait ProtocolMessageV1 extends ProtocolMessage {
-  def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent
+  protected[messages] def toProtoEnvelopeContentV1: v1.EnvelopeContent
 }
 
-object ProtocolMessage {
+object ProtocolMessage extends HasProtocolVersionedWithContextCompanion[ProtocolMessage, HashOps] {
+  val name = "ProtocolMessage"
+
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.EnvelopeContent)(fromProtoV0),
+      protocolMessage =>
+        protocolMessage match {
+          case messageV0: ProtocolMessageV0 => messageV0.toProtoEnvelopeContentV0.toByteString
+          case message =>
+            throw new IllegalArgumentException(
+              s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.v2_0_0}"
+            )
+        },
+    ),
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development, // TODO(i9423): Migrate to next protocol version
+      supportedProtoVersion(v1.EnvelopeContent)(fromProtoV1),
+      protocolMessage =>
+        protocolMessage match {
+          case messageV1: ProtocolMessageV1 => messageV1.toProtoEnvelopeContentV1.toByteString
+          case message =>
+            throw new IllegalArgumentException(
+              s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.unstable_development}"
+            )
+        },
+    ),
+  )
 
   def toEnvelopeContentByteString(
-      message: ProtocolMessage,
-      version: ProtocolVersion,
-  ): ByteString = {
-    // TODO(i9420): Move protocol version to protocol message case classes
-    (message, version) match {
-      // TODO(i9423): Migrate to next protocol version
-      case (messageV1: ProtocolMessageV1, ProtocolVersion.unstable_development) =>
-        messageV1.toProtoEnvelopeContentV1(version).toByteString
-      case (messageV0: ProtocolMessageV0, _) =>
-        messageV0.toProtoEnvelopeContentV0(version).toByteString
-      case _ =>
-        throw new IllegalArgumentException(
-          s"Trying to serialize message $message for incompatible protocol version $version"
-        )
-    }
-  }
+      message: ProtocolMessage
+  ): ByteString =
+    supportedProtoVersions.serializerFor(message.representativeProtocolVersion)(message)
 
   def fromEnvelopeContentByteString(protocolVersion: ProtocolVersion, hashOps: HashOps)(
       bytes: ByteString
@@ -81,8 +108,9 @@ object ProtocolMessage {
   }
 
   def fromProtoV0(
-      hashOps: HashOps
-  )(envelopeContent: v0.EnvelopeContent): ParsingResult[ProtocolMessage] = {
+      hashOps: HashOps,
+      envelopeContent: v0.EnvelopeContent,
+  ): ParsingResult[ProtocolMessage] = {
     import v0.EnvelopeContent.{SomeEnvelopeContent => Content}
     envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
@@ -92,7 +120,7 @@ object ProtocolMessage {
       case Content.EncryptedViewMessage(messageP) =>
         EncryptedViewMessageV0.fromProto(messageP)
       case Content.SignedMessage(messageP) =>
-        SignedProtocolMessage.fromProtoV0(hashOps)(messageP)
+        SignedProtocolMessage.fromProtoV0(hashOps, messageP)
       case Content.TransferOutMediatorMessage(messageP) =>
         TransferOutMediatorMessage.fromProtoV0(hashOps)(messageP)
       case Content.TransferInMediatorMessage(messageP) =>
@@ -109,8 +137,9 @@ object ProtocolMessage {
   }
 
   def fromProtoV1(
-      hashOps: HashOps
-  )(envelopeContent: v1.EnvelopeContent): ParsingResult[ProtocolMessage] = {
+      hashOps: HashOps,
+      envelopeContent: v1.EnvelopeContent,
+  ): ParsingResult[ProtocolMessage] = {
     import v1.EnvelopeContent.{SomeEnvelopeContent => Content}
     envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
@@ -120,7 +149,7 @@ object ProtocolMessage {
       case Content.EncryptedViewMessage(messageP) =>
         EncryptedViewMessageV1.fromProto(messageP)
       case Content.SignedMessage(messageP) =>
-        SignedProtocolMessage.fromProtoV0(hashOps)(messageP)
+        SignedProtocolMessage.fromProtoV0(hashOps, messageP)
       case Content.TransferOutMediatorMessage(messageP) =>
         TransferOutMediatorMessage.fromProtoV0(hashOps)(messageP)
       case Content.TransferInMediatorMessage(messageP) =>
@@ -139,12 +168,12 @@ object ProtocolMessage {
   def fromEnvelopeContentByteStringV0(hashOps: HashOps)(
       bytes: ByteString
   ): ParsingResult[ProtocolMessage] =
-    ProtoConverter.protoParser(v0.EnvelopeContent.parseFrom)(bytes).flatMap(fromProtoV0(hashOps))
+    ProtoConverter.protoParser(v0.EnvelopeContent.parseFrom)(bytes).flatMap(fromProtoV0(hashOps, _))
 
   private def fromEnvelopeContentByteStringV1(hashOps: HashOps)(
       bytes: ByteString
   ): ParsingResult[ProtocolMessage] =
-    ProtoConverter.protoParser(v1.EnvelopeContent.parseFrom)(bytes).flatMap(fromProtoV1(hashOps))
+    ProtoConverter.protoParser(v1.EnvelopeContent.parseFrom)(bytes).flatMap(fromProtoV1(hashOps, _))
 
   trait ProtocolMessageContentCast[A <: ProtocolMessage] {
     def toKind(message: ProtocolMessage): Option[A]

@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.service.store.db
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.domain.service.store.{
   ServiceAgreementAcceptanceStore,
@@ -15,12 +16,15 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
+import slick.jdbc.SetParameter
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class DbServiceAgreementAcceptanceStore(
     storage: DbStorage,
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -32,6 +36,9 @@ class DbServiceAgreementAcceptanceStore(
   import com.digitalasset.canton.util.ShowUtil._
   import storage.api._
   import storage.converters._
+
+  private implicit val setParameterSignature: SetParameter[Signature] =
+    Signature.getVersionedSetParameter(protocolVersion)
 
   override def insertAcceptance(acceptance: ServiceAgreementAcceptance)(implicit
       traceContext: TraceContext

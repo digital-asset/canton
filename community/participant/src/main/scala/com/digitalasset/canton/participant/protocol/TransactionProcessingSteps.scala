@@ -50,6 +50,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.{
   ConfirmationRequestCreationError,
   ContractKeyConsistencyError,
+  ContractKeyDuplicateError,
   MalformedLfTransaction,
   MalformedSubmitter,
   TransactionTreeFactoryError,
@@ -83,10 +84,11 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, IterableUtil, LfTransactionUtil}
+import com.digitalasset.canton.util.{ErrorUtil, IterableUtil}
 import com.digitalasset.canton.{
   DiscardOps,
   LedgerSubmissionId,
+  LfKeyResolver,
   LfPartyId,
   SequencerCounter,
   WorkflowId,
@@ -172,10 +174,11 @@ class TransactionProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionSubmissionError, Submission] = {
-    val SubmissionParam(submitterInfo, transactionMeta, wfTransaction) = param
+    val SubmissionParam(submitterInfo, transactionMeta, keyResolver, wfTransaction) = param
     val tracked = new TrackedTransactionSubmission(
       submitterInfo,
       transactionMeta,
+      keyResolver,
       wfTransaction,
       mediatorId,
       recentSnapshot,
@@ -191,6 +194,7 @@ class TransactionProcessingSteps(
   private class TrackedTransactionSubmission(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       mediatorId: MediatorId,
       recentSnapshot: DomainSnapshotSyncCryptoApi,
@@ -291,14 +295,24 @@ class TransactionProcessingSteps(
             //
             // TODO(M40) As this is merely an optimization, ensure that we test validation with transactions
             //  that fail this check.
-            val duplicates = LfTransactionUtil.duplicatedContractKeys(wfTransaction.unwrap)
-            EitherTUtil.condUnitET[Future](
-              duplicates.isEmpty,
-              causeWithTemplate(
-                "Domain with unique contract keys semantics",
-                ContractKeyConsistencyError(duplicates),
-              ),
-            )
+
+            val result = wfTransaction.withoutVersion.contractKeyInputs match {
+              case Left(LfTransaction.DuplicateContractKey(key)) =>
+                causeWithTemplate(
+                  "Domain with unique contract keys semantics",
+                  ContractKeyDuplicateError(key),
+                ).asLeft
+
+              case Left(LfTransaction.InconsistentKeys(key)) =>
+                causeWithTemplate(
+                  "Domain with unique contract keys semantics",
+                  ContractKeyConsistencyError(key),
+                ).asLeft
+
+              case Right(_) => ().asRight
+            }
+
+            EitherT.fromEither[Future](result)
           } else EitherT.pure[Future, TransactionSubmissionTrackingData.RejectionCause](())
         confirmationPolicy <- EitherT(
           ConfirmationPolicy
@@ -325,15 +339,14 @@ class TransactionProcessingSteps(
 
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a confirmation request
-        // TODO(phoebe) pass persistent state to confirmation request factory
         request <- confirmationRequestTimer.timeEitherT(
           confirmationRequestFactory
             .createConfirmationRequest(
               wfTransaction,
               confirmationPolicy,
               submitterInfoWithDedupPeriod,
-              CantonTimestamp(transactionMeta.ledgerEffectiveTime),
               transactionMeta.workflowId.map(WorkflowId(_)),
+              keyResolver,
               mediatorId,
               recentSnapshot,
               TransactionTreeFactory.contractInstanceLookup(contractLookup),
@@ -1253,7 +1266,7 @@ class TransactionProcessingSteps(
       val consumedInputsOfHostedStakeholdersB =
         Map.newBuilder[LfContractId, WithContractHash[Set[LfPartyId]]]
       val perRootViewInputKeysB =
-        List.newBuilder[(TransactionViewTree, Map[LfGlobalKey, Option[LfContractId]])]
+        List.newBuilder[(TransactionViewTree, LfKeyResolver)]
       val transientSameViewOrEarlier = mutable.Set.empty[LfContractId]
       val inputKeysOfHostedMaintainers = mutable.Map.empty[LfGlobalKey, ContractKeyJournal.Status]
 
@@ -1499,7 +1512,6 @@ class TransactionProcessingSteps(
         rootViewsWithContractKeys = NonEmptyUtil.fromUnsafe(perRootViewInputKeysB.result()),
         uckFreeKeysOfHostedMaintainers = freeKeys,
         uckUpdatedKeysOfHostedMaintainers = updatedKeys,
-        //TODO(i5352): Unit test this
         hostedInformeeStakeholders = informeeStakeholders.filter(s => hostsParty(Set(s))),
       )
       usedAndCreated
@@ -1522,6 +1534,7 @@ object TransactionProcessingSteps {
   case class SubmissionParam(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       transaction: WellFormedTransaction[WithoutSuffixes],
   )
 

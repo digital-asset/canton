@@ -259,7 +259,7 @@ class DbActiveContractStore(
     import DbStorage.Implicits.BuilderChain._
     import DbStorage.Implicits._
 
-    // TODO(i7860): Integrate with performance tests to check that we can remove packages when there are many contracts.
+    // TODO(i9480): Integrate with performance tests to check that we can remove packages when there are many contracts.
 
     val limitStatement: SQLActionBuilder = storage.profile match {
       case _: DbStorage.Profile.Oracle =>

@@ -13,7 +13,6 @@ import com.digitalasset.canton.data.CantonTimestamp
   * @param submissionTime The submission time of the transaction
   * @param seeds The node seeds by node ID
   */
-// TODO(Andreas) More more fields here (e.g., optional workflow ID, optional submitter info)
 case class TransactionMetadata(
     ledgerTime: CantonTimestamp,
     submissionTime: CantonTimestamp,

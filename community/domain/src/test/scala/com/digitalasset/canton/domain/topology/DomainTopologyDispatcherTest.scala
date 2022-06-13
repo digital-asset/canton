@@ -165,6 +165,7 @@ class DomainTopologyDispatcherTest
     val sendDelay = new AtomicReference[Future[Unit]](Future.unit)
     val senderFailure =
       new AtomicReference[Option[EitherT[FutureUnlessShutdown, String, Unit]]](None)
+
     val sender = new DomainTopologySender() {
       override def sendTransactions(
           snapshot: DomainSnapshotSyncCryptoApi,
@@ -384,24 +385,6 @@ class DomainTopologyDispatcherTest
       }
     }
 
-    "shutdown" when {
-      "abort when performing active submission" in { f =>
-        import f._
-        logger.debug("Abort active")
-        val p = Promise[Unit]()
-        sendDelay.set(p.future)
-        senderFailure.set(Some(EitherT.right(FutureUnlessShutdown.abortedDueToShutdown)))
-        val grabF = expect(1)
-        for {
-          _ <- submit(ts0, txs.ns1k1)
-          res <- grabF
-          _ = submit(ts1, txs.okm1)
-          _ = dispatcher.close()
-          _ = p.success(())
-        } yield { assert(true) }
-      }
-    }
-
     "bootstrapping participants" when {
       "send snapshot to new participant" in { f =>
         import f._
@@ -532,6 +515,7 @@ class DomainTopologySenderTest
     val responses = new AtomicReference[List[Response]](List.empty)
     val sender = new DomainTopologySender.Impl(
       domainId,
+      defaultProtocolVersion,
       client,
       timeTracker,
       clock,

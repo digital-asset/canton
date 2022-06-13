@@ -89,14 +89,14 @@ object ApplicationId {
 /** Workflow identifier for identifying customer workflows, i.e. individual requests, in the ledger api
   * @param id ledger string representing workflow
   */
-case class WorkflowId(private val id: LfLedgerString) extends PrettyPrinting {
-  def unwrap: LfLedgerString = id
+case class WorkflowId(private val id: LfWorkflowId) extends PrettyPrinting {
+  def unwrap: LfWorkflowId = id
   def toProtoPrimitive: String = unwrap
   override def pretty: Pretty[WorkflowId] = prettyOfParam(_.unwrap)
 }
 
 object WorkflowId {
-  def assertFromString(str: String) = WorkflowId(LfLedgerString.assertFromString(str))
+  def assertFromString(str: String) = WorkflowId(LfWorkflowId.assertFromString(str))
   def fromProtoPrimitive(str: String): Either[String, WorkflowId] =
-    LfLedgerString.fromString(str).map(WorkflowId(_))
+    LfWorkflowId.fromString(str).map(WorkflowId(_))
 }

@@ -35,21 +35,22 @@ object ParticipantStorageImplicits {
       )
   }
 
-  private def eventToBytes(event: LedgerSyncEvent): Array[Byte] =
-    SerializableLedgerSyncEvent(event).toByteArray(ProtocolVersion.v2_0_0_Todo_i8793)
+  private def eventToBytes(event: LedgerSyncEvent, protocolVersion: ProtocolVersion): Array[Byte] =
+    SerializableLedgerSyncEvent(event).toByteArray(protocolVersion)
 
-  private[db] implicit def setLedgerSyncEvent(implicit
+  private[db] def setLedgerSyncEvent(protocolVersion: ProtocolVersion)(implicit
       setParameterByteArray: SetParameter[Array[Byte]]
-  ): SetParameter[LedgerSyncEvent] = (v, pp) => pp >> eventToBytes(v)
+  ): SetParameter[LedgerSyncEvent] = (v, pp) => pp >> eventToBytes(v, protocolVersion)
 
   private[participant] implicit def getOptionLedgerSyncEvent(implicit
       getResultByteArrayO: GetResult[Option[Array[Byte]]]
   ): GetResult[Option[LedgerSyncEvent]] =
     _.<<[Option[Array[Byte]]].map(bytesToEvent)
 
-  private[participant] implicit def setOptionLedgerSyncEvent(implicit
+  private[participant] def setOptionLedgerSyncEvent(protocolVersion: ProtocolVersion)(implicit
       setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
-  ): SetParameter[Option[LedgerSyncEvent]] = (v, pp) => pp >> v.map(eventToBytes)
+  ): SetParameter[Option[LedgerSyncEvent]] = (v, pp) =>
+    pp >> v.map(eventToBytes(_, protocolVersion))
 
   private[db] implicit def getTracedLedgerSyncEvent(implicit
       getResultByteArray: GetResult[Array[Byte]]

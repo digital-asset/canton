@@ -34,6 +34,7 @@ trait DbSequencedEventStoreTest extends AsyncWordSpec with BaseTest with Sequenc
         SequencerClientDiscriminator.fromIndexedDomainId(
           IndexedDomain.tryCreate(DomainId.tryFromString("da::default"), 1)
         ),
+        defaultProtocolVersion,
         DefaultProcessingTimeouts.testing,
         loggerFactory,
       )(ec)

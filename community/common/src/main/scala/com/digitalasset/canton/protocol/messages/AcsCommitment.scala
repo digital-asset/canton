@@ -20,7 +20,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.ProtoDeserializationError
@@ -116,16 +118,16 @@ object CommitmentPeriod {
   *
   *  The interval is assumed to be a round number of seconds. The ticks then start at the Java EPOCH time, and are exactly `interval` apart.
   */
-case class AcsCommitment private (
+abstract sealed case class AcsCommitment private (
     domainId: DomainId,
     sender: ParticipantId,
     counterParticipant: ParticipantId,
     period: CommitmentPeriod,
     commitment: AcsCommitment.CommitmentType,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
-) extends HasProtocolVersionedWrapper[VersionedMessage[AcsCommitment]]
+) extends HasProtocolVersionedWrapper[AcsCommitment]
     with HasProtoV0[v0.AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
@@ -168,15 +170,11 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
   override val name: String = "AcsCommitment"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
-  )
-
-  private val protocolVersionRepresentative = protocolVersionRepresentativeFor(
-    ProtocolVersion.v2_0_0_Todo_i8793
   )
 
   type CommitmentType = ByteString
@@ -196,17 +194,6 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
   def commitmentTypeToProto(commitment: CommitmentType): ByteString = commitment
   def commitmentTypeFromByteString(bytes: ByteString): CommitmentType = bytes
 
-  private[this] def apply(
-      domainId: DomainId,
-      sender: ParticipantId,
-      timestamp: CantonTimestamp,
-      commitment: CommitmentType,
-  )(
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): AcsCommitment =
-    throw new UnsupportedOperationException("Use the create/tryCreate methods instead")
-
   def create(
       domainId: DomainId,
       sender: ParticipantId,
@@ -216,9 +203,9 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
       protocolVersion: ProtocolVersion,
   ): AcsCommitment =
     new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-      protocolVersion,
+      protocolVersionRepresentativeFor(protocolVersion),
       None,
-    )
+    ) {}
 
   private def fromProtoV0(protoMsg: v0.AcsCommitment)(
       bytes: ByteString
@@ -252,9 +239,9 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
       cmt = protoMsg.commitment
       commitment = commitmentTypeFromByteString(cmt)
     } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    )
+    ) {}
   }
 
   implicit val acsCommitmentCast: SignedMessageContentCast[AcsCommitment] = {
@@ -262,17 +249,20 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
     case _ => None
   }
 
-  def getAcsCommitmentResultReader(domainId: DomainId): GetResult[AcsCommitment] =
+  def getAcsCommitmentResultReader(
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+  ): GetResult[AcsCommitment] =
     new GetTupleResult[(ParticipantId, ParticipantId, CommitmentPeriod, CommitmentType)](
       GetResult[ParticipantId],
       GetResult[ParticipantId],
       GetResult[CommitmentPeriod],
       GetResult[CommitmentType],
     ).andThen { case (sender, counterParticipant, period, commitment) =>
-      AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-        protocolVersionRepresentative,
+      new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
+        protocolVersionRepresentativeFor(protocolVersion),
         None,
-      )
+      ) {}
     }
 
 }

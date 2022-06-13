@@ -58,4 +58,16 @@ class SnapshotAuthorizationValidator(
     }
   }
 
+  def reset()(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    sequential.execute(
+      Future {
+        identifierDelegationCache.clear()
+        namespaceCache.clear()
+      },
+      functionFullName,
+    )
+  }
+
 }

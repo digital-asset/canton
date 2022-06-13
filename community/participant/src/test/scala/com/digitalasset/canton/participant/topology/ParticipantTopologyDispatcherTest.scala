@@ -9,8 +9,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse
-import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.State
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Remove}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.{
@@ -81,7 +81,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
 
   private class MockHandle(
       expectI: Int,
-      response: State = State.ACCEPTED,
+      response: State = State.Accepted,
       store: TopologyStore[TopologyStoreId],
   ) extends RegisterTopologyTransactionHandle {
     val buffer = ListBuffer[SignedTopologyTransaction[TopologyChangeOp]]()
@@ -111,8 +111,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
           transactions.map(transaction =>
             RegisterTopologyTransactionResponse.Result(
               state = response,
-              uniquePath = transaction.uniquePath.toProtoPrimitive,
-              errorMessage = "",
+              uniquePathProtoPrimitive = transaction.uniquePath.toProtoPrimitive,
             )
           )
         }
@@ -150,7 +149,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       client: DomainTopologyClientWithInit,
       target: TopologyStore[TopologyStoreId.DomainStore],
   ): Future[Unit] = dispatcher
-    .domainConnected(domain, domainId, handle, client, target)
+    .domainConnected(domain, domainId, defaultProtocolVersion, handle, client, target)
     .value
     .map(_ => ())
     .onShutdown(())

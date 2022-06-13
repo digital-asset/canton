@@ -42,30 +42,31 @@ trait DomainConnectionConfigStoreTest {
   )
 
   def domainConnectionConfigStore(mk: => Future[DomainConnectionConfigStore]): Unit = {
+    val status = DomainConnectionConfigStore.Active
     "when storing connection configs" should {
 
       "be able to store and retrieve a config successfully" in {
         for {
           sut <- mk
-          _ <- valueOrFail(sut.put(config))("failed to add config to domain config store")
+          _ <- valueOrFail(sut.put(config, status))("failed to add config to domain config store")
           retrievedConfig <- Future.successful(
             valueOrFail(sut.get(alias))("failed to retrieve config from domain config store")
           )
-        } yield retrievedConfig shouldBe config
+        } yield retrievedConfig.config shouldBe config
       }
       "store the same config twice for idempotency" in {
         for {
           sut <- mk
-          _ <- sut.put(config).valueOrFail("first store of config")
-          _ <- sut.put(config).valueOrFail("second store of config")
+          _ <- sut.put(config, status).valueOrFail("first store of config")
+          _ <- sut.put(config, status).valueOrFail("second store of config")
         } yield succeed
 
       }
       "return error if domain alias config already exists with a different value" in {
         for {
           sut <- mk
-          _ <- sut.put(config).valueOrFail("first store of config")
-          result <- sut.put(config.copy(manualConnect = true)).value
+          _ <- sut.put(config, status).valueOrFail("first store of config")
+          result <- sut.put(config.copy(manualConnect = true), status).value
         } yield {
           result shouldBe Left(AlreadyAddedForAlias(alias))
         }
@@ -98,12 +99,12 @@ trait DomainConnectionConfigStoreTest {
         )
         for {
           sut <- mk
-          _ <- valueOrFail(sut.put(config))("failed to add config to domain config store")
+          _ <- valueOrFail(sut.put(config, status))("failed to add config to domain config store")
           _ <- valueOrFail(sut.replace(secondConfig))("failed to replace config in config store")
           retrievedConfig <- Future.successful(
             valueOrFail(sut.get(alias))("failed to retrieve config from domain config store")
           )
-        } yield retrievedConfig shouldBe secondConfig
+        } yield retrievedConfig.config shouldBe secondConfig
       }
       "return error if replaced config does not exist" in {
         for {
@@ -115,12 +116,12 @@ trait DomainConnectionConfigStoreTest {
         val secondConfig = config.copy(domain = DomainAlias.tryCreate("another"))
         for {
           sut <- mk
-          _ <- valueOrFail(sut.put(config))("failed to add config to domain config store")
-          _ <- valueOrFail(sut.put(secondConfig))(
+          _ <- valueOrFail(sut.put(config, status))("failed to add config to domain config store")
+          _ <- valueOrFail(sut.put(secondConfig, status))(
             "failed to add second config to domain config store"
           )
           result = sut.getAll()
-        } yield result should contain.allOf(config, secondConfig)
+        } yield result.map(_.config) should contain.allOf(config, secondConfig)
       }
     }
 
@@ -128,10 +129,10 @@ trait DomainConnectionConfigStoreTest {
       "refresh with same values" in {
         for {
           sut <- mk
-          _ <- valueOrFail(sut.put(config))("put")
+          _ <- valueOrFail(sut.put(config, status))("put")
           _ <- sut.refreshCache()
           fetchedConfig = valueOrFail(sut.get(config.domain))("get")
-        } yield fetchedConfig shouldBe config
+        } yield fetchedConfig.config shouldBe config
       }
     }
   }

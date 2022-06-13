@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import java.util.concurrent.atomic.AtomicReference
 import akka.actor.ActorSystem
 import com.daml.ledger.api.health.{HealthStatus, ReportsHealth}
 import com.daml.ledger.participant.state
@@ -11,20 +10,25 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.platform.indexer.{IndexerConfig, StandaloneIndexerServer}
+import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
 import com.daml.platform.store.LfValueTranslationCache
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.{DiscardOps, LedgerParticipantId}
 import io.functionmeta.functionFullName
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The StartableStoppableIndexer enables a canton participant node to start and stop the ledger api server's indexers
   * independently from the ledger api grpc server depending on whether the participant node is a High Availability
   * active or passive replica.
   *
+  * @param participantId lf id of the participant
+  * @param participantDataSourceConfig configuration for the data source (e.g., jdbc url)
   * @param indexerConfig indexer config to use when starting the indexer
   * @param metrics metrics for use by started indexer
   * @param lfValueTranslationCache lf value translation cache shared with the indexer's ledger api server
@@ -32,6 +36,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param indexerResourceInitial initial indexer resource if indexer already started
   */
 class StartableStoppableIndexer(
+    participantId: LedgerParticipantId,
+    participantDataSourceConfig: ParticipantDataSourceConfig,
     indexerConfig: IndexerConfig,
     metrics: Metrics,
     lfValueTranslationCache: LfValueTranslationCache.Cache,
@@ -53,9 +59,8 @@ class StartableStoppableIndexer(
     HealthStatus.healthy
   )
 
-  def setHealthReporter(maybeReportsHealth: Option[ReportsHealth]): Unit = {
-    val _ = replaceableHealthReporter.set(maybeReportsHealth.getOrElse(() => HealthStatus.healthy))
-  }
+  def setHealthReporter(maybeReportsHealth: Option[ReportsHealth]): Unit =
+    replaceableHealthReporter.set(maybeReportsHealth.getOrElse(() => HealthStatus.healthy)).discard
 
   // Wrapping the health reporter lets us switch in an actual ReportsHealth instance depending on whether an indexer is running.
   // Report healthy otherwise as the ledger api server has no way of dynamically adding or removing a ReportsHealth entry.
@@ -79,6 +84,8 @@ class StartableStoppableIndexer(
           case None =>
             implicit val context: ResourceContext = ResourceContext(ec)
             val indexerResource = new StandaloneIndexerServer(
+              participantId,
+              participantDataSourceConfig,
               readService,
               indexerConfig,
               metrics,
@@ -88,7 +95,7 @@ class StartableStoppableIndexer(
 
             FutureUtil.logOnFailure(
               indexerResource.asFuture.map { reportsHealth =>
-                val _ = indexer.set(Some(indexerResource))
+                indexer.set(Some(indexerResource)).discard
                 setHealthReporter(Some(reportsHealth))
               },
               "Failed to start indexer",

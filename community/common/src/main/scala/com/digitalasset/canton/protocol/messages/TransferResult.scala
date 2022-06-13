@@ -24,7 +24,9 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
   HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.LfPartyId
@@ -35,16 +37,16 @@ import com.google.protobuf.ByteString
   *
   * @param requestId timestamp of the corresponding [[TransferOutRequest]] on the origin domain
   */
-case class TransferResult[+Domain <: TransferDomainId] private (
+sealed abstract case class TransferResult[+Domain <: TransferDomainId](
     override val requestId: RequestId,
     informees: Set[LfPartyId],
     domain: Domain, // For transfer-out, this is the origin domain. For transfer-in, this is the target domain.
     override val verdict: Verdict,
 )(
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
-    with HasProtocolVersionedWrapper[VersionedMessage[TransferResult[TransferDomainId]]]
+    with HasProtocolVersionedWrapper[TransferResult[TransferDomainId]]
     with HasProtoV0[v0.TransferResult]
     with NoCopy
     with PrettyPrinting {
@@ -94,15 +96,12 @@ case class TransferResult[+Domain <: TransferDomainId] private (
         new TransferResult(requestId, informees, newDomain, verdict)(
           representativeProtocolVersion,
           deserializedFrom,
-        )
+        ) {}
       else
-        TransferResult.create(
-          requestId,
-          informees,
-          newDomain,
-          verdict,
+        new TransferResult(requestId, informees, newDomain, verdict)(
           representativeProtocolVersion,
-        )
+          None,
+        ) {}
     }
 
   override def pretty: Pretty[TransferResult[_ <: TransferDomainId]] =
@@ -119,23 +118,11 @@ object TransferResult
   override val name: String = "TransferResult"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferResult)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
-  )
-
-  private def apply[Domain <: TransferDomainId](
-      requestId: RequestId,
-      informees: Set[LfPartyId],
-      domain: Domain,
-      verdict: Verdict,
-  )(
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): TransferResult[Domain] = throw new UnsupportedOperationException(
-    "Use the create method instead"
   )
 
   def create[Domain <: TransferDomainId](
@@ -144,8 +131,11 @@ object TransferResult
       domain: Domain,
       verdict: Verdict,
       protocolVersion: ProtocolVersion,
-  ) =
-    new TransferResult[Domain](requestId, informees, domain, verdict)(protocolVersion, None)
+  ): TransferResult[Domain] =
+    new TransferResult[Domain](requestId, informees, domain, verdict)(
+      protocolVersionRepresentativeFor(protocolVersion),
+      None,
+    ) {}
 
   private def fromProtoV0(transferResultP: v0.TransferResult)(
       bytes: ByteString
@@ -174,9 +164,9 @@ object TransferResult
             .required("TransferResult.verdict", maybeVerdictP)
             .flatMap(Verdict.fromProtoV0)
         } yield new TransferResult(requestId, informees.toSet, domain, verdict)(
-          protocolVersionRepresentativeFor(0),
+          protocolVersionRepresentativeFor(ProtobufVersion(0)),
           Some(bytes),
-        )
+        ) {}
     }
 
   implicit def transferResultCast[Kind <: TransferDomainId](implicit

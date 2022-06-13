@@ -22,10 +22,11 @@ trait DbTransferStoreTest extends AsyncWordSpec with BaseTest with TransferStore
   }
 
   "DbTransferStore" should {
-    behave like transferStore(domain =>
+    behave like transferStore(domainId =>
       new DbTransferStore(
         storage,
-        domain,
+        domainId,
+        defaultProtocolVersion,
         TestingIdentityFactory.pureCrypto(),
         timeouts,
         loggerFactory,

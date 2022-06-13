@@ -490,14 +490,27 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           wrongTimestamp <- env.store
             .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2))
             .value // note different timestamp value
-          wrongTopologyClientTimestamp <- env.store
-            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts1, Some(ts1)))
+          wrongTimestampAndTopologyTimestamp <- env.store
+            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2, Some(ts2)))
+            .value // note different timestamp value
+          allowedDuplicateInsert <- env.store
+            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts1, Some(ts2)))
+            .value // note different topology client timestamp value
+          wrongTimestamp2 <- env.store
+            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2))
             .value // note different topology client timestamp value
         } yield {
           wrongTimestamp shouldBe Left(
             SaveCounterCheckpointError.CounterCheckpointInconsistent(ts1, None)
           )
-          wrongTopologyClientTimestamp shouldBe Left(
+          wrongTimestampAndTopologyTimestamp shouldBe Left(
+            SaveCounterCheckpointError.CounterCheckpointInconsistent(ts1, None)
+          )
+          // if we previously didn't have a latest topology timestamp, we allow a new 'insert'
+          allowedDuplicateInsert shouldBe Right(())
+          // but we won't actually update the stored latest topology timestamp, as this only happens immediately
+          // after a migration without any activity on the domain
+          wrongTimestamp2 shouldBe Left(
             SaveCounterCheckpointError.CounterCheckpointInconsistent(ts1, None)
           )
         }

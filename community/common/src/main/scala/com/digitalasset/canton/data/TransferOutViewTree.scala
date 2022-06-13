@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
+import com.digitalasset.canton.protocol.messages.{ProtocolMessage, TransferOutMediatorMessage}
 import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
@@ -17,10 +17,13 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.{EitherUtil, NoCopy}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
+  HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
-  HasVersionedMessageWithContextCompanion,
+  HasRepresentativeProtocolVersion,
   HasVersionedToByteString,
+  ProtobufVersion,
   ProtocolVersion,
+  RepresentativeProtocolVersion,
   VersionedMessage,
 }
 import com.digitalasset.canton.LfPartyId
@@ -29,29 +32,33 @@ import com.google.protobuf.ByteString
 import java.util.UUID
 
 /** A blindable Merkle tree for transfer-out requests */
-case class TransferOutViewTree(
+sealed abstract case class TransferOutViewTree(
     commonData: MerkleTree[TransferOutCommonData],
     view: MerkleTree[TransferOutView],
-)(hashOps: HashOps)
+)(val representativeProtocolVersion: RepresentativeProtocolVersion, hashOps: HashOps)
     extends GenTransferViewTree[
       TransferOutCommonData,
       TransferOutView,
       TransferOutViewTree,
       TransferOutMediatorMessage,
-    ](commonData, view)(hashOps) {
+    ](commonData, view)(hashOps)
+    with HasRepresentativeProtocolVersion {
 
   override private[data] def withBlindedSubtrees(
       optimizedBlindingPolicy: PartialFunction[RootHash, MerkleTree.BlindingCommand]
   ): MerkleTree[TransferOutViewTree] =
-    TransferOutViewTree(
+    new TransferOutViewTree(
       commonData.doBlind(optimizedBlindingPolicy),
       view.doBlind(optimizedBlindingPolicy),
-    )(hashOps)
+    )(representativeProtocolVersion, hashOps) {}
 
   protected[this] override def createMediatorMessage(
       blindedTree: TransferOutViewTree
   ): TransferOutMediatorMessage =
-    TransferOutMediatorMessage(blindedTree)
+    TransferOutMediatorMessage(
+      blindedTree,
+      ProtocolMessage.protocolVersionRepresentativeFor(representativeProtocolVersion.unwrap),
+    )
 
   override def pretty: Pretty[TransferOutViewTree] = prettyOfClass(
     param("common data", _.commonData),
@@ -60,13 +67,25 @@ case class TransferOutViewTree(
 }
 
 object TransferOutViewTree
-    extends HasVersionedMessageWithContextCompanion[TransferOutViewTree, HashOps] {
+    extends HasProtocolVersionedWithContextCompanion[TransferOutViewTree, HashOps] {
 
   override val name: String = "TransferOutViewTree"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto))
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
+      _.toProtoV0.toByteString,
+    )
   )
+
+  def apply(
+      commonData: MerkleTree[TransferOutCommonData],
+      view: MerkleTree[TransferOutView],
+  )(protocolVersion: ProtocolVersion, hashOps: HashOps) = new TransferOutViewTree(commonData, view)(
+    ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion),
+    hashOps,
+  ) {}
 
   def fromProtoV0(hashOps: HashOps)(
       transferOutViewTreeP: v0.TransferViewTree
@@ -74,7 +93,12 @@ object TransferOutViewTree
     GenTransferViewTree.fromProtoV0(
       TransferOutCommonData.fromByteString(hashOps),
       TransferOutView.fromByteString(hashOps),
-    )((commonData, view) => new TransferOutViewTree(commonData, view)(hashOps))(
+    )((commonData, view) =>
+      new TransferOutViewTree(commonData, view)(
+        protocolVersionRepresentativeFor(ProtobufVersion(0)),
+        hashOps,
+      ) {}
+    )(
       transferOutViewTreeP
     )
 }
@@ -88,7 +112,7 @@ object TransferOutViewTree
   * @param adminParties The admin parties of transferring transfer-out participants
   * @param uuid The request UUID of the transfer-out
   */
-case class TransferOutCommonData private (
+sealed abstract case class TransferOutCommonData private (
     override val salt: Salt,
     originDomain: DomainId,
     originMediator: MediatorId,
@@ -97,10 +121,10 @@ case class TransferOutCommonData private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutCommonData](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[TransferOutCommonData]]
+    with HasProtocolVersionedWrapper[TransferOutCommonData]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -142,26 +166,12 @@ object TransferOutCommonData
   override val name: String = "TransferOutCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
-
-  private[this] def apply(
-      salt: Salt,
-      originDomain: DomainId,
-      originMediator: MediatorId,
-      stakeholders: Set[LfPartyId],
-      adminParties: Set[LfPartyId],
-      uuid: UUID,
-  )(
-      hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): TransferOutCommonData =
-    throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -179,7 +189,7 @@ object TransferOutCommonData
       stakeholders,
       adminParties,
       uuid,
-    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
+    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None) {}
 
   private[this] def fromProtoV0(hashOps: HashOps, transferOutCommonDataP: v0.TransferOutCommonData)(
       bytes: ByteString
@@ -206,7 +216,7 @@ object TransferOutCommonData
       stakeholders.toSet,
       adminParties.toSet,
       uuid,
-    )(hashOps, protocolVersionRepresentativeFor(0), Some(bytes))
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
   }
 }
 
@@ -219,7 +229,7 @@ object TransferOutCommonData
   * @param targetTimeProof The sequenced event from the target domain
   *                        whose timestamp defines the baseline for measuring time periods on the target domain
   */
-case class TransferOutView private (
+sealed abstract case class TransferOutView private (
     override val salt: Salt,
     submitter: LfPartyId,
     contractId: LfContractId,
@@ -227,10 +237,10 @@ case class TransferOutView private (
     targetTimeProof: TimeProof,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: ProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutView](hashOps)
-    with HasProtocolVersionedWrapper[VersionedMessage[TransferOutView]]
+    with HasProtocolVersionedWrapper[TransferOutView]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
@@ -265,25 +275,12 @@ object TransferOutView
   override val name: String = "TransferOutView"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    0 -> VersionedProtoConverter(
+    ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
   )
-
-  private[this] def apply(
-      salt: Salt,
-      submitter: LfPartyId,
-      contractId: LfContractId,
-      targetDomain: DomainId,
-      targetTimeEvent: TimeProof,
-  )(
-      hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): TransferOutView =
-    throw new UnsupportedOperationException("Use the create method instead")
 
   def create(hashOps: HashOps)(
       salt: Salt,
@@ -297,7 +294,7 @@ object TransferOutView
       hashOps,
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    )
+    ) {}
 
   private[this] def fromProtoV0(hashOps: HashOps, transferOutViewP: v0.TransferOutView)(
       bytes: ByteString
@@ -314,9 +311,9 @@ object TransferOutView
         .flatMap(TimeProof.fromProtoV0(hashOps))
     } yield new TransferOutView(salt, submitter, contractId, targetDomain, targetTimeProof)(
       hashOps,
-      protocolVersionRepresentativeFor(0),
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    )
+    ) {}
   }
 }
 

@@ -32,6 +32,7 @@ object ConsoleEnvironmentBinding {
        |import com.digitalasset.canton.console.BootstrapScriptException
        |import com.digitalasset.canton.config.RequireTypes._
        |import com.digitalasset.canton.participant.admin.ResourceLimits
+       |import com.digitalasset.canton.protocol.DynamicDomainParameters
        |import java.time.Instant
        |import scala.concurrent.ExecutionContextExecutor
        |import scala.concurrent.duration.DurationInt
@@ -42,6 +43,7 @@ object ConsoleEnvironmentBinding {
        |def help = consoleEnvironment.help
        |def help(s: String) = consoleEnvironment.help(s)
        |def health = consoleEnvironment.health
+       |def logger = consoleEnvironment.consoleLogger
      """.stripMargin)
 
     // if we don't have a tty available switch the ammonite frontend to a dumb terminal

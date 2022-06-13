@@ -10,19 +10,28 @@ import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessage
 import com.digitalasset.canton.protocol.{TransferId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
 
 /** Causality messages are sent along with a transfer-in response. They propagate causality information on
   * the events a participant has "seen" for a party at the time of the transfer-out.
-  * TODO(i5352): consider whether this should be encrypted (probably).*
+  * TODO(i9514): Encrypt the causality messages
   *
   * @param domainId The domain ID that the causality message is addressed to
   * @param transferId The ID of the transfer for which we are propagating causality information
   * @param clock The vector clock specifying causality information at the time of the transfer out
   */
-case class CausalityMessage(domainId: DomainId, transferId: TransferId, clock: VectorClock)
+sealed abstract case class CausalityMessage(
+    domainId: DomainId,
+    transferId: TransferId,
+    clock: VectorClock,
+)(val representativeProtocolVersion: RepresentativeProtocolVersion)
     extends ProtocolMessage
     with HasProtoV0[v0.CausalityMessage]
     with PrettyPrinting
@@ -35,10 +44,10 @@ case class CausalityMessage(domainId: DomainId, transferId: TransferId, clock: V
     clock = Some(clock.toProtoV0),
   )
 
-  override def toProtoEnvelopeContentV0(version: ProtocolVersion): v0.EnvelopeContent =
+  override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
 
-  override def toProtoEnvelopeContentV1(version: ProtocolVersion): v1.EnvelopeContent =
+  override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.CausalityMessage(toProtoV0))
 
   override def pretty: Pretty[CausalityMessage.this.type] =
@@ -56,13 +65,28 @@ object CausalityMessage {
     case _ => None
   }
 
+  def apply(
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+      transferId: TransferId,
+      clock: VectorClock,
+  ) = new CausalityMessage(
+    domainId,
+    transferId,
+    clock,
+  )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+
   def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
     val v0.CausalityMessage(domainIdP, transferIdP, clockPO) = cmP
     for {
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "target_domain_id")
       clocks <- ProtoConverter.parseRequired(VectorClock.fromProtoV0, "clock", clockPO)
       tid <- ProtoConverter.parseRequired(TransferId.fromProtoV0, "transfer_id", transferIdP)
-    } yield CausalityMessage(domainId, tid, clocks)
+    } yield new CausalityMessage(
+      domainId,
+      tid,
+      clocks,
+    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
 }
 

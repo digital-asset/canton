@@ -58,7 +58,7 @@ case class TransferOutRequest(
       targetTimeProof,
       protocolVersion,
     )
-    val tree = TransferOutViewTree(commonData, view)(hashOps)
+    val tree = TransferOutViewTree(commonData, view)(protocolVersion, hashOps)
     FullTransferOutTree(tree)
   }
 }

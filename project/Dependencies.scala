@@ -14,7 +14,7 @@ object Dependencies {
   lazy val scala_version_short = "2.13"
 
   lazy val akka_version = "2.6.18"
-  lazy val akka_http_version = "10.2.4"
+  lazy val akka_http_version = "10.2.8"
   lazy val grpc_version = "1.44.0"
   lazy val logback_version = "1.2.8"
   lazy val slf4j_version = "1.7.29"
@@ -90,6 +90,7 @@ object Dependencies {
   lazy val daml_participant_state = "com.daml" %% "participant-state" % daml_libraries_version
   lazy val daml_resources_akka = "com.daml" %% "resources-akka" % daml_libraries_version
   lazy val daml_ledger_rxjava_client = "com.daml" % "bindings-rxjava" % daml_libraries_version
+  lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
 
   lazy val da_grpc_bindings_ledger_client = "com.daml" %% "bindings-scala" % daml_libraries_version
 
@@ -149,6 +150,8 @@ object Dependencies {
   lazy val cats = "org.typelevel" %% "cats-core" % "2.6.1"
   lazy val cats_law = "org.typelevel" %% "cats-laws" % "2.6.1"
   lazy val cats_scalacheck = "io.chrisdavenport" %% "cats-scalacheck" % "0.2.0"
+
+  lazy val chimney = "io.scalaland" %% "chimney" % "0.6.1"
 
   lazy val circe_core = "io.circe" %% "circe-core" % circe_version
   lazy val circe_generic = "io.circe" %% "circe-generic" % circe_version
@@ -226,6 +229,16 @@ object Dependencies {
   // From digitalasset.jfrog.io
   lazy val vmbc_sequencer_protos =
     "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
+
+  // From digitalasset.jfrog.io
+  lazy val vmbc_sequencer_core_reference =
+    "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-core-reference" % vmbc_driver_libraries_version % Test classifier "all"
+  lazy val vmbc_sequencer_core_reference_artifact_file_name: String = {
+    val artifact = vmbc_sequencer_core_reference.explicitArtifacts.head
+    s"${artifact.name}-${vmbc_sequencer_core_reference.revision}-${artifact.classifier.get}.${artifact.extension}"
+  }
+  lazy val vmbc_sequencer_core_reference_artifact_file_sha256 = // Compute with "sha256sum <file> | cut -d " " -f1 | sed 's/[a-z]/\U&/g'"`"
+    "BEE54719959F22328AB5F68A364FA5A51DDD8906FA2D5A68891A4E3CA011CBA7"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

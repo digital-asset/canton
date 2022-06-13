@@ -10,9 +10,10 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
 import org.scalacheck.Test
@@ -66,6 +67,9 @@ trait BaseTest
 
   protected def defaultProtocolVersion: ProtocolVersion =
     TestDomainParameters.defaultStatic.protocolVersion
+
+  protected def signedTransactionProtocolVersionRepresentative: RepresentativeProtocolVersion =
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   // default to providing an empty trace context to all tests
   protected implicit def traceContext = TraceContext.empty
@@ -304,6 +308,8 @@ trait BaseTest
   lazy val CantonExamplesPath: String = BaseTest.CantonExamplesPath
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
+  lazy val DamlTestFilesPath: String = BaseTest.DamlTestFilesPath
+  lazy val DamlTestLfDevFilesPath: String = BaseTest.DamlTestLfDevFilesPath
 }
 
 object BaseTest {
@@ -312,6 +318,8 @@ object BaseTest {
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
+  lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
+  lazy val DamlTestLfDevFilesPath: String = getResourcePath("DamlTestLfDevFiles.dar")
 
   private def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

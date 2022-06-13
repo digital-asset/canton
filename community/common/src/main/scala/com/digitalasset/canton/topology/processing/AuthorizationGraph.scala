@@ -86,8 +86,11 @@ object AuthorizedTopologyTransaction {
   *   - when removing transactions, we do check that the authorizing key is authorized. but note that the authorizing
   *     key of an edge REMOVAL doesn't need to match the key used to authorized the ADD.
   */
-class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFactory)
-    extends NamedLogging {
+class AuthorizationGraph(
+    namespace: Namespace,
+    extraDebugInfo: Boolean,
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   private case class GraphNode(
       target: Fingerprint,
@@ -276,7 +279,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
       if (dangling.nonEmpty) {
         logger.warn(s"The following target keys of namespace $namespace are dangling: ${dangling}")
       }
-      if (logger.underlying.isDebugEnabled) {
+      if (extraDebugInfo && logger.underlying.isDebugEnabled) {
         val str =
           authorizedDelegations()
             .map(aud =>
@@ -296,7 +299,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
   }
 
   def authorizationChain(
-      authKey: Fingerprint,
+      startAuthKey: Fingerprint,
       requireRoot: Boolean,
   ): Option[AuthorizationChain] = {
     @tailrec
@@ -316,7 +319,7 @@ class AuthorizationGraph(namespace: Namespace, val loggerFactory: NamedLoggerFac
         case _ => List.empty
       }
     }
-    go(authKey, requireRoot, List.empty) match {
+    go(startAuthKey, requireRoot, List.empty) match {
       case Nil => None
       case rest =>
         Some(

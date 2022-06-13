@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyService
 import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, ParticipantId}
 import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
@@ -21,7 +22,6 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
-import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -48,15 +48,17 @@ class ParticipantDomainTopologyServiceTest
     )(defaultProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
-  )(defaultProtocolVersion, None)
-  private val request =
-    RegisterTopologyTransactionRequest(
+  )(signedTransactionProtocolVersionRepresentative, None)
+  private val request = RegisterTopologyTransactionRequest
+    .create(
       participantId,
       participantId,
       requestId,
       List(signedIdentityTransaction),
       domainId,
     )
+    .headOption
+    .value
 
   private val response =
     RegisterTopologyTransactionResponse(
@@ -64,14 +66,13 @@ class ParticipantDomainTopologyServiceTest
       participantId,
       requestId,
       List(
-        v0.RegisterTopologyTransactionResponse.Result(
+        RegisterTopologyTransactionResponse.Result(
           signedIdentityTransaction.uniquePath.toProtoPrimitive,
-          v0.RegisterTopologyTransactionResponse.Result.State.ACCEPTED,
-          "",
+          RegisterTopologyTransactionResponse.State.Accepted,
         )
       ),
       domainId,
-    )
+    )(request.representativeProtocolVersion)
 
   "ParticipantDomainTopologyService" should {
     val sendRequest =

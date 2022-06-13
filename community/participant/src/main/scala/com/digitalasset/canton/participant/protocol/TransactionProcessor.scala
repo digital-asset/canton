@@ -102,6 +102,7 @@ class TransactionProcessor(
   def submit(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
+      keyResolver: LfKeyResolver,
       transaction: WellFormedTransaction[WithoutSuffixes],
   )(implicit
       traceContext: TraceContext
@@ -109,7 +110,12 @@ class TransactionProcessor(
     TransactionSubmitted
   ]] =
     this.submit(
-      TransactionProcessingSteps.SubmissionParam(submitterInfo, transactionMeta, transaction)
+      TransactionProcessingSteps.SubmissionParam(
+        submitterInfo,
+        transactionMeta,
+        keyResolver,
+        transaction,
+      )
     )
 }
 
