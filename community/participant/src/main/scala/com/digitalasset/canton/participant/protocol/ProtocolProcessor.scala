@@ -10,7 +10,6 @@ import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -43,14 +42,13 @@ import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphe
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.{RequestCounter, store}
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.messages.Verdict.Approve
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
@@ -91,8 +89,6 @@ abstract class ProtocolProcessor[
     ephemeral: SyncDomainEphemeralState,
     crypto: DomainSyncCryptoClient,
     sequencerClient: SequencerClient,
-    participantId: ParticipantId,
-    futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, resultCast: SignedMessageContentCast[Result])
     extends AbstractMessageProcessor(
@@ -590,7 +586,7 @@ abstract class ProtocolProcessor[
       performUnlessClosingF(functionFullName) {
         val resultF = for {
           snapshot <- EitherT.right(
-            futureSupervisor.supervised(s"await crypto snapshot $ts")(crypto.awaitSnapshot(ts))
+            crypto.awaitSnapshotSupervised(s"await crypto snapshot $ts")(ts)
           )
           decryptedViews <- steps.decryptViews(viewMessages, snapshot)
 
@@ -757,7 +753,7 @@ abstract class ProtocolProcessor[
     ephemeral.recordOrderPublisher.tick(sc, ts)
     for {
       snapshot <- EitherT.right(
-        futureSupervisor.supervised(s"await crypto snapshot $ts")(crypto.ips.awaitSnapshot(ts))
+        crypto.ips.awaitSnapshotSupervised(s"await crypto snapshot $ts")(ts)
       )
 
       domainParameters <- EitherT.right(snapshot.findDynamicDomainParametersOrDefault())

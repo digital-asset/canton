@@ -3,15 +3,17 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import cats.syntax.traverse._
 import cats.syntax.either._
 import cats.syntax.option._
+import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
-import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
@@ -20,14 +22,11 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
+import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 import scala.Ordered.orderingToOrdered
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology._
 
 /** X -> Y */
 sealed trait TopologyMapping extends Product with Serializable with PrettyPrinting {
@@ -247,15 +246,14 @@ sealed abstract case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[LegalIdentityClaim],
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
     with HasProtocolVersionedWrapper[LegalIdentityClaim]
     with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
-  override protected def toProtoVersioned: VersionedMessage[LegalIdentityClaim] =
-    LegalIdentityClaim.toProtoVersioned(this)
+  override def companionObj = LegalIdentityClaim
 
   override protected def toProtoV0: v0.LegalIdentityClaim =
     v0.LegalIdentityClaim(

@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.v0
 import com.digitalasset.canton.version.{
   HasProtoV0,
   HasVersionedMessageCompanion,
@@ -18,7 +19,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   VersionedMessage,
 }
-import com.digitalasset.canton.v0
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.{Context => OpenTelemetryContext}

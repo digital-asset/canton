@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
-import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.ServiceAgreement
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.http.{

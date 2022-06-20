@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.RequestCounter
@@ -13,9 +14,8 @@ import com.digitalasset.canton.participant.store.SingleDomainCausalDependencySto
   CausalityWriteFinished,
 }
 import com.digitalasset.canton.protocol.TransferId
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap

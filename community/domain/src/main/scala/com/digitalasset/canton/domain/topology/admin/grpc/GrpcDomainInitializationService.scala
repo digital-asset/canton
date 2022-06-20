@@ -5,8 +5,8 @@ package com.digitalasset.canton.domain.topology.admin.grpc
 
 import cats.data.EitherT
 import cats.data.EitherT.fromEither
-import com.digitalasset.canton.domain.admin.v0.DomainInitializationServiceGrpc.DomainInitializationService
 import com.digitalasset.canton.domain.admin.v0.DomainInitRequest
+import com.digitalasset.canton.domain.admin.v0.DomainInitializationServiceGrpc.DomainInitializationService
 import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.serialization.ProtoConverter

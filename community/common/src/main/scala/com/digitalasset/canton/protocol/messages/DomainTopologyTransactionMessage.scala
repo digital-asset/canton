@@ -5,16 +5,17 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.data.EitherT
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
@@ -27,8 +28,11 @@ sealed abstract case class DomainTopologyTransactionMessage private (
     domainTopologyManagerSignature: Signature,
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion)
-    extends ProtocolMessage
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      DomainTopologyTransactionMessage
+    ]
+) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.DomainTopologyTransactionMessage]
@@ -55,13 +59,22 @@ sealed abstract case class DomainTopologyTransactionMessage private (
     )
 }
 
-object DomainTopologyTransactionMessage {
+object DomainTopologyTransactionMessage
+    extends HasProtocolVersionedCompanion[DomainTopologyTransactionMessage] {
 
   implicit val domainIdentityTransactionMessageCast
       : ProtocolMessageContentCast[DomainTopologyTransactionMessage] = {
     case ditm: DomainTopologyTransactionMessage => Some(ditm)
     case _ => None
   }
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.DomainTopologyTransactionMessage)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
 
   private def hash(
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
@@ -92,7 +105,7 @@ object DomainTopologyTransactionMessage {
           signature,
           transactions,
           domainId,
-        )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+        )(protocolVersionRepresentativeFor(protocolVersion)) {}
       )
   }
 
@@ -135,6 +148,8 @@ object DomainTopologyTransactionMessage {
       signature,
       succeededContent,
       DomainId(domainUid),
-    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
+
+  override protected def name: String = "DomainTopologyTransactionMessage"
 }

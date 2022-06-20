@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import com.digitalasset.canton.util.EitherUtil.{RichEither, RichEitherIterable}
-
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.util.EitherUtil.{RichEither, RichEitherIterable}
 import org.scalatest.wordspec.AnyWordSpec
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))

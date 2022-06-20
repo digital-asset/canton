@@ -5,9 +5,9 @@ package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.protocol.messages.Verdict
 import com.digitalasset.canton.protocol.{AlarmStreamer, RequestId, RootHash, ViewHash}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 

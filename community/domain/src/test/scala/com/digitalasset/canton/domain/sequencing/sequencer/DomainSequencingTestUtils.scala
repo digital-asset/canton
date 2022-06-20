@@ -7,9 +7,9 @@ import cats.syntax.functorFilter._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.immutable.SortedSet
 
@@ -30,7 +30,9 @@ object DomainSequencingTestUtils {
   def payloadsForEvents(events: Seq[Sequenced[PayloadId]]): List[Payload] = {
     val payloadIds = events.mapFilter(_.event.payloadO)
     payloadIds
-      .map(pid => Payload(pid, Batch.empty.toByteString(ProtocolVersion.latestForTest)))
+      .map(pid =>
+        Payload(pid, Batch.empty(TestDomainParameters.defaultStatic.protocolVersion).toByteString)
+      )
       .toList
   }
 

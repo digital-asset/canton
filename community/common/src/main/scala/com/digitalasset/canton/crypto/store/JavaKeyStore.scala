@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.crypto.store
 
-import java.security.{KeyStoreException, KeyStore => JKeyStore}
 import cats.syntax.either._
 import com.digitalasset.canton.config.Password
 import com.digitalasset.canton.crypto.{X509Certificate, X509CertificatePem}
 import com.digitalasset.canton.util.ResourceUtil
+
+import java.security.{KeyStore => JKeyStore, KeyStoreException}
 
 // NOTE: Trust store is represented by a [[java.security.KeyStore]] class too.
 case class TrustStore(private val store: JKeyStore) {

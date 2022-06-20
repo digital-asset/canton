@@ -4,15 +4,15 @@
 package com.digitalasset.canton.util
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.Thereafter.syntax._
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger

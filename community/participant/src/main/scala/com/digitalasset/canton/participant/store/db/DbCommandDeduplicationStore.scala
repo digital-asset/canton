@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import cats.syntax.option._
 import com.daml.ledger.participant.state.v2.ChangeId
-import com.digitalasset.canton.{ApplicationId, CommandId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -26,6 +25,7 @@ import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{ApplicationId, CommandId}
 import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 

@@ -8,6 +8,7 @@ import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.ViewType.{
   TransactionViewType,
   TransferInViewType,
@@ -44,7 +45,6 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, Participa
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
-import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 

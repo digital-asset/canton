@@ -7,7 +7,7 @@ import com.daml.logging.LoggingContext
 import com.daml.logging.entries.{LoggingEntry, LoggingValue}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 
-private[participant] object LoggingContextUtil {
+object LoggingContextUtil {
 
   /** Propagates canton logger factory properties to daml LoggingContext
     */

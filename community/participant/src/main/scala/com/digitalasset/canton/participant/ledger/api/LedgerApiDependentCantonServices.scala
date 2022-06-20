@@ -3,11 +3,9 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import java.util.concurrent.ScheduledExecutorService
 import akka.actor.ActorSystem
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
 import com.digitalasset.canton.participant.admin.grpc.{GrpcPackageService, GrpcPingService}
@@ -19,9 +17,11 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TracerProvider
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.ExecutionContextExecutor
 
 /** Holds all Canton services that use the Ledger Api and hence depend on the ledger api server to be up.

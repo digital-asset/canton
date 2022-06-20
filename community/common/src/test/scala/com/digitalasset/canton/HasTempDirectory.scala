@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton
 
-import java.nio.file.Path
-
 import better.files.File
 import org.scalatest.{BeforeAndAfterAll, Suite}
+
+import java.nio.file.Path
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 trait HasTempDirectory extends BeforeAndAfterAll { this: Suite =>

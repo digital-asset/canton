@@ -8,7 +8,7 @@ import cats.syntax.foldable._
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
 import com.digitalasset.canton._
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   LoggingConfig,
@@ -534,7 +534,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
       for {
         Env(client, transport, sequencerCounterTrackerStore, _, timeTracker) <- Env.create(
-          options = SequencerClientConfig(eventInboxSize = NonNegativeInt.one)
+          options = SequencerClientConfig(eventInboxSize = PositiveInt.tryCreate(1))
         )
         _ <- client.subscribeTracking(sequencerCounterTrackerStore, handler, timeTracker)
         _ <- transport.subscriber.value.sendToHandler(deliver)
@@ -609,7 +609,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.changeTransport(secondTransport)
-        _ <- env.sendAsync(Batch.empty)
+        _ <- env.sendAsync(Batch.empty(defaultProtocolVersion))
       } yield {
         env.transport.lastSend.get() shouldBe None
         secondTransport.lastSend.get() should not be None
@@ -626,7 +626,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter()
         _ <- env.changeTransport(secondTransport)
-        _ <- env.sendAsync(Batch.empty)
+        _ <- env.sendAsync(Batch.empty(defaultProtocolVersion))
       } yield {
         env.transport.lastSend.get() shouldBe None
         secondTransport.lastSend.get() should not be None

@@ -7,8 +7,9 @@ import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.foldable._
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -30,15 +31,14 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
 import io.functionmeta.functionFullName
 import oracle.jdbc.{OracleArray, OracleConnection}
-import org.postgresql.util.PSQLState
 import org.h2.api.{ErrorCode => H2ErrorCode}
+import org.postgresql.util.PSQLState
 import slick.jdbc._
 
 import java.sql.{Connection, JDBCType, SQLException, SQLNonTransientException}

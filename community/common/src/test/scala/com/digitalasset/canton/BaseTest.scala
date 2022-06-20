@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.TestDomainParameters
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
@@ -68,7 +68,8 @@ trait BaseTest
   protected def defaultProtocolVersion: ProtocolVersion =
     TestDomainParameters.defaultStatic.protocolVersion
 
-  protected def signedTransactionProtocolVersionRepresentative: RepresentativeProtocolVersion =
+  protected def signedTransactionProtocolVersionRepresentative
+      : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   // default to providing an empty trace context to all tests

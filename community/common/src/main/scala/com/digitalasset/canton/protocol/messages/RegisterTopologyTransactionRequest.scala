@@ -6,11 +6,17 @@ package com.digitalasset.canton.protocol.messages
 import cats.syntax.traverse._
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.protocol.{v0, v1}
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
-import com.digitalasset.canton.version.{HasProtoV0, ProtobufVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasProtocolVersionedCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 
 /** @param representativeProtocolVersion The representativeProtocolVersion must correspond to the protocol version of
   *                                      every transaction in the list (enforced by the factory method)
@@ -21,8 +27,11 @@ sealed abstract case class RegisterTopologyTransactionRequest(
     requestId: TopologyRequestId,
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion)
-    extends ProtocolMessage
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      RegisterTopologyTransactionRequest
+    ]
+) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.RegisterTopologyTransactionRequest] {
@@ -47,23 +56,34 @@ sealed abstract case class RegisterTopologyTransactionRequest(
     )
 }
 
-object RegisterTopologyTransactionRequest {
+object RegisterTopologyTransactionRequest
+    extends HasProtocolVersionedCompanion[RegisterTopologyTransactionRequest] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.RegisterTopologyTransactionRequest)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
+
   def create(
       requestedBy: Member,
       participant: ParticipantId,
       requestId: TopologyRequestId,
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
   ): Iterable[RegisterTopologyTransactionRequest] =
     transactions.groupBy(_.representativeProtocolVersion.unwrap).map {
-      case (protocolVersion, transactions) =>
+      case (transactionProtocolVersion, transactions) =>
         new RegisterTopologyTransactionRequest(
           requestedBy = requestedBy,
           participant = participant,
           requestId = requestId,
           transactions = transactions,
           domainId = domainId,
-        )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+        )(protocolVersionRepresentativeFor(protocolVersion)) {}
     }
 
   def fromProtoV0(
@@ -83,6 +103,8 @@ object RegisterTopologyTransactionRequest {
       requestId,
       transactions,
       DomainId(domainUid),
-    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
+
+  override protected def name: String = "RegisterTopologyTransactionRequest"
 }

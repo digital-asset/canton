@@ -60,7 +60,7 @@ class HttpSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    client.sendAsync(request, requiresAuthentication = true, protocolVersion)
+    client.sendAsync(request, requiresAuthentication = true)
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
@@ -69,7 +69,7 @@ class HttpSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    client.sendAsync(request, requiresAuthentication = false, protocolVersion)
+    client.sendAsync(request, requiresAuthentication = false)
 
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext

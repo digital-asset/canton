@@ -4,9 +4,9 @@
 package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
 import cats.implicits._
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
+import com.digitalasset.canton.topology.Member
 import io.grpc._
 
 class SequencerConnectServerInterceptor(val loggerFactory: NamedLoggerFactory)

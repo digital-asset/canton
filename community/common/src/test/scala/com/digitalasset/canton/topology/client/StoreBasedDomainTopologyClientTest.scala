@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.client
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -33,6 +34,7 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
 
   private class TestClient() extends BaseDomainTopologyClient {
 
+    override protected def futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
     override def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
     override def trySnapshot(timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
@@ -132,6 +134,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
           initialKeys,
           StoreBasedDomainTopologyClient.NoPackageDependencies,
           DefaultProcessingTimeouts.testing,
+          FutureSupervisor.Noop,
           loggerFactory,
         )
 

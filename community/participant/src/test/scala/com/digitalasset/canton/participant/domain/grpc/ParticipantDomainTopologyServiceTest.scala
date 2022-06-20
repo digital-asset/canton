@@ -9,7 +9,12 @@ import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyService
-import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, ParticipantId}
+import com.digitalasset.canton.protocol.messages.{
+  RegisterTopologyTransactionRequest,
+  RegisterTopologyTransactionResponse,
+}
+import com.digitalasset.canton.sequencing.client.SendAsyncClientError
+import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
 import com.digitalasset.canton.topology.transaction.{
   OwnerToKeyMapping,
   SignedTopologyTransaction,
@@ -18,12 +23,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyStateUpdate,
   TopologyStateUpdateElement,
 }
-import com.digitalasset.canton.protocol.messages.{
-  RegisterTopologyTransactionRequest,
-  RegisterTopologyTransactionResponse,
-}
-import com.digitalasset.canton.sequencing.client.SendAsyncClientError
-import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
+import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -56,6 +56,7 @@ class ParticipantDomainTopologyServiceTest
       requestId,
       List(signedIdentityTransaction),
       domainId,
+      defaultProtocolVersion,
     )
     .headOption
     .value
@@ -72,7 +73,8 @@ class ParticipantDomainTopologyServiceTest
         )
       ),
       domainId,
-    )(request.representativeProtocolVersion)
+      defaultProtocolVersion,
+    )
 
   "ParticipantDomainTopologyService" should {
     val sendRequest =
@@ -86,7 +88,13 @@ class ParticipantDomainTopologyServiceTest
     when(
       sendRequest.apply(
         eqTo(traceContext),
-        eqTo(OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)))),
+        eqTo(
+          OpenEnvelope(
+            request,
+            Recipients.cc(DomainTopologyManagerId(domainId)),
+            defaultProtocolVersion,
+          )
+        ),
       )
     )
       .thenReturn(EitherT.pure[Future, SendAsyncClientError](()))
@@ -95,6 +103,7 @@ class ParticipantDomainTopologyServiceTest
       val sut = new ParticipantDomainTopologyService(
         domainId,
         sendRequest,
+        defaultProtocolVersion,
         ProcessingTimeout(),
         loggerFactory,
       )
@@ -102,7 +111,11 @@ class ParticipantDomainTopologyServiceTest
       val resultF = sut.registerTopologyTransaction(request).unwrap
 
       // after response is processed, the future will be completed
-      sut.processor.apply(Traced(List(OpenEnvelope(response, Recipients.cc(response.requestedBy)))))
+      sut.processor.apply(
+        Traced(
+          List(OpenEnvelope(response, Recipients.cc(response.requestedBy), defaultProtocolVersion))
+        )
+      )
 
       resultF.map(result => result shouldBe UnlessShutdown.Outcome(response))
     }
@@ -110,6 +123,7 @@ class ParticipantDomainTopologyServiceTest
       val sut = new ParticipantDomainTopologyService(
         domainId,
         sendRequest,
+        defaultProtocolVersion,
         ProcessingTimeout(),
         loggerFactory,
       )

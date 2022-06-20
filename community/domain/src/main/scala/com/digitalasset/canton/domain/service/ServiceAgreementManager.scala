@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.service
 
-import java.io.IOException
 import better.files.File
 import cats.data.EitherT
 import cats.syntax.either._
@@ -17,15 +16,16 @@ import com.digitalasset.canton.domain.service.store.{
   ServiceAgreementAcceptanceStore,
   ServiceAgreementAcceptanceStoreError,
 }
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import slick.jdbc.GetResult
 
+import java.io.IOException
 import scala.concurrent.{ExecutionContext, Future}
 
 case class ServiceAgreementAcceptance(

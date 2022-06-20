@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
-import java.util.concurrent._
-import java.util.function.Predicate
-
 import cats.syntax.either._
 import com.digitalasset.canton.lifecycle.ClosingException
 import com.digitalasset.canton.logging.TracedLogger
@@ -13,6 +10,8 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
+import java.util.concurrent._
+import java.util.function.Predicate
 import scala.concurrent.{ExecutionContext, blocking}
 
 /** Factories and utilities for dealing with threading.

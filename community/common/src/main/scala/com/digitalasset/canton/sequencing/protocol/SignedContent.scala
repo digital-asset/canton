@@ -15,10 +15,11 @@ import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedM
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
-  HasVersionedMessageWithContextCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 
@@ -28,16 +29,18 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     content: A,
     signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasProtocolVersionedWrapper[SignedContent[A]]
-    with HasProtoV0[v0.SignedContent] {
-  override def toProtoVersioned: VersionedMessage[SignedContent[A]] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+) extends HasProtocolVersionedWrapper[SignedContent[ProtocolVersionedMemoizedEvidence]]
+    with HasProtoV0[v0.SignedContent]
+    with Serializable
+    with Product {
+  override def companionObj = SignedContent.serializer
 
   /** We use [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]] here because only v0 is defined
     * for SignedContent. This can be revisited when this wrapper will evolve.
     */
-  def representativeProtocolVersion: RepresentativeProtocolVersion =
-    RepresentativeProtocolVersion.v2
+  def representativeProtocolVersion
+      : RepresentativeProtocolVersion[SignedContent[ProtocolVersionedMemoizedEvidence]] =
+    SignedContent.serializer.protocolVersionRepresentativeFor(ProtocolVersion.v2_0_0)
 
   def getCryptographicEvidence: ByteString = content.getCryptographicEvidence
 
@@ -59,10 +62,19 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
 }
 
 object SignedContent {
+  type ContentDeserializer[A] = ByteString => ParsingResult[A]
+
+  private[sequencing] val serializer: HasProtocolVersionedWithContextCompanion[SignedContent[
+    ProtocolVersionedMemoizedEvidence
+  ], ContentDeserializer[ProtocolVersionedMemoizedEvidence]] =
+    SignedContent.versionedProtoConverter[ProtocolVersionedMemoizedEvidence](
+      "Sequenced event serializer"
+    )
+
   val protoConvertedSequencedEventClosedEnvelope
-      : HasVersionedMessageWithContextCompanion[SignedContent[
+      : HasProtocolVersionedWithContextCompanion[SignedContent[
         SequencedEvent[ClosedEnvelope]
-      ], ByteString => ParsingResult[SequencedEvent[ClosedEnvelope]]] =
+      ], ContentDeserializer[SequencedEvent[ClosedEnvelope]]] =
     SignedContent.versionedProtoConverter[SequencedEvent[ClosedEnvelope]]("ClosedEnvelope")
 
   def create[Env <: Envelope[_]](
@@ -102,20 +114,23 @@ object SignedContent {
 
   def versionedProtoConverter[A <: ProtocolVersionedMemoizedEvidence](
       contentType: String
-  ): HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] =
-    new HasVersionedMessageWithContextCompanion[SignedContent[A], ByteString => ParsingResult[A]] {
+  ): HasProtocolVersionedWithContextCompanion[SignedContent[A], ContentDeserializer[A]] =
+    new HasProtocolVersionedWithContextCompanion[SignedContent[A], ContentDeserializer[A]] {
       override val name: String = s"SignedContent[$contentType]"
 
-      val supportedProtoVersions: Map[Int, Parser] = Map(
-        0 -> supportedProtoVersion(v0.SignedContent) { (deserializer, proto) =>
-          fromProtoV0(deserializer)(proto)
-        }
+      val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+        ProtobufVersion(0) -> VersionedProtoConverter(
+          ProtocolVersion.v2_0_0,
+          supportedProtoVersion(v0.SignedContent)(fromProtoV0),
+          _.toProtoV0.toByteString,
+        )
       )
     }
 
   def fromProtoV0[A <: ProtocolVersionedMemoizedEvidence](
-      deserializer: ByteString => ParsingResult[A]
-  )(signedValueP: v0.SignedContent): ParsingResult[SignedContent[A]] =
+      deserializer: ContentDeserializer[A],
+      signedValueP: v0.SignedContent,
+  ): ParsingResult[SignedContent[A]] =
     signedValueP match {
       case v0.SignedContent(content, maybeSignatureP, timestampOfSigningKey) =>
         for {

@@ -5,8 +5,8 @@ package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CryptoConfig
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 

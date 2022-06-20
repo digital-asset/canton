@@ -24,11 +24,11 @@ import java.security.{
   GeneralSecurityException,
   InvalidKeyException,
   NoSuchAlgorithmException,
-  SecureRandom,
-  SignatureException,
   PrivateKey => JPrivateKey,
   PublicKey => JPublicKey,
+  SecureRandom,
   Signature => JSignature,
+  SignatureException,
 }
 import scala.collection.concurrent.TrieMap
 

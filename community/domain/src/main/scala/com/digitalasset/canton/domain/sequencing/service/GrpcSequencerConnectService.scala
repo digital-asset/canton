@@ -10,11 +10,11 @@ import com.digitalasset.canton.domain.api.v0.SequencerConnect.{GetDomainId, GetD
 import com.digitalasset.canton.domain.api.{v0 => proto}
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.v0.{ServiceAgreement => protoServiceAgreement}
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 

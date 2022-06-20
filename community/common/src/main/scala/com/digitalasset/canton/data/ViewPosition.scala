@@ -5,8 +5,10 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.google.protobuf.ByteString
+import pprint.Tree
 
 /** A position encodes the path from a view in a transaction tree to its root.
   * The encoding must not depend on the hashes of the nodes.
@@ -28,6 +30,26 @@ object ViewPosition {
 
   /** The root [[ViewPosition]] has an empty path. */
   val root: ViewPosition = new ViewPosition(List.empty[MerklePathElement])
+
+  implicit def prettyViewPosition: Pretty[ViewPosition] = { pos =>
+    import com.digitalasset.canton.logging.pretty.Pretty.PrettyOps
+    implicit val prettyMPE: Pretty[MerklePathElement] = prettyMerklePathElement
+    Tree.Apply("", Iterator(pos.position.toTree))
+  }
+
+  private val prettyMerklePathElement: Pretty[MerklePathElement] = {
+    case ListIndex(index) => Tree.Literal(index.toString)
+    case MerkleSeqIndex(index) =>
+      val sb = new StringBuilder(index.length)
+      index.reverse.foreach { dir =>
+        val dirChar = dir match {
+          case Direction.Left => "L"
+          case Direction.Right => "R"
+        }
+        sb.append(dirChar)
+      }
+      Tree.Literal(sb.toString())
+  }
 
   /** A single element on a path through a Merkle tree. */
   sealed trait MerklePathElement extends Product with Serializable {

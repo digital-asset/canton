@@ -11,8 +11,6 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.RequestCounter
@@ -30,7 +28,6 @@ import com.digitalasset.canton.participant.store.TransferStore.TransferStoreErro
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,
@@ -41,11 +38,14 @@ import com.digitalasset.canton.protocol.messages.Verdict.{
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   EncryptedViewMessage,
+  EncryptedViewMessageDecryptionError,
   SignedProtocolMessageContent,
   Verdict,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
+import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfPartyId, SequencerCounter}
 

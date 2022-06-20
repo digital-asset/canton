@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.traverse._
 import cats.syntax.foldable._
+import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}

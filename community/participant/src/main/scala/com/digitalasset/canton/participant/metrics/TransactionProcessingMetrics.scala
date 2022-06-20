@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.metrics.{MetricDoc, MetricHandle}
 import com.digitalasset.canton.metrics.MetricHandle.{HistogramM, TimerM}
+import com.digitalasset.canton.metrics.{MetricDoc, MetricHandle}
 
 class TransactionProcessingMetrics(override val prefix: MetricName, val registry: MetricRegistry)
     extends MetricHandle.Factory {

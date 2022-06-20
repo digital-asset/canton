@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.Semigroup
 import cats.implicits._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
@@ -16,10 +17,9 @@ import com.digitalasset.canton.participant.store.SingleDomainCausalDependencySto
 }
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 
 import scala.collection.immutable.HashMap
 import scala.collection.mutable

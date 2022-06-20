@@ -6,6 +6,8 @@ package com.digitalasset.canton.topology.client
 import cats.data.EitherT
 import cats.syntax.traverse._
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,7 +21,6 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.SequencerCounter
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
@@ -30,6 +31,7 @@ class CachingDomainTopologyClient(
     parent: DomainTopologyClientWithInit,
     cachingConfigs: CachingConfigs,
     val timeouts: ProcessingTimeout,
+    override protected val futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
     extends DomainTopologyClientWithInit
@@ -173,6 +175,7 @@ object CachingDomainTopologyClient {
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
       cachingConfigs: CachingConfigs,
       timeouts: ProcessingTimeout,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -187,6 +190,7 @@ object CachingDomainTopologyClient {
         initKeys,
         packageDependencies,
         timeouts,
+        futureSupervisor,
         loggerFactory,
       )
     val caching =
@@ -195,6 +199,7 @@ object CachingDomainTopologyClient {
         dbClient,
         cachingConfigs,
         timeouts,
+        futureSupervisor,
         loggerFactory,
       )
 

@@ -35,7 +35,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{DelayUtil, ErrorUtil, FutureUtil, retry}
-import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
 import io.functionmeta.functionFullName
 
@@ -544,7 +544,7 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
   protected def targetStore: TopologyStore[TopologyStoreId.DomainStore]
   protected def handle: RegisterTopologyTransactionHandle
 
-  private lazy val signedTxProtocolVersionRepresentative: RepresentativeProtocolVersion =
+  private lazy val signedTxProtocolVersionRepresentative =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
   // register handle close task

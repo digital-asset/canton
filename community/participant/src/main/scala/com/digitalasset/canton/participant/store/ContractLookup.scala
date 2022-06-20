@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.{
   LfContractId,
   LfContractInst,

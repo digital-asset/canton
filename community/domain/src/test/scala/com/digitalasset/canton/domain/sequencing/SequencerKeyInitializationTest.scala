@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.KeyName
 import com.digitalasset.canton.domain.sequencing.admin.protocol
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
@@ -11,7 +12,6 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, TestingIdentityFactory}
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.BaseTest
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 

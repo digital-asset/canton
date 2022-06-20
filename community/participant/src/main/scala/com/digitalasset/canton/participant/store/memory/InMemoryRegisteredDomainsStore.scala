@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import cats.syntax.either._
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
@@ -12,7 +13,6 @@ import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
   DomainIdAlreadyAdded,
   Error,
 }
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.participant.store.RegisteredDomainsStore
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext

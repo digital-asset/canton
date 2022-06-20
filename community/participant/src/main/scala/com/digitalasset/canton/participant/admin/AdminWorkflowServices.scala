@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin
 
 import akka.actor.ActorSystem
 import cats.implicits._
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.{ApiTypes => A}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
@@ -15,7 +16,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.ledger.api.client.{LedgerConnection, LedgerSubscription}
 import com.digitalasset.canton.lifecycle._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}

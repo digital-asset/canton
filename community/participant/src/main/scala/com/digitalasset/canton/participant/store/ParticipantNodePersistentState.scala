@@ -16,9 +16,9 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
+import com.digitalasset.canton.util.{ErrorUtil, retry}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.duration._

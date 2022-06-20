@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.metrics.{MetricDoc, MetricHandle}
 import com.digitalasset.canton.metrics.MetricHandle.TimerM
+import com.digitalasset.canton.metrics.{MetricDoc, MetricHandle}
 
 class PruningMetrics(override val prefix: MetricName, val registry: MetricRegistry)
     extends MetricHandle.Factory {

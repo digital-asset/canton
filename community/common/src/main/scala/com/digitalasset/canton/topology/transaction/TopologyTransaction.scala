@@ -15,8 +15,8 @@ import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.TopologyTransaction.Transaction
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
 import com.digitalasset.canton.version._
@@ -208,18 +208,19 @@ sealed trait TopologyTransaction[+Op <: TopologyChangeOp]
     extends ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
     with HasProtocolVersionedWrapper[TopologyTransaction[TopologyChangeOp]]
-    with HasProtoV0[v0.TopologyTransaction] {
+    with HasProtoV0[v0.TopologyTransaction]
+    with Product
+    with Serializable {
   def op: Op
   def element: TopologyStateElement[TopologyMapping]
 
   def reverse: TopologyTransaction[TopologyChangeOp]
 
+  override def companionObj = TopologyTransaction
+
   // calculate hash for signature
   def hashToSign(hashOps: HashOps): Hash =
     hashOps.digest(HashPurpose.TopologyTransactionSignature, this.getCryptographicEvidence)
-
-  override protected def toProtoVersioned: VersionedMessage[TopologyTransaction[TopologyChangeOp]] =
-    TopologyTransaction.toProtoVersioned(this)
 
   override def toByteStringUnmemoized: ByteString = super[HasProtocolVersionedWrapper].toByteString
 
@@ -285,7 +286,9 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
     op: Op,
     element: TopologyStateUpdateElement,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransaction[TopologyChangeOp]
+    ],
     val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[Op] {
   override def toProtoV0: v0.TopologyTransaction = {
@@ -416,7 +419,9 @@ object TopologyStateUpdate {
 sealed abstract case class DomainGovernanceTransaction(
     element: DomainGovernanceElement
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TopologyTransaction[TopologyChangeOp]
+    ],
     val deserializedFrom: Option[ByteString] = None,
 ) extends TopologyTransaction[TopologyChangeOp.Replace] {
   val op = TopologyChangeOp.Replace

@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import java.time.Instant
-
 import com.daml.platform.apiserver.TimeServiceBackend
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.NoTracing
 
+import java.time.Instant
 import scala.concurrent.Future
 
 /** Time service backend for testing only to enable the ledger api server to work with the Canton sim-clock or remote clock

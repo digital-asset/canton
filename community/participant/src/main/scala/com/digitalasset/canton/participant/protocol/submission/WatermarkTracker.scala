@@ -7,9 +7,9 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, Thereafter}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.{ErrorUtil, Thereafter}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util

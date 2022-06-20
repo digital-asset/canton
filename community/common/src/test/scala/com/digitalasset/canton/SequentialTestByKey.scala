@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton
 
-import java.util.concurrent.Semaphore
-
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
+import java.util.concurrent.Semaphore
 import scala.collection.concurrent.TrieMap
 
 /** Our tests are typically run in parallel but sometimes we want to make sure specific tests are not run in parallel.

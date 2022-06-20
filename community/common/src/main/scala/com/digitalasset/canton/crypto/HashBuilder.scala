@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.crypto
 
-import java.nio.ByteBuffer
-import java.security.MessageDigest
-
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.google.protobuf.ByteString
+
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 
 /** The methods of [[HashBuilder]] change its internal state and return `this` for convenience.
   *

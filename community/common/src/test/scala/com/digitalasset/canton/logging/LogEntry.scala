@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.logging
 
-import com.digitalasset.canton.error.BaseCantonError
 import com.daml.error.ErrorCode
+import com.digitalasset.canton.error.BaseCantonError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ErrorUtil
 import org.scalactic.source

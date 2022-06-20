@@ -7,9 +7,9 @@ import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.{Command => ScalaCommand}
 import com.daml.ledger.api.v1.completion.Completion
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.ledger.api.client.{CommandSubmitterWithRetry, LedgerSubmit}
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 

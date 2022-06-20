@@ -9,9 +9,10 @@ import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.LfTransactionUtil
 
 import scala.annotation.nowarn
@@ -19,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Wrapper type for elements of a view decomposition
   */
-sealed trait TransactionViewDecomposition extends Product with Serializable {
+sealed trait TransactionViewDecomposition extends Product with Serializable with PrettyPrinting {
   def lfNode: LfActionNode
   def nodeId: LfNodeId
   def rbContext: RollbackContext
@@ -100,6 +101,16 @@ object TransactionViewDecomposition {
           }
       )
     }
+
+    override def pretty: Pretty[NewView] = prettyOfClass(
+      // TODO(Andreas) A bit more information would be nice, but we don't want to print the full node for confidentiality reasons
+      param("root node template", _.rootNode.templateId),
+      param("informees", _.informees),
+      param("threshold", _.threshold),
+      param("node ID", _.nodeId),
+      param("rollback context", _.rbContext),
+      param("tail nodes", _.tailNodes),
+    )
   }
 
   /** Encapsulates a node that belongs to core of some [[com.digitalasset.canton.data.TransactionViewDecomposition.NewView]]. */
@@ -107,7 +118,15 @@ object TransactionViewDecomposition {
       lfNode: LfActionNode,
       override val nodeId: LfNodeId,
       override val rbContext: RollbackContext,
-  ) extends TransactionViewDecomposition
+  ) extends TransactionViewDecomposition {
+
+    override def pretty: Pretty[SameView] = prettyOfClass(
+      // TODO(Andreas) A bit more information would be nice, but we don't want to print the full node for confidentiality reasons
+      param("lf node template", _.lfNode.templateId),
+      param("node ID", _.nodeId),
+      param("rollback context", _.rbContext),
+    )
+  }
 
   /** Converts `transaction: Transaction` into the corresponding `ViewDecomposition`s.
     */

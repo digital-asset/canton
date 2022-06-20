@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.config
 
-import java.io.File
 import cats.data.Validated
 import cats.syntax.functor._
 import com.daml.nonempty.NonEmpty
@@ -17,10 +16,11 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.typesafe.config.Config
+import monocle.macros.syntax.lens._
 import org.slf4j.{Logger, LoggerFactory}
 import pureconfig.{ConfigReader, ConfigWriter}
-import monocle.macros.syntax.lens._
 
+import java.io.File
 import scala.annotation.nowarn
 
 case class CantonCommunityConfig(

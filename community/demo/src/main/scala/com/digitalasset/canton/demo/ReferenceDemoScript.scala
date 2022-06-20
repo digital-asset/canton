@@ -5,7 +5,7 @@ package com.digitalasset.canton.demo
 
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.TransactionTree
-import com.daml.ledger.client.binding.{Contract, TemplateCompanion, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive => P, TemplateCompanion}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.TimeoutDuration

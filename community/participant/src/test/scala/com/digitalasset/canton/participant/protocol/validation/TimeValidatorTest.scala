@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import java.time.Duration
-
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
@@ -15,6 +13,8 @@ import com.digitalasset.canton.participant.protocol.validation.TimeValidator.{
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, TransactionId}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.time.Duration
 
 class TimeValidatorTest extends AnyWordSpec with BaseTest {
   val sequencerTimestamp: CantonTimestamp = CantonTimestamp.ofEpochSecond(0)

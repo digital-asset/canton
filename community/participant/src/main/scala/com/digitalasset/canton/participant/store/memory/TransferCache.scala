@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
@@ -16,10 +17,9 @@ import com.digitalasset.canton.participant.store.memory.TransferCache.PendingTra
 import com.digitalasset.canton.participant.store.{TransferLookup, TransferStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.TransferId
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent

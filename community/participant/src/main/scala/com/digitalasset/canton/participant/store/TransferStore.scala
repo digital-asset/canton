@@ -4,16 +4,16 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, OptionUtil}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.Future
 

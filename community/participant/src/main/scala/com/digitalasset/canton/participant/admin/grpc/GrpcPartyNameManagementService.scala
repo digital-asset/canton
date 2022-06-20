@@ -6,13 +6,13 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.implicits._
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.participant.admin.v0.{
   PartyNameManagementServiceGrpc,
   SetPartyDisplayNameRequest,
   SetPartyDisplayNameResponse,
 }
 import com.digitalasset.canton.participant.topology.LedgerServerPartyNotifier
+import com.digitalasset.canton.topology.{PartyId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 

@@ -13,7 +13,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.GetServiceAgreementRequest
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.VerifyActive
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
@@ -22,10 +21,11 @@ import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.{Thereafter, retry}
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.Success
+import com.digitalasset.canton.util.{Thereafter, retry}
 import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ClientInterceptors

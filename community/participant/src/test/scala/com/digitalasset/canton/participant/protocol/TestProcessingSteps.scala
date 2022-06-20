@@ -12,13 +12,6 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOp
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  DomainId,
-  MediatorId,
-  Member,
-  ParticipantId,
-}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
@@ -50,6 +43,13 @@ import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionE
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  DomainId,
+  MediatorId,
+  Member,
+  ParticipantId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
@@ -128,7 +128,7 @@ class TestProcessingSteps(
     val recipient: Member = ParticipantId("participant1")
     EitherT.rightT(new UntrackedSubmission {
       override def batch: Batch[DefaultOpenEnvelope] =
-        Batch.of((envelope, Recipients.cc(recipient)))
+        Batch.of(defaultProtocolVersion, (envelope, Recipients.cc(recipient)))
       override def pendingSubmissionId: Int = param
       override def maxSequencingTimeO: OptionT[Future, CantonTimestamp] = OptionT.none
 

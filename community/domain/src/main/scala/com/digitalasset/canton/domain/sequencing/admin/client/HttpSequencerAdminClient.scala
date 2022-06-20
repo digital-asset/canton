@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.sequencing.admin.client
 
-import java.net.URL
 import cats.data.EitherT
 import cats.instances.future._
 import cats.syntax.either._
@@ -23,6 +22,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import sttp.client3._
 import sttp.model.Uri
 
+import java.net.URL
 import scala.concurrent.{ExecutionContext, Future}
 
 /** HTTP Sequencer administration/privileged operations client. */

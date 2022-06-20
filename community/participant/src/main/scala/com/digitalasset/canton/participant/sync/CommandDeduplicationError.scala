@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.DuplicateCommand
 import com.daml.error.definitions.LedgerApiErrors.RequestValidation.InvalidDeduplicationPeriodField
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.LedgerSubmissionId

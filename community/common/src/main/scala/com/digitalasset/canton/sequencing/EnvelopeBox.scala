@@ -15,7 +15,7 @@ import com.digitalasset.canton.tracing.Traced
 /** Type class to manipulate envelopes inside their box.
   * Specializes [[cats.Traverse]] to [[protocol.Envelope]] arguments.
   */
-trait EnvelopeBox[Box[+_]] {
+trait EnvelopeBox[Box[+_ <: Envelope[_]]] {
 
   /** Make this private so that we don't arbitrarily change the contents of a
     * [[com.digitalasset.canton.sequencing.protocol.SequencedEvent]] that has its serialization
@@ -28,12 +28,12 @@ trait EnvelopeBox[Box[+_]] {
   /** We can compose a [[cats.Traverse]] with an [[EnvelopeBox]], but not several [[EnvelopeBox]]es due to the
     * restriction to [[protocol.Envelope]]s in the type arguments.
     */
-  type ComposedBox[Outer[+_], +A] = Outer[Box[A]]
+  type ComposedBox[Outer[+_], +A <: Envelope[_]] = Outer[Box[A]]
 
   def revCompose[OuterBox[+_]](implicit
       OuterBox: Traverse[OuterBox]
-  ): EnvelopeBox[ComposedBox[OuterBox, +*]] =
-    new EnvelopeBox[ComposedBox[OuterBox, +*]] {
+  ): EnvelopeBox[Lambda[`+A <: Envelope[_]` => ComposedBox[OuterBox, A]]] =
+    new EnvelopeBox[Lambda[`+A <: Envelope[_]` => ComposedBox[OuterBox, A]]] {
       override private[sequencing] def traverse[G[_], A <: Envelope[_], B <: Envelope[_]](
           boxedEnvelope: OuterBox[Box[A]]
       )(f: A => G[B])(implicit G: Applicative[G]): G[OuterBox[Box[B]]] =
@@ -43,7 +43,7 @@ trait EnvelopeBox[Box[+_]] {
 
 object EnvelopeBox {
 
-  def apply[Box[+_]](implicit Box: EnvelopeBox[Box]): EnvelopeBox[Box] = Box
+  def apply[Box[+_ <: Envelope[_]]](implicit Box: EnvelopeBox[Box]): EnvelopeBox[Box] = Box
 
   implicit val sequencedEventEnvelopeBox: EnvelopeBox[SequencedEvent] =
     new EnvelopeBox[SequencedEvent] {

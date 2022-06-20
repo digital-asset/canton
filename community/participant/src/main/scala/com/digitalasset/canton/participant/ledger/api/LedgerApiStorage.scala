@@ -4,14 +4,13 @@
 package com.digitalasset.canton.participant.ledger.api
 
 import cats.syntax.either._
-import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.{DbConfig, MemoryStorageConfig, StorageConfig}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.{
   FailedToStopLedgerApiServer,
   LedgerApiServerError,
 }
 import com.digitalasset.canton.util.ResourceUtil.withResource
-import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.{DiscardOps, LedgerParticipantId}
 
 import java.sql.{DriverManager, SQLException}
 import java.util.UUID.randomUUID
@@ -90,8 +89,7 @@ object LedgerApiStorage {
       // although canton is running using in-memory data structures, ledger-api still needs a sql database so allocate its own h2 instance
       case _: MemoryStorageConfig => allocateInMemoryH2Database(participantId)
       // reuse the configured database
-      case dbConfig: DbConfig =>
-        fromDbConfig(dbConfig)
+      case dbConfig: DbConfig => fromDbConfig(dbConfig)
     }
 
   private def allocateInMemoryH2Database(

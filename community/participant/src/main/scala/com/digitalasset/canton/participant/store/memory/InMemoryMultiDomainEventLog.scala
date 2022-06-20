@@ -11,6 +11,7 @@ import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
+import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -41,11 +42,10 @@ import com.digitalasset.canton.participant.sync.{
 import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.LedgerTransactionId
-import com.digitalasset.canton.topology.DomainId
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}

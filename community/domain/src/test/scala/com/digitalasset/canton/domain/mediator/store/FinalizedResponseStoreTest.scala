@@ -3,24 +3,24 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import java.util.UUID
-import com.digitalasset.canton.crypto._
 import cats.syntax.traverse._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
-import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.protocol.messages.{InformeeMessage, Verdict}
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import io.functionmeta.functionFullName
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.util.UUID
 import scala.concurrent.Future
 
 trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
@@ -65,7 +65,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       )
     )
   }
-  val informeeMessage = InformeeMessage(fullInformeeTree)
+  val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
   val currentVersion =
     ResponseAggregation(
       requestId,

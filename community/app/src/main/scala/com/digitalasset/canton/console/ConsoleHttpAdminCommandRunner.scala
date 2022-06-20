@@ -21,8 +21,8 @@ import com.digitalasset.canton.tracing.Spanning
 import io.opentelemetry.api.trace.Tracer
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContextExecutor, blocking}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{ExecutionContextExecutor, blocking}
 
 /** Attempt to run an http admin-api command against whatever is pointed at in the config
   */

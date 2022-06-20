@@ -288,8 +288,15 @@ class ParticipantNodeBootstrap(
 
     // Crypto and Identity management
 
-    val syncCrypto =
-      new SyncCryptoApiProvider(participantId, ips, crypto, config.caching, timeouts, loggerFactory)
+    val syncCrypto = new SyncCryptoApiProvider(
+      participantId,
+      ips,
+      crypto,
+      config.caching,
+      timeouts,
+      futureSupervisor,
+      loggerFactory,
+    )
 
     val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
 

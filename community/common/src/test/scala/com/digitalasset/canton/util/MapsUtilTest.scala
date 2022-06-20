@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.util
 
-import org.scalatest.wordspec.AnyWordSpec
-import com.digitalasset.canton.BaseTest
 import cats.Id
+import com.digitalasset.canton.BaseTest
+import org.scalatest.wordspec.AnyWordSpec
 
 class MapsUtilTest extends AnyWordSpec with BaseTest {
   "MapsUtil" should {

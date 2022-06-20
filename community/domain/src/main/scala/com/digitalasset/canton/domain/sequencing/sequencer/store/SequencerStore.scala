@@ -4,10 +4,10 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.Order._
-import cats.{Functor, Show}
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
+import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout

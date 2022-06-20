@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console.commands
 
-import java.util.concurrent.atomic.AtomicReference
 import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverseFilter._
@@ -33,13 +32,15 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicDomainParameters
-import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.{DomainId, _}
-import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
-import com.google.protobuf.ByteString
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery}
+import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
+import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.{DomainId, _}
+import com.google.protobuf.ByteString
+
+import java.util.concurrent.atomic.AtomicReference
 
 class TopologyAdministrationGroup(
     instance: InstanceReference,

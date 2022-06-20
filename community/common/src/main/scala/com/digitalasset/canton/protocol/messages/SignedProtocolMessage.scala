@@ -9,9 +9,9 @@ import cats.syntax.option._
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
@@ -23,7 +23,6 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,12 +38,13 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 
   override def domainId: DomainId = message.domainId
 
-  override protected def toProtoVersioned
-      : VersionedMessage[SignedProtocolMessage[SignedProtocolMessageContent]] =
-    SignedProtocolMessage.toProtoVersioned(this)
+  override def companionObj = SignedProtocolMessage
 
-  override def representativeProtocolVersion: RepresentativeProtocolVersion =
-    ProtocolMessage.protocolVersionRepresentativeFor(message.representativeProtocolVersion.unwrap)
+  override val representativeProtocolVersion
+      : RepresentativeProtocolVersion[SignedProtocolMessage[SignedProtocolMessageContent]] =
+    SignedProtocolMessage.protocolVersionRepresentativeFor(
+      message.representativeProtocolVersion.unwrap
+    )
 
   override protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = message.toProtoSomeSignedProtocolMessage

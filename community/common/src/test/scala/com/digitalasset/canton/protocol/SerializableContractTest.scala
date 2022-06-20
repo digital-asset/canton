@@ -4,10 +4,8 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
 class SerializableContractTest extends AnyWordSpec with BaseTest {
@@ -39,7 +37,7 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
         CantonTimestamp.now(),
       )
       SerializableContract.fromProtoVersioned(
-        sci.toProtoVersioned(ProtocolVersion.latestForTest)
+        sci.toProtoVersioned(defaultProtocolVersion)
       ) shouldEqual Right(sci)
     }
   }

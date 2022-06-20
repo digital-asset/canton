@@ -7,6 +7,7 @@ import cats.Functor
 import cats.syntax.either._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
@@ -19,6 +20,7 @@ import com.digitalasset.canton.sequencing.RawProtocolEvent
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
@@ -27,10 +29,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 
 /** Mediator result for a transfer-out request
@@ -43,7 +42,9 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
     domain: Domain, // For transfer-out, this is the origin domain. For transfer-in, this is the target domain.
     override val verdict: Verdict,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      TransferResult[TransferDomainId]
+    ],
     override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with HasProtocolVersionedWrapper[TransferResult[TransferDomainId]]
@@ -63,8 +64,7 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransferResult(getCryptographicEvidence)
 
-  override def toProtoVersioned: VersionedMessage[TransferResult[TransferDomainId]] =
-    TransferResult.toProtoVersioned(this)
+  override def companionObj = TransferResult
 
   override def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {

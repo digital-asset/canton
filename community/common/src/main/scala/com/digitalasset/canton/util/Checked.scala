@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.{Applicative, Functor, MonadError}
 import cats.data.{Chain, EitherT, NonEmptyChain}
+import cats.{Applicative, Functor, MonadError}
 
 import scala.annotation.tailrec
 

@@ -48,7 +48,16 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
 
   def deliver(msgId: MessageId, timestamp: CantonTimestamp): OrdinaryProtocolEvent =
     OrdinarySequencedEvent(
-      sign(Deliver.create(0, timestamp, DefaultTestIdentities.domainId, Some(msgId), Batch.empty))
+      sign(
+        Deliver.create(
+          0,
+          timestamp,
+          DefaultTestIdentities.domainId,
+          Some(msgId),
+          Batch.empty(defaultProtocolVersion),
+          defaultProtocolVersion,
+        )
+      )
     )(traceContext)
 
   def deliverError(msgId: MessageId, timestamp: CantonTimestamp): OrdinaryProtocolEvent = {
@@ -60,6 +69,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           DefaultTestIdentities.domainId,
           msgId,
           DeliverErrorReason.BatchRefused("test"),
+          defaultProtocolVersion,
         )
       )
     )(traceContext)

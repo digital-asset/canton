@@ -14,7 +14,7 @@ import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
 import com.daml.ledger.participant.state.v2._
 import com.daml.lf.crypto.{Hash => LfHash}
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.data.{ImmArray, Ref, StringModule, Bytes => LfBytes}
+import com.daml.lf.data.{Bytes => LfBytes, ImmArray, Ref, StringModule}
 import com.daml.lf.transaction.BlindingInfo
 import com.digitalasset.canton
 import com.digitalasset.canton.ProtoDeserializationError.{
@@ -23,7 +23,6 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueConversionError,
 }
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.google.rpc.status.{Status => RpcStatus}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.v0
 import com.digitalasset.canton.participant.store.DamlLfSerializers._
@@ -61,6 +60,7 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.google.protobuf.ByteString
+import com.google.rpc.status.{Status => RpcStatus}
 import slick.jdbc.{GetResult, SetParameter}
 
 /** Wrapper for converting a [[LedgerSyncEvent]] to its protobuf companion.

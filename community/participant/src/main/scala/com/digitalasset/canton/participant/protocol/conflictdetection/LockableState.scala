@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import java.util.concurrent.atomic.AtomicReference
-
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
@@ -14,6 +12,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.LockableSt
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.google.common.annotations.VisibleForTesting
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.Ordered.orderingToOrdered
 import scala.concurrent.{Future, Promise}
 

@@ -7,10 +7,10 @@ import cats.syntax.either._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}
-import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import org.bouncycastle.asn1.x500.X500Name

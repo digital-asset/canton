@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.domain
 
 import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -16,11 +17,10 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.DomainRegistryE
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.SequencerClient
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.topology.DomainId
 
 /** A registry of domains. */
 trait DomainRegistry extends AutoCloseable {

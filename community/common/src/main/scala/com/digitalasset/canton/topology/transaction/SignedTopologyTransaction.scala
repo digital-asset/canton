@@ -6,10 +6,13 @@ package com.digitalasset.canton.topology.transaction
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.store.db.DbSerializationException
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtoV0,
@@ -17,15 +20,11 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.DomainId
 
 /** A signed topology transaction
   *
@@ -39,7 +38,9 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     key: SigningPublicKey,
     signature: Signature,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedTopologyTransaction[TopologyChangeOp]
+    ],
     val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SignedTopologyTransaction[TopologyChangeOp]]
     with HasProtoV0[v0.SignedTopologyTransaction]
@@ -51,9 +52,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
   override protected def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def toProtoVersioned
-      : VersionedMessage[SignedTopologyTransaction[TopologyChangeOp]] =
-    SignedTopologyTransaction.toProtoVersioned(this)
+  override def companionObj = SignedTopologyTransaction
 
   override protected def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(

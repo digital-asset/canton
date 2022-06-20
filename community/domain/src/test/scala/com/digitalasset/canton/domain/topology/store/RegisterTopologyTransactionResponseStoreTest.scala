@@ -3,17 +3,14 @@
 
 package com.digitalasset.canton.domain.topology.store
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore.Response
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingIdentityFactory}
-import com.digitalasset.canton.protocol.messages.{
-  ProtocolMessage,
-  RegisterTopologyTransactionResponse,
-}
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingIdentityFactory}
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -28,7 +25,7 @@ trait RegisterTopologyTransactionResponseStoreTest {
   private val requestId2 = String255.tryCreate("requestId2")
 
   private lazy val representativeProtocolVersion =
-    ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   private val response1 = RegisterTopologyTransactionResponse(
     p1,

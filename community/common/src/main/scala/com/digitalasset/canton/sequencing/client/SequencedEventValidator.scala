@@ -4,8 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.crypto.{Hash, SignatureCheckError, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{Hash, SignatureCheckError, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -85,8 +84,7 @@ class SequencedEventValidator(
     skipValidation: Boolean,
     domainId: DomainId,
     sequencerId: SequencerId,
-    syncCryptoApi: SyncCryptoClient,
-    futureSupervisor: FutureSupervisor,
+    syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends ValidateSequencedEvent
@@ -112,17 +110,15 @@ class SequencedEventValidator(
       ts: CantonTimestamp,
       context: => String,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Duration] =
-    futureSupervisor.supervisedUS(context)(
-      syncCryptoApi
-        .awaitIpsSnapshotUS(ts)
-        .flatMap { snapshot =>
-          FutureUnlessShutdown.outcomeF {
-            snapshot
-              .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
-              .map(_.topologyChangeDelay.duration)
-          }
+    syncCryptoApi
+      .awaitIpsSnapshotUSSupervised(context)(ts)
+      .flatMap { snapshot =>
+        FutureUnlessShutdown.outcomeF {
+          snapshot
+            .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
+            .map(_.topologyChangeDelay.duration)
         }
-    )
+      }
 
   private val priorEventRef: AtomicReference[Option[PriorEvent]] =
     new AtomicReference[Option[PriorEvent]](
@@ -251,11 +247,9 @@ class SequencedEventValidator(
           logger.debug(s"Wait for topology snapshot at $timestamp")
           for {
             snapshot <- EitherT.right(
-              futureSupervisor.supervisedUS(
+              syncCryptoApi.awaitSnapshotUSSupervised(
                 s"await topology ts $timestamp for event at ${event.timestamp}(tsOfSign=${event.signedEvent.timestampOfSigningKey}) with previous=$previousTsO and known=$topologyStateKnownUntil"
-              )(
-                syncCryptoApi.awaitSnapshotUS(timestamp)
-              )
+              )(timestamp)
             )
             _ <- snapshot
               .verifySignature(hash, sequencerId, event.signedEvent.signature)

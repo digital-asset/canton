@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import java.io.EOFException
-import java.util.zip.{GZIPInputStream, ZipException}
-
 import cats.Order
 import com.digitalasset.canton.serialization.DeserializationError
 import com.google.protobuf.ByteString
 
+import java.io.EOFException
+import java.util.zip.{GZIPInputStream, ZipException}
 import scala.annotation.tailrec
 
 object ByteStringUtil {

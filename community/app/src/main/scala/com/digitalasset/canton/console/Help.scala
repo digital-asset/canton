@@ -4,6 +4,7 @@
 package com.digitalasset.canton.console
 
 import cats.syntax.functor._
+
 import scala.annotation.StaticAnnotation
 import scala.reflect.ClassTag
 import scala.reflect.runtime.{universe => ru}

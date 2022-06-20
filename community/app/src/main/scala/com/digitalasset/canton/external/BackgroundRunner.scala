@@ -3,10 +3,6 @@
 
 package com.digitalasset.canton.external
 
-import java.io.{IOException, InputStream, StringWriter}
-import java.nio.BufferOverflowException
-import java.util.concurrent.TimeUnit
-
 import better.files.File
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{ProcessingTimeout, RequireTypes}
@@ -17,6 +13,9 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 import org.slf4j.event.Level
 
+import java.io.{IOException, InputStream, StringWriter}
+import java.nio.BufferOverflowException
+import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.jdk.CollectionConverters._

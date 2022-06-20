@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedDomain, SendTrackerStoreTest}
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 

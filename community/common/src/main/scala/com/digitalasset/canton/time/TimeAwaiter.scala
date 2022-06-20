@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.time
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.util.PriorityBlockingQueueUtil
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
 import scala.concurrent.{Future, Promise}
-import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.logging.NamedLogging
 import scala.jdk.CollectionConverters._
 
 /** Utility to implement a time awaiter

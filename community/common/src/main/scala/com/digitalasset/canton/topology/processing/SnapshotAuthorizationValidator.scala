@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.processing
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   RequiredAuth,
   SignedTopologyTransaction,
@@ -17,7 +17,6 @@ import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
-import com.digitalasset.canton.topology.store.TopologyStoreId
 
 /** Compute the authorization chain for a certain UID */
 class SnapshotAuthorizationValidator(

@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.BaseTest
-import com.google.protobuf.ByteString
-import org.scalatest.wordspec.AnyWordSpec
 import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
+import com.google.protobuf.ByteString
+import org.scalatest.wordspec.AnyWordSpec
 
 class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicEvidenceTest {
   val cryptoApi = new SymbolicPureCrypto

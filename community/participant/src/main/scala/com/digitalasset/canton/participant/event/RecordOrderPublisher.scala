@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.event
 import cats.syntax.foldable._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -36,10 +37,9 @@ import com.digitalasset.canton.participant.store.{
   SingleDimensionEventLog,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference

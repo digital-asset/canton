@@ -162,7 +162,10 @@ final case class NonNegativeFiniteDuration(duration: Duration)
 }
 
 object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {
-  implicit val forgetRefinement: Transformer[NonNegativeFiniteDuration, Duration] = _.duration
+  implicit val forgetRefinementJDuration: Transformer[NonNegativeFiniteDuration, Duration] =
+    _.duration
+  implicit val forgetRefinementFDuration: Transformer[NonNegativeFiniteDuration, FiniteDuration] =
+    _.toScala
 
   val Zero: NonNegativeFiniteDuration = NonNegativeFiniteDuration(Duration.ZERO)
 }

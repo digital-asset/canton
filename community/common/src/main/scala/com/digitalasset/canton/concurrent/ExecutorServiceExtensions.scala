@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.concurrent
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.logging.TracedLogger
 
 import java.util.concurrent.{ExecutorService, TimeUnit}
-import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.lifecycle.Lifecycle
 
 case class ExecutorServiceExtensions[EC <: ExecutorService](executorService: EC)(
     logger: TracedLogger,

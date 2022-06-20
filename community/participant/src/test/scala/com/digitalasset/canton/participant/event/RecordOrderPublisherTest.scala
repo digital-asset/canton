@@ -15,8 +15,8 @@ import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisherTest.Fixture
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
-import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
 import com.digitalasset.canton.participant.protocol._
+import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.MultiDomainEventLog
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData

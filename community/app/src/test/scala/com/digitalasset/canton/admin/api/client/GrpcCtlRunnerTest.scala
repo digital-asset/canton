@@ -11,8 +11,8 @@ import io.grpc.stub.AbstractStub
 import io.grpc.{CallOptions, Channel, ManagedChannel}
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.concurrent.duration._
 import scala.concurrent.Future
+import scala.concurrent.duration._
 
 class GrpcCtlRunnerTest extends AsyncWordSpec with BaseTest {
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.data
 
-import java.util.concurrent.atomic.AtomicReference
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
@@ -18,6 +17,7 @@ import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}

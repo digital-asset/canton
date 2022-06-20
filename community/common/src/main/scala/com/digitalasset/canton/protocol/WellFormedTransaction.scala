@@ -12,11 +12,11 @@ import com.daml.lf.data.ImmArray
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.ActionDescription
-import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.protocol.WellFormedTransaction.State
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
-import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil, NoCopy}
+import com.digitalasset.canton.protocol.WellFormedTransaction.State
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil, NoCopy}
 
 import scala.collection.immutable.HashMap
 import scala.collection.mutable
@@ -588,15 +588,8 @@ object WellFormedTransaction {
         ) { case ((freeNodeId, rbScopeWithNodeIds), WithRollbackScope(rbScope, wfTx)) =>
           val headNodeIds = wfTx.unwrap.nodes.keys
 
-          val longestCommonRollbackScopePrefixLength = rbScopeWithNodeIds
-            .lazyZip(rbScope)
-            .takeWhile { case ((rollbackSibling, _), y) =>
-              rollbackSibling == y
-            }
-            .size
-
-          val rbPops = rbScopeWithNodeIds.length - longestCommonRollbackScopePrefixLength
-          val rbPushes = rbScope.length - longestCommonRollbackScopePrefixLength
+          val (rbPops, rbPushes) =
+            RollbackScope.popsAndPushes(rbScopeWithNodeIds.map(_._1), rbScope)
 
           for {
             _ <- Either.cond(

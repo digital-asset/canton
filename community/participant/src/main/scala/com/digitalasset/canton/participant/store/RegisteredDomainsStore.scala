@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.db.DbRegisteredDomainsStore
 import com.digitalasset.canton.participant.store.memory.InMemoryRegisteredDomainsStore
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
 

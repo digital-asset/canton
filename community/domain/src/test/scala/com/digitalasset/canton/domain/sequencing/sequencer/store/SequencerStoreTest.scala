@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.option._
 import cats.syntax.traverse._
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.mockDeliverStoreEvent
@@ -18,9 +17,10 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
   SequencerMemberStatus,
   SequencerPruningStatus,
 }
-import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.{Member, ParticipantId}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec

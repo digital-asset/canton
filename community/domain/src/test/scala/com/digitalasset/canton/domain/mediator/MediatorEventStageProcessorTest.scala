@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -38,7 +39,6 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
-import com.digitalasset.canton.BaseTest
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -109,7 +109,11 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         timestamp,
         domainId,
         None,
-        Batch.of((InformeeMessage(fullInformeeTree), Recipients.cc(mediatorId))),
+        Batch.of(
+          defaultProtocolVersion,
+          (InformeeMessage(fullInformeeTree, defaultProtocolVersion), Recipients.cc(mediatorId)),
+        ),
+        defaultProtocolVersion,
       )
 
     def handle(events: RawProtocolEvent*): FutureUnlessShutdown[Unit] =
@@ -136,10 +140,17 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
   "raise alarms when receiving bad sequencer event batches" in {
     val env = new Env()
+
     val informeeMessage = mock[InformeeMessage]
     when(informeeMessage.domainId).thenReturn(domainId)
     when(informeeMessage.rootHash).thenReturn(None)
-    val signedConfirmationResponse = SignedProtocolMessage(mock[MediatorResponse], mock[Signature])
+
+    val mediatorResponse = mock[MediatorResponse]
+    when(mediatorResponse.representativeProtocolVersion).thenReturn(
+      MediatorResponse.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    )
+
+    val signedConfirmationResponse = SignedProtocolMessage(mediatorResponse, mock[Signature])
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -147,6 +158,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     val badBatches = List(
       (
         Batch.of[ProtocolMessage](
+          defaultProtocolVersion,
           informeeMessage -> RecipientsTest.testInstance,
           informeeMessage -> RecipientsTest.testInstance,
         ),
@@ -154,13 +166,17 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       ),
       (
         Batch.of[ProtocolMessage](
+          defaultProtocolVersion,
           informeeMessage -> RecipientsTest.testInstance,
           signedConfirmationResponse -> RecipientsTest.testInstance,
         ),
         List("Received both mediator requests and mediator responses."),
       ),
       (
-        Batch.of[ProtocolMessage](informeeMessageWithWrongDomainId -> RecipientsTest.testInstance),
+        Batch.of[ProtocolMessage](
+          defaultProtocolVersion,
+          informeeMessageWithWrongDomainId -> RecipientsTest.testInstance,
+        ),
         List("Received messages with wrong domain ids: List(wrong::domain)"),
       ),
     )
@@ -168,7 +184,9 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     sequentialTraverse_(badBatches) { case (batch, expectedMessages) =>
       loggerFactory.assertLogs(
         env.processor.handle(
-          toTracedSignedEvents(Deliver.create(1L, CantonTimestamp.Epoch, domainId, None, batch))
+          toTracedSignedEvents(
+            Deliver.create(1L, CantonTimestamp.Epoch, domainId, None, batch, defaultProtocolVersion)
+          )
         ),
         expectedMessages map { error => logEntry: LogEntry =>
           logEntry.errorMessage should include(error)
@@ -292,6 +310,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
     ResponseAggregation(
       requestId,
-      InformeeMessage(fullInformeeTree),
+      InformeeMessage(fullInformeeTree, defaultProtocolVersion),
     )(loggerFactory)
 }

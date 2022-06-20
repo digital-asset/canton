@@ -17,7 +17,7 @@ import com.daml.ledger.api.v1.ledger_configuration_service.LedgerConfiguration
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
-import com.daml.ledger.client.binding.{Contract, TemplateCompanion, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive => P, TemplateCompanion}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
@@ -682,6 +682,34 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )(filter, consoleEnvironment.environment.scheduler)
           )
         })
+
+      @Help.Summary("Subscribe to the command completion stream", FeatureFlag.Testing)
+      @Help.Description(
+        """This function connects to the command completion stream and passes command completions to `observer` until 
+          |the stream is completed.
+          |Only completions for parties in `parties` will be returned.
+          |The returned completions start at `beginOffset` (default: `LEDGER_BEGIN`).
+          |If the participant has been pruned via `pruning.prune` and if `beginOffset` is lower than the pruning offset, 
+          |this command fails with a `NOT_FOUND` error."""
+      )
+      def subscribe(
+          observer: StreamObserver[Completion],
+          parties: Seq[PartyId],
+          beginOffset: LedgerOffset =
+            new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
+      ): AutoCloseable = {
+        check(FeatureFlag.Testing)(
+          consoleEnvironment.run {
+            ledgerApiCommand(
+              LedgerApiCommands.CommandCompletionService.Subscribe(
+                observer,
+                parties.map(_.toLf),
+                Some(beginOffset),
+              )
+            )
+          }
+        )
+      }
     }
 
     @Help.Summary("Retrieve the ledger configuration", FeatureFlag.Testing)

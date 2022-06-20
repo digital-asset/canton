@@ -5,8 +5,8 @@ package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.util.ErrorUtil
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j
 
 import scala.collection.immutable.ListMap

@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.crypto.provider.tink
 
-import java.security.GeneralSecurityException
 import cats.syntax.either._
 import cats.syntax.foldable._
-import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.crypto.HkdfError.{HkdfHmacError, HkdfInternalError}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink
 import com.google.crypto.tink.aead.AeadKeyTemplates
@@ -18,6 +17,7 @@ import com.google.crypto.tink.subtle.{Hkdf, Random}
 import com.google.crypto.tink.{KeysetHandle, proto => tinkproto}
 import com.google.protobuf.ByteString
 
+import java.security.GeneralSecurityException
 import scala.collection.concurrent.TrieMap
 import scala.reflect.{ClassTag, classTag}
 

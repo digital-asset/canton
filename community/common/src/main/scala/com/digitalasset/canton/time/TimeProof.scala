@@ -11,7 +11,6 @@ import com.digitalasset.canton.config.RequireTypes.String73
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.time.v0
 import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol._
@@ -22,9 +21,10 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   OrdinarySequencedEvent,
   PossiblyIgnoredSequencedEvent,
 }
+import com.digitalasset.canton.time.v0
 import com.digitalasset.canton.topology.{AuthenticatedMember, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.HasProtoV0
+import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -39,7 +39,7 @@ import scala.concurrent.Future
   * @param deliver the time proof event itself. this must be the event content signedEvent wrapper.
   */
 case class TimeProof private (
-    private val event: OrdinarySequencedEvent[_],
+    private val event: OrdinarySequencedEvent[Envelope[_]],
     private val deliver: Deliver[Nothing],
 ) extends PrettyPrinting
     with HasProtoV0[v0.TimeProof]
@@ -59,7 +59,10 @@ case class TimeProof private (
 
 object TimeProof {
 
-  private def apply(event: OrdinarySequencedEvent[_], deliver: Deliver[Nothing]): TimeProof = {
+  private def apply(
+      event: OrdinarySequencedEvent[Envelope[_]],
+      deliver: Deliver[Nothing],
+  ): TimeProof = {
     require(
       event.signedEvent.content eq deliver,
       "Time proof event must be the content of the provided signed sequencer event",
@@ -68,13 +71,14 @@ object TimeProof {
   }
 
   def fromProtoV0(
-      hashOps: HashOps
+      protocolVersion: ProtocolVersion,
+      hashOps: HashOps,
   )(timeProofP: v0.TimeProof): ParsingResult[TimeProof] = {
     val v0.TimeProof(eventPO) = timeProofP
     for {
       possiblyIgnoredProtocolEvent <- ProtoConverter
         .required("event", eventPO)
-        .flatMap(PossiblyIgnoredSequencedEvent.fromProtoV0(hashOps))
+        .flatMap(PossiblyIgnoredSequencedEvent.fromProtoV0(protocolVersion, hashOps))
       event <- possiblyIgnoredProtocolEvent match {
         case ordinary: OrdinaryProtocolEvent => Right(ordinary)
         case _: IgnoredSequencedEvent[_] =>
@@ -85,7 +89,7 @@ object TimeProof {
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  def fromEvent(event: OrdinarySequencedEvent[_]): Either[String, TimeProof] =
+  def fromEvent(event: OrdinarySequencedEvent[Envelope[_]]): Either[String, TimeProof] =
     for {
       deliver <- PartialFunction
         .condOpt(event.signedEvent.content) { case deliver: Deliver[_] => deliver }
@@ -105,7 +109,7 @@ object TimeProof {
     } yield new TimeProof(event, emptyDeliver)
 
   /** Return a wrapped [[TimeProof]] if the given `event` has the correct properties. */
-  def fromEventO(event: OrdinarySequencedEvent[_]): Option[TimeProof] =
+  def fromEventO(event: OrdinarySequencedEvent[Envelope[_]]): Option[TimeProof] =
     fromEvent(event).toOption
 
   /** Is the event a time proof */
@@ -124,7 +128,7 @@ object TimeProof {
         client.sendAsync(
           // we intentionally ask for an empty event to be sequenced to observe the time.
           // this means we can safely share this event without mentioning other recipients.
-          Batch.empty,
+          Batch.empty(client.staticDomainParameters.protocolVersion),
           // as we typically won't know the domain time at the point of doing this request (hence doing the request for the time...),
           // we can't pick a known good domain time for the max sequencing time.
           // if we were to guess it we may get it wrong and then in the event of no activity on the domain for our recipient,
@@ -135,7 +139,7 @@ object TimeProof {
         )
       case _: UnauthenticatedMemberId =>
         client.sendAsyncUnauthenticated(
-          Batch.empty,
+          Batch.empty(client.staticDomainParameters.protocolVersion),
           maxSequencingTime = CantonTimestamp.MaxValue,
           messageId = mkTimeProofRequestMessageId,
         )

@@ -5,14 +5,13 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
-import com.digitalasset.canton.protocol.ViewHash
 import com.digitalasset.canton.protocol.v0.TransferViewTree
-import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
+import com.digitalasset.canton.protocol.{ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
 import com.digitalasset.canton.version.{
   HasProtoV0,
   HasVersionedWrapper,

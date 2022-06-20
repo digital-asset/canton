@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.sync
 
 import cats.syntax.option._
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.ParticipantEventLog.ProductionParticipantEventLogId
@@ -13,8 +12,6 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryMultiDomainEventLog,
   InMemoryParticipantEventLog,
 }
-import com.digitalasset.canton.{BaseTest, DomainAlias}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.participant.store.{
   DomainConnectionConfigStore,
   MultiDomainEventLog,
@@ -22,9 +19,12 @@ import com.digitalasset.canton.participant.store.{
   SingleDimensionEventLogTest,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{EventId, TimelyRejectionEventId}
+import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

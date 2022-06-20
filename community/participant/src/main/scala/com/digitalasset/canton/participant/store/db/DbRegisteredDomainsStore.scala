@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either._
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
@@ -17,9 +18,8 @@ import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
 }
 import com.digitalasset.canton.participant.store.RegisteredDomainsStore
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

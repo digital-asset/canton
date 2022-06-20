@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.crypto
 
-import java.nio.{ByteBuffer, ByteOrder, ShortBuffer}
 import com.google.protobuf.ByteString
-import scala.jdk.CollectionConverters._
 
+import java.nio.{ByteBuffer, ByteOrder, ShortBuffer}
 import scala.concurrent.blocking
+import scala.jdk.CollectionConverters._
 
 /** A running digest of a set of bytes, where elements can be added and removed.
   *

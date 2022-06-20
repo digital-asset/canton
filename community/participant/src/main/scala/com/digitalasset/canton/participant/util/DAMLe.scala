@@ -13,7 +13,6 @@ import com.daml.lf.engine._
 import com.daml.lf.interpretation.{Error => LfInterpretationError}
 import com.daml.lf.language.Ast.Package
 import com.daml.lf.transaction.Versioned
-import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
@@ -22,6 +21,7 @@ import com.digitalasset.canton.participant.util.DAMLe.{ContractWithMetadata, Pac
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.LfTransactionUtil
+import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}

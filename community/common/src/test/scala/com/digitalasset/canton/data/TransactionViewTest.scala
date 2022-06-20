@@ -89,7 +89,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         coreInputs: Map[LfContractId, SerializableContract] = Map.empty,
         createdIds: Seq[LfContractId] = Seq(createdId),
         archivedInSubviews: Set[LfContractId] = Set.empty,
-        resolvedKeys: Map[LfGlobalKey, KeyResolution] = Map.empty,
+        resolvedKeys: Map[LfGlobalKey, SerializableKeyResolution] = Map.empty,
     ): Either[String, ViewParticipantData] = {
 
       val created = createdIds.map { id =>
@@ -229,7 +229,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           archivedInSubviews = Set(otherAbsoluteId),
           resolvedKeys = Map(
             ExampleTransactionFactory.defaultGlobalKey ->
-              AssignedKey(absoluteId)(ExampleTransactionFactory.transactionVersion)
+              AssignedKey(absoluteId, rolledBack = false)(
+                ExampleTransactionFactory.transactionVersion
+              )
           ),
         ).value
 

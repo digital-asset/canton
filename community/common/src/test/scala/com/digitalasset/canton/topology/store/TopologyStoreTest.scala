@@ -3,24 +3,24 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.syntax.contravariantSemigroupal._
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Replace}
+import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 
 import scala.annotation.nowarn
 import scala.concurrent.Future
-import cats.syntax.contravariantSemigroupal._
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Replace}
-import com.digitalasset.canton.util.MonadUtil
 
 trait TopologyStoreTest
     extends AsyncWordSpec

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto.DomainSnapshotSyncCryptoApi
@@ -45,15 +45,16 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessor,
 }
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
@@ -61,8 +62,6 @@ import org.scalatest.{Assertion, FutureOutcome}
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise, blocking}
-import com.digitalasset.canton.util.Thereafter.syntax._
-
 import scala.util.{Failure, Success}
 
 class DomainTopologyDispatcherTest
@@ -198,6 +197,7 @@ class DomainTopologyDispatcherTest
       clock,
       false,
       parameters,
+      FutureSupervisor.Noop,
       sender,
       loggerFactory,
     )
@@ -628,6 +628,7 @@ class DomainTopologySenderTest
                   domainId,
                   messageId = MessageId.tryCreate("booh"),
                   reason = DeliverErrorReason.BatchInvalid("booh"),
+                  protocolVersion = defaultProtocolVersion,
                 )
               )
             ),

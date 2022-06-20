@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferInViewTree, ViewType}
 import com.digitalasset.canton.protocol._
@@ -11,9 +13,13 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.{HasProtoV0, RepresentativeProtocolVersion}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasProtocolVersionedWithContextCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 
 import java.util.UUID
 
@@ -33,16 +39,17 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
 
   private[this] val commonData = tree.commonData.tryUnwrap
 
+  // Align the protocol version with the common data's protocol version
+  lazy val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInMediatorMessage] =
+    TransferInMediatorMessage.protocolVersionRepresentativeFor(
+      commonData.representativeProtocolVersion.unwrap
+    )
+
   override def domainId: DomainId = commonData.targetDomain
 
   override def mediatorId: MediatorId = commonData.targetMediator
 
   override def requestUuid: UUID = commonData.uuid
-
-  lazy val representativeProtocolVersion: RepresentativeProtocolVersion =
-    ProtocolMessage.protocolVersionRepresentativeFor(
-      commonData.representativeProtocolVersion.unwrap
-    )
 
   override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
     val confirmingParties = commonData.confirmingParties
@@ -91,7 +98,19 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
   override def viewType: ViewType = ViewType.TransferInViewType
 }
 
-object TransferInMediatorMessage {
+object TransferInMediatorMessage
+    extends HasProtocolVersionedWithContextCompanion[TransferInMediatorMessage, HashOps] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.TransferInMediatorMessage)((hashOps, proto) =>
+        fromProtoV0(hashOps)(proto)
+      ),
+      _.toProtoV0.toByteString,
+    )
+  )
+
   def fromProtoV0(hashOps: HashOps)(
       transferInMediatorMessageP: v0.TransferInMediatorMessage
   ): ParsingResult[TransferInMediatorMessage] =
@@ -108,4 +127,6 @@ object TransferInMediatorMessage {
         OtherError(s"Transfer-in view data is not blinded in request ${tree.rootHash}"),
       )
     } yield TransferInMediatorMessage(tree)
+
+  override protected def name: String = "TransferInMediatorMessage"
 }

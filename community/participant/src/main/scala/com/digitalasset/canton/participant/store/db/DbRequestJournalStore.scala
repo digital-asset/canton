@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -20,8 +20,8 @@ import com.digitalasset.canton.participant.admin.RepairService.RepairContext._
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.store.db.DbRequestJournalStore.ReplaceRequest
-import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
+import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.{
   DbBulkUpdateProcessor,
@@ -30,8 +30,8 @@ import com.digitalasset.canton.store.db.{
 }
 import com.digitalasset.canton.store.{CursorPreheadStore, IndexedDomain}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 import slick.jdbc._

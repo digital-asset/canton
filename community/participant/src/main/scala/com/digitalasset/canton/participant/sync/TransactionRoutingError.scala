@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.sync
 
+import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, ErrorResource, Explanation, Resolution}
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.RoutingErrorGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionSubmissionError
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.LfPartyId
-import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, ErrorResource, Explanation, Resolution}
 import com.digitalasset.canton.topology.DomainId
 
 sealed trait TransactionRoutingError extends TransactionError with Product with Serializable

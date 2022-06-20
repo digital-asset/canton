@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.domain
 
-import java.util.concurrent.atomic.AtomicReference
 import cats.data.EitherT
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.{
@@ -13,13 +13,13 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.collect.{BiMap, HashBiMap}
 
-import scala.jdk.CollectionConverters._
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.jdk.CollectionConverters._
 
 trait DomainAliasResolution extends AutoCloseable {
   def domainIdForAlias(alias: DomainAlias): Option[DomainId]

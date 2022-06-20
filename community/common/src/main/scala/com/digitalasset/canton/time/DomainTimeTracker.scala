@@ -8,8 +8,9 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.OrdinaryApplicationHandler
+import com.digitalasset.canton.sequencing.client.SequencerClient
+import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -241,7 +242,7 @@ class DomainTimeTracker(
   }
 
   /** Create a [[sequencing.OrdinaryApplicationHandler]] for updating this time tracker */
-  def wrapHandler[Env](
+  def wrapHandler[Env <: Envelope[_]](
       handler: OrdinaryApplicationHandler[Env]
   ): OrdinaryApplicationHandler[Env] = handler.replace { tracedEvents =>
     tracedEvents.withTraceContext { implicit batchTraceContext => events =>
@@ -253,11 +254,11 @@ class DomainTimeTracker(
   }
 
   @VisibleForTesting
-  private[time] def update(events: Seq[OrdinarySequencedEvent[_]])(implicit
+  private[time] def update(events: Seq[OrdinarySequencedEvent[Envelope[_]]])(implicit
       batchTraceContext: TraceContext
   ): Unit = {
     withLock {
-      def updateOne(event: OrdinarySequencedEvent[_]): Unit = {
+      def updateOne(event: OrdinarySequencedEvent[Envelope[_]]): Unit = {
         val oldTimestamp =
           timestampRef.getAndSet(LatestAndNext(received(event.timestamp).some, None))
         oldTimestamp.next.foreach(_.trySuccess(UnlessShutdown.Outcome(event.timestamp)))

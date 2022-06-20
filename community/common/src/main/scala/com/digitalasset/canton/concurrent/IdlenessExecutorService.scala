@@ -4,7 +4,6 @@
 package com.digitalasset.canton.concurrent
 
 import java.util.concurrent._
-
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContextExecutorService
 import scala.concurrent.duration.FiniteDuration

@@ -3,9 +3,6 @@
 
 package com.digitalasset.canton.networking.http
 
-import java.io.IOException
-import java.security._
-import java.util.Base64
 import better.files._
 import cats.Show
 import cats.data.EitherT
@@ -23,8 +20,6 @@ import com.google.protobuf.ByteString
 import io.circe.syntax._
 import io.circe.{Decoder, Encoder}
 import io.functionmeta.functionFullName
-
-import javax.net.ssl._
 import okhttp3.OkHttpClient
 import sttp.capabilities.WebSockets
 import sttp.client3
@@ -33,7 +28,11 @@ import sttp.client3.circe.asJson
 import sttp.client3.okhttp.OkHttpFutureBackend
 import sttp.model.{Header, StatusCode, Uri}
 
+import java.io.IOException
+import java.security._
 import java.security.cert.X509Certificate
+import java.util.Base64
+import javax.net.ssl._
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A generic HTTP client with client certificate authentication and optional request signing.

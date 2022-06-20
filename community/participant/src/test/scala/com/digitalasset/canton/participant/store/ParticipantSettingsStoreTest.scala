@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.option._
 import cats.syntax.foldable._
+import cats.syntax.option._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings

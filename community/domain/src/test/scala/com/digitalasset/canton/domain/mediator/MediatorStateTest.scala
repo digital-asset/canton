@@ -4,14 +4,14 @@
 package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.domain.mediator.store.{InMemoryFinalizedResponseStore, MediatorState}
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.InformeeMessage
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -57,7 +57,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         )
       )
     }
-    val informeeMessage = InformeeMessage(fullInformeeTree)
+    val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
     val currentVersion = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
 
     def mediatorState: MediatorState = {

@@ -4,13 +4,12 @@
 package com.digitalasset.canton.lifecycle
 
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
-
-import java.util.concurrent.atomic.AtomicInteger
 import com.digitalasset.canton.lifecycle.StartAndCloseable.StartAfterClose
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{Future, Promise, blocking}
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
+import cats.syntax.either._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsServiceStub
 import com.daml.ledger.api.v1.active_contracts_service.{
@@ -10,12 +11,19 @@ import com.daml.ledger.api.v1.active_contracts_service.{
   GetActiveContractsRequest,
   GetActiveContractsResponse,
 }
+import com.daml.ledger.api.v1.admin.metering_report_service.MeteringReportServiceGrpc.MeteringReportServiceStub
+import com.daml.ledger.api.v1.admin.metering_report_service.{
+  GetMeteringReportRequest,
+  GetMeteringReportResponse,
+  MeteringReportServiceGrpc,
+}
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
 import com.daml.ledger.api.v1.admin.package_management_service._
 import com.daml.ledger.api.v1.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
 import com.daml.ledger.api.v1.admin.participant_pruning_service._
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
 import com.daml.ledger.api.v1.admin.party_management_service._
+import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.daml.ledger.api.v1.admin.user_management_service.{
   CreateUserRequest,
   CreateUserResponse,
@@ -29,11 +37,10 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   ListUsersResponse,
   RevokeUserRightsRequest,
   RevokeUserRightsResponse,
+  Right => UserRight,
   User,
   UserManagementServiceGrpc,
-  Right => UserRight,
 }
-import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.daml.ledger.api.v1.command_completion_service.CommandCompletionServiceGrpc.CommandCompletionServiceStub
 import com.daml.ledger.api.v1.command_completion_service._
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandServiceStub
@@ -77,6 +84,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   UserRights,
 }
 import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -87,14 +95,6 @@ import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import com.google.protobuf.empty.Empty
 import io.grpc._
 import io.grpc.stub.StreamObserver
-import cats.syntax.either._
-import com.daml.ledger.api.v1.admin.metering_report_service.{
-  GetMeteringReportRequest,
-  GetMeteringReportResponse,
-  MeteringReportServiceGrpc,
-}
-import com.daml.ledger.api.v1.admin.metering_report_service.MeteringReportServiceGrpc.MeteringReportServiceStub
-import com.digitalasset.canton.data.CantonTimestamp
 
 import java.time.Instant
 import java.util.UUID
@@ -459,6 +459,41 @@ object LedgerApiCommands {
       override def timeoutType: TimeoutType = ServerEnforcedTimeout
     }
 
+    case class Subscribe(
+        observer: StreamObserver[Completion],
+        parties: Seq[String],
+        offset: Option[LedgerOffset],
+    )(implicit loggingContext: ErrorLoggingContext)
+        extends BaseCommand[CompletionStreamRequest, AutoCloseable, AutoCloseable] {
+      // The subscription should never be cut short because of a gRPC timeout
+      override def timeoutType: TimeoutType = ServerEnforcedTimeout
+
+      override def createRequest(): Either[String, CompletionStreamRequest] = Right {
+        CompletionStreamRequest(
+          applicationId = applicationId,
+          parties = parties,
+          offset = offset,
+        )
+      }
+
+      override def submitRequest(
+          service: CommandCompletionServiceStub,
+          request: CompletionStreamRequest,
+      ): Future[AutoCloseable] = {
+        val rawObserver = new ForwardingStreamObserver[CompletionStreamResponse, Completion](
+          observer,
+          _.completions,
+        )
+        val context = Context.current().withCancellation()
+        context.run(() => service.completionStream(request, rawObserver))
+        Future.successful(context)
+      }
+
+      override def handleResponse(response: AutoCloseable): Either[String, AutoCloseable] = Right(
+        response
+      )
+    }
+
     object GrpcErrorStatus {
       def unapply(ex: Throwable): Option[Status] = ex match {
         case e: StatusException => Some(e.getStatus)
@@ -466,7 +501,6 @@ object LedgerApiCommands {
         case _ => None
       }
     }
-
   }
 
   object LedgerConfigurationService {
@@ -776,7 +810,7 @@ object LedgerApiCommands {
       def readAs: Set[LfPartyId]
       def participantAdmin: Boolean
 
-      protected def getRights(): Seq[UserRight] = {
+      protected def getRights: Seq[UserRight] = {
         actAs.toSeq.map(x => UserRight().withCanActAs(UserRight.CanActAs(x))) ++
           readAs.toSeq.map(x => UserRight().withCanReadAs(UserRight.CanReadAs(x))) ++
           (if (participantAdmin) Seq(UserRight().withParticipantAdmin(UserRight.ParticipantAdmin()))
@@ -802,7 +836,7 @@ object LedgerApiCommands {
       override def createRequest(): Either[String, CreateUserRequest] = Right(
         CreateUserRequest(
           user = Some(User(id = id, primaryParty = primaryParty.getOrElse(""))),
-          rights = getRights(),
+          rights = getRights,
         )
       )
 
@@ -868,7 +902,7 @@ object LedgerApiCommands {
         override def createRequest(): Either[String, GrantUserRightsRequest] = Right(
           GrantUserRightsRequest(
             userId = id,
-            rights = getRights(),
+            rights = getRights,
           )
         )
 
@@ -894,7 +928,7 @@ object LedgerApiCommands {
         override def createRequest(): Either[String, RevokeUserRightsRequest] = Right(
           RevokeUserRightsRequest(
             userId = id,
-            rights = getRights(),
+            rights = getRights,
           )
         )
 

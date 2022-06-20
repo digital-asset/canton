@@ -9,7 +9,6 @@ import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.option._
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,8 +25,8 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
@@ -60,10 +59,9 @@ class SequencerReader(
     config: SequencerReaderConfig,
     domainId: DomainId,
     store: SequencerStore,
-    syncCryptoApi: SyncCryptoClient,
+    syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     eventSignaller: EventSignaller,
     topologyClientMember: Member,
-    futureSupervisor: FutureSupervisor,
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -165,7 +163,6 @@ class SequencerReader(
           syncCryptoApi,
           signingTimestamp,
           latestTopologyClientTimestamp,
-          futureSupervisor,
           protocolVersion,
           // This warning should only trigger on unauthenticated members,
           // but batches addressed to unauthenticated members must not specify a signing key timestamp.
@@ -231,7 +228,6 @@ class SequencerReader(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
-              futureSupervisor,
               protocolVersion,
               warnIfApproximate = warnIfApproximate,
             )(implicitly, ErrorLoggingContext.fromTracedLogger(logger)(eventTraceContext))
@@ -317,6 +313,7 @@ class SequencerReader(
                   domainId,
                   messageId,
                   reason,
+                  protocolVersion,
                 )
               } else
                 Deliver.create(
@@ -324,7 +321,8 @@ class SequencerReader(
                   sequencingTimestamp,
                   domainId,
                   None,
-                  Batch.empty[ClosedEnvelope],
+                  Batch.empty[ClosedEnvelope](protocolVersion),
+                  protocolVersion,
                 )
               Future.successful(
                 // This event cannot change the topology state of the client
@@ -452,7 +450,14 @@ class SequencerReader(
             .batchClosedEnvelopesFromByteString(payload.content)
             .fold(err => throw new DbDeserializationException(err.toString), identity)
           val filteredBatch = Batch.filterClosedEnvelopesFor(batch, member)
-          Deliver.create[ClosedEnvelope](counter, timestamp, domainId, messageIdO, filteredBatch)
+          Deliver.create[ClosedEnvelope](
+            counter,
+            timestamp,
+            domainId,
+            messageIdO,
+            filteredBatch,
+            protocolVersion,
+          )
         case DeliverErrorStoreEvent(_, messageId, message, traceContext) =>
           DeliverError.create(
             counter,
@@ -460,6 +465,7 @@ class SequencerReader(
             domainId,
             messageId,
             reason = DeliverErrorReason.BatchRefused(message.unwrap),
+            protocolVersion,
           )
       }
     }
@@ -553,9 +559,12 @@ object SequencerReader {
       eventTraceContext: TraceContext,
   )
 
-  def getSnapshotForSequencerSigning(cryptoApi: SyncCryptoClient, timestamp: CantonTimestamp)(
-      implicit traceContext: TraceContext
-  ): SyncCryptoApi = {
+  def getSnapshotForSequencerSigning[T <: SyncCryptoApi](
+      cryptoApi: SyncCryptoClient[T],
+      timestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): T = {
     // TODO(i4639) improve how we deal with sequencer keys
     // below code works due to the following convention: we always use the "newest" key for signing.
     // if we roll sequencer keys, then we add a new key first and then revoke the old one in a subsequent

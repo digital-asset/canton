@@ -5,9 +5,9 @@ package com.digitalasset.canton.networking.grpc
 
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil._
 import io.grpc.StatusRuntimeException
 import io.grpc.stub.StreamObserver
-import com.digitalasset.canton.util.ShowUtil._
 
 abstract class ErrorLoggingStreamObserver[R](
     logger: TracedLogger,

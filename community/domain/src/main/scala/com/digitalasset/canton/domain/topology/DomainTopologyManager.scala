@@ -12,13 +12,13 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Topolo
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.nowarn
 import scala.collection.mutable
@@ -193,8 +193,7 @@ class DomainTopologyManager(
   }
 
   // Representative for the class of protocol versions of SignedTopologyTransaction
-  private val signedTopologyTransactionRepresentativeProtocolVersion
-      : RepresentativeProtocolVersion =
+  private val signedTopologyTransactionRepresentativeProtocolVersion =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
   private def checkCorrectProtocolVersion(

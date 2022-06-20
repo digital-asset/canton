@@ -9,16 +9,16 @@ import cats.syntax.bifunctor._
 import cats.syntax.either._
 import cats.syntax.option._
 import com.daml.metrics.Timed
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
-import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   KeepAliveClientConfig,
   LoggingConfig,
   ProcessingTimeout,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.crypto.{Crypto, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{Crypto, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle._
@@ -29,6 +29,7 @@ import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
+import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError._
@@ -45,7 +46,6 @@ import com.digitalasset.canton.sequencing.handlers.{
 }
 import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
 import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.store.SequencedEventStore.{
   OrdinarySequencedEvent,
   PossiblyIgnoredSequencedEvent,
@@ -97,7 +97,7 @@ import scala.util.{Failure, Success, Try}
   *                                     therefore, unless you know what you are doing, you shouldn't touch this setting.
   */
 case class SequencerClientConfig(
-    eventInboxSize: NonNegativeInt = NonNegativeInt.tryCreate(100),
+    eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
     startupConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(1),
     initialConnectionRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(10),
     warnDisconnectDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
@@ -149,7 +149,7 @@ class SequencerClient(
     sequencerClientTransport: SequencerClientTransport,
     val config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
-    staticDomainParameters: StaticDomainParameters,
+    val staticDomainParameters: StaticDomainParameters,
     override val timeouts: ProcessingTimeout,
     eventValidatorFactory: EventValidatorFactoryArgs => ValidateSequencedEvent,
     clock: Clock,
@@ -310,6 +310,7 @@ class SequencerClient(
         Batch.closeEnvelopes(batch),
         maxSequencingTime,
         timestampOfSigningKey,
+        staticDomainParameters.protocolVersion,
       )
       if (loggingConfig.eventDetails) {
         logger.debug(
@@ -343,7 +344,8 @@ class SequencerClient(
                 CantonTimestamp.now(),
                 domainId,
                 None,
-                Batch(List.empty),
+                Batch(List.empty, staticDomainParameters.protocolVersion),
+                staticDomainParameters.protocolVersion,
               )
             )
           callback(dummySendResult)
@@ -392,8 +394,7 @@ class SequencerClient(
   }
 
   private def verifyBatchSize(batch: Batch[_]): Either[SendAsyncClientError, Unit] = {
-    val batchSerializedSize =
-      batch.toProtoVersioned(staticDomainParameters.protocolVersion).serializedSize
+    val batchSerializedSize = batch.toProtoVersioned.serializedSize
     val maxBatchMessageSize = staticDomainParameters.maxBatchMessageSize.unwrap
     Either.cond(
       batchSerializedSize <= maxBatchMessageSize,
@@ -906,105 +907,106 @@ class SequencerClient(
     * or [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]]
     * then [[applicationHandlerFailure]] contains an error.
     */
-  private def processEventBatch[Box[+X] <: PossiblyIgnoredSequencedEvent[X], Env <: Envelope[_]](
-      eventHandler: ApplicationHandler[Lambda[`+X` => Traced[Seq[Box[X]]]], Env],
+  private def processEventBatch[Box[+X <: Envelope[_]] <: PossiblyIgnoredSequencedEvent[
+    X
+  ], Env <: Envelope[_]](
+      eventHandler: ApplicationHandler[Lambda[`+X <: Envelope[_]` => Traced[Seq[Box[X]]]], Env],
       eventBatch: Seq[Box[Env]],
   ): EitherT[Future, ApplicationHandlerFailure, Unit] =
-    eventBatch.lastOption.fold(EitherT.pure[Future, ApplicationHandlerFailure](())) { lastEvent =>
-      applicationHandlerFailure.get.fold {
-        implicit val batchTraceContext: TraceContext = TraceContext.ofBatch(eventBatch)(logger)
-        val lastSc = lastEvent.counter
-        val firstEvent =
-          eventBatch.headOption.getOrElse(
-            throw new RuntimeException("A non-empty Seq must have a head")
+    NonEmpty.from(eventBatch).fold(EitherT.pure[Future, ApplicationHandlerFailure](())) {
+      eventBatchNE =>
+        applicationHandlerFailure.get.fold {
+          implicit val batchTraceContext: TraceContext = TraceContext.ofBatch(eventBatch)(logger)
+          val lastSc = eventBatchNE.last1.counter
+          val firstEvent = eventBatchNE.head1
+          val firstSc = firstEvent.counter
+
+          logger.debug(
+            s"Passing ${eventBatch.size} events to the application handler ${eventHandler.name}."
           )
-        val firstSc = firstEvent.counter
+          // Measure only the synchronous part of the application handler so that we see how much the application handler
+          // contributes to the sequential processing bottleneck.
+          val asyncResultFT =
+            Try(
+              Timed
+                .future(metrics.applicationHandle.metric, eventHandler(Traced(eventBatch)).unwrap)
+            )
 
-        logger.debug(
-          s"Passing ${eventBatch.size} events to the application handler ${eventHandler.name}."
-        )
-        // Measure only the synchronous part of the application handler so that we see how much the application handler
-        // contributes to the sequential processing bottleneck.
-        val asyncResultFT =
-          Try(
-            Timed.future(metrics.applicationHandle.metric, eventHandler(Traced(eventBatch)).unwrap)
-          )
-
-        def putApplicationHandlerFailure(
-            failure: ApplicationHandlerFailure
-        ): ApplicationHandlerFailure = {
-          val alreadyCompleted = applicationHandlerFailure.putIfAbsent(failure)
-          alreadyCompleted.foreach { earlierFailure =>
-            logger.debug(show"Another event processing has previously failed: $earlierFailure")
-          }
-          logger.debug("Clearing the receivedEvents queue to unblock the subscription.")
-          // Clear the receivedEvents queue, because the thread that inserts new events to the queue may block.
-          // Clearing the queue is potentially dangerous, because it may result in data loss.
-          // To prevent that, clear the queue only after setting applicationHandlerFailure.
-          // - Once the applicationHandlerFailure has been set, any subsequent invocations of this method won't invoke
-          //   the application handler.
-          // - Ongoing invocations of this method are not affected by clearing the queue,
-          //   because the events processed by the ongoing invocation have been drained from the queue before clearing.
-          receivedEvents.clear()
-          failure
-        }
-
-        def handleException(
-            error: Throwable,
-            syncProcessing: Boolean,
-        ): ApplicationHandlerFailure = {
-          val sync = if (syncProcessing) "Synchronous" else "Asynchronous"
-
-          error match {
-            case PassiveInstanceException(reason) =>
-              logger.warn(
-                s"$sync event processing stopped because instance became passive"
-              )
-              putApplicationHandlerFailure(ApplicationHandlerPassive(reason))
-
-            case _ =>
-              logger.error(
-                s"$sync event processing failed for event batch with sequencer counters $firstSc to $lastSc.",
-                error,
-              )
-              putApplicationHandlerFailure(ApplicationHandlerException(error, firstSc, lastSc))
-          }
-        }
-
-        def handleAsyncResult(
-            asyncResultF: Future[UnlessShutdown[AsyncResult]]
-        ): EitherT[Future, ApplicationHandlerFailure, Unit] =
-          EitherTUtil
-            .fromFuture(asyncResultF, handleException(_, syncProcessing = true))
-            .subflatMap {
-              case UnlessShutdown.Outcome(asyncResult) =>
-                val asyncSignalledF = asyncResult.unwrap.transform { result =>
-                  // record errors and shutdown in `applicationHandlerFailure` and move on
-                  result match {
-                    case Success(outcome) =>
-                      outcome.onShutdown(putApplicationHandlerFailure(ApplicationHandlerShutdown))
-                    case Failure(error) =>
-                      handleException(error, syncProcessing = false)
-                  }
-                  Success(UnlessShutdown.unit)
-                }.unwrap
-                // note, we are adding our async processing to the flush future, so we know once the async processing has finished
-                addToFlushAndLogError(
-                  s"asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc"
-                )(asyncSignalledF)
-                // we do not wait for the async results to finish, we are done here once the synchronous part is done
-                Right(())
-              case UnlessShutdown.AbortedDueToShutdown =>
-                putApplicationHandlerFailure(ApplicationHandlerShutdown)
-                Left(ApplicationHandlerShutdown)
+          def putApplicationHandlerFailure(
+              failure: ApplicationHandlerFailure
+          ): ApplicationHandlerFailure = {
+            val alreadyCompleted = applicationHandlerFailure.putIfAbsent(failure)
+            alreadyCompleted.foreach { earlierFailure =>
+              logger.debug(show"Another event processing has previously failed: $earlierFailure")
             }
+            logger.debug("Clearing the receivedEvents queue to unblock the subscription.")
+            // Clear the receivedEvents queue, because the thread that inserts new events to the queue may block.
+            // Clearing the queue is potentially dangerous, because it may result in data loss.
+            // To prevent that, clear the queue only after setting applicationHandlerFailure.
+            // - Once the applicationHandlerFailure has been set, any subsequent invocations of this method won't invoke
+            //   the application handler.
+            // - Ongoing invocations of this method are not affected by clearing the queue,
+            //   because the events processed by the ongoing invocation have been drained from the queue before clearing.
+            receivedEvents.clear()
+            failure
+          }
 
-        // note, here, we created the asyncResultF, which means we've completed the synchronous processing part.
-        asyncResultFT.fold(
-          error => EitherT.leftT[Future, Unit](handleException(error, syncProcessing = true)),
-          handleAsyncResult,
-        )
-      }(EitherT.leftT[Future, Unit](_))
+          def handleException(
+              error: Throwable,
+              syncProcessing: Boolean,
+          ): ApplicationHandlerFailure = {
+            val sync = if (syncProcessing) "Synchronous" else "Asynchronous"
+
+            error match {
+              case PassiveInstanceException(reason) =>
+                logger.warn(
+                  s"$sync event processing stopped because instance became passive"
+                )
+                putApplicationHandlerFailure(ApplicationHandlerPassive(reason))
+
+              case _ =>
+                logger.error(
+                  s"$sync event processing failed for event batch with sequencer counters $firstSc to $lastSc.",
+                  error,
+                )
+                putApplicationHandlerFailure(ApplicationHandlerException(error, firstSc, lastSc))
+            }
+          }
+
+          def handleAsyncResult(
+              asyncResultF: Future[UnlessShutdown[AsyncResult]]
+          ): EitherT[Future, ApplicationHandlerFailure, Unit] =
+            EitherTUtil
+              .fromFuture(asyncResultF, handleException(_, syncProcessing = true))
+              .subflatMap {
+                case UnlessShutdown.Outcome(asyncResult) =>
+                  val asyncSignalledF = asyncResult.unwrap.transform { result =>
+                    // record errors and shutdown in `applicationHandlerFailure` and move on
+                    result match {
+                      case Success(outcome) =>
+                        outcome.onShutdown(putApplicationHandlerFailure(ApplicationHandlerShutdown))
+                      case Failure(error) =>
+                        handleException(error, syncProcessing = false)
+                    }
+                    Success(UnlessShutdown.unit)
+                  }.unwrap
+                  // note, we are adding our async processing to the flush future, so we know once the async processing has finished
+                  addToFlushAndLogError(
+                    s"asynchronous event processing for event batch with sequencer counters $firstSc to $lastSc"
+                  )(asyncSignalledF)
+                  // we do not wait for the async results to finish, we are done here once the synchronous part is done
+                  Right(())
+                case UnlessShutdown.AbortedDueToShutdown =>
+                  putApplicationHandlerFailure(ApplicationHandlerShutdown)
+                  Left(ApplicationHandlerShutdown)
+              }
+
+          // note, here, we created the asyncResultF, which means we've completed the synchronous processing part.
+          asyncResultFT.fold(
+            error => EitherT.leftT[Future, Unit](handleException(error, syncProcessing = true)),
+            handleAsyncResult,
+          )
+        }(EitherT.leftT[Future, Unit](_))
     }
 
   private def closeWithSubscriptionReason(
@@ -1150,7 +1152,7 @@ object SequencerClient {
       connection: SequencerConnection,
       domainId: DomainId,
       sequencerId: SequencerId,
-      syncCryptoApi: SyncCryptoClient,
+      syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
       crypto: Crypto,
       agreedAgreementId: Option[ServiceAgreementId],
       config: SequencerClientConfig,
@@ -1162,7 +1164,6 @@ object SequencerClient {
       recordingConfigForMember: Member => Option[RecordingConfig],
       replayConfigForMember: Member => Option[ReplayConfig],
       metrics: SequencerClientMetrics,
-      futureSupervisor: FutureSupervisor,
       loggingConfig: LoggingConfig,
       loggerFactory: NamedLoggerFactory,
       supportedProtocolVersions: Seq[ProtocolVersion],
@@ -1212,7 +1213,6 @@ object SequencerClient {
               domainId,
               sequencerId,
               syncCryptoApi,
-              futureSupervisor,
               loggerFactory,
             )
         } yield new SequencerClient(

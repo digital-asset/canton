@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.either._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -24,11 +25,10 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -79,7 +79,10 @@ class DbTransferStore(
   ) =
     protoConverterSequencedEventOpenEnvelope.fromProtoVersioned(
       SequencedEvent.fromByteString(
-        OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoApi))
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(protocolVersion, cryptoApi),
+          protocolVersion,
+        )
       )
     )(signedContentProto)
 

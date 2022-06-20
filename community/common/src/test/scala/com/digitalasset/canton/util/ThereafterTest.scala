@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.util
 
-import cats.{Applicative, Functor}
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
+import cats.{Applicative, Functor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec

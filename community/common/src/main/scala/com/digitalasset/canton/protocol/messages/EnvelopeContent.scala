@@ -7,31 +7,34 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.{v0, v1}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 
-final case class EnvelopeContent(message: ProtocolMessage)
-    extends HasProtocolVersionedWrapper[EnvelopeContent] {
+final case class EnvelopeContent(message: ProtocolMessage)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[EnvelopeContent]
+) extends HasProtocolVersionedWrapper[EnvelopeContent] {
 
-  def representativeProtocolVersion: RepresentativeProtocolVersion =
-    message.representativeProtocolVersion
+  // TODO(i9627): Remove this distinction and define an unwrapped serialization for PV2 in the companion object
+  override def toByteString: ByteString = representativeProtocolVersion.unwrap match {
+    // TODO(i9423): Migrate to next protocol version
+    case ProtocolVersion.unstable_development => toProtoVersioned.toByteString
+    case _ => toProtoVersioned.getData
+  }
 
-  override def toByteString: ByteString = toProtoVersioned.toByteString
-
-  // This method can throw (see companion object)
-  override def toProtoVersioned: VersionedMessage[EnvelopeContent] =
-    EnvelopeContent.toProtoVersioned(this)
+  override def companionObj = EnvelopeContent
 }
 
 object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[EnvelopeContent, HashOps] {
+  // Serializer defined for the EnvelopeContent can throw
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
@@ -84,7 +87,9 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
       case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
     }
-    message.map(EnvelopeContent.apply)
+    message.map(
+      EnvelopeContent.apply(_)(EnvelopeContent.protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )
   }
 
   def fromProtoV1(
@@ -114,13 +119,38 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
       case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
     }
-    message.map(EnvelopeContent.apply)
+    message.map(
+      EnvelopeContent.apply(_)(EnvelopeContent.protocolVersionRepresentativeFor(ProtobufVersion(1)))
+    )
   }
 
   override protected def name: String = "EnvelopeContent"
 
-  def messageFromByteString(hashOps: HashOps)(
+  def apply(message: ProtocolMessage, protocolVersion: ProtocolVersion): EnvelopeContent = {
+    EnvelopeContent(message)(protocolVersionRepresentativeFor(protocolVersion))
+  }
+
+  def messageFromByteStringV0(hashOps: HashOps)(
       bytes: ByteString
-  ): Either[ProtoDeserializationError, ProtocolMessage] =
-    fromByteString(hashOps)(bytes).map(_.message)
+  ): ParsingResult[ProtocolMessage] =
+    ProtoConverter
+      .protoParser(v0.EnvelopeContent.parseFrom)(bytes)
+      .flatMap(fromProtoV0(hashOps, _))
+      .map(_.message)
+
+  def messageFromByteString(protocolVersion: ProtocolVersion, hashOps: HashOps)(
+      bytes: ByteString
+  ): Either[ProtoDeserializationError, ProtocolMessage] = {
+    // Previously the envelope content was not wrapped in a VersionedMessage, therefore we have to explicitly decide to
+    // deserialize from a versioned wrapper message or not.
+    protocolVersion match {
+      // TODO(i9423): Migrate to next protocol version
+      case ProtocolVersion.unstable_development =>
+        fromByteString(hashOps)(bytes)
+          .map(_.message)
+          .tapLeft(err => println(s"Failed to parse $err: $bytes"))
+      case _ =>
+        messageFromByteStringV0(hashOps)(bytes)
+    }
+  }
 }

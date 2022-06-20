@@ -7,8 +7,8 @@ import cats.implicits._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
-import com.digitalasset.canton.topology.{Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.{Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 

@@ -5,29 +5,31 @@ package com.digitalasset.canton.protocol.messages
 
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType
-import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
+import com.digitalasset.canton.topology.MediatorId
+import com.digitalasset.canton.version.ProtocolVersion
 
 /** Represents the confirmation request as sent from a submitting node to the sequencer.
   */
 case class ConfirmationRequest(
     informeeMessage: InformeeMessage,
     viewEnvelopes: Seq[OpenEnvelope[TransactionViewMessage]],
+    protocolVersion: ProtocolVersion,
 ) extends PrettyPrinting {
 
   def mediator: MediatorId = informeeMessage.mediatorId
 
   def asBatch: Batch[DefaultOpenEnvelope] = {
     val mediatorEnvelope: DefaultOpenEnvelope =
-      OpenEnvelope(informeeMessage, Recipients.cc(mediator))
+      OpenEnvelope(informeeMessage, Recipients.cc(mediator), protocolVersion)
 
     val rootHashMessage = RootHashMessage(
       rootHash = informeeMessage.fullInformeeTree.transactionId.toRootHash,
       domainId = informeeMessage.domainId,
       viewType = ViewType.TransactionViewType,
       payload = EmptyRootHashMessagePayload,
-      protocolVersion = informeeMessage.representativeProtocolVersion.unwrap,
+      protocolVersion = protocolVersion,
     )
     val participants = viewEnvelopes.flatMap { envelope =>
       envelope.protocolMessage.participants
@@ -47,13 +49,14 @@ case class ConfirmationRequest(
         OpenEnvelope(
           rootHashMessage,
           Recipients.groups(participantsNE.map(NonEmpty.mk(Set, _, mediator))),
+          protocolVersion,
         )
       }
       .toList
 
     val envelopes: List[DefaultOpenEnvelope] =
       rootHashMessages ++ (viewEnvelopes: Seq[DefaultOpenEnvelope])
-    Batch(mediatorEnvelope +: envelopes)
+    Batch(mediatorEnvelope +: envelopes, protocolVersion)
   }
 
   override def pretty: Pretty[ConfirmationRequest] = prettyOfClass(

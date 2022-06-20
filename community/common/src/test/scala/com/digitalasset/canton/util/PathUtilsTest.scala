@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.util
 
-import java.nio.file.Paths
-
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.nio.file.Paths
 
 class PathUtilsTest extends AnyWordSpec with BaseTest {
   "PathUtils" should {

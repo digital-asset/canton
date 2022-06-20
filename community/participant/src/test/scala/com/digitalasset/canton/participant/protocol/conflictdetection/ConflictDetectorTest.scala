@@ -27,11 +27,11 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Active,
   Archived,
   ChangeAfterArchival,
+  ContractState => AcsContractState,
   DoubleContractArchival,
   DoubleContractCreation,
   Status,
   TransferredAway,
-  ContractState => AcsContractState,
 }
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
   Assigned,

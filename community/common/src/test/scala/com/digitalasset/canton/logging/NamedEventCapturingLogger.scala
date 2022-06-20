@@ -3,19 +3,16 @@
 
 package com.digitalasset.canton.logging
 
-import java.util.concurrent.TimeUnit
-
 import com.digitalasset.canton.util.ErrorUtil
-
 import org.scalactic.source
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers._
 import org.slf4j.event.{Level, SubstituteLoggingEvent}
-import org.slf4j.helpers
-import org.slf4j.Logger
+import org.slf4j.{Logger, helpers}
 
-import scala.jdk.CollectionConverters._
+import java.util.concurrent.TimeUnit
 import scala.collection.immutable.ListMap
+import scala.jdk.CollectionConverters._
 
 /** Test logger that just writes the events into a queue for inspection
   */

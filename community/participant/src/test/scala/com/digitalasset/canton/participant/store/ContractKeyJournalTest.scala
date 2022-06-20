@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import java.time.Instant
-
 import cats.syntax.functor._
 import cats.syntax.traverse._
 import com.daml.lf.value.Value.ValueInt64
@@ -23,6 +21,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
+import java.time.Instant
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 import scala.util.Random

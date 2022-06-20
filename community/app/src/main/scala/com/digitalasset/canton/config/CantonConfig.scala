@@ -38,6 +38,7 @@ import com.digitalasset.canton.tracing.TracingConfig
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{Config, ConfigException, ConfigFactory, ConfigRenderOptions}
 import com.typesafe.scalalogging.LazyLogging
+import monocle.macros.syntax.lens._
 import pureconfig._
 import pureconfig.error.{CannotConvert, FailureReason}
 import pureconfig.generic.{DerivedConfigWriter, FieldCoproductHint, ProductHint}
@@ -48,7 +49,6 @@ import scala.annotation.nowarn
 import scala.concurrent.duration._
 import scala.jdk.DurationConverters._
 import scala.reflect.ClassTag
-import monocle.macros.syntax.lens._
 
 /** Configuration for a check */
 sealed trait CheckConfig

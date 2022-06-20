@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.data
 
-import java.time.Instant
-
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.time.Instant
 
 class CantonTimestampTest extends AnyWordSpec with BaseTest {
 

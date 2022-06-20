@@ -11,17 +11,17 @@ import cats.syntax.traverseFilter._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
-import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.LocalReject.Malformed
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject, RejectReasons}
 import com.digitalasset.canton.protocol.messages.{MediatorRequest, _}
 import com.digitalasset.canton.protocol.{RequestId, ViewHash}
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
 import scala.concurrent.{ExecutionContext, Future}
 

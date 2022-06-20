@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import com.digitalasset.canton.LedgerTransactionId
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.SyncStateInspection
 import com.digitalasset.canton.participant.admin.v0.InspectionServiceGrpc.InspectionService
 import com.digitalasset.canton.participant.admin.v0.{
@@ -14,7 +15,6 @@ import com.digitalasset.canton.participant.admin.v0.{
 }
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.data.CantonTimestamp
 import io.grpc.{Status, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}

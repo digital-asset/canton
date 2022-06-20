@@ -7,8 +7,8 @@ import akka.NotUsed
 import akka.stream.OverflowStrategy
 import akka.stream.scaladsl.{Flow, Source}
 
-import java.util.concurrent.atomic.AtomicReference
 import java.util.ConcurrentModificationException
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Flow that upon read signals will attempt to fetch all events until head is reached.

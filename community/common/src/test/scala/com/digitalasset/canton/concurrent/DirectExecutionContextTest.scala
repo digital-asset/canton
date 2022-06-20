@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.concurrent
 
-import java.util.concurrent.Semaphore
-
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.Semaphore
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
 

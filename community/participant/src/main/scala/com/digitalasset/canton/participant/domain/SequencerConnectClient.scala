@@ -4,6 +4,8 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
+import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.api.v0
@@ -16,8 +18,6 @@ import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeR
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, HttpSequencerConnection}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.common.domain.ServiceAgreement
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
 

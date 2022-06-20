@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.TimeoutException
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
-
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration._

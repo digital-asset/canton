@@ -3,33 +3,33 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import java.time.Instant
 import cats.syntax.either._
 import cats.syntax.traverse._
-
+import com.daml.ledger.api.v1.admin.metering_report_service.{
+  ApplicationMeteringReport => ProtoApplicationMeteringReport,
+  GetMeteringReportResponse,
+  ParticipantMeteringReport,
+}
 import com.daml.ledger.api.v1.admin.user_management_service.Right.Kind
-import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.admin.v0
-import com.digitalasset.canton.participant.admin.{v0 => participantAdminV0}
 import com.daml.ledger.api.v1.admin.user_management_service.{
   ListUsersResponse => ProtoListUsersResponse,
   Right => ProtoUserRight,
   User => ProtoLedgerApiUser,
 }
-import com.daml.ledger.api.v1.admin.metering_report_service.{
-  GetMeteringReportResponse,
-  ParticipantMeteringReport,
-  ApplicationMeteringReport => ProtoApplicationMeteringReport,
-}
+import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
+import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.admin.{v0 => participantAdminV0}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.admin.v0
+import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.{DomainAlias, LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
+
+import java.time.Instant
 
 /** A tagged class used to return exported private keys */
 case class SerializedPrivateKey(payload: String)

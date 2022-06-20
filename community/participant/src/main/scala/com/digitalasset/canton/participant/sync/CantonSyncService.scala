@@ -36,6 +36,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning._
+import com.digitalasset.canton.participant._
 import com.digitalasset.canton.participant.admin._
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
@@ -62,7 +63,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.topology._
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant._
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
@@ -106,7 +106,7 @@ class CantonSyncService(
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
     syncDomainPersistentStateFactory: SyncDomainPersistentStateFactory,
-    packageService: PackageService,
+    private[canton] val packageService: PackageService,
     topologyStoreFactory: TopologyStoreFactory,
     domainCausalityStore: MultiDomainCausalityStore,
     topologyManager: ParticipantTopologyManager,

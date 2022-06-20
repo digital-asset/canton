@@ -7,8 +7,8 @@ import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
 import com.google.protobuf.ByteString
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.prop.TableFor3
+import org.scalatest.wordspec.AnyWordSpec
 
 class SerializableRawContractInstanceTest
     extends AnyWordSpec

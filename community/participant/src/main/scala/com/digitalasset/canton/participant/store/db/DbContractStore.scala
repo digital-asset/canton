@@ -7,7 +7,6 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.{LfPartyId, checked}
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,6 +25,7 @@ import com.digitalasset.canton.util.EitherUtil.RichEitherIterable
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{BatchAggregator, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPartyId, checked}
 import com.github.blemale.scaffeine.AsyncCache
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}

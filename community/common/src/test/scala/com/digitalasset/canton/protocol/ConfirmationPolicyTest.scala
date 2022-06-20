@@ -4,15 +4,15 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.transaction.{TrustLevel, ParticipantAttributes}
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.protocol.ConfirmationPolicy.{Signatory, Vip}
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   signatoryParticipant,
   submitterParticipant,
 }
 import com.digitalasset.canton.protocol.LfKeyWithMaintainers
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
+import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 

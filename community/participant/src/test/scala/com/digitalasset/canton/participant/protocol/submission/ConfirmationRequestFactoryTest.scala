@@ -31,15 +31,13 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedView,
   EncryptedViewMessageV0,
   InformeeMessage,
-  ProtocolMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
-import com.digitalasset.canton.topology.transaction.ParticipantPermission._
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.transaction.ParticipantPermission._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -206,7 +204,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
 
         val keySeed = tree.viewPosition.position.foldRight(testKeySeed) { case (pos, seed) =>
           ProtocolCryptoApi
-            .hkdf(cryptoPureApi, ProtocolVersion.latestForTest)(
+            .hkdf(cryptoPureApi, defaultProtocolVersion)(
               seed,
               cryptoPureApi.defaultSymmetricKeyScheme.keySizeInBytes,
               HkdfInfo.subview(pos),
@@ -216,7 +214,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
 
         val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
         val symmetricKeyRandomness = ProtocolCryptoApi
-          .hkdf(cryptoPureApi, ProtocolVersion.latestForTest)(
+          .hkdf(cryptoPureApi, defaultProtocolVersion)(
             keySeed,
             viewEncryptionScheme.keySizeInBytes,
             HkdfInfo.ViewKey,
@@ -237,7 +235,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             cryptoPureApi,
             symmetricKey,
             TransactionViewType,
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )(
             LightTransactionViewTree.fromTransactionViewTree(tree)
           )
@@ -259,14 +257,16 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             createdRandomnessMap.fmap(_.encrypted),
             encryptedView,
             transactionFactory.domainId,
-          )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)),
+          ),
           recipients,
+          defaultProtocolVersion,
         )
     }
 
     ConfirmationRequest(
-      InformeeMessage(example.fullInformeeTree),
+      InformeeMessage(example.fullInformeeTree, defaultProtocolVersion),
       expectedTransactionViewMessages,
+      defaultProtocolVersion,
     )
   }
 
@@ -285,7 +285,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
         .futureValue
         .getOrElse(fail("The defaultIdentitySnapshot really should have at least one key."))
     } yield participant -> cryptoPureApi
-      .encryptWith(randomness, publicKey, ProtocolVersion.latestForTest)
+      .encryptWith(randomness, publicKey, defaultProtocolVersion)
       .valueOr(err => fail(err.toString))
 
     randomnessPairs.toMap
@@ -310,7 +310,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               newCryptoSnapshot,
               contractInstanceOfId,
               Some(testKeySeed),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
             .value
             .map(res =>
@@ -340,7 +340,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             emptyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value
           .map(
@@ -374,7 +374,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             confirmationOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value
           .map(
@@ -405,7 +405,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             newCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value
           .map(_ should equal(Left(TransactionTreeFactoryError(error))))
@@ -433,7 +433,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             submitterOnlyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value
           .map(
@@ -466,7 +466,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
             noKeyCryptoSnapshot,
             contractInstanceOfId,
             Some(testKeySeed),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value
           .map(_ should matchPattern {

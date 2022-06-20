@@ -8,10 +8,10 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 

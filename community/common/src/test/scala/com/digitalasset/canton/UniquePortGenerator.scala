@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton
 
-import java.util.concurrent.atomic.AtomicInteger
-
 import com.digitalasset.canton.config.RequireTypes.Port
+
+import java.util.concurrent.atomic.AtomicInteger
 
 class UniquePortGenerator(start: Int) extends {
   private val nextPort = new AtomicInteger(start)

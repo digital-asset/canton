@@ -9,8 +9,8 @@ import com.codahale.metrics.{Gauge, Timer}
 import com.daml.metrics.{MetricName, Timed, VarGauge}
 
 import scala.annotation.StaticAnnotation
-import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{Future, blocking}
 import scala.reflect.ClassTag
 import scala.reflect.runtime.{universe => ru}
 

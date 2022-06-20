@@ -19,6 +19,7 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Invali
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State._
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -30,7 +31,6 @@ import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State._
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   ParticipantId,

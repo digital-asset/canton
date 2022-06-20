@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent}
 import com.digitalasset.canton.participant.store.{CausalityStoresTest, EventLogId}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
+import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent}
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext

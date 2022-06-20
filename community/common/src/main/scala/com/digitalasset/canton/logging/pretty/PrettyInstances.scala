@@ -3,25 +3,25 @@
 
 package com.digitalasset.canton.logging.pretty
 
-import java.net.URI
-import java.time.{Instant, Duration => JDuration}
-import java.util.UUID
 import cats.Show.Shown
 import com.daml.ledger.api.DeduplicationPeriod
-import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset.LedgerBoundary
 import com.daml.ledger.client.binding.Primitive
-import com.daml.ledger.{configuration, offset}
 import com.daml.ledger.participant.state.v2
-import com.daml.ledger.participant.state.v2.{ChangeId, Update}
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate
+import com.daml.ledger.participant.state.v2.{ChangeId, Update}
+import com.daml.ledger.{configuration, offset}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
+import com.daml.lf.transaction.Transaction.{
+  DuplicateContractKey,
+  InconsistentContractKey,
+  KeyInputError,
+}
 import com.daml.lf.value.Value
-import com.daml.nonempty.NonEmptyUtil
-import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.protocol.{
   ContractId,
   LfContractId,
@@ -30,6 +30,7 @@ import com.digitalasset.canton.protocol.{
   LfNodeId,
   LfTransactionVersion,
 }
+import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.W3CTraceContext
 import com.digitalasset.canton.util.{ErrorUtil, HexString}
 import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp}
@@ -38,6 +39,9 @@ import io.grpc.Status
 import pprint.Tree
 import slick.util.{DumpInfo, Dumpable}
 
+import java.net.URI
+import java.time.{Duration => JDuration, Instant}
+import java.util.UUID
 import scala.concurrent.duration.Duration
 
 /** Collects instances of [[Pretty]] for common types.
@@ -382,6 +386,13 @@ trait PrettyInstances {
     param("parent", _.parent.unquoted),
     paramIfDefined("state", _.state.map(_.unquoted)),
   )
+
+  implicit val prettyKeyInputError: Pretty[KeyInputError] = {
+    case Left(e: InconsistentContractKey) =>
+      prettyOfClass[InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
+    case Right(e: DuplicateContractKey) =>
+      prettyOfClass[DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
+  }
 
 }
 

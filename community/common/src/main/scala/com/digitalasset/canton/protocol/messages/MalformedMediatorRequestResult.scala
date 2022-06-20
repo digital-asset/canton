@@ -20,7 +20,6 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 
@@ -37,7 +36,9 @@ sealed abstract case class MalformedMediatorRequestResult(
     override val viewType: ViewType,
     override val verdict: Verdict.MediatorReject,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      MalformedMediatorRequestResult
+    ],
     val deserializedFrom: Option[ByteString],
 ) extends MediatorResult
     with SignedProtocolMessageContent
@@ -54,8 +55,7 @@ sealed abstract case class MalformedMediatorRequestResult(
       getCryptographicEvidence
     )
 
-  override protected def toProtoVersioned: VersionedMessage[MalformedMediatorRequestResult] =
-    MalformedMediatorRequestResult.toProtoVersioned(this)
+  override def companionObj = MalformedMediatorRequestResult
 
   override protected def toProtoV0: v0.MalformedMediatorRequestResult =
     v0.MalformedMediatorRequestResult(

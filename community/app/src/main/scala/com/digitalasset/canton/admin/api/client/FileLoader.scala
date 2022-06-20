@@ -4,7 +4,6 @@
 package com.digitalasset.canton.admin.api.client
 
 import java.io.{File, FileInputStream, InputStream}
-
 import scala.util.control.NonFatal
 
 class FileLoader[T](mapper: InputStream => T) {

@@ -6,12 +6,20 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.concurrent.{
+  DirectExecutionContext,
+  FutureSupervisor,
+  HasFutureSupervision,
+}
 import com.digitalasset.canton.config.{CachingConfigs, DefaultProcessingTimeouts}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities._
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
@@ -20,17 +28,12 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedTopologySnapshot,
   TopologySnapshot,
 }
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.TopologyStoreId
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
-import com.digitalasset.canton.topology.store.TopologyStoreId
-import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration._
@@ -177,6 +180,7 @@ class TestingIdentityFactory(
       newCrypto(owner),
       CachingConfigs.testing,
       DefaultProcessingTimeouts.testing,
+      FutureSupervisor.Noop,
       loggerFactory,
     )
   }
@@ -190,7 +194,15 @@ class TestingIdentityFactory(
   def ips(): IdentityProvidingServiceClient = {
     val ips = new IdentityProvidingServiceClient()
     topology.domains.foreach(dId =>
-      ips.add(new DomainTopologyClient() {
+      ips.add(new DomainTopologyClient() with HasFutureSupervision with NamedLogging {
+
+        override protected def loggerFactory: NamedLoggerFactory =
+          TestingIdentityFactory.this.loggerFactory
+
+        override protected def futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
+
+        override protected def executionContext: ExecutionContext = directExecutionContext
+
         override def await(condition: TopologySnapshot => Future[Boolean], timeout: Duration)(
             implicit traceContext: TraceContext
         ): FutureUnlessShutdown[Boolean] = ???
@@ -297,8 +309,8 @@ class TestingIdentityFactory(
       case _ => throw new IllegalStateException(s"Multiple domain parameters are valid at $ts")
     }
 
-  private val signedTxProtocolRepresentative: RepresentativeProtocolVersion =
-    SignedTopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.latestForTest)
+  private val signedTxProtocolRepresentative =
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(defaultProtocolVersion)
 
   private def mkReplace(
       mapping: DomainGovernanceMapping
@@ -548,7 +560,7 @@ class TestingOwnerWithKeys(
             signingKey,
             cryptoApi.crypto.pureCrypto,
             cryptoApi.crypto.privateCrypto,
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .value,
         10.seconds,

@@ -8,13 +8,12 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.time.{Clock, SimClock}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
+import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AnyWordSpec
@@ -91,7 +90,7 @@ trait TopologyManagerTest
           .authorize(
             rootCert,
             Some(setup.namespace.fingerprint),
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
             force = false,
           )
           .value
@@ -123,7 +122,7 @@ trait TopologyManagerTest
           mgr.authorize(
             TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion),
             None,
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
             force = true,
           )
 
@@ -177,7 +176,7 @@ trait TopologyManagerTest
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
               false,
             )
             .value
@@ -193,7 +192,7 @@ trait TopologyManagerTest
             .authorize(
               removeCert,
               Some(setup.namespace.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
               false,
             )
             .value
@@ -203,7 +202,7 @@ trait TopologyManagerTest
             .authorize(
               removeCert.reverse,
               Some(setup.namespace.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
             .value
           _ = authAdd2.value shouldBe a[SignedTopologyTransaction[_]]
@@ -214,7 +213,7 @@ trait TopologyManagerTest
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
           authAgain <- mgr
-            .authorize(rootCert, Some(setup.namespace.fingerprint), ProtocolVersion.latestForTest)
+            .authorize(rootCert, Some(setup.namespace.fingerprint), defaultProtocolVersion)
             .value
           _ = authAgain.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
@@ -227,14 +226,14 @@ trait TopologyManagerTest
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
             .value
           authFail <- mgr
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
             .value
           _ = authFail.left.value shouldBe a[CantonError]
@@ -250,7 +249,7 @@ trait TopologyManagerTest
             invalidRev.element.id != rootCert.element.id
           ) // ensure transaction ids are different so we are sure to fail the test
           authFail <- mgr
-            .authorize(invalidRev, Some(setup.namespace.fingerprint), ProtocolVersion.latestForTest)
+            .authorize(invalidRev, Some(setup.namespace.fingerprint), defaultProtocolVersion)
             .value
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
@@ -279,7 +278,7 @@ trait TopologyManagerTest
             .authorize(
               reverted,
               Some(setup.namespaceKey.fingerprint),
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
             .value
           _ = authRev.value shouldBe a[SignedTopologyTransaction[_]]

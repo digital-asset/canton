@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol
 
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
@@ -18,7 +17,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   VersionedMessage,
 }
-import com.digitalasset.canton.{LfPartyId, checked}
+import com.digitalasset.canton.{LfPartyId, LfVersioned, checked}
 
 /** Metadata for a contract.
   *

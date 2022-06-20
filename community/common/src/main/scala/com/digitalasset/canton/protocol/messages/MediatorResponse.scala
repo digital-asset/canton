@@ -5,15 +5,16 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
@@ -22,9 +23,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
 /** Payload of a response sent to the mediator in reaction to a request.
@@ -40,14 +39,21 @@ import com.google.protobuf.ByteString
   *                          or [[com.digitalasset.canton.protocol.messages.LocalReject]]. Empty otherwise.
   * @param domainId The domain ID over which the request is sent.
   */
-// This class is a reference example of serialization best practices, demonstrating:
-// - handling of object invariants (i.e., the construction of an instance may fail with an exception)
-// Please consult the team if you intend to change the design of serialization.
-//
-// The constructor and `fromProto...` methods are private to ensure that clients cannot create instances with an incorrect `deserializedFrom` field.
-//
-// Optional parameters are strongly discouraged, as each parameter needs to be consciously set in a production context.
-case class MediatorResponse private (
+
+/*
+This class is a reference example of serialization best practices, demonstrating:
+ * handling of object invariants (i.e., the construction of an instance may fail with an exception)
+
+Please consult the team if you intend to change the design of serialization.
+
+Because
+ * `fromProtoV0` is private,
+ * the class is `sealed abstract`,
+then clients cannot create instances with an incorrect `deserializedFrom` field.
+
+Optional parameters are strongly discouraged, as each parameter needs to be consciously set in a production context.
+ */
+sealed abstract case class MediatorResponse(
     requestId: RequestId,
     sender: ParticipantId,
     viewHash: Option[ViewHash],
@@ -56,7 +62,7 @@ case class MediatorResponse private (
     confirmingParties: Set[LfPartyId],
     override val domainId: DomainId,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[MediatorResponse],
     override val deserializedFrom: Option[ByteString],
 ) extends SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MediatorResponse]
@@ -84,8 +90,7 @@ case class MediatorResponse private (
   protected override def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def toProtoVersioned: VersionedMessage[MediatorResponse] =
-    MediatorResponse.toProtoVersioned(this)
+  override def companionObj = MediatorResponse
 
   override protected def toProtoV0: v0.MediatorResponse =
     v0.MediatorResponse(
@@ -117,22 +122,6 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   )
 
   case class InvalidMediatorResponse(msg: String) extends RuntimeException(msg)
-
-  // Make the auto-generated apply method inaccessible to prevent clients from creating instances with an incorrect
-  // `deserializedFrom` field.
-  private[this] def apply(
-      requestId: RequestId,
-      sender: ParticipantId,
-      viewHash: Option[ViewHash],
-      localVerdict: LocalVerdict,
-      rootHash: Option[RootHash],
-      confirmingParties: Set[LfPartyId],
-      domainId: DomainId,
-  )(
-      representativeProtocolVersion: RepresentativeProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ) =
-    throw new UnsupportedOperationException("Use the public apply method")
 
   // Variant of "tryCreate" that returns Left(...) instead of throwing an exception.
   // This is for callers who *do not know up front* whether the parameters meet the object invariants.
@@ -192,7 +181,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
       rootHash,
       confirmingParties,
       domainId,
-    )(protocolVersionRepresentativeFor(protocolVersion), None)
+    )(protocolVersionRepresentativeFor(protocolVersion), None) {}
 
   private def fromProtoV0(mediatorResponseP: v0.MediatorResponse)(
       bytes: ByteString
@@ -233,7 +222,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
           )(
             supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(0)),
             Some(bytes),
-          )
+          ) {}
         )
         .leftMap(err => InvariantViolation(err.toString))
     } yield response

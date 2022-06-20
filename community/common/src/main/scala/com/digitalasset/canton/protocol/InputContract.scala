@@ -3,12 +3,16 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.version.HasProtoV0
 
+/** @param consumed Whether this contract is consumed in the core of the view this [[InputContract]] belongs to.
+  *
+  * @see com.digitalasset.canton.data.ViewParticipantData.coreInputs
+  */
 case class InputContract(contract: SerializableContract, consumed: Boolean)
     extends HasProtoV0[v0.ViewParticipantData.InputContract]
     with PrettyPrinting {
@@ -35,10 +39,10 @@ case class InputContract(contract: SerializableContract, consumed: Boolean)
 
 object InputContract {
   def fromProtoV0(
-      contractAndMetadataP: v0.ViewParticipantData.InputContract
+      inputContractP: v0.ViewParticipantData.InputContract
   ): ParsingResult[InputContract] = {
     val v0.ViewParticipantData.InputContract(contractP, consumed) =
-      contractAndMetadataP
+      inputContractP
     for {
       contract <- ProtoConverter
         .required("InputContract.contract", contractP)

@@ -9,10 +9,10 @@ import cats.syntax.traverseFilter._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{ConfirmingParty, Informee, PlainInformee}
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.google.protobuf.ByteString
 

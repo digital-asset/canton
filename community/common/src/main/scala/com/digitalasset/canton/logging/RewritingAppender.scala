@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.logging
 
-import java.util
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import cats.syntax.functorFilter._
 import ch.qos.logback.classic
 import ch.qos.logback.classic.spi.{ILoggingEvent, IThrowableProxy, LoggerContextVO}
@@ -12,6 +10,8 @@ import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, AppenderBase}
 import org.slf4j.Marker
 
+import java.util
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.mutable.ListBuffer
 
 /** Rewrite object used for logback.xml */

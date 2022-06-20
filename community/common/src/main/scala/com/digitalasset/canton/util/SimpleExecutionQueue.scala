@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.atomic.AtomicReference
 import cats.data.EitherT
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.SimpleExecutionQueue.TaskCell
 import com.digitalasset.canton.util.Thereafter.syntax._
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}

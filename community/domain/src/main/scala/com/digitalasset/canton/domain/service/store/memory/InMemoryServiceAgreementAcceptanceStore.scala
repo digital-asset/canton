@@ -10,8 +10,8 @@ import com.digitalasset.canton.domain.service.store.{
   ServiceAgreementAcceptanceStore,
   ServiceAgreementAcceptanceStoreError,
 }
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.concurrent.TrieMap

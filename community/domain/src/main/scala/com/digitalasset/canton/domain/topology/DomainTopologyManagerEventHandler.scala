@@ -14,15 +14,16 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
+import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
   SequencerClient,
 }
 import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,6 +40,7 @@ class DomainTopologyManagerEventHandler(
         OpenEnvelope[RegisterTopologyTransactionResponse],
         SendCallback,
     ) => EitherT[Future, SendAsyncClientError, Unit],
+    protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -100,18 +102,12 @@ class DomainTopologyManagerEventHandler(
       //   - config flag / domain parameter ensuring that participant only sends transactions related to itself
       //   - initial registration must not contain anything other than a cert and some keys
       //   - initial registration must be limited to a handful of certs and keys (100, configurable)
-      response <- requestHandler.newRequest(
+      responseResults <- requestHandler.newRequest(
         request.requestedBy,
         request.participant,
         request.transactions,
       )
-      pendingResponse = RegisterTopologyTransactionResponse(
-        request.requestedBy,
-        request.participant,
-        request.requestId,
-        response,
-        request.domainId,
-      )(request.representativeProtocolVersion)
+      pendingResponse = RegisterTopologyTransactionResponse.create(request, responseResults)
       _ <- store.savePendingResponse(pendingResponse)
       result <- sendResponse(pendingResponse)
     } yield result
@@ -120,7 +116,11 @@ class DomainTopologyManagerEventHandler(
   private def sendResponse(
       response: RegisterTopologyTransactionResponse
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val batch = OpenEnvelope(response, Recipients.cc(response.requestedBy))
+    val batch = OpenEnvelope(
+      response,
+      Recipients.cc(response.requestedBy),
+      protocolVersion,
+    )
     SequencerClient
       .sendWithRetries(
         sequencerSendResponse(batch, _),

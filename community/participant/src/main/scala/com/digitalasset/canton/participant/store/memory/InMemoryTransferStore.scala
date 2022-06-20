@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
 import cats.implicits.catsSyntaxPartialOrder
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter
@@ -13,14 +14,13 @@ import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil, MapsUtil}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 
+import java.util.ConcurrentModificationException
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import java.util.ConcurrentModificationException
 import scala.concurrent.Future
 
 class InMemoryTransferStore(

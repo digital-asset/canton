@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.atomic.AtomicReference
-
 import com.digitalasset.canton.logging.pretty.Pretty
+
+import java.util.concurrent.atomic.AtomicReference
 
 /** A mutable list to which elements can be prepended and where snapshots can be taken atomically.
   * Both operations are constant-time.

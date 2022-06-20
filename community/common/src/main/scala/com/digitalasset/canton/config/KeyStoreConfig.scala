@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.config
 
-import java.io.File
-
 import io.circe.Encoder
+
+import java.io.File
 
 /** Configuration for Java keystore with optional password protection. */
 case class KeyStoreConfig(path: File, password: Password)

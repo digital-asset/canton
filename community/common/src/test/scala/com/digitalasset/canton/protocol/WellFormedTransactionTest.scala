@@ -9,8 +9,8 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory._
 import com.digitalasset.canton.protocol.WellFormedTransaction.{State, WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.prop.{TableFor3, TableFor4}
+import org.scalatest.wordspec.AnyWordSpec
 
 class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 

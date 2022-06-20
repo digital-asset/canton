@@ -6,6 +6,7 @@ package com.digitalasset.canton.health
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.metrics.MetricName
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonCommunityConfig
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.environment.{Environment, ParticipantNodes}
@@ -16,7 +17,6 @@ import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBoot
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration

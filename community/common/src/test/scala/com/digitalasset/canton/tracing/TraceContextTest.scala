@@ -4,14 +4,13 @@
 package com.digitalasset.canton.tracing
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import java.nio.file.Path
 import com.digitalasset.canton.util.MessageRecorder
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTestWordSpec, HasTempDirectory}
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.context.Context
 import org.scalatest.{Assertion, BeforeAndAfterEach}
 
+import java.nio.file.Path
 import scala.annotation.nowarn
 
 @SuppressWarnings(
@@ -95,7 +94,7 @@ class TraceContextTest extends BaseTestWordSpec with HasTempDirectory with Befor
     // columns but our table definitions typically expect non-null for the trace context column value.
     // This is not an issue when serializing a `VersionedTraceContext` but to not regress we have this unit test.
     "won't be serialized to an empty ByteArray" in {
-      val res = TraceContext.empty.toByteArray(ProtocolVersion.latestForTest)
+      val res = TraceContext.empty.toByteArray(defaultProtocolVersion)
       val empty = new Array[Byte](0)
       res should not be empty
     }
@@ -115,7 +114,7 @@ class TraceContextTest extends BaseTestWordSpec with HasTempDirectory with Befor
       forEvery(testCases) { context =>
         TraceContext.fromProtoV0(context.toProtoV0) shouldBe Right(context)
         TraceContext.fromProtoVersioned(
-          context.toProtoVersioned(ProtocolVersion.latestForTest)
+          context.toProtoVersioned(defaultProtocolVersion)
         ) shouldBe Right(context)
       }
     }

@@ -10,8 +10,7 @@ import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import cats.{Applicative, MonoidK}
-import com.daml.nonempty.NonEmptyUtil
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewType}
@@ -49,9 +48,8 @@ import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.time.TimeProof
@@ -202,7 +200,7 @@ class TransferOutProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
-      TransferSubmission(Batch.of(messages: _*), rootHash)
+      TransferSubmission(Batch.of(protocolVersion, messages: _*), rootHash)
     }
   }
 

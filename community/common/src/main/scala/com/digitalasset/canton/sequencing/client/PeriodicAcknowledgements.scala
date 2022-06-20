@@ -5,12 +5,12 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.HasFlushFuture
@@ -18,9 +18,9 @@ import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.jdk.DurationConverters._
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.DurationConverters._
 
 /** Periodically pull the latest clean timestamp and if it has changed acknowledge it with the sequencer.
   * This indicates that we have successfully processed all events up to and including this event.

@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.either._
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.crypto.{Nonce, Signature}
 import com.digitalasset.canton.domain.Domain.GrpcSequencerAuthenticationErrorGroup
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -15,14 +16,13 @@ import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerAuthentica
   SequencerAuthenticationFaultyOrMalicious,
 }
 import com.digitalasset.canton.domain.service.HandshakeValidator
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.AuthenticationError
 import com.digitalasset.canton.sequencing.authentication.grpc.AuthenticationTokenWithExpiry
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status

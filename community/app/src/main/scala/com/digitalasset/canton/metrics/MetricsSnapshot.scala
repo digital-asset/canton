@@ -4,6 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
+
 import scala.jdk.CollectionConverters._
 
 case class MetricsSnapshot(

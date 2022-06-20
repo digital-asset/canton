@@ -11,12 +11,12 @@ import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
 import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
   NamespaceDelegation,
   OwnerToKeyMapping,
 }
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 

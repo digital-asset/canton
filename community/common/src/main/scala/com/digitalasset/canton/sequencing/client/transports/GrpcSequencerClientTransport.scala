@@ -8,8 +8,8 @@ import cats.syntax.either._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.api.v0.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.domain.api.v0.SequencerConnectServiceGrpc.SequencerConnectServiceStub
+import com.digitalasset.canton.domain.api.v0.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -101,7 +101,7 @@ class GrpcSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    sendAsyncInternal(request, timeout, requiresAuthentication = true, protocolVersion)
+    sendAsyncInternal(request, timeout, requiresAuthentication = true)
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
@@ -110,13 +110,12 @@ class GrpcSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
-    sendAsyncInternal(request, timeout, requiresAuthentication = false, protocolVersion)
+    sendAsyncInternal(request, timeout, requiresAuthentication = false)
 
   private def sendAsyncInternal(
       request: SubmissionRequest,
       timeout: Duration,
       requiresAuthentication: Boolean,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     def fromGrpcError(error: GrpcError): Either[SendAsyncClientError, Unit] = {
       val result = EitherUtil.condUnitE(
@@ -148,7 +147,7 @@ class GrpcSequencerClientTransport(
       .sendGrpcRequest(sequencerServiceClient, "sequencer")(
         stub =>
           (if (requiresAuthentication) stub.sendAsync _ else stub.sendAsyncUnauthenticated _)(
-            request.toProtoV0(protocolVersion)
+            request.toProtoV0
           ),
         requestDescription =
           s"send-async${if (!requiresAuthentication) "-unauthenticated" else ""}/${request.messageId}",

@@ -4,8 +4,8 @@
 package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.BaseTest
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
 class LogEntryTest extends AnyWordSpec with BaseTest {

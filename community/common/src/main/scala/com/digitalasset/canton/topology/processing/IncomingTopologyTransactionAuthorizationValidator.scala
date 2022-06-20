@@ -7,6 +7,7 @@ import cats.syntax.either._
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
@@ -15,7 +16,6 @@ import com.digitalasset.canton.topology.store.{
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.annotation.nowarn

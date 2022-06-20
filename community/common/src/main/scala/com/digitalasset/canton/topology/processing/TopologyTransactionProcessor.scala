@@ -731,6 +731,7 @@ object TopologyTransactionProcessor {
           StoreBasedDomainTopologyClient.NoPackageDependencies,
           parameters.cachingConfigs,
           parameters.processingTimeouts,
+          futureSupervisor,
           loggerFactory,
         )
     topologyClientF.map { topologyClient =>

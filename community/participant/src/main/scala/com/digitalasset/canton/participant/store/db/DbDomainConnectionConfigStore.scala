@@ -11,13 +11,13 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.participant.store.{
-  DomainConnectionConfigStore,
-  StoredDomainConnectionConfig,
-}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
+}
+import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
+  StoredDomainConnectionConfig,
 }
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}

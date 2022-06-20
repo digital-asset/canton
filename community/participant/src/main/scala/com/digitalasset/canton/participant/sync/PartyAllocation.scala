@@ -10,7 +10,6 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.ledger.participant.state.v2._
 import com.daml.telemetry.TelemetryContext
-import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, LfTimestamp}
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -20,17 +19,18 @@ import com.digitalasset.canton.participant.config.{
   PartyNotificationConfig,
 }
 import com.digitalasset.canton.participant.store.ParticipantNodeEphemeralState
+import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.participant.topology.{
   LedgerServerPartyNotifier,
   ParticipantTopologyManager,
 }
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
-import com.digitalasset.canton.topology.{DomainId, Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
 import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.{DomainId, Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, LfTimestamp}
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.UUID
@@ -38,8 +38,8 @@ import java.util.concurrent.CompletionStage
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters._
-import scala.util.{Failure, Success}
 import scala.util.chaining._
+import scala.util.{Failure, Success}
 
 private[sync] class PartyAllocation(
     participantId: ParticipantId,

@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.serialization
 
-import java.time.{DateTimeException, Duration, Instant}
-import java.util.UUID
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
@@ -18,6 +16,9 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.timestamp.Timestamp
 import com.google.protobuf.{ByteString, CodedInputStream, InvalidProtocolBufferException}
+
+import java.time.{DateTimeException, Duration, Instant}
+import java.util.UUID
 
 /** Can convert messages to and from proto objects
   * @tparam A type of the message to be serialized

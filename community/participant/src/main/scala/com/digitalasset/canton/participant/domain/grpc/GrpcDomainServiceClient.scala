@@ -7,16 +7,16 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.common.domain.ServiceAgreement
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
-import com.digitalasset.canton.participant.domain.DomainServiceClient
-import com.digitalasset.canton.participant.domain.DomainServiceClient.Error
 import com.digitalasset.canton.domain.api.v0.DomainServiceGrpc.DomainServiceStub
 import com.digitalasset.canton.domain.api.v0.{
   DomainServiceGrpc,
   GetServiceAgreementRequest,
   GetServiceAgreementResponse,
 }
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
+import com.digitalasset.canton.participant.domain.DomainServiceClient
+import com.digitalasset.canton.participant.domain.DomainServiceClient.Error
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TracingConfig

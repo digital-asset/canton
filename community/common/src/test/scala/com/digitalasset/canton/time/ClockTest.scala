@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.time
 
-import java.time.{Instant, Clock => JClock}
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.time.Clock.SystemClockRunningBackwards
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
+import java.time.{Clock => JClock, Instant}
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}

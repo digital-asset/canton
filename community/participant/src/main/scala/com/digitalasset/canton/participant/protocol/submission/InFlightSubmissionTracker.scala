@@ -9,8 +9,8 @@ import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.option._
-import cats.syntax.traverseFilter._
 import cats.syntax.traverse._
+import cats.syntax.traverseFilter._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,9 +28,9 @@ import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.Policy
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import io.functionmeta.functionFullName
 
 import scala.collection.immutable.ArraySeq

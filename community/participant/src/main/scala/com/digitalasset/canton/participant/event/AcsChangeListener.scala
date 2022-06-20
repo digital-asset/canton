@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.event
 
 import cats.syntax.functor._
 import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, WithContractHash}
+import com.digitalasset.canton.tracing.TraceContext
 
 /** Components that need to keep a running snapshot of ACS.
   */

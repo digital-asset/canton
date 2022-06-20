@@ -6,9 +6,9 @@ package com.digitalasset.canton.domain.sequencing.authentication
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import org.mockito.ArgumentMatchers
 import org.scalatest.wordspec.AsyncWordSpec
 

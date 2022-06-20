@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.lifecycle
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.DiscardOps
 
-import scala.concurrent.{Future, TimeoutException}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Future, TimeoutException}
 
 /** AutoCloseableAsync eases the proper closing of futures.
   */

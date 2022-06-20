@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.console
 
-import java.util.concurrent.TimeUnit
 import com.digitalasset.canton.admin.api.client.GrpcCtlRunner
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
@@ -12,14 +11,15 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
 }
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{ClientConfig, TimeoutDuration}
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
-import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.tracing.Spanning
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.TimeUnit
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContextExecutor, blocking}

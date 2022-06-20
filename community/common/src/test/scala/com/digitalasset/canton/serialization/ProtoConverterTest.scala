@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.serialization
 
-import java.time.Instant
-
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, TimestampConversionError}
 import com.digitalasset.canton.serialization.ProtoConverter.{InstantConverter, required}
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.time.Instant
 
 class ProtoConverterTest extends AnyWordSpec with BaseTest {
   "InstantConverters" should {

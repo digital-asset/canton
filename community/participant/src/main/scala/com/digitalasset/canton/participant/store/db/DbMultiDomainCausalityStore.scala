@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.syntax.traverseFilter._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -12,9 +13,8 @@ import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.VectorClock
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

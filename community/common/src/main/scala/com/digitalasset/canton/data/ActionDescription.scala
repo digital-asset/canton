@@ -12,7 +12,6 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   OtherError,
   ValueDeserializationError,
 }
-import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.LfHashSyntax._
@@ -34,7 +33,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{LfTransactionUtil, NoCopy}
 import com.digitalasset.canton.version.HasProtoV0
-import com.digitalasset.canton.{LfChoiceName, LfPartyId}
+import com.digitalasset.canton.{LfChoiceName, LfPartyId, LfVersioned}
 import com.google.protobuf.ByteString
 
 /** Summarizes the information that is needed in addition to the other fields of [[ViewParticipantData]] for

@@ -12,7 +12,7 @@ package com.digitalasset.canton.util
   * use the following code to pass in a `Context`:
   * <pre>
   * class C {
-  *   private val _f: LazyValWithContext[T, Context] = new LazyValWithContext[T, Context](context => initializer)
+  *   private[this] val _f: LazyValWithContext[T, Context] = new LazyValWithContext[T, Context](context => initializer)
   *   def f(implicit context: Context): T = _f.get
   * }
   * </pre>
@@ -47,4 +47,9 @@ final class LazyValWithContext[T, Context](initialize: Context => T) {
 
   def get(implicit context: Context): T =
     if (bitmap_0) value_0 else value_lzycompute(context)
+}
+
+trait LazyValWithContextCompanion[Context] {
+  def apply[T](initialize: Context => T): LazyValWithContext[T, Context] =
+    new LazyValWithContext[T, Context](initialize)
 }

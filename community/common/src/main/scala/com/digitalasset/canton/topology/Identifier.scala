@@ -17,10 +17,10 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.{LfPartyId, checked}
 import io.circe.Encoder
 import slick.jdbc.{GetResult, SetParameter}
-import com.digitalasset.canton.util.ShowUtil._
 
 /** utility class to ensure that strings conform to LF specification minus our internal delimiter */
 object SafeSimpleString {

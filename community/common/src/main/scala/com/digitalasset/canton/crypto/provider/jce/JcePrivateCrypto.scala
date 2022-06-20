@@ -18,9 +18,9 @@ import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec
 import java.security.{
   GeneralSecurityException,
   InvalidAlgorithmParameterException,
+  KeyPair => JKeyPair,
   KeyPairGenerator,
   NoSuchAlgorithmException,
-  KeyPair => JKeyPair,
 }
 import scala.concurrent.{ExecutionContext, Future}
 

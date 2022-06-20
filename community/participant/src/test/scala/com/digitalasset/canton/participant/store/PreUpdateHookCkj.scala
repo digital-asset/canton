@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
-import java.util.concurrent.atomic.AtomicReference
-
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,6 +15,7 @@ import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
