@@ -24,12 +24,13 @@ import com.digitalasset.canton.protocol.{DynamicDomainParameters, LoggingAlarmSt
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
+import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.ProtocolVersion
@@ -179,14 +180,12 @@ class Mediator(
     } yield ()
   }
 
-  private def handler: ApplicationHandler[
-    Lambda[`+X` => Traced[Seq[OrdinarySequencedEvent[X]]]],
-    DefaultOpenEnvelope,
-  ] =
-    new ApplicationHandler[
-      Lambda[`+X` => Traced[Seq[OrdinarySequencedEvent[X]]]],
-      DefaultOpenEnvelope,
-    ] {
+  private def handler: ApplicationHandler[Lambda[
+    `+X <: Envelope[_]` => Traced[Seq[OrdinarySequencedEvent[X]]]
+  ], DefaultOpenEnvelope] =
+    new ApplicationHandler[Lambda[
+      `+X <: Envelope[_]` => Traced[Seq[OrdinarySequencedEvent[X]]]
+    ], DefaultOpenEnvelope] {
       override def name: String = s"mediator-${mediatorId}"
 
       override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit

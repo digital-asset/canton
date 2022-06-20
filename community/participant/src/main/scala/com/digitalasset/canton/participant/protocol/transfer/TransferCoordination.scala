@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,10 +22,9 @@ import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, TimeProof}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 
 import scala.concurrent.{ExecutionContext, Future}
 

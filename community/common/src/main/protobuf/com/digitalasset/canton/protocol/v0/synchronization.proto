@@ -243,7 +243,7 @@ message ViewParticipantData {
     com.digitalasset.canton.crypto.v0.Salt salt = 1;
     repeated InputContract core_inputs = 2;
     repeated CreatedContract created_core = 3;
-    repeated string archived_from_subviews = 4; // ids of contracts created in a subview and archived in the core
+    repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
     repeated ResolvedKey resolved_keys = 5;
     ActionDescription action_description = 6;
     RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.

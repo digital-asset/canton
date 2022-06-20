@@ -9,7 +9,7 @@ import cats.syntax.bifunctor._
 import cats.syntax.either._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton._
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiProvider}
 import com.digitalasset.canton.lifecycle._
@@ -43,19 +43,19 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
-trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
+trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasFutureSupervision =>
   def participantId: ParticipantId
   protected def participantNodeParameters: ParticipantNodeParameters
   def aliasManager: DomainAliasManager
 
   implicit def ec: ExecutionContextExecutor
+  override protected def executionContext: ExecutionContext = ec
   implicit def materializer: Materializer
   implicit def tracer: Tracer
 
   override protected def timeouts: ProcessingTimeout = participantNodeParameters.processingTimeouts
-  protected def futureSupervisor: FutureSupervisor
 
   protected def getDomainHandle(
       config: DomainConnectionConfig,
@@ -152,17 +152,17 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
 
       topologyClient <- EitherT.right(
         FutureUnlessShutdown.outcomeF(
-          CachingDomainTopologyClient
-            .create(
-              clock,
-              domainId,
-              targetDomainStore,
-              Map(),
-              packageDependencies,
-              participantNodeParameters.cachingConfigs,
-              timeouts,
-              domainLoggerFactory,
-            )
+          CachingDomainTopologyClient.create(
+            clock,
+            domainId,
+            targetDomainStore,
+            Map(),
+            packageDependencies,
+            participantNodeParameters.cachingConfigs,
+            timeouts,
+            futureSupervisor,
+            domainLoggerFactory,
+          )
         )
       )
 
@@ -220,7 +220,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging {
               )
           ),
           metrics(config.domain).sequencerClient,
-          futureSupervisor,
           participantNodeParameters.loggingConfig,
           domainLoggerFactory,
           ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions =

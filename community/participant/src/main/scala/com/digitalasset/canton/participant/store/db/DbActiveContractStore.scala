@@ -22,8 +22,8 @@ import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractS
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId

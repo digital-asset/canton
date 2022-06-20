@@ -6,9 +6,8 @@ package com.digitalasset.canton.crypto.store.memory
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._
-import com.digitalasset.canton.crypto.KeyName
-import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
+import com.digitalasset.canton.crypto.{KeyName, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TrieMapUtil
 

@@ -4,9 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
 import com.digitalasset.canton.protocol.messages.{
@@ -15,7 +13,9 @@ import com.digitalasset.canton.protocol.messages.{
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{DiscardOps, LfPartyId}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.immutable.SortedSet

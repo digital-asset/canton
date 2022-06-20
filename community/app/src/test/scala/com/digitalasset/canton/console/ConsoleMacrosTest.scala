@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.console
 
-import java.time.Instant
-import java.util.concurrent.atomic.AtomicInteger
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.TimeoutDuration
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 
 case class TestCase(id: Int, name: String)

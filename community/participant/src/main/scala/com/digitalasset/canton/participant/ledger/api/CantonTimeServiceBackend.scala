@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import java.time.Instant
-
+import com.daml.platform.apiserver.TimeServiceBackend
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.{Clock, TestingTimeService}
-import com.daml.platform.apiserver.TimeServiceBackend
 import com.digitalasset.canton.tracing.NoTracing
 
+import java.time.Instant
 import scala.concurrent.Future
 
 /** Optional time services backend for demos and testing only to enable an "advanceable clock" based on the environment's

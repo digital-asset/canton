@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.client
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, DefaultProcessingTimeouts}
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{DefaultTestIdentities, KeyCollection, TestingOwnerWithKeys}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, KeyCollection, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.Future
@@ -61,6 +62,7 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
           )
         ),
         DefaultProcessingTimeouts.testing,
+        FutureSupervisor.Noop,
         loggerFactory,
       )
 

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import akka.stream.{KillSwitches, Materializer}
 import akka.stream.scaladsl.{Keep, Source}
+import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
@@ -12,13 +12,13 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   domainManager,
   participant1,
   participant2,
 }
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId, UniqueIdentifier}
-import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
@@ -31,7 +31,8 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   val messageId = MessageId.tryCreate("test-message-id")
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
-      ClosedEnvelope(ByteString.EMPTY, Recipients.ofSet(recipients).value) :: Nil
+      ClosedEnvelope(ByteString.EMPTY, Recipients.ofSet(recipients).value) :: Nil,
+      defaultProtocolVersion,
     )
   def submission(from: Member, to: Set[Member]) =
     SubmissionRequest(
@@ -41,6 +42,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       mkBatch(to),
       CantonTimestamp.MaxValue,
       None,
+      defaultProtocolVersion,
     )
 
   private implicit val materializer = mock[Materializer] // not used

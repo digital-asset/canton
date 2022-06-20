@@ -7,7 +7,6 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,12 +19,12 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   CommitSet,
 }
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
+import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerError
 import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   SubmissionTrackingData,
   UnsequencedSubmission,
 }
-import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerError
 import com.digitalasset.canton.participant.store.{
   ContractLookup,
   SyncDomainEphemeralState,
@@ -34,11 +33,11 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 
 import scala.collection.concurrent
 import scala.concurrent.Future

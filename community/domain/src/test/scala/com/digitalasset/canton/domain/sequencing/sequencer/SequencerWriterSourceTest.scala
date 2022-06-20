@@ -329,9 +329,13 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               alice,
               MessageId.tryCreate("test-unknown-recipients"),
               isRequest = true,
-              batch = Batch.fromClosed(ClosedEnvelope(ByteString.EMPTY, Recipients.cc(bob))),
+              batch = Batch.fromClosed(
+                defaultProtocolVersion,
+                ClosedEnvelope(ByteString.EMPTY, Recipients.cc(bob)),
+              ),
               maxSequencingTime = CantonTimestamp.MaxValue,
               timestampOfSigningKey = None,
+              protocolVersion = defaultProtocolVersion,
             )
           )
         )("send to unknown recipient")

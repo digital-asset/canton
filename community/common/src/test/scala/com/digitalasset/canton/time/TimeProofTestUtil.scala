@@ -6,6 +6,7 @@ package com.digitalasset.canton.time
 import cats.syntax.option._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
@@ -22,7 +23,8 @@ object TimeProofTestUtil {
       timestamp,
       domainId,
       TimeProof.mkTimeProofRequestMessageId.some,
-      Batch.empty,
+      Batch.empty(TestDomainParameters.defaultStatic.protocolVersion),
+      TestDomainParameters.defaultStatic.protocolVersion,
     )
     val signedContent = SignedContent(deliver, SymbolicCrypto.emptySignature, None)
     val event = OrdinarySequencedEvent(signedContent)(TraceContext.empty)

@@ -3,16 +3,15 @@
 
 package com.digitalasset.canton.ledger.api.client
 
-import java.util.UUID
-import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.stream.KillSwitches
 import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
+import akka.{Done, NotUsed}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.ApiTypes.{ApplicationId, TemplateId, WorkflowId}
 import com.daml.ledger.api.v1.command_submission_service.SubmitRequest
-import com.daml.ledger.api.v1.commands.{Command, Commands}
 import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
+import com.daml.ledger.api.v1.commands.{Command, Commands}
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
@@ -28,7 +27,6 @@ import com.daml.ledger.client.configuration.{
 }
 import com.daml.ledger.client.services.commands.tracker.CompletionResponse
 import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -38,6 +36,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.AkkaUtil
 import com.google.rpc.status.Status
@@ -47,6 +46,7 @@ import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import org.slf4j.event.Level
 import scalaz.syntax.tag._
 
+import java.util.UUID
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 

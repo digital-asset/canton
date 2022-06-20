@@ -212,7 +212,7 @@ class TransferInProcessingSteps(
         viewMessage -> recipients,
         rootHashMessage -> rootHashRecipients,
       )
-      TransferSubmission(Batch.of(messages: _*), rootHash)
+      TransferSubmission(Batch.of(protocolVersion, messages: _*), rootHash)
     }
 
     result.mapK(FutureUnlessShutdown.outcomeK).widen[Submission]

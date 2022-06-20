@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
-import java.nio.charset.StandardCharsets
-
 import com.digitalasset.canton.serialization.{
   DeserializationError,
   DeterministicEncoding,
   HasCryptographicEvidence,
 }
 import com.google.protobuf.ByteString
+
+import java.nio.charset.StandardCharsets
 
 final case class EncodableString(string: String) extends HasCryptographicEvidence {
   def encodeDeterministically: ByteString = DeterministicEncoding.encodeString(string)

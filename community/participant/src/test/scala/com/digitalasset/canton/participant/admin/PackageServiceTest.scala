@@ -12,7 +12,7 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.archive.DarParser
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{String256M, String255}
+import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}

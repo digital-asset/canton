@@ -11,9 +11,10 @@ import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.option._
 import cats.syntax.traverseFilter._
+import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -59,11 +60,10 @@ import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.LedgerTransactionId
-import com.digitalasset.canton.topology.DomainId
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 

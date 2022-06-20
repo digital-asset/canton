@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.metrics
 
-import org.scalatest.wordspec.AnyWordSpec
 import com.codahale.metrics
 import com.digitalasset.canton.BaseTest
+import org.scalatest.wordspec.AnyWordSpec
 
 class MetricDocTest extends AnyWordSpec with BaseTest {
 

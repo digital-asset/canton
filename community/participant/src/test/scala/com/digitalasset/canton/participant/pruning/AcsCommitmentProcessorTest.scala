@@ -15,7 +15,6 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
@@ -53,6 +52,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.store.memory.InMemorySequencerCounterTrackerStore
 import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalacheck.{Arbitrary, Gen, Shrink}
@@ -119,7 +119,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
   def cryptoSetup(
       owner: ParticipantId,
       topology: Map[ParticipantId, Set[LfPartyId]],
-  ): SyncCryptoClient = {
+  ): SyncCryptoClient[DomainSnapshotSyncCryptoApi] = {
     val topologyWithPermissions =
       topology.fmap(_.map(p => (p, ParticipantPermission.Submission)).toMap)
     TestingTopology().withReversedTopology(topologyWithPermissions).build().forOwnerAndDomain(owner)
@@ -540,7 +540,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         delivered = remote.map(cmt =>
           (
             cmt.message.period.toInclusive.plusSeconds(1),
-            List(OpenEnvelope(cmt, Recipients.cc(localId))),
+            List(OpenEnvelope(cmt, Recipients.cc(localId), defaultProtocolVersion)),
           )
         )
         // First ask for the remote commitments to be processed, and then compute locally

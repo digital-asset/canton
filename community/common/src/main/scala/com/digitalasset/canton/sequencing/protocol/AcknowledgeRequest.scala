@@ -6,9 +6,9 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.option._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.HasProtoV0
 
 case class AcknowledgeRequest(member: Member, timestamp: CantonTimestamp)

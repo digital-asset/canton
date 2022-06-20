@@ -6,10 +6,9 @@ package com.digitalasset.canton.crypto.store
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.KeyName
 import com.digitalasset.canton.crypto.store.db.DbCryptoPrivateStore
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.{KeyName, _}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}

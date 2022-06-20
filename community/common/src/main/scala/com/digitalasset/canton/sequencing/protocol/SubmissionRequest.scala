@@ -6,15 +6,17 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.traverse._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasProtoV0WithVersion,
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
+  HasProtoV0,
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
+  HasProtocolVersionedWrapperCompanion,
+  ProtobufVersion,
   ProtocolVersion,
-  VersionedMessage,
+  RepresentativeProtocolVersion,
 }
 
 case class SubmissionRequest private (
@@ -24,22 +26,37 @@ case class SubmissionRequest private (
     batch: Batch[ClosedEnvelope],
     maxSequencingTime: CantonTimestamp,
     timestampOfSigningKey: Option[CantonTimestamp],
-) extends HasVersionedWrapper[VersionedMessage[SubmissionRequest]]
-    with HasProtoV0WithVersion[v0.SubmissionRequest] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SubmissionRequest] =
-    VersionedMessage(toProtoV0(version).toByteString, 0)
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest])
+    extends HasProtocolVersionedWrapper[SubmissionRequest]
+    with HasProtoV0[v0.SubmissionRequest] {
 
-  // added for serializing in HttpSequencerClient
-  def toByteArrayV0(version: ProtocolVersion): Array[Byte] = toProtoV0(version).toByteArray
+  override val companionObj: HasProtocolVersionedWrapperCompanion[SubmissionRequest] =
+    SubmissionRequest
 
-  override def toProtoV0(version: ProtocolVersion): v0.SubmissionRequest = v0.SubmissionRequest(
+  override def toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
     sender = sender.toProtoPrimitive,
     messageId = messageId.toProtoPrimitive,
     isRequest = isRequest,
-    batch = Some(batch.toProtoV0(version)),
+    batch = Some(batch.toProtoV0),
     maxSequencingTime = Some(maxSequencingTime.toProtoPrimitive),
     timestampOfSigningKey = timestampOfSigningKey.map(_.toProtoPrimitive),
   )
+
+  def copy(
+      sender: Member = sender,
+      messageId: MessageId = messageId,
+      isRequest: Boolean = isRequest,
+      batch: Batch[ClosedEnvelope] = batch,
+      maxSequencingTime: CantonTimestamp = maxSequencingTime,
+      timestampOfSigningKey: Option[CantonTimestamp] = timestampOfSigningKey,
+  ) = SubmissionRequest(
+    sender,
+    messageId,
+    isRequest,
+    batch,
+    maxSequencingTime,
+    timestampOfSigningKey,
+  )(representativeProtocolVersion)
 
   def isConfirmationRequest(mediator: Member): Boolean =
     batch.envelopes.exists(_.recipients.allRecipients == Set(mediator)) && batch.envelopes.exists(
@@ -50,12 +67,34 @@ case class SubmissionRequest private (
     batch.envelopes.nonEmpty && batch.envelopes.forall(_.recipients.allRecipients == Set(mediator))
 }
 
-object SubmissionRequest extends HasVersionedMessageCompanion[SubmissionRequest] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SubmissionRequest)(fromProtoV0)
+object SubmissionRequest extends HasProtocolVersionedCompanion[SubmissionRequest] {
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.SubmissionRequest)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "submission request"
+
+  def apply(
+      sender: Member,
+      messageId: MessageId,
+      isRequest: Boolean,
+      batch: Batch[ClosedEnvelope],
+      maxSequencingTime: CantonTimestamp,
+      timestampOfSigningKey: Option[CantonTimestamp],
+      protocolVersion: ProtocolVersion,
+  ): SubmissionRequest =
+    SubmissionRequest(
+      sender,
+      messageId,
+      isRequest,
+      batch,
+      maxSequencingTime,
+      timestampOfSigningKey,
+    )(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV0(
       requestP: v0.SubmissionRequest
@@ -80,6 +119,8 @@ object SubmissionRequest extends HasVersionedMessageCompanion[SubmissionRequest]
         .required("SubmissionRequest.batch", batchP)
         .flatMap(Batch.fromProtoV0(ClosedEnvelope.fromProtoV0))
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
-    } yield new SubmissionRequest(sender, messageId, isRequest, batch, maxSequencingTime, ts)
+    } yield new SubmissionRequest(sender, messageId, isRequest, batch, maxSequencingTime, ts)(
+      protocolVersionRepresentativeFor(ProtobufVersion(0))
+    )
   }
 }

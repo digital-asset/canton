@@ -4,21 +4,20 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTransactionResponseStore
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.protocol.messages.{
-  ProtocolMessage,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCallback, SendResult}
 import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.BaseTest
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -48,6 +47,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       requestId,
       List(signedIdentityTransaction),
       domainId,
+      defaultProtocolVersion,
     )
     .headOption
     .value
@@ -63,7 +63,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       requestId,
       List(domainIdentityServiceResult),
       domainId,
-    )(ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion))
+    )(RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(defaultProtocolVersion))
 
   "DomainIdentityManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
@@ -90,7 +90,9 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
         ]
         when(
           sequencerSendResponse.apply(
-            eqTo(OpenEnvelope(response, Recipients.cc(response.requestedBy))),
+            eqTo(
+              OpenEnvelope(response, Recipients.cc(response.requestedBy), defaultProtocolVersion)
+            ),
             any[SendCallback],
           )
         )
@@ -105,6 +107,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
           store,
           requestHandler,
           sequencerSendResponse,
+          defaultProtocolVersion,
           timeouts,
           loggerFactory,
         )
@@ -113,7 +116,14 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       val result = {
         val batch =
           Batch(
-            List(OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(response.domainId))))
+            List(
+              OpenEnvelope(
+                request,
+                Recipients.cc(DomainTopologyManagerId(response.domainId)),
+                defaultProtocolVersion,
+              )
+            ),
+            defaultProtocolVersion,
           )
         sut.apply(
           Traced(
@@ -125,6 +135,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
                   domainId,
                   Some(MessageId.tryCreate("messageId")),
                   batch,
+                  defaultProtocolVersion,
                 )
               )
             )

@@ -10,8 +10,8 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data.CertificateResult
-import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.admin.v0
+import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 => cryptoproto, _}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.google.protobuf.ByteString

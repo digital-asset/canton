@@ -12,8 +12,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ResourceUtil
-import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.retry.RetryEither
 import io.functionmeta.functionFullName
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.FlywayException

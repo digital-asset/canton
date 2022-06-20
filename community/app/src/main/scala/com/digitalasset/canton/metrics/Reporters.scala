@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.metrics
 
-import io.prometheus.client.exporter.HTTPServer
 import com.codahale.metrics.Reporter
+import io.prometheus.client.exporter.HTTPServer
 
 object Reporters {
 

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import java.util.UUID
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{FullInformeeTree, Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
@@ -11,10 +12,16 @@ import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.version.{HasProtoV0, RepresentativeProtocolVersion}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasProtocolVersionedWithContextCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.google.protobuf.ByteString
+
+import java.util.UUID
 
 /** The informee message to be sent to the mediator.
   */
@@ -31,14 +38,14 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
     with ProtocolMessageV0
     with ProtocolMessageV1 {
 
+  val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage] =
+    InformeeMessage.protocolVersionRepresentativeFor(fullInformeeTree.protocolVersion)
+
   override def requestUuid: UUID = fullInformeeTree.transactionUuid
 
   override def domainId: DomainId = fullInformeeTree.domainId
 
   override def mediatorId: MediatorId = fullInformeeTree.mediatorId
-
-  lazy val representativeProtocolVersion: RepresentativeProtocolVersion =
-    ProtocolMessage.protocolVersionRepresentativeFor(fullInformeeTree.protocolVersion)
 
   override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     fullInformeeTree.informeesAndThresholdByView
@@ -84,7 +91,22 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
   override def viewType: ViewType = ViewType.TransactionViewType
 }
 
-object InformeeMessage {
+object InformeeMessage extends HasProtocolVersionedWithContextCompanion[InformeeMessage, HashOps] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.InformeeMessage)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
+      _.toProtoV0.toByteString,
+    )
+  )
+
+  def apply(
+      fullInformeeTree: FullInformeeTree,
+      protocolVersion: ProtocolVersion,
+  ): InformeeMessage = {
+    InformeeMessage(fullInformeeTree)
+  }
 
   // The inverse of "toProto<version>".
   //
@@ -117,7 +139,7 @@ object InformeeMessage {
   // Again, the method must return "Left(...)" (and not throw an exception), if deserialization fails.
   //
   // Optional method, feel free to omit it.
-  def fromByteString(
+  override def fromByteString(
       hashOps: HashOps
   )(bytes: ByteString): ParsingResult[InformeeMessage] = {
     for {
@@ -131,4 +153,6 @@ object InformeeMessage {
     case im: InformeeMessage => Some(im)
     case _ => None
   }
+
+  override protected def name: String = "InformeeMessage"
 }

@@ -3,17 +3,6 @@
 
 package com.digitalasset.canton.crypto
 
-import java.io.{IOException, OutputStream, OutputStreamWriter}
-import java.math.BigInteger
-import java.security.cert.{
-  CertificateEncodingException,
-  CertificateException,
-  CertificateFactory,
-  CertificateParsingException,
-  X509Certificate => JX509Certificate,
-}
-import java.time.{Duration, Instant}
-import java.util.Date
 import better.files._
 import cats.data.EitherT
 import cats.syntax.either._
@@ -46,8 +35,19 @@ import org.bouncycastle.openssl.jcajce.JcaPEMWriter
 import org.bouncycastle.operator.ContentSigner
 import slick.jdbc.{GetResult, SetParameter}
 
-import scala.jdk.CollectionConverters._
+import java.io.{IOException, OutputStream, OutputStreamWriter}
+import java.math.BigInteger
+import java.security.cert.{
+  CertificateEncodingException,
+  CertificateException,
+  CertificateFactory,
+  CertificateParsingException,
+  X509Certificate => JX509Certificate,
+}
+import java.time.{Duration, Instant}
+import java.util.Date
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters._
 
 case class CertificateId(override val str: String255)
     extends LengthLimitedStringWrapper

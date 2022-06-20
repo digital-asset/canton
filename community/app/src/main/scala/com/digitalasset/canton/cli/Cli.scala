@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.cli
 
-import java.io.File
 import ch.qos.logback.classic.Level
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.buildinfo.BuildInfo
 import scopt.OptionParser
+
+import java.io.File
 
 sealed trait LogFileAppender
 object LogFileAppender {

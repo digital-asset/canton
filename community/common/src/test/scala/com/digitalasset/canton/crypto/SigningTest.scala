@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.SignatureCheckError.{InvalidSignature, SignatureWithWrongKey}
 import com.digitalasset.canton.crypto.SigningError.UnknownSigningKey
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpecLike
 
@@ -32,7 +31,7 @@ trait SigningTest extends BaseTest {
           for {
             crypto <- newCrypto
             publicKey <- newPublicKey(crypto)
-            publicKeyP = publicKey.toProtoVersioned(ProtocolVersion.latestForTest)
+            publicKeyP = publicKey.toProtoVersioned(defaultProtocolVersion)
             publicKey2 = SigningPublicKey
               .fromProtoVersioned(publicKeyP)
               .valueOrFail("serialize key")
@@ -48,7 +47,7 @@ trait SigningTest extends BaseTest {
               .leftMap(_.toString)
               .subflatMap(_.toRight("Private key not found"))
               .valueOrFail("get key")
-            privateKeyP = privateKey.toProtoVersioned(ProtocolVersion.latestForTest)
+            privateKeyP = privateKey.toProtoVersioned(defaultProtocolVersion)
             privateKey2 = SigningPrivateKey
               .fromProtoVersioned(privateKeyP)
               .valueOrFail("serialize key")
@@ -61,7 +60,7 @@ trait SigningTest extends BaseTest {
             publicKey <- newPublicKey(crypto)
             hash = TestHash.digest("foobar")
             sig <- crypto.privateCrypto.sign(hash, publicKey.id).valueOrFail("sign")
-            sigP = sig.toProtoVersioned(ProtocolVersion.latestForTest)
+            sigP = sig.toProtoVersioned(defaultProtocolVersion)
             sig2 = Signature.fromProtoVersioned(sigP).valueOrFail("serialize signature")
           } yield sig shouldEqual sig2
         }

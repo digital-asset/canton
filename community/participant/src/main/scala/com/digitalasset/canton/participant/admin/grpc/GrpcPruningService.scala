@@ -6,10 +6,9 @@ package com.digitalasset.canton.participant.admin.grpc
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._
-import com.digitalasset.canton.error.CantonError
-import com.daml.error.BaseError
 import com.daml.error.definitions.LedgerApiErrors.RequestValidation.NonHexOffset
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.daml.error.{BaseError, ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.PruningServiceErrorGroup
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.v0

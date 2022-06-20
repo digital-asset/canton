@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
-import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait ServiceAgreementStoreTest { this: AsyncWordSpec with BaseTest =>

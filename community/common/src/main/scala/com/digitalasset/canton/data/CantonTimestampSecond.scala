@@ -4,12 +4,12 @@
 package com.digitalasset.canton.data
 
 import cats.kernel.Order
-import com.digitalasset.canton.{LfTimestamp, ProtoDeserializationError}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.{LfTimestamp, ProtoDeserializationError}
+import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.{Duration, Instant}

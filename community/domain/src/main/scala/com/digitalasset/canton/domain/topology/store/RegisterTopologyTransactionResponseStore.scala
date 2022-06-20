@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyR
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.messages.{
-  ProtocolMessage,
+  EnvelopeContent,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
@@ -135,8 +135,8 @@ class DbRegisterTopologyTransactionResponseStore(
 
   implicit val getRegisterTopologyTransactionRequest
       : GetResult[RegisterTopologyTransactionRequest] = GetResult(r =>
-    ProtocolMessage
-      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
+    EnvelopeContent
+      .messageFromByteString(protocolVersion, cryptoApi)(
         ByteString.copyFrom(r.<<[Array[Byte]])
       )
       .fold[RegisterTopologyTransactionRequest](
@@ -156,12 +156,12 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setParameterRegisterTopologyTransactionRequest
       : SetParameter[RegisterTopologyTransactionRequest] =
     (r: RegisterTopologyTransactionRequest, pp: PositionedParameters) =>
-      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
+      pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
       : GetResult[RegisterTopologyTransactionResponse] = GetResult(r =>
-    ProtocolMessage
-      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
+    EnvelopeContent
+      .messageFromByteString(protocolVersion, cryptoApi)(
         ByteString.copyFrom(r.<<[Array[Byte]])
       )
       .fold[RegisterTopologyTransactionResponse](
@@ -188,7 +188,7 @@ class DbRegisterTopologyTransactionResponseStore(
   implicit val setRegisterTopologyTransactionResponse
       : SetParameter[RegisterTopologyTransactionResponse] =
     (r: RegisterTopologyTransactionResponse, pp: PositionedParameters) =>
-      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
+      pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
 
   override def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
       traceContext: TraceContext

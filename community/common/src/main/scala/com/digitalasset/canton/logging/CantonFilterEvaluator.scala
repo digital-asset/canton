@@ -5,8 +5,7 @@ package com.digitalasset.canton.logging
 
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
-import ch.qos.logback.core.boolex.EvaluationException
-import ch.qos.logback.core.boolex.EventEvaluatorBase
+import ch.qos.logback.core.boolex.{EvaluationException, EventEvaluatorBase}
 import ch.qos.logback.core.filter.EvaluatorFilter
 import ch.qos.logback.core.spi.FilterReply
 

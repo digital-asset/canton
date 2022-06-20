@@ -44,3 +44,21 @@ message EnvelopeContent {
     }
 }
 
+message ViewParticipantData {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    repeated v0.ViewParticipantData.InputContract core_inputs = 2;
+    repeated v0.ViewParticipantData.CreatedContract created_core = 3;
+    repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
+    repeated ResolvedKey resolved_keys = 5;
+    v0.ActionDescription action_description = 6;
+    v0.ViewParticipantData.RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.
+}
+
+message ResolvedKey {
+    v0.GlobalKey key = 1;
+    oneof resolution {
+        string contract_id = 2; // the key resolves to a contract
+        v0.ViewParticipantData.FreeKey free = 3; // the key is free and these are the maintainers
+    }
+    bool rolledBack = 4;
+}

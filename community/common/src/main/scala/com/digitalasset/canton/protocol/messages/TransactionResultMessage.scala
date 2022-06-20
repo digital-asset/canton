@@ -21,7 +21,6 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
@@ -38,7 +37,7 @@ sealed abstract case class TransactionResultMessage(
     override val verdict: Verdict,
     notificationTree: InformeeTree,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionResultMessage],
     val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with NoCopy
@@ -60,8 +59,7 @@ sealed abstract case class TransactionResultMessage(
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected def toProtoVersioned: VersionedMessage[TransactionResultMessage] =
-    TransactionResultMessage.toProtoVersioned(this)
+  override def companionObj = TransactionResultMessage
 
   override protected def toProtoV0: v0.TransactionResultMessage =
     v0.TransactionResultMessage(

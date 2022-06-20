@@ -8,6 +8,7 @@ import cats.syntax.foldable._
 import cats.syntax.traverseFilter._
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
@@ -97,6 +98,7 @@ private[domain] class DomainTopologyDispatcher(
     clock: Clock,
     addressSequencerAsDomainMember: Boolean,
     parameters: DomainNodeParameters,
+    futureSupervisor: FutureSupervisor,
     sender: DomainTopologySender,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -116,6 +118,7 @@ private[domain] class DomainTopologyDispatcher(
       SigningPublicKey.collect(initialKeys),
       StoreBasedDomainTopologyClient.NoPackageDependencies,
       timeouts,
+      futureSupervisor,
       loggerFactory,
       useStateTxs = false,
     )
@@ -126,6 +129,7 @@ private[domain] class DomainTopologyDispatcher(
     crypto,
     parameters.cachingConfigs,
     timeouts,
+    futureSupervisor,
     loggerFactory,
   )
   private val staticDomainMembers = DomainMember.list(domainId, addressSequencerAsDomainMember)
@@ -515,6 +519,7 @@ private[domain] object DomainTopologyDispatcher {
       clock: Clock,
       addressSequencerAsDomainMember: Boolean,
       parameters: DomainNodeParameters,
+      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
@@ -545,6 +550,7 @@ private[domain] object DomainTopologyDispatcher {
       clock,
       addressSequencerAsDomainMember,
       parameters,
+      futureSupervisor,
       sender,
       loggerFactory,
     )
@@ -647,7 +653,12 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
                     .leftMap(_.toString)
                     .mapK(FutureUnlessShutdown.outcomeK)
                 _ <- ensureDelivery(
-                  Batch(List(OpenEnvelope(message, nonEmptyRecipients))),
+                  Batch(
+                    List(
+                      OpenEnvelope(message, nonEmptyRecipients, protocolVersion)
+                    ),
+                    protocolVersion,
+                  ),
                   s"${transactions.size} topology transactions for ${recipients.size} recipients",
                 )
               } yield ()

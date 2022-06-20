@@ -1,8 +1,8 @@
 package io.functionmeta
 
-import shapeless.test.illTyped
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import shapeless.test.illTyped
 
 class FunctionMetaTest extends AnyWordSpec with Matchers {
 

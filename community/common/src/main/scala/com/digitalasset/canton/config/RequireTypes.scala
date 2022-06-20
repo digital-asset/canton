@@ -8,8 +8,8 @@ import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
-import com.digitalasset.canton.config.RequireTypes.InstanceName.InvalidInstanceName
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.RequireTypes.InstanceName.InvalidInstanceName
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.InvalidLengthString
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -17,6 +17,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.util.ShowUtil._
 import io.circe.{Decoder, Encoder, KeyEncoder}
+import io.scalaland.chimney.Transformer
 import pureconfig.error.{CannotConvert, FailureReason}
 import pureconfig.{ConfigReader, ConfigWriter}
 import slick.jdbc.{GetResult, SetParameter}
@@ -163,6 +164,8 @@ object RequireTypes {
 
     def create(n: Int): Either[InvariantViolation, NonNegativeInt] = NonNegativeNumeric.create(n)
     def tryCreate(n: Int): NonNegativeInt = NonNegativeNumeric.tryCreate(n)
+
+    implicit val forgetNonNegativeIntRefinement: Transformer[NonNegativeInt, Int] = _.unwrap
   }
 
   sealed abstract case class PositiveNumeric[T](value: T)(implicit val num: Numeric[T])

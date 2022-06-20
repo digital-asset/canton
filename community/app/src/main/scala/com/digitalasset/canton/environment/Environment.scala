@@ -37,8 +37,8 @@ import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.{Await, blocking}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, blocking}
 import scala.util.control.NonFatal
 
 /** Holds all significant resources held by this process.

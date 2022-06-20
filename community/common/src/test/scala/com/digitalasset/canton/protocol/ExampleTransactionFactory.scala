@@ -3,11 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.option._
-
-import java.util.UUID
-import java.time.{Duration => JDuration}
 import cats.syntax.functorFilter._
+import cats.syntax.option._
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
@@ -32,6 +29,14 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{
 }
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
 import com.digitalasset.canton.data._
+import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
+  Confirmation,
+  Observation,
+  Submission,
+}
+import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.topology.{
   DomainId,
   MediatorId,
@@ -40,21 +45,15 @@ import com.digitalasset.canton.topology.{
   TestingTopology,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
-  Confirmation,
-  Observation,
-  Submission,
-}
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.protocol.ExampleTransactionFactory._
-import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{LfTransactionBuilder, LfTransactionUtil}
 import org.scalatest.EitherValues
 
+import java.time.{Duration => JDuration}
+import java.util.UUID
 import scala.collection.immutable.{HashMap, StringOps}
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 /** Provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
@@ -520,7 +519,7 @@ class ExampleTransactionFactory(
       createdContract <- subView.viewParticipantData.tryUnwrap.createdCore
     } yield createdContract.contract.contractId).toSet
 
-    val archivedFromSubviews = consumed.intersect(createdInSubviews)
+    val createdInSubviewArchivedInCore = consumed.intersect(createdInSubviews)
 
     val actionDescription =
       ActionDescription.tryFromLfActionNode(LfTransactionUtil.lightWeight(node), seed)
@@ -528,7 +527,7 @@ class ExampleTransactionFactory(
     val viewParticipantData = ViewParticipantData(cryptoOps)(
       coreInputsWithMetadata,
       createWithSerialization,
-      archivedFromSubviews,
+      createdInSubviewArchivedInCore,
       Map.empty,
       actionDescription,
       RollbackContext.empty,

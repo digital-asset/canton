@@ -7,8 +7,8 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.sequencing.SequencerConnection
-import io.grpc.ManagedChannel
 import com.google.protobuf.empty.Empty
+import io.grpc.ManagedChannel
 
 import scala.concurrent.Future
 

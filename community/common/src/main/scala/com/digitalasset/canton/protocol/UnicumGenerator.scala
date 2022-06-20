@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.protocol
 
-import java.util.UUID
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose, HmacOps, Salt}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
+
+import java.util.UUID
 
 /** Generates [[Unicum]]s for contract IDs such that the [[Unicum]] is a cryptographic commitment to the following:
   * <ul>

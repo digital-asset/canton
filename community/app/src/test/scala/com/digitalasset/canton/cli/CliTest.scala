@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.cli
 
-import java.io.{ByteArrayOutputStream, File}
-
 import ch.qos.logback.classic.Level
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.io.{ByteArrayOutputStream, File}
 
 class CliTest extends AnyWordSpec with BaseTest {
   "parse" can {

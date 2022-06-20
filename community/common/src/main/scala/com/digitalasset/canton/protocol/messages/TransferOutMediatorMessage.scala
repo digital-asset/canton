@@ -3,18 +3,23 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferOutViewTree, ViewType}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.version.{HasProtoV0, ProtobufVersion, RepresentativeProtocolVersion}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasProtocolVersionedWithContextCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 
 import java.util.UUID
 
@@ -24,8 +29,7 @@ import java.util.UUID
   * @throws java.lang.IllegalArgumentException if the common data is blinded or the view is not blinded
   */
 case class TransferOutMediatorMessage(
-    tree: TransferOutViewTree,
-    representativeProtocolVersion: RepresentativeProtocolVersion,
+    tree: TransferOutViewTree
 ) extends MediatorRequest
     with ProtocolMessageV0
     with ProtocolMessageV1
@@ -34,6 +38,11 @@ case class TransferOutMediatorMessage(
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
 
   private[this] val commonData = tree.commonData.tryUnwrap
+
+  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutMediatorMessage] =
+    TransferOutMediatorMessage.protocolVersionRepresentativeFor(
+      commonData.representativeProtocolVersion.unwrap
+    )
 
   override def domainId: DomainId = commonData.originDomain
 
@@ -82,7 +91,19 @@ case class TransferOutMediatorMessage(
   override def viewType: ViewType = ViewType.TransferOutViewType
 }
 
-object TransferOutMediatorMessage {
+object TransferOutMediatorMessage
+    extends HasProtocolVersionedWithContextCompanion[TransferOutMediatorMessage, HashOps] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.TransferOutMediatorMessage)((hashOps, proto) =>
+        fromProtoV0(hashOps)(proto)
+      ),
+      _.toProtoV0.toByteString,
+    )
+  )
+
   def fromProtoV0(hashOps: HashOps)(
       transferOutMediatorMessageP: v0.TransferOutMediatorMessage
   ): ParsingResult[TransferOutMediatorMessage] =
@@ -98,15 +119,7 @@ object TransferOutMediatorMessage {
         tree.view.isBlinded,
         OtherError(s"Transfer-out view data is not blinded in request ${tree.rootHash}"),
       )
-    } yield TransferOutMediatorMessage(
-      tree,
-      ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0)),
-    )
+    } yield TransferOutMediatorMessage(tree)
 
-  def fromByteString(
-      crypto: CryptoPureApi
-  )(bytes: ByteString): ParsingResult[TransferOutMediatorMessage] =
-    ProtoConverter
-      .protoParser(v0.TransferOutMediatorMessage.parseFrom)(bytes)
-      .flatMap(fromProtoV0(crypto))
+  override protected def name: String = "TransferOutMediatorMessage"
 }

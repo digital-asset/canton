@@ -5,6 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.admin.api.client.commands.{
   ParticipantAdminCommands,
   TopologyAdminCommands,
@@ -35,7 +36,6 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.LedgerParticipantId
 import com.google.protobuf.ByteString
 
 import java.time.Instant

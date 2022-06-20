@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Tests that all examples provided can be created successfully.

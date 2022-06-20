@@ -8,10 +8,8 @@ import cats.syntax.alternative._
 import cats.syntax.option._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
 import com.digitalasset.canton.participant.store._
@@ -20,13 +18,15 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.{
   TimelyRejectionEventId,
   TransactionEventId,
 }
+import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerConfiguration, LedgerSubmissionId}
 import com.google.common.annotations.VisibleForTesting
-import java.time.Duration
 
+import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Helper to publish participant events in a thread-safe way. For "regular" SingleDimensionEventLogs representing

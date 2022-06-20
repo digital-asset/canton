@@ -4,12 +4,9 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.error.definitions.DamlError
-
-import java.util.Base64
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive => P}
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry.{
   CommandResult,
@@ -21,9 +18,11 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AcceptRejectError.OfferNotFound
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
 import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
 import com.google.protobuf.ByteString
 
+import java.util.Base64
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Store for DAR sharing requests I've sent that haven't yet been accepted or rejected */

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
@@ -15,7 +16,6 @@ import com.digitalasset.canton.participant.store.db.DbContractStoreTest.createDb
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbStorageIdempotency, DbTest, H2Test, PostgresTest}
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName

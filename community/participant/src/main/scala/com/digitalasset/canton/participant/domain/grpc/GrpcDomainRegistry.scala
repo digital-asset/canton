@@ -7,7 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton._
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.lifecycle._
@@ -63,12 +63,13 @@ class GrpcDomainRegistry(
     ) => FutureUnlessShutdown[Either[ParticipantTopologyManagerError, Unit]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
     metrics: DomainAlias => SyncDomainMetrics,
-    protected val futureSupervisor: FutureSupervisor,
+    override protected val futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContextExecutor, val materializer: Materializer, val tracer: Tracer)
     extends DomainRegistry
     with DomainRegistryHelpers
     with FlagCloseable
+    with HasFutureSupervision
     with NamedLogging {
 
   override protected def timeouts: ProcessingTimeout = participantNodeParameters.processingTimeouts

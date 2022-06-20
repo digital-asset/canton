@@ -89,6 +89,7 @@ class DomainNodeSequencerClientFactory(
         crypto,
         cantonParameterConfig.cachingConfigs,
         cantonParameterConfig.processingTimeouts,
+        futureSupervisor,
         loggerFactory,
       )
 
@@ -113,7 +114,6 @@ class DomainNodeSequencerClientFactory(
       member =>
         Domain.replaySequencerConfig.get().lift(member).map(Domain.defaultReplayPath(member)),
       clientMetrics,
-      futureSupervisor,
       cantonParameterConfig.loggingConfig,
       clientLoggerFactory,
       supportedProtocolVersions =

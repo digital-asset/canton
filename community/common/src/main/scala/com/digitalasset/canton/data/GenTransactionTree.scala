@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.data
 
-import java.util.UUID
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.foldable._
@@ -11,8 +10,7 @@ import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.SubmitterInfo
-import com.daml.nonempty.NonEmptyUtil
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
@@ -22,14 +20,6 @@ import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransac
 import com.digitalasset.canton.data.MerkleTree._
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
-import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
-import com.digitalasset.canton.topology.{
-  DomainId,
-  MediatorId,
-  Member,
-  ParticipantId,
-  UniqueIdentifier,
-}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
@@ -42,6 +32,14 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient
+import com.digitalasset.canton.topology.{
+  DomainId,
+  MediatorId,
+  Member,
+  ParticipantId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
@@ -56,6 +54,7 @@ import com.digitalasset.canton.version.{
 }
 import com.google.protobuf.ByteString
 
+import java.util.UUID
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
@@ -668,7 +667,7 @@ sealed abstract case class SubmitterMetadata private (
     dedupPeriod: DeduplicationPeriod,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[SubmitterMetadata],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[SubmitterMetadata](hashOps)
     with HasProtocolVersionedWrapper[SubmitterMetadata]
@@ -690,8 +689,7 @@ sealed abstract case class SubmitterMetadata private (
     param("deduplication period", _.dedupPeriod),
   )
 
-  override protected def toProtoVersioned: VersionedMessage[SubmitterMetadata] =
-    SubmitterMetadata.toProtoVersioned(this)
+  override def companionObj = SubmitterMetadata
 
   protected def toProtoV0: v0.SubmitterMetadata = v0.SubmitterMetadata(
     actAs = actAs.toSeq,
@@ -835,7 +833,7 @@ sealed abstract case class CommonMetadata private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[CommonMetadata],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[CommonMetadata](hashOps)
     with HasProtocolVersionedWrapper[CommonMetadata]
@@ -855,8 +853,7 @@ sealed abstract case class CommonMetadata private (
     param("salt", _.salt),
   )
 
-  override protected def toProtoVersioned: VersionedMessage[CommonMetadata] =
-    CommonMetadata.toProtoVersioned(this)
+  override def companionObj = CommonMetadata
 
   private[CommonMetadata] def toProtoV0: v0.CommonMetadata = v0.CommonMetadata(
     confirmationPolicy = confirmationPolicy.toProtoPrimitive,
@@ -936,7 +933,7 @@ sealed abstract case class ParticipantMetadata private (
     salt: Salt,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[ParticipantMetadata],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ParticipantMetadata](hashOps)
     with HasProtocolVersionedWrapper[ParticipantMetadata]
@@ -955,8 +952,7 @@ sealed abstract case class ParticipantMetadata private (
     param("salt", _.salt),
   )
 
-  override protected def toProtoVersioned: VersionedMessage[ParticipantMetadata] =
-    ParticipantMetadata.toProtoVersioned(this)
+  override def companionObj = ParticipantMetadata
 
   protected def toProtoV0: v0.ParticipantMetadata = v0.ParticipantMetadata(
     ledgerTime = Some(ledgerTime.toProtoPrimitive),

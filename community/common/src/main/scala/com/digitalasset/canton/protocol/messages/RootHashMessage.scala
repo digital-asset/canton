@@ -15,6 +15,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
@@ -33,7 +34,7 @@ sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
     override val domainId: DomainId,
     viewType: ViewType,
     payload: Payload,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion)
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage])
     extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
@@ -89,7 +90,21 @@ sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
 
 }
 
-object RootHashMessage {
+object RootHashMessage
+    extends HasProtocolVersionedWithContextCompanion[RootHashMessage[
+      RootHashMessagePayload
+    ], ByteString => ParsingResult[RootHashMessagePayload]] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.RootHashMessage)((deserializer, proto) =>
+        fromProtoV0(deserializer)(proto)
+      ),
+      _.toProtoV0.toByteString,
+    )
+  )
+
   def apply[Payload <: RootHashMessagePayload](
       rootHash: RootHash,
       domainId: DomainId,
@@ -101,7 +116,7 @@ object RootHashMessage {
     domainId,
     viewType,
     payload,
-  )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+  )(protocolVersionRepresentativeFor(protocolVersion)) {}
 
   def fromProtoV0[Payload <: RootHashMessagePayload](
       payloadDeserializer: ByteString => ParsingResult[Payload]
@@ -119,7 +134,7 @@ object RootHashMessage {
       domainId,
       viewType,
       payloadO,
-    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit
@@ -141,6 +156,8 @@ object RootHashMessage {
       implicit cast: RootHashMessagePayloadCast[Payload]
   ): Option[RootHashMessage[Payload]] =
     message.traverse(toKind(_))
+
+  override protected def name: String = "RootHashMessage"
 }
 
 /** Payloads of [[RootHashMessage]] */

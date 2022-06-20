@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.version
 
+import cats.syntax.either._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.protobuf.{VersionedMessageV0, VersionedMessageV1, VersionedMessageV2}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.google.protobuf.ByteString
-import org.scalatest.wordspec.AnyWordSpec
-import cats.syntax.either._
 import com.digitalasset.canton.version.HasProtocolVersionedWrapperTest.{
   Message,
   protocolVersion,
   protocolVersionRepresentative,
 }
+import com.google.protobuf.ByteString
+import org.scalatest.wordspec.AnyWordSpec
 
 class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
@@ -66,18 +66,19 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
 object HasProtocolVersionedWrapperTest {
   private def protocolVersion(i: Int): ProtocolVersion = ProtocolVersion(i, 0, 0)
-  private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion =
+  private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion[Message] =
     Message.protocolVersionRepresentativeFor(protocolVersion(i))
 
   case class Message(
       msg: String,
       iValue: Int,
       dValue: Double,
-      representativeProtocolVersion: RepresentativeProtocolVersion,
+      representativeProtocolVersion: RepresentativeProtocolVersion[Message],
   )(
       val deserializedFrom: Option[ByteString] = None
   ) extends HasProtocolVersionedWrapper[Message] {
-    override def toProtoVersioned: VersionedMessage[Message] = Message.toProtoVersioned(this)
+
+    override def companionObj = Message
 
     def toProtoV0 = VersionedMessageV0(msg)
     def toProtoV1 = VersionedMessageV1(msg, iValue)

@@ -7,7 +7,6 @@ import akka.NotUsed
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
@@ -171,11 +170,10 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         _ => None,
         _ => None,
         CommonMockMetrics.sequencerClient,
-        FutureSupervisor.Noop,
         LoggingConfig(),
         loggerFactory,
         ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions = false),
-        Some(ProtocolVersion.latestForTest),
+        Some(TestDomainParameters.defaultStatic.protocolVersion),
       ).create(
         participant,
         sequencedEventStore,
@@ -248,8 +246,8 @@ class GrpcSequencerIntegrationTest
       env.mockSubscription(_ => subscribePromise.success(()), _ => unsubscribePromise.success(()))
 
       val domainTimeTracker = mock[DomainTimeTracker]
-      when(domainTimeTracker.wrapHandler(any[OrdinaryApplicationHandler[Any]]))
-        .thenAnswer(Predef.identity[OrdinaryApplicationHandler[Any]] _)
+      when(domainTimeTracker.wrapHandler(any[OrdinaryApplicationHandler[Envelope[_]]]))
+        .thenAnswer(Predef.identity[OrdinaryApplicationHandler[Envelope[_]]] _)
 
       // kick of subscription
       val initF = env.client.subscribeAfter(
@@ -281,7 +279,8 @@ class GrpcSequencerIntegrationTest
       val result = for {
         response <- env.client
           .sendAsync(
-            Batch.of((MockProtocolMessage, Recipients.cc(anotherParticipant))),
+            Batch
+              .of(defaultProtocolVersion, (MockProtocolMessage, Recipients.cc(anotherParticipant))),
             SendType.Other,
             None,
           )
@@ -302,8 +301,8 @@ class GrpcSequencerIntegrationTest
         protocolV0.SignedProtocolMessage.SomeSignedProtocolMessage.Empty,
       )
 
-    override def representativeProtocolVersion: RepresentativeProtocolVersion =
-      ProtocolMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    override def representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage] =
+      ???
 
     override def domainId: DomainId = DefaultTestIdentities.domainId
     override def toProtoEnvelopeContentV0: protocolV0.EnvelopeContent =

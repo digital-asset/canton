@@ -5,11 +5,11 @@ package com.digitalasset.canton.store.db
 
 import cats.data.OptionT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 import io.functionmeta.functionFullName
-import com.digitalasset.canton.config.RequireTypes.String300
 
 import scala.concurrent.{ExecutionContext, Future}
 

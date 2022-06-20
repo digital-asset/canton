@@ -23,6 +23,8 @@ import scala.util.{Failure, Success}
   * does not start because we never complete the promise.
   * This leads to hard to debug situations. We can support debugging by tracking such futures.
   * As this is costly, we'll turn this off in production.
+  *
+  * @see HasFutureSupervision for a mixin
   */
 trait FutureSupervisor {
   def supervised[T](description: => String, warnAfter: Duration = 10.seconds)(fut: Future[T])(
@@ -30,6 +32,7 @@ trait FutureSupervisor {
       errorLoggingContext: ErrorLoggingContext,
       executionContext: ExecutionContext,
   ): Future[T]
+
   def supervisedUS[T](description: => String, warnAfter: Duration = 10.seconds)(
       fut: FutureUnlessShutdown[T]
   )(implicit

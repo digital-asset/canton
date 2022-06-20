@@ -4,9 +4,9 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either._
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v0
@@ -15,6 +15,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
@@ -23,9 +24,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
-import com.digitalasset.canton.ProtoDeserializationError
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
 
@@ -125,15 +124,14 @@ abstract sealed case class AcsCommitment private (
     period: CommitmentPeriod,
     commitment: AcsCommitment.CommitmentType,
 )(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitment]
     with HasProtoV0[v0.AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
 
-  override protected def toProtoVersioned: VersionedMessage[AcsCommitment] =
-    AcsCommitment.toProtoVersioned(this)
+  override def companionObj = AcsCommitment
 
   override protected def toProtoV0: v0.AcsCommitment = {
     v0.AcsCommitment(

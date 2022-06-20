@@ -5,11 +5,10 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.health.admin.data
-import com.digitalasset.canton.health.admin.v0
+import com.digitalasset.canton.health.admin.{data, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import io.grpc.ManagedChannel
 import com.google.protobuf.empty.Empty
+import io.grpc.ManagedChannel
 
 import scala.concurrent.Future
 

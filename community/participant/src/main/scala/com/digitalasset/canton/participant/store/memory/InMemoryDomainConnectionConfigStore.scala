@@ -3,22 +3,22 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import java.util.concurrent.ConcurrentHashMap
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
-import com.digitalasset.canton.participant.store.{
-  DomainConnectionConfigStore,
-  StoredDomainConnectionConfig,
-}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
   AlreadyAddedForAlias,
   MissingConfigForAlias,
 }
+import com.digitalasset.canton.participant.store.{
+  DomainConnectionConfigStore,
+  StoredDomainConnectionConfig,
+}
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 

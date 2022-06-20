@@ -27,7 +27,7 @@ import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.nio.file.Path
-import java.time.{Instant, Duration => JDuration}
+import java.time.{Duration => JDuration, Instant}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 

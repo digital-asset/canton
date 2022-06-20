@@ -81,7 +81,8 @@ object CantonOnly {
         forbidV0ContractId = true,
         requireSuffixedGlobalContractId = true,
         contractKeyUniqueness =
-          if (uniqueContractKeys) ContractKeyUniquenessMode.On else ContractKeyUniquenessMode.Off,
+          if (uniqueContractKeys) ContractKeyUniquenessMode.Strict
+          else ContractKeyUniquenessMode.Off,
       )
     )
 

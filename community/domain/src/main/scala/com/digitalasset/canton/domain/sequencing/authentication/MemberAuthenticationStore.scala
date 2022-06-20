@@ -7,11 +7,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.IdempotentInsert.insertIgnoringConflicts
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.protocol.v0
 import cats.syntax.traverse._
+import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
 

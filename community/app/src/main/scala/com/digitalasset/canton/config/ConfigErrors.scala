@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.config
 
-import com.digitalasset.canton.error.CantonErrorGroups.ConfigErrorGroup
-import com.digitalasset.canton.error.CantonError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.CantonErrorGroups.ConfigErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.typesafe.config.ConfigException
 import org.slf4j.event.Level

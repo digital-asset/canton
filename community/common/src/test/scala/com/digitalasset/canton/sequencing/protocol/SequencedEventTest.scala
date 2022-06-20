@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{RequestId, v0}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainId
-import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage}
-import com.digitalasset.canton.BaseTestWordSpec
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.UntypedVersionedMessage
 
 class SequencedEventTest extends BaseTestWordSpec {
   "serialization" should {
@@ -27,12 +27,13 @@ class SequencedEventTest extends BaseTestWordSpec {
               Set.empty,
               TransferInDomainId(domainId),
               Verdict.Timeout,
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             ),
           SymbolicCrypto.emptySignature,
         )
       val batch = Batch.of(
-        (message, Recipients.cc(DefaultTestIdentities.participant1))
+        defaultProtocolVersion,
+        (message, Recipients.cc(DefaultTestIdentities.participant1)),
       )
       val deliver: Deliver[DefaultOpenEnvelope] =
         Deliver.create[DefaultOpenEnvelope](
@@ -41,6 +42,7 @@ class SequencedEventTest extends BaseTestWordSpec {
           domainId,
           Some(MessageId.tryCreate("some-message-id")),
           batch,
+          defaultProtocolVersion,
         )
       val deliverEventPV0 = deliver.toProtoV0
       val deliverEventP = deliver.toProtoVersioned
@@ -58,6 +60,7 @@ class SequencedEventTest extends BaseTestWordSpec {
         domainId,
         MessageId.tryCreate("some-message-id"),
         DeliverErrorReason.BatchRefused("no batches here please"),
+        defaultProtocolVersion,
       )
       val deliverErrorPV0 = deliverError.toProtoV0
       val deserializedEventV0 = deserializeV0(deliverErrorPV0)
@@ -74,7 +77,10 @@ class SequencedEventTest extends BaseTestWordSpec {
       val cryptoPureApi = mock[CryptoPureApi]
       val bytes = eventP.toByteString
       SequencedEvent.fromProtoWithV0(
-        OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoPureApi))
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(defaultProtocolVersion, cryptoPureApi),
+          defaultProtocolVersion,
+        )
       )(eventP, bytes)
     }
 
@@ -84,7 +90,10 @@ class SequencedEventTest extends BaseTestWordSpec {
       val cryptoPureApi = mock[CryptoPureApi]
       val bytes = eventP.toByteString
       SequencedEvent.fromProtoWith(
-        OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(cryptoPureApi))
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(defaultProtocolVersion, cryptoPureApi),
+          defaultProtocolVersion,
+        )
       )(eventP, bytes)
     }
   }

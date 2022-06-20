@@ -14,8 +14,6 @@ import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
 import com.digitalasset.canton.domain.mediator.store.MediatorState
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
@@ -35,6 +33,8 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.DomainTimeTracker
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
@@ -331,7 +331,7 @@ class ConfirmationResponseProcessor(
                 signedRejection -> Recipients.groups(recipients.map(r => NonEmpty(Set, r)))
               }
           }
-        batch = Batch.of(envs: _*)
+        batch = Batch.of(protocolVersion, envs: _*)
         _ <- sendResultBatch(requestId, batch, domainParameters)
       } yield ()
     } else Future.unit
@@ -529,7 +529,9 @@ class ConfirmationResponseProcessor(
           )
           SignedProtocolMessage
             .create(result, snapshot, crypto.pureCrypto)
-            .map(signedResult => OpenEnvelope(signedResult, Recipients.cc(participantId)))
+            .map(signedResult =>
+              OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
+            )
         }
-    } yield Batch(envelopes)
+    } yield Batch(envelopes, protocolVersion)
 }

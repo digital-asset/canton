@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 /** A [[ClosedEnvelope]]'s contents are serialized as a [[com.google.protobuf.ByteString]]. */
@@ -20,10 +21,11 @@ case class ClosedEnvelope(
   override protected def content: ByteString = bytes
 
   def openEnvelope[M <: ProtocolMessage](
-      protocolMessageDeserializer: ByteString => ParsingResult[M]
+      protocolMessageDeserializer: ByteString => ParsingResult[M],
+      protocolVersion: ProtocolVersion,
   ): ParsingResult[OpenEnvelope[M]] =
     protocolMessageDeserializer(bytes).map(protocolMessage =>
-      OpenEnvelope(protocolMessage, recipients)
+      OpenEnvelope(protocolMessage, recipients, protocolVersion)
     )
 
   override def pretty: Pretty[ClosedEnvelope] = prettyOfClass(param("recipients", _.recipients))

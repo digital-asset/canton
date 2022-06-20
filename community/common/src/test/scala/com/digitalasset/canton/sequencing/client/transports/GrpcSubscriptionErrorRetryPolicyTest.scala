@@ -4,10 +4,10 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import io.grpc.{Metadata, Status}
 import org.scalatest.wordspec.AnyWordSpec
 

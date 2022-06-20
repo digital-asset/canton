@@ -12,12 +12,15 @@ import com.digitalasset.canton.crypto.store.{
   PrivateKeyWithName,
   SigningPrivateKeyWithName,
 }
-import com.digitalasset.canton.crypto.{EncryptionPrivateKey, Fingerprint, SigningPrivateKey}
+import com.digitalasset.canton.crypto.{
+  EncryptionPrivateKey,
+  Fingerprint,
+  KeyName,
+  SigningPrivateKey,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TrieMapUtil
-
-import com.digitalasset.canton.crypto.KeyName
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}

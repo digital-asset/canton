@@ -11,8 +11,8 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Signature, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore._
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
@@ -37,7 +37,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
   val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
   def mkBatch(envelopes: ClosedEnvelope*): Batch[ClosedEnvelope] =
-    Batch(envelopes.toList)
+    Batch(envelopes.toList, defaultProtocolVersion)
 
   def signDeliver(event: Deliver[ClosedEnvelope]): SignedContent[Deliver[ClosedEnvelope]] =
     SignedContent(event, sign(s"deliver signature ${event.counter}"), None)
@@ -54,6 +54,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("deliver")),
           mkBatch(closedEnvelope),
+          defaultProtocolVersion,
         ),
         sign("deliver signature"),
         None,
@@ -73,6 +74,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-max-positive-deliver")),
           mkBatch(closedEnvelope),
+          defaultProtocolVersion,
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MaxValue),
@@ -89,6 +91,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-min-deliver")),
           mkBatch(closedEnvelope),
+          defaultProtocolVersion,
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MinValue),
@@ -105,6 +108,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-deliver")),
           mkBatch(closedEnvelope),
+          defaultProtocolVersion,
         ),
         singleDeliver.signedEvent.signature,
         None,
@@ -133,6 +137,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("empty-deliver")),
           mkBatch(),
+          defaultProtocolVersion,
         ),
         sign("Deliver signature"),
         None,
@@ -148,6 +153,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           MessageId.tryCreate("deliver-error"),
           DeliverErrorReason.BatchRefused("paniertes schnitzel"),
+          defaultProtocolVersion,
         ),
         sign("Deliver error signature"),
         None,
@@ -493,6 +499,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
                 domainId,
                 Some(MessageId.tryCreate("deliver1")),
                 emptyBatch,
+                defaultProtocolVersion,
               )
           )
         )
@@ -504,6 +511,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
             domainId,
             Some(MessageId.tryCreate("deliver2")),
             emptyBatch,
+            defaultProtocolVersion,
           )
         )
       )
@@ -549,13 +557,27 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
       val deliver1 =
         mkOrdinaryEvent(
           signDeliver(
-            Deliver.create(102L, ts2, domainId, Some(MessageId.tryCreate("deliver1")), emptyBatch)
+            Deliver.create(
+              102L,
+              ts2,
+              domainId,
+              Some(MessageId.tryCreate("deliver1")),
+              emptyBatch,
+              defaultProtocolVersion,
+            )
           )
         )
       val deliver2 =
         mkOrdinaryEvent(
           signDeliver(
-            Deliver.create(104L, ts4, domainId, Some(MessageId.tryCreate("deliver2")), emptyBatch)
+            Deliver.create(
+              104L,
+              ts4,
+              domainId,
+              Some(MessageId.tryCreate("deliver2")),
+              emptyBatch,
+              defaultProtocolVersion,
+            )
           )
         )
 

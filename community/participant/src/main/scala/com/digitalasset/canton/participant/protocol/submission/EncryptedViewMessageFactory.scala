@@ -7,20 +7,19 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
   EncryptedView,
   EncryptedViewMessage,
   EncryptedViewMessageV0,
   EncryptedViewMessageV1,
-  ProtocolMessage,
 }
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.LfPartyId
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -89,11 +88,8 @@ object EncryptedViewMessageFactory {
             encryptedView,
             viewTree.domainId,
             viewEncryptionScheme,
-          )(
-            Some(informeeParticipants),
-            ProtocolMessage.protocolVersionRepresentativeFor(ProtocolVersion.unstable_development),
-          )
-        case protocolVersion =>
+          )(Some(informeeParticipants))
+        case _ =>
           val randomnessMapV0 = randomnessMap.fmap(_.encrypted)
           EncryptedViewMessageV0[VT](
             signature,
@@ -101,7 +97,7 @@ object EncryptedViewMessageFactory {
             randomnessMapV0,
             encryptedView,
             viewTree.domainId,
-          )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion))
+          )
       }
     } yield message
   }

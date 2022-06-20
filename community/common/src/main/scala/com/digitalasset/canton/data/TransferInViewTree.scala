@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.data
 
-import java.util.UUID
 import cats.syntax.bifunctor._
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
   DeliveredTransferOutResult,
-  ProtocolMessage,
+  EnvelopeContent,
   TransferInMediatorMessage,
 }
 import com.digitalasset.canton.protocol.{
@@ -34,10 +34,10 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
+
+import java.util.UUID
 
 /** A blindable Merkle tree for transfer-in requests */
 case class TransferInViewTree(
@@ -102,7 +102,7 @@ sealed abstract case class TransferInCommonData private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInCommonData],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferInCommonData]
@@ -111,8 +111,7 @@ sealed abstract case class TransferInCommonData private (
 
   def confirmingParties: Set[Informee] = stakeholders.map(ConfirmingParty(_, 1))
 
-  override protected def toProtoVersioned: VersionedMessage[TransferInCommonData] =
-    TransferInCommonData.toProtoVersioned(this)
+  override def companionObj = TransferInCommonData
 
   protected def toProtoV0: v0.TransferInCommonData = v0.TransferInCommonData(
     salt = Some(salt.toProtoV0),
@@ -197,7 +196,7 @@ sealed abstract case class TransferInView private (
     transferOutResultEvent: DeliveredTransferOutResult,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInView],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInView](hashOps)
     with HasProtocolVersionedWrapper[TransferInView]
@@ -206,8 +205,7 @@ sealed abstract case class TransferInView private (
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
-  override protected def toProtoVersioned: VersionedMessage[TransferInView] =
-    TransferInView.toProtoVersioned(this)
+  override def companionObj = TransferInView
 
   protected def toProtoV0: v0.TransferInView =
     v0.TransferInView(
@@ -273,13 +271,21 @@ object TransferInView
       contract <- ProtoConverter
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV0)
+      // TODO(i9626): Requires protocol version of the source domain
+      sourceDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
       transferOutResultEventMC <- ProtoConverter
         .required("TransferInView.transferOutResultEvent", transferOutResultEventP)
         .flatMap(
           SignedContent.fromProtoV0(
             SequencedEvent.fromByteString(
-              OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(hashOps))
-            )
+              OpenEnvelope.fromProtoV0(
+                EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
+                  _
+                ),
+                sourceDomainPV,
+              )
+            ),
+            _,
           )
         )
       transferOutResultEvent <- DeliveredTransferOutResult

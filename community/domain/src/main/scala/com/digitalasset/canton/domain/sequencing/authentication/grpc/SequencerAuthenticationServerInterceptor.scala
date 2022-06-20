@@ -10,13 +10,6 @@ import com.digitalasset.canton.domain.sequencing.authentication.{
   MemberAuthenticationService,
   StoredAuthenticationToken,
 }
-import com.digitalasset.canton.topology.{
-  AuthenticatedMember,
-  DomainId,
-  Member,
-  UnauthenticatedMemberId,
-  UniqueIdentifier,
-}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
@@ -24,6 +17,13 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   TokenVerificationException,
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
+import com.digitalasset.canton.topology.{
+  AuthenticatedMember,
+  DomainId,
+  Member,
+  UnauthenticatedMemberId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc._
 

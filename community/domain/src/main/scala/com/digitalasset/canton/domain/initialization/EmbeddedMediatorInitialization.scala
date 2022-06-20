@@ -99,6 +99,7 @@ object EmbeddedMediatorInitialization {
           crypto,
           cantonParameterConfig.cachingConfigs,
           timeouts,
+          futureSupervisor,
           loggerFactory,
         )
 

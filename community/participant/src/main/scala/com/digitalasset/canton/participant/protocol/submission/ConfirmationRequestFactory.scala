@@ -12,8 +12,8 @@ import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory._
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
@@ -26,9 +26,9 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -66,7 +66,7 @@ class ConfirmationRequestFactory(
       cryptoSnapshot: DomainSnapshotSyncCryptoApi,
       contractInstanceOfId: SerializableContractOfId,
       optKeySeed: Option[SecureRandomness],
-      version: ProtocolVersion,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ConfirmationRequestCreationError, ConfirmationRequest] = {
@@ -110,7 +110,7 @@ class ConfirmationRequestFactory(
         transactionTree,
         cryptoSnapshot,
         keySeed,
-        version,
+        protocolVersion,
       )
     } yield {
       if (loggingConfig.eventDetails) {
@@ -119,8 +119,9 @@ class ConfirmationRequestFactory(
         )
       }
       ConfirmationRequest(
-        InformeeMessage(transactionTree.fullInformeeTree),
+        InformeeMessage(transactionTree.fullInformeeTree, protocolVersion),
         transactionViewEnvelopes,
+        protocolVersion,
       )
     }
   }
@@ -179,7 +180,7 @@ class ConfirmationRequestFactory(
             recipients <- witnesses
               .toRecipients(cryptoSnapshot.ipsSnapshot)
               .leftMap[ConfirmationRequestCreationError](e => RecipientsCreationError(e.message))
-          } yield OpenEnvelope(viewMessage, recipients)
+          } yield OpenEnvelope(viewMessage, recipients, protocolVersion)
         }
     } yield res
   }
@@ -191,6 +192,7 @@ object ConfirmationRequestFactory {
       seedGenerator: SeedGenerator,
       packageService: PackageService,
       loggingConfig: LoggingConfig,
+      uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ConfirmationRequestFactory = {
 
@@ -201,6 +203,7 @@ object ConfirmationRequestFactory {
         protocolVersion,
         cryptoOps,
         packageService,
+        uniqueContractKeys,
         loggerFactory,
       )
 

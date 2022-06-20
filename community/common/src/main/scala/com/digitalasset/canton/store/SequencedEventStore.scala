@@ -5,12 +5,13 @@ package com.digitalasset.canton.store
 
 import cats.data.EitherT
 import cats.syntax.traverse._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.messages.ProtocolMessage
+import com.digitalasset.canton.protocol.messages.EnvelopeContent
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -29,7 +30,6 @@ import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientD
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
-import com.digitalasset.canton.SequencerCounter
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -140,7 +140,7 @@ object SequencedEventStore {
 
   /** Encapsulates an event stored in the SequencedEventStore.
     */
-  sealed trait PossiblyIgnoredSequencedEvent[+Env]
+  sealed trait PossiblyIgnoredSequencedEvent[+Env <: Envelope[_]]
       extends HasTraceContext
       with HasProtoV0[v0.PossiblyIgnoredSequencedEvent]
       with PrettyPrinting
@@ -179,7 +179,7 @@ object SequencedEventStore {
     * If an ignored event `ie` is inserted as a placeholder for an event that has not been received, the underlying
     * event `ie.underlying` is left empty.
     */
-  case class IgnoredSequencedEvent[+Env](
+  case class IgnoredSequencedEvent[+Env <: Envelope[_]](
       override val timestamp: CantonTimestamp,
       override val counter: SequencerCounter,
       override val underlying: Option[SignedContent[SequencedEvent[Env]]],
@@ -202,7 +202,7 @@ object SequencedEventStore {
       case None => this
     }
 
-    override def pretty: Pretty[IgnoredSequencedEvent[_]] =
+    override def pretty: Pretty[IgnoredSequencedEvent[Envelope[_]]] =
       prettyOfClass(
         param("timestamp", _.timestamp),
         param("counter", _.counter),
@@ -213,7 +213,9 @@ object SequencedEventStore {
   /** Encapsulates an event received by the sequencer.
     * It has been signed by the sequencer and contains a trace context.
     */
-  case class OrdinarySequencedEvent[+Env](signedEvent: SignedContent[SequencedEvent[Env]])(
+  case class OrdinarySequencedEvent[+Env <: Envelope[_]](
+      signedEvent: SignedContent[SequencedEvent[Env]]
+  )(
       override val traceContext: TraceContext
   ) extends PossiblyIgnoredSequencedEvent[Env] {
 
@@ -234,7 +236,7 @@ object SequencedEventStore {
 
     override def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env] = this
 
-    override def pretty: Pretty[OrdinarySequencedEvent[_]] = prettyOfClass(
+    override def pretty: Pretty[OrdinarySequencedEvent[Envelope[_]]] = prettyOfClass(
       param("signedEvent", _.signedEvent)
     )
   }
@@ -247,11 +249,14 @@ object SequencedEventStore {
         case _: Deliver[_] => SequencedEventDbType.Deliver
       }
 
-    def fromProtoV0(hashOps: HashOps)(
+    def fromProtoV0(protocolVersion: ProtocolVersion, hashOps: HashOps)(
         possiblyIgnoredSequencedEventP: v0.PossiblyIgnoredSequencedEvent
     ): ParsingResult[PossiblyIgnoredProtocolEvent] =
       fromProtoV0(
-        OpenEnvelope.fromProtoV0(ProtocolMessage.fromEnvelopeContentByteStringV0(hashOps))(_)
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(protocolVersion, hashOps),
+          protocolVersion,
+        )(_)
       )(possiblyIgnoredSequencedEventP)
 
     def fromProtoV0[Env <: Envelope[_]](
@@ -269,7 +274,7 @@ object SequencedEventStore {
         possiblyIgnoredSequencedEventP
       for {
         underlyingO <- underlyingPO.traverse(
-          SignedContent.fromProtoV0(SequencedEvent.fromByteString(envelopeFromProtoV0))
+          SignedContent.fromProtoV0(SequencedEvent.fromByteString(envelopeFromProtoV0), _)
         )
         timestamp <- ProtoConverter
           .required("timestamp", timestampPO)

@@ -4,7 +4,13 @@
 package com.digitalasset.canton.serialization
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.version.RepresentativeProtocolVersion
+import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedSerializerCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -85,7 +91,7 @@ class MemoizedEvidenceTest extends AnyWordSpec with BaseTest with HasCryptograph
 }
 
 sealed case class MemoizedEvidenceSUT(b: Byte)(
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[MemoizedEvidenceSUT],
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence {
 
@@ -98,18 +104,35 @@ sealed case class MemoizedEvidenceSUT(b: Byte)(
   }
 }
 
-object MemoizedEvidenceSUT {
+object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[MemoizedEvidenceSUT] {
+
+  val name: String = "MemoizedEvidenceSUT"
+
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      (),
+      _ => throw new NotImplementedError("Serialization is not implemented"),
+    )
+  )
+
+  private val defaultProtocolVersionRepresentative = protocolVersionRepresentativeFor(
+    TestDomainParameters.defaultStatic.protocolVersion
+  )
+
   private[this] def apply(b: Byte)(deserializedFrom: Option[ByteString]): MemoizedEvidenceSUT =
     throw new UnsupportedOperationException("Use the public apply method instead")
 
-  def apply(b: Byte): MemoizedEvidenceSUT =
-    new MemoizedEvidenceSUT(b)(RepresentativeProtocolVersion.v2, None)
+  def apply(b: Byte): MemoizedEvidenceSUT = new MemoizedEvidenceSUT(b)(
+    defaultProtocolVersionRepresentative,
+    None,
+  )
 
   def fromByteString(bytes: ByteString): MemoizedEvidenceSUT = {
     if (bytes.size() != 2)
       throw new IllegalArgumentException(s"Only two bytes expected, got: ${bytes.toString}")
 
-    new MemoizedEvidenceSUT(bytes.byteAt(1))(RepresentativeProtocolVersion.v2, Some(bytes))
+    new MemoizedEvidenceSUT(bytes.byteAt(1))(defaultProtocolVersionRepresentative, Some(bytes))
   }
 }
 

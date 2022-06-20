@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.TimeUnit
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -11,6 +10,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.TracedLogger
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.Await
 import scala.concurrent.duration._
 

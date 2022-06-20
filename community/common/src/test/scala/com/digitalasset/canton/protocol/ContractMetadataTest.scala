@@ -4,7 +4,6 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class ContractMetadataTest extends AnyWordSpec with BaseTest {
@@ -48,7 +47,7 @@ class ContractMetadataTest extends AnyWordSpec with BaseTest {
           )
         ),
       )
-      val serialization = metadata.toProtoVersioned(ProtocolVersion.latestForTest)
+      val serialization = metadata.toProtoVersioned(defaultProtocolVersion)
 
       ContractMetadata.fromProtoVersioned(serialization) shouldBe Right(metadata)
     }

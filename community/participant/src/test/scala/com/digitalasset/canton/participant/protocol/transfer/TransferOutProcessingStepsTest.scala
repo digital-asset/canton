@@ -9,8 +9,8 @@ import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.HashPurpose
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.participant.admin.{PackageInspectionOpsForTesting, PackageService}
@@ -46,16 +46,15 @@ import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
   Observation,
   Submission,
 }
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -191,7 +190,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       damle,
       coordination,
       seedGenerator,
-      ProtocolVersion.latestForTest,
+      defaultProtocolVersion,
       loggerFactory,
     )(executorService)
 
@@ -506,7 +505,11 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     "succeed without errors" in {
       for {
         encryptedOutRequest <- encryptedOutRequestF
-        envelopes = NonEmpty(Seq, OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance))
+        envelopes =
+          NonEmpty(
+            Seq,
+            OpenEnvelope(encryptedOutRequest, RecipientsTest.testInstance, defaultProtocolVersion),
+          )
         decrypted <- valueOrFail(outProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
           "decrypt request failed"
         )
@@ -601,19 +604,20 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           Set(),
           TransferOutDomainId(originDomain),
           Verdict.Approve,
-          ProtocolVersion.latestForTest,
+          defaultProtocolVersion,
         )
       for {
         signedResult <- SignedProtocolMessage.tryCreate(transferResult, cryptoSnapshot, pureCrypto)
         deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] = {
           val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
-            Batch.of((signedResult, Recipients.cc(submittingParticipant)))
+            Batch.of(defaultProtocolVersion, (signedResult, Recipients.cc(submittingParticipant)))
           Deliver.create(
             0L,
             CantonTimestamp.Epoch,
             originDomain,
             Some(MessageId.tryCreate("msg-0")),
             batch,
+            defaultProtocolVersion,
           )
         }
         signedContent = SignedContent(
@@ -663,7 +667,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       tree: FullTransferOutTree
   ): Future[EncryptedViewMessage[TransferOutViewType]] =
     EncryptedViewMessageFactory
-      .create(TransferOutViewType)(tree, cryptoSnapshot, ProtocolVersion.latestForTest)(
+      .create(TransferOutViewType)(tree, cryptoSnapshot, defaultProtocolVersion)(
         implicitly[TraceContext],
         executorService,
       )

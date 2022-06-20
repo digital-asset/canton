@@ -3,23 +3,16 @@
 
 package com.digitalasset.canton.topology.processing
 
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainManager
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
-}
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  DomainId,
-  Identifier,
-  Namespace,
-  ParticipantId,
-  PartyId,
-  TestingOwnerWithKeys,
-  UniqueIdentifier,
 }
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
@@ -34,10 +27,17 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TrustLevel,
 }
-import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.TestDomainParameters
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  DomainId,
+  Identifier,
+  Namespace,
+  ParticipantId,
+  PartyId,
+  TestingOwnerWithKeys,
+  UniqueIdentifier,
+}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext

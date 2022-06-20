@@ -26,10 +26,10 @@ import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.{DomainId, Member}
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContextExecutor

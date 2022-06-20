@@ -5,7 +5,6 @@ package com.digitalasset.canton.topology
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.crypto.{
   Hash,
   HashOps,
@@ -21,11 +20,12 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   TrustLevel,
 }
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import monocle.macros.syntax.lens._
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
-import monocle.macros.syntax.lens._
+import scala.concurrent.{Await, Future}
 
 class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 

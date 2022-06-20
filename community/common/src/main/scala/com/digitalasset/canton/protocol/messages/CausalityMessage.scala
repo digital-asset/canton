@@ -4,20 +4,21 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.implicits._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{TransferId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 
 /** Causality messages are sent along with a transfer-in response. They propagate causality information on
   * the events a participant has "seen" for a party at the time of the transfer-out.
@@ -31,7 +32,7 @@ sealed abstract case class CausalityMessage(
     domainId: DomainId,
     transferId: TransferId,
     clock: VectorClock,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion)
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage])
     extends ProtocolMessage
     with HasProtoV0[v0.CausalityMessage]
     with PrettyPrinting
@@ -58,7 +59,15 @@ sealed abstract case class CausalityMessage(
     )
 }
 
-object CausalityMessage {
+object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.CausalityMessage)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
 
   implicit val causalityMessageCast: ProtocolMessageContentCast[CausalityMessage] = {
     case cm: CausalityMessage => Some(cm)
@@ -70,11 +79,11 @@ object CausalityMessage {
       protocolVersion: ProtocolVersion,
       transferId: TransferId,
       clock: VectorClock,
-  ) = new CausalityMessage(
+  ): CausalityMessage = new CausalityMessage(
     domainId,
     transferId,
     clock,
-  )(ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion)) {}
+  )(protocolVersionRepresentativeFor(protocolVersion)) {}
 
   def fromProtoV0(cmP: v0.CausalityMessage): ParsingResult[CausalityMessage] = {
     val v0.CausalityMessage(domainIdP, transferIdP, clockPO) = cmP
@@ -86,8 +95,10 @@ object CausalityMessage {
       domainId,
       tid,
       clocks,
-    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
   }
+
+  override protected def name: String = "CausalityMessage"
 }
 
 /** A vector clock represents the causal constraints that must be respected for a party at a certain point in time.

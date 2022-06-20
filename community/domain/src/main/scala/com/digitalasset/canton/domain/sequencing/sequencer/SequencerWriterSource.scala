@@ -277,7 +277,7 @@ class SendEventGenerator(
         val payload =
           Payload(
             payloadIdGenerator(),
-            submission.batch.toByteString(protocolVersion),
+            submission.batch.toByteString,
           )
         DeliverStoreEvent.ensureSenderReceivesEvent(
           senderId,

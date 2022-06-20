@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -12,10 +13,9 @@ import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.IndexedStringStore
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.topology.DomainId
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap

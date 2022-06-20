@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.concurrent
 
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.{ForkJoinPool, LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import cats.Monad
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.{BaseTest, BaseTestWordSpec}
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{ForkJoinPool, LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import scala.annotation.tailrec
 import scala.concurrent.duration._
 import scala.concurrent.{Future, Promise}

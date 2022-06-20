@@ -4,8 +4,8 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import com.digitalasset.canton.util.LazyValWithContextTest.ClassUsingLazyValWithContext
+import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger

@@ -4,11 +4,10 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import com.digitalasset.canton.{DiscardOps, SequencerCounter}
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
 import com.digitalasset.canton.error.{CantonError, HasDegradationState}
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -29,6 +28,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.{DelayUtil, FutureUtil, LoggerUtil}
+import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference

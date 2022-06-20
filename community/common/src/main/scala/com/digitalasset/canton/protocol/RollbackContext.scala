@@ -7,10 +7,11 @@ import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
-import com.digitalasset.canton.util.NoCopy
-import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.HasProtoV0
+
+import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 
 /** RollbackContext tracks the location of lf transaction nodes or canton participant views within a hierarchy of
   * LfNodeRollback suitable for maintaining the local position within the hierarchy of rollback nodes when iterating
@@ -65,10 +66,24 @@ case class WithRollbackScope[T](rbScope: RollbackScope, unwrap: T)
 
 object RollbackContext {
   type RollbackSibling = Int
-  type RollbackScope = Seq[RollbackSibling]
   val firstChild: RollbackSibling = 1
 
-  private def apply(rbScope: Seq[RollbackSibling], nextChild: RollbackSibling) =
+  type RollbackScope = Seq[RollbackSibling]
+
+  object RollbackScope {
+    def empty: RollbackScope = Vector.empty[RollbackSibling]
+
+    def popsAndPushes(origin: RollbackScope, target: RollbackScope): (Int, Int) = {
+      val longestCommonRollbackScopePrefixLength =
+        origin.lazyZip(target).takeWhile { case (i, j) => i == j }.size
+
+      val rbPops = origin.length - longestCommonRollbackScopePrefixLength
+      val rbPushes = target.length - longestCommonRollbackScopePrefixLength
+      (rbPops, rbPushes)
+    }
+  }
+
+  private def apply(rbScope: RollbackScope, nextChild: RollbackSibling) =
     throw new UnsupportedOperationException("Use one of the other builders")
 
   def empty: RollbackContext = new RollbackContext(Vector.empty)

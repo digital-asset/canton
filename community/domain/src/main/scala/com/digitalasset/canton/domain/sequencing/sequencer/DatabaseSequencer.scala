@@ -6,27 +6,26 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.functor._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
-import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
@@ -45,7 +44,6 @@ object DatabaseSequencer {
       topologyClientMember: Member,
       protocolVersion: ProtocolVersion,
       cryptoApi: DomainSyncCryptoClient,
-      futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
@@ -78,7 +76,6 @@ object DatabaseSequencer {
       topologyClientMember,
       protocolVersion,
       cryptoApi,
-      futureSupervisor,
       loggerFactory,
     )
   }
@@ -98,7 +95,6 @@ class DatabaseSequencer(
     topologyClientMember: Member,
     protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
-    futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(DomainTopologyManagerId(domainId), loggerFactory)
@@ -177,7 +173,6 @@ class DatabaseSequencer(
       cryptoApi,
       eventSignaller,
       topologyClientMember,
-      futureSupervisor,
       protocolVersion,
       timeouts,
       loggerFactory,

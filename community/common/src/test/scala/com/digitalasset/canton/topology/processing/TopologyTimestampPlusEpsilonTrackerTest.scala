@@ -9,8 +9,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.store.{TopologyStoreId, ValidatedTopologyTransaction}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{TopologyStoreId, ValidatedTopologyTransaction}
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
   SignedTopologyTransaction,

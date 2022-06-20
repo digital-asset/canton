@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Memb
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, FutureUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import java.util.UUID
@@ -45,13 +46,14 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     domainId: DomainId,
     participantId: ParticipantId,
     requestedBy: Member,
+    protocolVersion: ProtocolVersion,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends RegisterTopologyTransactionHandle
     with NamedLogging {
   private val service =
-    new ParticipantDomainTopologyService(domainId, send, timeouts, loggerFactory)
+    new ParticipantDomainTopologyService(domainId, send, protocolVersion, timeouts, loggerFactory)
 
   // must be used by the event handler of a sequencer subscription in order to complete the promises of requests sent with the given sequencer client
   val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = service.processor
@@ -66,6 +68,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
         requestId = String255.tryCreate(UUID.randomUUID().toString),
         transactions = transactions.toList,
         domainId = domainId,
+        protocolVersion = protocolVersion,
       )
       .toList
       .traverse(service.registerTopologyTransaction)
@@ -81,6 +84,7 @@ private[domain] class ParticipantDomainTopologyService(
         TraceContext,
         OpenEnvelope[RegisterTopologyTransactionRequest],
     ) => EitherT[Future, SendAsyncClientError, Unit],
+    protocolVersion: ProtocolVersion,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
@@ -112,7 +116,10 @@ private[domain] class ParticipantDomainTopologyService(
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
     logger.debug(s"Sending register topology transaction request ${requestDescription(request)}")
     EitherTUtil.logOnError(
-      send(traceContext, OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)))),
+      send(
+        traceContext,
+        OpenEnvelope(request, Recipients.cc(DomainTopologyManagerId(domainId)), protocolVersion),
+      ),
       s"Failed sending register topology transaction request ${requestDescription(request)}",
     )
   }

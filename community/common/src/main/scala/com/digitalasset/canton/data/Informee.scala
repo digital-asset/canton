@@ -4,12 +4,12 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
-import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.digitalasset.canton.data.Informee.InvalidInformee
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.HasProtoV0
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** A party that must be informed about the view.
   */

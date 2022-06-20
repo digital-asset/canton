@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.store.memory
 
-import java.util.concurrent.atomic.AtomicReference
-
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
@@ -12,6 +10,7 @@ import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContext, Future}
 

@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.protocol.messages.{MediatorRequest, ProtocolMessage, Verdict}
+import com.digitalasset.canton.protocol.messages.{EnvelopeContent, MediatorRequest, Verdict}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
@@ -126,10 +126,8 @@ class DbFinalizedResponseStore(
     TraceContext.getVersionedSetParameter(protocolVersion)
 
   implicit val getResultMediatorRequest: GetResult[MediatorRequest] = GetResult(r =>
-    ProtocolMessage
-      .fromEnvelopeContentByteString(protocolVersion, cryptoApi)(
-        ByteString.copyFrom(r.<<[Array[Byte]])
-      )
+    EnvelopeContent
+      .messageFromByteString(protocolVersion, cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
       .fold[MediatorRequest](
         error =>
           throw new DbDeserializationException(s"Error deserializing mediator request $error"),
@@ -142,7 +140,7 @@ class DbFinalizedResponseStore(
   )
   implicit val setParameterMediatorRequest: SetParameter[MediatorRequest] =
     (r: MediatorRequest, pp: PositionedParameters) =>
-      pp >> ProtocolMessage.toEnvelopeContentByteString(r).toByteArray
+      pp >> EnvelopeContent(r, protocolVersion).toByteArray
 
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("finalized-response-store")

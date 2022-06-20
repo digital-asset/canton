@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.store
 
-import java.time.Instant
-import java.util.concurrent.atomic.AtomicReference
 import cats.instances.future.catsStdInstancesForFuture
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
@@ -12,10 +10,12 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
+import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
 import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContext, Future}
 

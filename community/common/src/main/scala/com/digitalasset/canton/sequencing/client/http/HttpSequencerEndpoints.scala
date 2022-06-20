@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.sequencing.client.http
 
-import java.net.{MalformedURLException, URL}
 import cats.syntax.either._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+
+import java.net.{MalformedURLException, URL}
 
 /** Urls for talking to a HTTP backend.
   * Allows specifying different locations for read and write requests which is required by the Confidential Consortium

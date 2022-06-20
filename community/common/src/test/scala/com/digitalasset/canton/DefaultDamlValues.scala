@@ -5,9 +5,9 @@ package com.digitalasset.canton
 
 import cats.Id
 import cats.syntax.option._
-import com.daml.ledger.configuration.LedgerTimeModel
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
+import com.daml.ledger.configuration.LedgerTimeModel
 import com.daml.ledger.participant.state.v2.Update.PublicPackageUpload
 import com.daml.ledger.participant.state.v2._
 import com.daml.lf.CantonOnly.LfVersionedTransaction

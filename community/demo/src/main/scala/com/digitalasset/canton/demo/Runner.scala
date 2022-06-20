@@ -4,15 +4,14 @@
 package com.digitalasset.canton.demo
 
 import com.digitalasset.canton.config.ProcessingTimeout
-
-import java.net.URL
-import java.security.MessageDigest
 import com.digitalasset.canton.console.ConsoleEnvironment
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging
 import com.digitalasset.canton.logging.TracedLogger
 import org.slf4j.LoggerFactory
 
+import java.net.URL
+import java.security.MessageDigest
 import scala.annotation.tailrec
 import scala.util.{Failure, Success, Try}
 

@@ -237,8 +237,8 @@ object Dependencies {
     val artifact = vmbc_sequencer_core_reference.explicitArtifacts.head
     s"${artifact.name}-${vmbc_sequencer_core_reference.revision}-${artifact.classifier.get}.${artifact.extension}"
   }
-  lazy val vmbc_sequencer_core_reference_artifact_file_sha256 = // Compute with "sha256sum <file> | cut -d " " -f1 | sed 's/[a-z]/\U&/g'"`"
-    "BEE54719959F22328AB5F68A364FA5A51DDD8906FA2D5A68891A4E3CA011CBA7"
+  lazy val vmbc_sequencer_core_reference_artifact_file_sha256 = // Compute with "sha256sum <file> | cut -d " " -f1 | sed 's/[a-z]/\U&/g'"
+    "F23FD6FA0B332CE99D5CF650F90F5A7519A099C8C0A97DDFB069BBBBDDEBC968"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.governance
 
-import com.digitalasset.canton.logging.{TracedLogger, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import org.slf4j.helpers.NOPLogger.NOP_LOGGER
 
 class ParticipantAuditor(val loggerFactory: NamedLoggerFactory) extends NamedLogging {}

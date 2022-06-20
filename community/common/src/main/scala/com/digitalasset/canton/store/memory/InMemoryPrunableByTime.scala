@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.store.memory
 
-import java.util.concurrent.atomic.AtomicReference
-
 import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLogging
@@ -13,6 +11,7 @@ import com.digitalasset.canton.store.PrunableByTime
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtil
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
 
 /** Mixin for a in-memory store that provides a thread-safe storage slot for the latest point in time when

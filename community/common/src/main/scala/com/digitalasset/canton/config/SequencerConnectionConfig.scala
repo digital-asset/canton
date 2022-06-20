@@ -9,12 +9,12 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints
 import com.digitalasset.canton.sequencing.{
   GrpcSequencerConnection,
   HttpSequencerConnection,
   SequencerConnection,
 }
-import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints
 import com.google.protobuf.ByteString
 
 /** Definition provided by the domain node to members with details on how to connect to the domain sequencer. * */

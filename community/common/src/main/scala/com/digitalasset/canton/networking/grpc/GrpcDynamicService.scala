@@ -7,9 +7,9 @@ import cats.syntax.either._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc._
-import scala.jdk.CollectionConverters._
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.jdk.CollectionConverters._
 
 /** Stand up a gRPC service stub which will direct to an instance set dynamically at runtime if available,
   * or return a UNAVAILBLE status if not set.

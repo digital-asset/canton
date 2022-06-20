@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
@@ -20,7 +21,6 @@ import com.digitalasset.canton.sequencing.handlers.{
   StripSignature,
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
-import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -68,10 +68,14 @@ object ParticipantInitializeTopology {
 
     def pushTopologyAndVerify(client: SequencerClient, domainTimeTracker: DomainTimeTracker) = {
       val handle = new SequencerBasedRegisterTopologyTransactionHandle(
-        (traceContext, env) => client.sendAsyncUnauthenticated(Batch(List(env)))(traceContext),
+        (traceContext, env) =>
+          client.sendAsyncUnauthenticated(
+            Batch(List(env), client.staticDomainParameters.protocolVersion)
+          )(traceContext),
         domainId,
         participantId,
         unauthenticatedMember,
+        protocolVersion,
         processingTimeout,
         loggerFactory,
       )

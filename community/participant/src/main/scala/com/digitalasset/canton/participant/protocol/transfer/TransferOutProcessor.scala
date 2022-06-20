@@ -3,11 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -19,6 +17,7 @@ import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.messages.TransferOutResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -34,7 +33,6 @@ class TransferOutProcessor(
     seedGenerator: SeedGenerator,
     sequencerClient: SequencerClient,
     override protected val timeouts: ProcessingTimeout,
-    futureSupervisor: FutureSupervisor,
     version: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -58,7 +56,5 @@ class TransferOutProcessor(
       ephemeral,
       domainCrypto,
       sequencerClient,
-      participantId,
-      futureSupervisor,
       loggerFactory,
     )

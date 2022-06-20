@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton
 
-import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
-import com.digitalasset.canton.error.CantonErrorGroups.ProtoDeserializationErrorGroup
-import com.digitalasset.canton.error.CantonError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.CantonErrorGroups.ProtoDeserializationErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.serialization.DeserializationError
 import com.google.protobuf.InvalidProtocolBufferException

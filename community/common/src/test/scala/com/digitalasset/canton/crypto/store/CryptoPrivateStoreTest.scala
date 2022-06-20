@@ -4,8 +4,8 @@
 package com.digitalasset.canton.crypto.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>

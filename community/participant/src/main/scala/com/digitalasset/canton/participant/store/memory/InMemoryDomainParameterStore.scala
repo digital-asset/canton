@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import java.util.concurrent.atomic.AtomicReference
-import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.participant.store.DomainParameterStore
+import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
 
 class InMemoryDomainParameterStore extends DomainParameterStore {

@@ -9,6 +9,9 @@ import cats.syntax.either._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
@@ -23,9 +26,6 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.DbPrunableByTimeDomain
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.checked
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

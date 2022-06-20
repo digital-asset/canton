@@ -602,6 +602,8 @@ object TransferStoreTest {
       10.seconds,
     )
   }
+
+  private val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
   val seedGenerator = new SeedGenerator(pureCryptoApi)
 
   def mkTransferDataForDomain(
@@ -661,7 +663,7 @@ object TransferStoreTest {
         mediatorMessage.allInformees,
       )
       val signedResult = SignedProtocolMessage(result, sign("TransferOutResult-mediator"))
-      val batch = Batch.of(signedResult -> RecipientsTest.testInstance)
+      val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(
           1L,
@@ -669,6 +671,7 @@ object TransferStoreTest {
           transferData.originDomain,
           Some(MessageId.tryCreate("1")),
           batch,
+          protocolVersion,
         )
       SignedContent(
         deliver,

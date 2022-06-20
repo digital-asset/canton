@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.health.admin.grpc
 
-import com.digitalasset.canton.health.admin.v0
-import com.digitalasset.canton.health.admin.data
+import com.digitalasset.canton.health.admin.{data, v0}
 import com.google.protobuf.empty.Empty
 
 import scala.concurrent.{ExecutionContext, Future}

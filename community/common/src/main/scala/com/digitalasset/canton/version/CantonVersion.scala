@@ -170,9 +170,6 @@ final case class ReleaseVersion(
 ) extends CantonVersion
 
 object ReleaseVersion extends CompanionTrait {
-  private[this] def apply(n: Int): ReleaseVersion = throw new UnsupportedOperationException(
-    "Use create method"
-  )
 
   def create(rawVersion: String): Either[String, ReleaseVersion] =
     createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
@@ -232,9 +229,6 @@ final case class ProtocolVersion(
 ) extends CantonVersion
 
 object ProtocolVersion extends CompanionTrait {
-  private[this] def apply(n: Int): ProtocolVersion = throw new UnsupportedOperationException(
-    "Use create method"
-  )
   private val allProtocolVersions: List[ProtocolVersion] =
     BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList
   val latest: ProtocolVersion =
@@ -347,6 +341,46 @@ object ProtocolVersion extends CompanionTrait {
   // TODO(i8793): signifies an instance where the protocol version is currently hardcoded but should likely be
   // passed in via propagating the protocol version set in the domain parameters
   lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
+
+}
+
+/** This class represents a revision of the Sequencer.sol contract. */
+final case class EthereumContractVersion(
+    major: Int,
+    minor: Int,
+    patch: Int,
+    optSuffix: Option[String] = None,
+) extends CantonVersion
+
+object EthereumContractVersion extends CompanionTrait {
+
+  def create(rawVersion: String): Either[String, EthereumContractVersion] =
+    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
+      new EthereumContractVersion(major, minor, patch, optSuffix)
+    }
+  def tryCreate(rawVersion: String): EthereumContractVersion =
+    create(rawVersion).fold(sys.error, identity)
+
+  /** Which revisions of the Sequencer.sol contract are supported and can be deployed by a certain release? */
+  def tryReleaseVersionToEthereumContractVersions(
+      v: ReleaseVersion
+  ): NonEmpty[List[EthereumContractVersion]] = {
+    assert(CantonVersion.releaseVersionToProtocolVersions.contains(v))
+    if (v < ReleaseVersion.v2_3_0_snapshot)
+      NonEmpty(List, v1_0_0)
+    else
+      NonEmpty(List, v1_0_0, v1_0_1)
+  }
+
+  lazy val v1_0_0: EthereumContractVersion = EthereumContractVersion(1, 0, 0)
+  lazy val v1_0_1: EthereumContractVersion = EthereumContractVersion(1, 0, 1)
+
+  lazy val allKnownVersions = List(v1_0_0, v1_0_1)
+
+  lazy val latest: EthereumContractVersion = tryReleaseVersionToEthereumContractVersions(
+    ReleaseVersion.current
+  ).max1
+  lazy val versionInTests: EthereumContractVersion = latest
 
 }
 

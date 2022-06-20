@@ -5,13 +5,13 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.functor._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.{LfPartyId, WorkflowId}
 import com.digitalasset.canton.data.SubmitterMetadata
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.{LfPartyId, WorkflowId}
 
 import scala.concurrent.Future
 

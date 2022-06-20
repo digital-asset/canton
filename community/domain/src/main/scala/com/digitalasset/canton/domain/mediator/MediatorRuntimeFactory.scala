@@ -18,9 +18,9 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTrackerConfig, GrpcDomainTimeService}
-import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
+import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition

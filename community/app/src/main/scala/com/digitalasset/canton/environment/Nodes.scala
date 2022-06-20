@@ -31,8 +31,8 @@ import com.digitalasset.canton.util.LoggerUtil
 
 import scala.Function.tupled
 import scala.collection.mutable
-import scala.concurrent.{Future, blocking}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Future, blocking}
 import scala.util.Try
 
 /** Group of CantonNodes of the same type (domains, participants, sequencers). */

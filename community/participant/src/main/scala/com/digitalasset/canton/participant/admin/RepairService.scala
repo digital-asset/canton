@@ -55,14 +55,14 @@ import com.digitalasset.canton.store.{
   IndexedStringStore,
   SequencedEventStore,
 }
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.topology.client.{
   CachingTopologySnapshot,
   StoreBasedTopologySnapshot,
   TopologySnapshot,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
+import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
+import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._

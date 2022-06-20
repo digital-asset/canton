@@ -72,8 +72,8 @@ import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
-import scala.jdk.FutureConverters._
 import scala.concurrent.Future
+import scala.jdk.FutureConverters._
 
 class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContext {
 

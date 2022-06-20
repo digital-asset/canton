@@ -4,10 +4,9 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-
-import java.io.{PrintWriter, StringWriter}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
+import java.io.{PrintWriter, StringWriter}
 import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.control.NonFatal

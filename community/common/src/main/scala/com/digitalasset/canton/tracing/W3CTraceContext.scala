@@ -4,11 +4,11 @@
 package com.digitalasset.canton.tracing
 
 import akka.NotUsed
-
 import io.grpc.Metadata
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.{TextMapGetter, TextMapSetter}
 import io.opentelemetry.context.{Context => OpenTelemetryContext}
+
 import java.lang
 
 /** Our representation of the w3c trace context values: https://www.w3.org/TR/trace-context/

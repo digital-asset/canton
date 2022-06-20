@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainManager
 import com.digitalasset.canton.topology.{DomainId, TestingOwnerWithKeys, UniqueIdentifier}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 class TopologyChangeOpTest extends AnyWordSpec with BaseTest with HasExecutionContext {

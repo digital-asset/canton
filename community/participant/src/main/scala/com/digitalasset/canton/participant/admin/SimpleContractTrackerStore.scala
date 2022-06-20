@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.ledger.client.binding.{Contract, Primitive => P}
-import scala.collection.mutable
 
+import scala.collection.mutable
 import scala.concurrent.Future
 
 /** Simple store for tracking ledger contracts of a given type */

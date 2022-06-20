@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.domain.grpc
 
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
+import com.digitalasset.canton.topology.ParticipantId
 import io.grpc.ClientCall.Listener
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc._

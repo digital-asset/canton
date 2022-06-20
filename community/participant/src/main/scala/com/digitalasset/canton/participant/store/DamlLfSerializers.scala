@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import com.daml.lf.transaction.{TransactionCoder, TransactionOuterClass}
-import com.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.daml.lf.value.ValueCoder
+import com.daml.lf.value.ValueCoder.{DecodeError, EncodeError}
 import com.digitalasset.canton.protocol.{LfContractInst, LfVersionedTransaction}
 import com.google.protobuf.ByteString
 

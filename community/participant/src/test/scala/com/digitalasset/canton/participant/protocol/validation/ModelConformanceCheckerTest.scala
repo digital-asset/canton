@@ -3,24 +3,26 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import java.time.Duration
 import cats.data.EitherT
 import cats.implicits._
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine
-import com.daml.nonempty.NonEmptyUtil
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionViewTree}
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
+import com.digitalasset.canton.participant.protocol.submission.{
+  TransactionTreeFactoryImpl,
+  TransactionTreeFactoryImplV3,
+}
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker._
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
 @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
@@ -65,13 +67,14 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     NonEmptyUtil.fromUnsafe(rootViews.map(_ -> Map.empty))
 
   val transactionTreeFactory: TransactionTreeFactoryImpl =
-    new TransactionTreeFactoryImpl(
+    new TransactionTreeFactoryImplV3(
       ExampleTransactionFactory.submitterParticipant,
       factory.domainId,
       defaultProtocolVersion,
       ExampleTransactionFactory.asSerializableRaw,
       ExampleTransactionFactory.defaultPackageInfoService,
       factory.cryptoOps,
+      uniqueContractKeys = true,
       loggerFactory,
     )
 

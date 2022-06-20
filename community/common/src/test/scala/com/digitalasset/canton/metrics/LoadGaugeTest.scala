@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.metrics
 
-import java.util.concurrent.atomic.AtomicLong
-
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 

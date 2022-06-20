@@ -9,10 +9,10 @@ import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.{
   PoolClosed,
   RegistrationError,
 }
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import io.functionmeta.functionFullName

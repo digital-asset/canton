@@ -8,8 +8,8 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.resource.MemoryStorage
+import com.digitalasset.canton.topology.ParticipantId
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec

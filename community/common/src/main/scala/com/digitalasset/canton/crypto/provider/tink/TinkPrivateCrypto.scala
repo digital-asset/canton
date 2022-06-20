@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.crypto.provider.tink
 
-import java.security.GeneralSecurityException
-
 import cats.data.EitherT
 import cats.instances.future._
 import cats.syntax.either._
@@ -16,6 +14,7 @@ import com.google.crypto.tink.hybrid.HybridKeyTemplates
 import com.google.crypto.tink.proto._
 import com.google.crypto.tink.signature.SignatureKeyTemplates
 
+import java.security.GeneralSecurityException
 import scala.concurrent.{ExecutionContext, Future}
 
 class TinkPrivateCrypto private (

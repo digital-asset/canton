@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.atomic.AtomicBoolean
-
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AsyncWordSpec
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{Future, Promise}
 
 class SimpleExecutionQueueTest extends AsyncWordSpec with BaseTest {

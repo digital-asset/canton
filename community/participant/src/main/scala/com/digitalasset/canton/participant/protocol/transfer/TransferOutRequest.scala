@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.UUID

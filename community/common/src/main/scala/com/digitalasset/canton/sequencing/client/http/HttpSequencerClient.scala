@@ -28,7 +28,6 @@ import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.{TraceContext, Traced, TracingConfig}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ProtoDeserializationError, SequencerCounter}
 import io.circe.Codec
 import io.circe.generic.extras.Configuration
@@ -140,7 +139,6 @@ class HttpSequencerClient(
   def sendAsync(
       submission: SubmissionRequest,
       requiresAuthentication: Boolean,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
@@ -152,7 +150,7 @@ class HttpSequencerClient(
             "SequencerService",
             if (requiresAuthentication) "SendAsync" else "SendAsyncUnauthenticated",
           ),
-          submission.toByteArrayV0(protocolVersion),
+          submission.toByteArray,
           generateHeaders,
         )
         .leftMap[SendAsyncClientError](err => SendAsyncClientError.RequestFailed(err.toString))
@@ -315,7 +313,7 @@ class HttpSequencerClient(
         mbEvent = response.signedSequencedEvent
         mbSigned <- mbEvent
           .traverse(
-            SignedContent.fromProtoV0(SequencedEvent.fromByteString(ClosedEnvelope.fromProtoV0))(_)
+            SignedContent.fromProtoV0(SequencedEvent.fromByteString(ClosedEnvelope.fromProtoV0), _)
           )
           .leftMap[HttpSequencerClientError](DeserializationError)
           .toEitherT[Future]

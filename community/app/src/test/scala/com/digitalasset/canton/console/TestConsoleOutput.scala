@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.console
 
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.{Future, TimeUnit}
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
@@ -14,6 +12,8 @@ import org.scalatest.Assertion
 import org.scalatest.Inspectors._
 import org.scalatest.matchers.should.Matchers._
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{Future, TimeUnit}
 import scala.concurrent.blocking
 import scala.jdk.CollectionConverters._
 

@@ -11,21 +11,20 @@ import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}
-import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.{KeyOwner, KeyOwnerCode}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
+import com.google.protobuf.ByteString
 
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.attribute.PosixFilePermission.{OWNER_READ, OWNER_WRITE}
 import java.time.Instant
-import com.google.protobuf.ByteString
-
-import scala.jdk.CollectionConverters._
 import scala.concurrent.ExecutionContext.Implicits._
 import scala.concurrent.Future
+import scala.jdk.CollectionConverters._
 
 class SecretKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: ConsoleEnvironment)
     extends Helpful {

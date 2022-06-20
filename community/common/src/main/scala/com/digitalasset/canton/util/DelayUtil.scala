@@ -3,13 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import java.util.concurrent.ScheduledExecutorService
-
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.util.concurrent.ScheduledExecutorService
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{Future, Promise}
 

@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, RejectReasons, Timeout}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -41,7 +40,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
         forAll(exampleResults) { (resultType: String, original: Verdict) =>
           val cycled =
             Verdict.fromProtoVersioned(
-              original.toProtoVersioned(ProtocolVersion.latestForTest)
+              original.toProtoVersioned(defaultProtocolVersion)
             ) match {
               case Left(err) => fail(err.toString)
               case Right(verdict) => verdict

@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.topology.ParticipantId
 
 import scala.concurrent.ExecutionContext
 

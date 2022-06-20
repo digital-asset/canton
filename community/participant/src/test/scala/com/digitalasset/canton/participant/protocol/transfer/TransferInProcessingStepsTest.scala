@@ -61,7 +61,6 @@ import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -404,7 +403,10 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "succeed without errors" in {
       for {
         inRequest <- inRequestF
-        envelopes = NonEmpty(Seq, OpenEnvelope(inRequest, RecipientsTest.testInstance))
+        envelopes = NonEmpty(
+          Seq,
+          OpenEnvelope(inRequest, RecipientsTest.testInstance, defaultProtocolVersion),
+        )
         decrypted <- valueOrFail(transferInProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
           "decrypt request failed"
         )
@@ -822,7 +824,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       ),
       seedGenerator,
       causalityTracking = true,
-      ProtocolVersion.latestForTest,
+      defaultProtocolVersion,
       loggerFactory = loggerFactory,
     )
   }
@@ -857,7 +859,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       tree: FullTransferInTree
   ): Future[EncryptedViewMessage[TransferInViewType]] =
     EncryptedViewMessageFactory
-      .create(TransferInViewType)(tree, cryptoSnapshot, ProtocolVersion.latestForTest)
+      .create(TransferInViewType)(tree, cryptoSnapshot, defaultProtocolVersion)
       .fold(
         error => throw new IllegalArgumentException(s"Cannot encrypt transfer-in request: $error"),
         Predef.identity,
@@ -907,6 +909,7 @@ object TransferInProcessingStepsTest {
       hashOps: HashOps,
       participantId: ParticipantId,
   )(implicit traceContext: TraceContext): DeliveredTransferOutResult = {
+    val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
 
     implicit val ec: ExecutionContext = DirectExecutionContext(
       TracedLogger(
@@ -922,12 +925,12 @@ object TransferInProcessingStepsTest {
         Set(),
         TransferOutDomainId(originDomain),
         Verdict.Approve,
-        ProtocolVersion.latestForTest,
+        protocolVersion,
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
       Await.result(SignedProtocolMessage.tryCreate(result, cryptoSnapshot, hashOps), 10.seconds)
     val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
-      Batch.of((signedResult, Recipients.cc(participantId)))
+      Batch.of(protocolVersion, (signedResult, Recipients.cc(participantId)))
     val deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
       Deliver.create(
         0L,
@@ -935,6 +938,7 @@ object TransferInProcessingStepsTest {
         originDomain,
         Some(MessageId.tryCreate("msg-0")),
         batch,
+        protocolVersion,
       )
     val signature =
       Await
@@ -955,6 +959,6 @@ object TransferInProcessingStepsTest {
     Set(),
     TransferInDomainId(targetDomain),
     Verdict.Approve,
-    ProtocolVersion.latestForTest,
+    TestDomainParameters.defaultStatic.protocolVersion,
   )
 }

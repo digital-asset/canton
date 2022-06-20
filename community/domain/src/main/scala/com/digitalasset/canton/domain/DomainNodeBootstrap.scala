@@ -404,6 +404,7 @@ class DomainNodeBootstrap(
             crypto,
             parameters.cachingConfigs,
             timeouts,
+            futureSupervisor,
             loggerFactory,
           )
             .tryForDomain(domainId)
@@ -488,6 +489,7 @@ class DomainNodeBootstrap(
           initialKeys,
           sequencerClientFactoryFactory(topologyClient),
           parameters,
+          futureSupervisor,
           indexedStringStore,
           loggerFactory,
         )

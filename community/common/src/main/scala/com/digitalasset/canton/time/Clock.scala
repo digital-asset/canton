@@ -4,13 +4,13 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
+import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.error.CantonErrorGroups.ClockErrorGroup
 import com.digitalasset.canton.error.CantonError
-import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
+import com.digitalasset.canton.error.CantonErrorGroups.ClockErrorGroup
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle, UnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -22,7 +22,7 @@ import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, PriorityBlockingQueueUtil}
 import com.google.protobuf.empty.Empty
 
-import java.time.{Duration, Instant, Clock => JClock}
+import java.time.{Clock => JClock, Duration, Instant}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.{Callable, PriorityBlockingQueue, TimeUnit}
 import scala.annotation.tailrec

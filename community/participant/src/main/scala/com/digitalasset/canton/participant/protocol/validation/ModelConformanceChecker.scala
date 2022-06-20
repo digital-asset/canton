@@ -16,7 +16,6 @@ import com.digitalasset.canton.data.{
   TransactionViewDecomposition,
   TransactionViewTree,
 }
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
@@ -35,6 +34,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithoutSuffixes,
 }
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, checked}
 

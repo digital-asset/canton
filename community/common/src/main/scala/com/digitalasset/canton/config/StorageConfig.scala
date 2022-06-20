@@ -5,8 +5,8 @@ package com.digitalasset.canton.config
 
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}

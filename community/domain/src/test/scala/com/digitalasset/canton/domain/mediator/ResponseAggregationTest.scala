@@ -4,14 +4,10 @@
 package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-
-import java.util.UUID
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
 import com.digitalasset.canton.data.{ConfirmingParty, PlainInformee, _}
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.protocol.messages.Verdict.{MediatorReject, RejectReasons}
 import com.digitalasset.canton.protocol.messages.{
   InformeeMessage,
@@ -22,13 +18,15 @@ import com.digitalasset.canton.protocol.messages.{
   Verdict,
 }
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.funspec.PathAnyFunSpec
 
+import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
@@ -91,7 +89,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         rootHashO,
         confirmingParties,
         domainId,
-        ProtocolVersion.latestForTest,
+        defaultProtocolVersion,
       )
 
     describe("under the Signatory policy") {
@@ -106,7 +104,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           )
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
-      val informeeMessage = InformeeMessage(fullInformeeTree)
+      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
       val rootHash = informeeMessage.rootHash
       val someOtherRootHash = Some(RootHash(TestHash.digest(12345)))
 
@@ -141,7 +139,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           )
         )
 
-        val sut = ResponseAggregation(requestId, InformeeMessage(fullInformeeTreeThresholdTooLow))(
+        val sut = ResponseAggregation(
+          requestId,
+          InformeeMessage(fullInformeeTreeThresholdTooLow, defaultProtocolVersion),
+        )(
           loggerFactory
         )
 
@@ -161,7 +162,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           someOtherRootHash,
           Set(alice.party),
           domainId,
-          ProtocolVersion.latestForTest,
+          defaultProtocolVersion,
         )
         val result =
           sut
@@ -354,7 +355,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             b(2),
             MerkleSeq.fromSeq(hashOps)(view1 :: view2 :: Nil),
           )
-        )
+        ),
+        defaultProtocolVersion,
       )
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
@@ -404,7 +406,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               None,
               Set.empty,
               domainId,
-              ProtocolVersion.latestForTest,
+              defaultProtocolVersion,
             )
           val result = loggerFactory.assertLogs(
             valueOrFail(sut.progress(changeTs, response, topologySnapshot).value.futureValue)(
@@ -452,7 +454,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             MerkleSeq.fromSeq(hashOps)(view1 :: Nil),
           )
         )
-      val informeeMessage = InformeeMessage(fullInformeeTree)
+      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
       val rootHash = informeeMessage.rootHash
       val nonVip = ParticipantId("notAVip")
 
@@ -506,7 +508,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             None,
             Set.empty,
             domainId,
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
         val result = loggerFactory.assertLogs(
           valueOrFail(

@@ -63,10 +63,10 @@ import com.digitalasset.canton.time.{
   DomainTimeTrackerConfig,
   NonNegativeFiniteDuration,
 }
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
@@ -135,6 +135,7 @@ class SequencerRuntime(
       crypto,
       localNodeParameters.cachingConfigs,
       timeouts,
+      futureSupervisor,
       loggerFactory,
     )
 
@@ -148,7 +149,6 @@ class SequencerRuntime(
       snapshot,
       localNodeParameters,
       staticDomainParameters.protocolVersion,
-      futureSupervisor,
     )
 
   private val keyCheckF =

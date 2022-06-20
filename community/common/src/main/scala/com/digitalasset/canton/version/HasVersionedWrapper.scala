@@ -34,20 +34,6 @@ trait HasProtoV1[ProtoClass <: scalapb.GeneratedMessage] {
   protected def toProtoV1: ProtoClass
 }
 
-/** Same as [[HasProtoV0]] but `toProtoV0` takes a version argument.This trait generally only be used in rare cases
-  * when a Protobuf message contains a nested `UntypedVersionedMessage` wrapper - see e.g. Batch and Envelope
-  */
-trait HasProtoV0WithVersion[ProtoClass <: scalapb.GeneratedMessage] {
-
-  /** Yields the proto representation of the class.
-    *
-    * Subclasses should make this method public by default, as this supports composing proto serializations.
-    * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
-    */
-  protected def toProtoV0(version: ProtocolVersion): ProtoClass
-}
-
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
   *
@@ -85,10 +71,6 @@ trait HasVersionedWrapper[+ProtoClass <: scalapb.GeneratedMessage]
 
 /** Traits for the companion objects of classes that implement [[HasVersionedWrapper]].
   * Provide default methods.
-  *
-  * We provide two traits:
-  *  - [[HasVersionedMessageCompanion]] for the "standard" case
-  *  - [[HasMemoizedVersionedMessageCompanion]] for cases where memoization is done.
   */
 trait HasVersionedMessageCompanion[
     ValueClass <: HasVersionedWrapper[VersionedMessage[ValueClass]]
@@ -182,49 +164,11 @@ trait HasVersionedMessageCompanion[
     (valueO, pp) => pp >> valueO.map(_.toByteArray(protocolVersion))
 }
 
-trait HasMemoizedVersionedMessageCompanion[ValueClass <: HasVersionedWrapper[
-  VersionedMessage[ValueClass]
-]] {
-
-  /** The name of the class as used for pretty-printing and error reporting */
-  protected def name: String
-
-  /** Proto versions that are supported by `fromProtoVersioned` and `fromByteString`
-    * See the helper `supportedProtoVersion` below to define a `Parser`.
-    */
-  protected def supportedProtoVersions: Map[Int, Parser]
-
-  type OriginalByteString = ByteString // What is passed to the fromByteString method
-  type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message
-  type Parser = (OriginalByteString, DataByteString) => ParsingResult[ValueClass]
-
-  protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
-      p: scalapb.GeneratedMessageCompanion[Proto]
-  )(
-      fromProto: Proto => (OriginalByteString => ParsingResult[ValueClass])
-  ): (OriginalByteString, DataByteString) => ParsingResult[ValueClass] =
-    (original: OriginalByteString, data: DataByteString) =>
-      ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
-
-  def fromByteString(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
-    proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
-    data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-    valueClass <- supportedProtoVersions
-      .get(proto.version)
-      .map(_(bytes, data))
-      .getOrElse(ProtoDeserializationError.VersionError(name, proto.version).asLeft[ValueClass])
-  } yield valueClass
-}
-
 /** Traits for the companion objects of classes that implement [[HasVersionedWrapper]].
   * They provide default methods.
   * Unlike [[HasVersionedMessageCompanion]] these traits allow to pass additional
   * context to the conversion methods (see, e.g., [[com.digitalasset.canton.data.TransferInViewTree.fromProtoVersioned]]
   * which takes a `HashOps` parameter).
-  *
-  * We provide two traits:
-  *  - [[HasVersionedMessageWithContextCompanion]] for the "standard" case
-  *  - [[HasMemoizedVersionedMessageWithContextCompanion]] for cases where memoization is done.
   */
 trait HasVersionedMessageWithContextCompanion[ValueClass, Ctx] {
 
@@ -257,37 +201,5 @@ trait HasVersionedMessageWithContextCompanion[ValueClass, Ctx] {
   def fromByteString(ctx: Ctx)(bytes: ByteString): ParsingResult[ValueClass] = for {
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     valueClass <- fromProtoVersioned(ctx)(VersionedMessage(proto))
-  } yield valueClass
-}
-
-trait HasMemoizedVersionedMessageWithContextCompanion[ValueClass, Ctx] {
-
-  /** The name of the class as used for pretty-printing and error reporting */
-  protected def name: String
-
-  protected def supportedProtoVersions: Map[Int, Parser]
-
-  type OriginalByteString = ByteString // What is passed to the fromByteString method
-  type DataByteString = ByteString // What is inside the parsed UntypedVersionedMessage message
-  type Parser = (Ctx, OriginalByteString, DataByteString) => ParsingResult[ValueClass]
-
-  protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
-      p: scalapb.GeneratedMessageCompanion[Proto]
-  )(
-      fromProto: (Ctx, Proto) => (OriginalByteString => ParsingResult[ValueClass])
-  ): (Ctx, OriginalByteString, DataByteString) => ParsingResult[ValueClass] =
-    (ctx: Ctx, original: OriginalByteString, data: DataByteString) =>
-      for {
-        proto <- ProtoConverter.protoParser(p.parseFrom)(data)
-        valueClass <- fromProto(ctx, proto)(original)
-      } yield valueClass
-
-  def fromByteString(ctx: Ctx)(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
-    proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
-    data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
-    valueClass <- supportedProtoVersions
-      .get(proto.version)
-      .map(_(ctx, bytes, data))
-      .getOrElse(ProtoDeserializationError.VersionError(name, proto.version).asLeft[ValueClass])
   } yield valueClass
 }

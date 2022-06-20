@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.participant.admin.grpc
 
-import java.util.UUID
-
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.digitalasset.canton.participant.admin.v0._
 import com.digitalasset.canton.participant.admin.PingService
+import com.digitalasset.canton.participant.admin.v0._
 import com.digitalasset.canton.tracing.Spanning
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
 class GrpcPingService(service: PingService)(implicit ec: ExecutionContext, tracer: Tracer)

@@ -4,11 +4,12 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.messages.{ProtocolMessage, TransferOutMediatorMessage}
+import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
 import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
@@ -24,9 +25,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
 import com.google.protobuf.ByteString
 
 import java.util.UUID
@@ -35,8 +34,10 @@ import java.util.UUID
 sealed abstract case class TransferOutViewTree(
     commonData: MerkleTree[TransferOutCommonData],
     view: MerkleTree[TransferOutView],
-)(val representativeProtocolVersion: RepresentativeProtocolVersion, hashOps: HashOps)
-    extends GenTransferViewTree[
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutViewTree],
+    hashOps: HashOps,
+) extends GenTransferViewTree[
       TransferOutCommonData,
       TransferOutView,
       TransferOutViewTree,
@@ -55,10 +56,7 @@ sealed abstract case class TransferOutViewTree(
   protected[this] override def createMediatorMessage(
       blindedTree: TransferOutViewTree
   ): TransferOutMediatorMessage =
-    TransferOutMediatorMessage(
-      blindedTree,
-      ProtocolMessage.protocolVersionRepresentativeFor(representativeProtocolVersion.unwrap),
-    )
+    TransferOutMediatorMessage(blindedTree)
 
   override def pretty: Pretty[TransferOutViewTree] = prettyOfClass(
     param("common data", _.commonData),
@@ -83,7 +81,7 @@ object TransferOutViewTree
       commonData: MerkleTree[TransferOutCommonData],
       view: MerkleTree[TransferOutView],
   )(protocolVersion: ProtocolVersion, hashOps: HashOps) = new TransferOutViewTree(commonData, view)(
-    ProtocolMessage.protocolVersionRepresentativeFor(protocolVersion),
+    TransferOutViewTree.protocolVersionRepresentativeFor(protocolVersion),
     hashOps,
   ) {}
 
@@ -121,15 +119,14 @@ sealed abstract case class TransferOutCommonData private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutCommonData],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferOutCommonData]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
 
-  override protected def toProtoVersioned: VersionedMessage[TransferOutCommonData] =
-    TransferOutCommonData.toProtoVersioned(this)
+  override def companionObj = TransferOutCommonData
 
   protected def toProtoV0: v0.TransferOutCommonData =
     v0.TransferOutCommonData(
@@ -237,7 +234,7 @@ sealed abstract case class TransferOutView private (
     targetTimeProof: TimeProof,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion,
+    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView],
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutView](hashOps)
     with HasProtocolVersionedWrapper[TransferOutView]
@@ -246,8 +243,7 @@ sealed abstract case class TransferOutView private (
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferOutView
 
-  override protected def toProtoVersioned: VersionedMessage[TransferOutView] =
-    TransferOutView.toProtoVersioned(this)
+  override def companionObj = TransferOutView
 
   protected def toProtoV0: v0.TransferOutView =
     v0.TransferOutView(
@@ -306,9 +302,11 @@ object TransferOutView
       submitter <- ProtoConverter.parseLfPartyId(submitterP)
       contractId <- LfContractId.fromProtoPrimitive(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
+      // TODO(i9626): Requires protocol version of the target domain
+      targetDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
       targetTimeProof <- ProtoConverter
         .required("targetTimeProof", targetTimeProofP)
-        .flatMap(TimeProof.fromProtoV0(hashOps))
+        .flatMap(TimeProof.fromProtoV0(targetDomainPV, hashOps))
     } yield new TransferOutView(salt, submitter, contractId, targetDomain, targetTimeProof)(
       hashOps,
       protocolVersionRepresentativeFor(ProtobufVersion(0)),

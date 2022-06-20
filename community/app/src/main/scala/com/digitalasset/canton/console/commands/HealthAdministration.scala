@@ -5,6 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import com.digitalasset.canton.admin.api.client.commands.{HttpAdminCommand, StatusAdminCommands}
 import com.digitalasset.canton.console.CommandErrors.CommandError
+import com.digitalasset.canton.console.ConsoleMacros.utils
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   CommandSuccessful,
@@ -14,7 +15,6 @@ import com.digitalasset.canton.console.{
   Helpful,
 }
 import com.digitalasset.canton.health.admin.{data, v0}
-import com.digitalasset.canton.console.ConsoleMacros.utils
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 import java.util.concurrent.atomic.AtomicReference

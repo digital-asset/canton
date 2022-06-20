@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, EOFException}
-import java.util.zip.{GZIPInputStream, GZIPOutputStream, ZipException}
-
 import com.digitalasset.canton.serialization.DeserializationError
 import com.google.protobuf.ByteString
 import org.apache.commons.io.IOUtils
+
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, EOFException}
+import java.util.zip.{GZIPInputStream, GZIPOutputStream, ZipException}
 
 object ByteArrayUtil {
   // See also the analogue methods in `ByteStringUtil`

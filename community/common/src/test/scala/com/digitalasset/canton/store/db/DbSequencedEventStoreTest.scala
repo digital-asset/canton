@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.store.db
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedDomain, SequencedEventStoreTest}
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.topology.DomainId
 import org.scalatest.wordspec.AsyncWordSpec
 

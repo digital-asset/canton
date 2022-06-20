@@ -10,8 +10,8 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, U
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.time._
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.store.TopologyStore.Change
+import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
   DomainTopologyTransactionType,

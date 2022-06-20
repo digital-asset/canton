@@ -36,6 +36,10 @@ object BuildCommon {
           "; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; checkDamlProjectVersions",
         ) ++
         addCommandAlias(
+          "scalafixCheck",
+          s"${alsoTest("scalafix --check")}",
+        ) ++
+        addCommandAlias(
           "format",
           "; scalafmt ; Test / scalafmt ; scalafmtSbt; createLicenseHeaders",
         ) ++

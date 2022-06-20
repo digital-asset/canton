@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import java.util.ConcurrentModificationException
-import java.util.concurrent.atomic.AtomicReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestData
 import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
+
+import java.util.ConcurrentModificationException
+import java.util.concurrent.atomic.AtomicReference
 
 /** Deals with repair request as part of messsage processing.
   * As is, it merely skips the request counters.

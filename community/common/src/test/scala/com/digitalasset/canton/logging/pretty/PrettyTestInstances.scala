@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.logging.pretty
 
+import com.daml.lf.CantonOnly.LfVersionedTransaction
 import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
   LfKeyWithMaintainers,
@@ -13,7 +14,6 @@ import com.digitalasset.canton.protocol.{
   LfNodeLookupByKey,
   LfNodeRollback,
 }
-import com.daml.lf.CantonOnly.LfVersionedTransaction
 
 /** Pretty printing implicits for use by tests only. These enable showing readable multiline diffs when expected
   * and actual transactions differ unexpectedly.

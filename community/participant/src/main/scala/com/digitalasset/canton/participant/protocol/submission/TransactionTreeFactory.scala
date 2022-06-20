@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.daml.ledger.participant.state.v2.SubmitterInfo
+import com.daml.lf.transaction.Transaction.KeyInputError
 import com.digitalasset.canton._
 import com.digitalasset.canton.crypto.{Salt, SaltSeed}
 import com.digitalasset.canton.data.{
@@ -13,8 +14,6 @@ import com.digitalasset.canton.data.{
   TransactionViewTree,
   ViewPosition,
 }
-import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   SerializableContractOfId,
@@ -23,6 +22,8 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.UUID
@@ -124,6 +125,18 @@ object TransactionTreeFactory {
     override def pretty: Pretty[DivergingKeyResolutionError] = prettyOfClass(
       unnamedParam(_.divergingKeys)
     )
+  }
+
+  case class MissingContractKeyLookupError(key: LfGlobalKey)
+      extends TransactionTreeConversionError {
+    override def pretty: Pretty[MissingContractKeyLookupError] =
+      prettyOfClass(unnamedParam(_.key))
+  }
+
+  case class ContractKeyResolutionError(error: KeyInputError)
+      extends TransactionTreeConversionError {
+    override def pretty: Pretty[ContractKeyResolutionError] =
+      prettyOfClass(unnamedParam(_.error))
   }
 
   /** Indicates that too few salts have been supplied for creating a view */

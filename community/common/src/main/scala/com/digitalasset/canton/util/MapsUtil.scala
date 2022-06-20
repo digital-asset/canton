@@ -11,7 +11,7 @@ import cats.syntax.foldable._
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.annotation.tailrec
-import scala.collection.concurrent
+import scala.collection.{concurrent, mutable}
 import scala.concurrent.Future
 
 object MapsUtil {
@@ -209,4 +209,28 @@ object MapsUtil {
     Semigroup[Map[K, V]].combine(map1, map2)
   }
 
+  def extendMapWith[K, V](m: mutable.Map[K, V], extendWith: IterableOnce[(K, V)])(
+      merge: (V, V) => V
+  ): Unit = {
+    extendWith.iterator.foreach { case (k, v) =>
+      m.updateWith(k) {
+        case None => Some(v)
+        case Some(mv) => Some(merge(mv, v))
+      }
+    }
+  }
+
+  /** Return all key-value pairs in minuend that are different / missing in subtrahend
+    *
+    * @throws java.lang.IllegalArgumentException if the minuend is not defined for all keys of the subtrahend.
+    */
+  def mapDiff[K, V](minuend: Map[K, V], subtrahend: collection.Map[K, V])(implicit
+      loggingContext: ErrorLoggingContext
+  ): Map[K, V] = {
+    ErrorUtil.requireArgument(
+      subtrahend.keySet.subsetOf(subtrahend.keySet),
+      s"Cannot compute map difference if minuend is not defined whenever subtrahend is defined. Missing keys: ${subtrahend.keySet diff minuend.keySet}",
+    )
+    minuend.collect { case (k, v) if !subtrahend.get(k).contains(v) => (k, v) }
+  }
 }

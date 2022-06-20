@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
+
 import scala.io.Source
 
 class Blake2xbTest extends AnyWordSpec with BaseTest {

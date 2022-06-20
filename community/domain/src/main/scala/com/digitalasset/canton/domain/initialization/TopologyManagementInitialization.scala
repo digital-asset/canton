@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.initialization
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.instances.future._
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{
   Crypto,
@@ -41,11 +42,11 @@ import com.digitalasset.canton.store.{
   SequencerCounterTrackerStore,
 }
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
-import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -86,10 +87,14 @@ object TopologyManagementInitialization {
     for {
       content <- DomainTopologyTransactionMessage
         .tryCreate(transactions.toList, recentSnapshot, id, protocolVersion)
-      batch = domainMembers.map(member => OpenEnvelope(content, Recipients.cc(member)))
+      batch = domainMembers.map(member =>
+        OpenEnvelope(content, Recipients.cc(member), protocolVersion)
+      )
       _ = logger.debug(s"Sending initial topology transactions to domain members $domainMembers")
       _ <- SequencerClient.sendWithRetries(
-        callback => client.sendAsync(Batch(batch.toList), SendType.Other, callback = callback),
+        callback =>
+          client
+            .sendAsync(Batch(batch.toList, protocolVersion), SendType.Other, callback = callback),
         maxRetries = 600,
         delay = 1.second,
         sendDescription = "Send initial topology transaction to domain members",
@@ -116,6 +121,7 @@ object TopologyManagementInitialization {
       initialKeys: Map[KeyOwner, Seq[PublicKey]],
       sequencerClientFactory: SequencerClientFactory,
       parameters: DomainNodeParameters,
+      futureSupervisor: FutureSupervisor,
       indexedStringStore: IndexedStringStore,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -127,6 +133,7 @@ object TopologyManagementInitialization {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val managerId: DomainTopologyManagerId = domainTopologyManager.managerId
     val timeouts = parameters.processingTimeouts
+    val protocolVersion = domainTopologyManager.protocolVersion
     val dispatcherLoggerFactory = loggerFactory.appendUnnamedKey("node", "identity")
     // if we're only running a embedded sequencer then there's no need to sequence topology transactions
     val isEmbedded = config match {
@@ -143,7 +150,7 @@ object TopologyManagementInitialization {
           SequencedEventStore(
             storage,
             managerDiscriminator,
-            domainTopologyManager.protocolVersion,
+            protocolVersion,
             timeouts,
             dispatcherLoggerFactory,
           )
@@ -161,12 +168,17 @@ object TopologyManagementInitialization {
             RegisterTopologyTransactionResponseStore(
               storage,
               crypto.pureCrypto,
-              domainTopologyManager.protocolVersion,
+              protocolVersion,
               timeouts,
               loggerFactory,
             ),
             domainTopologyService,
-            (env, callback) => newClient.sendAsync(Batch(List(env)), callback = callback),
+            (env, callback) =>
+              newClient.sendAsync(
+                Batch(List(env), protocolVersion),
+                callback = callback,
+              ),
+            protocolVersion,
             timeouts,
             loggerFactory,
           )
@@ -174,7 +186,7 @@ object TopologyManagementInitialization {
         DiscardIgnoredEvents {
           StripSignature {
             EnvelopeOpener[UnsignedEnvelopeBox](
-              domainTopologyManager.protocolVersion,
+              protocolVersion,
               crypto.pureCrypto,
             ) {
               domainTopologyServiceHandler.combineWith(topologyProcessorHandler)
@@ -210,7 +222,7 @@ object TopologyManagementInitialization {
             authorizedTopologySnapshot <- domainTopologyManager.store.headTransactions(traceContext)
             _ <- sequenceInitialTopology(
               id,
-              domainTopologyManager.protocolVersion,
+              protocolVersion,
               newClient,
               authorizedTopologySnapshot.result.map(_.transaction),
               DomainMember.list(id, addressSequencerAsDomainMember),
@@ -241,6 +253,7 @@ object TopologyManagementInitialization {
           clock,
           addressSequencerAsDomainMember,
           parameters,
+          futureSupervisor,
           dispatcherLoggerFactory,
         )
       )

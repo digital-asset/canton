@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.traverse._
 import com.daml.error.{ErrorCategory, ErrorGroup, Explanation, Resolution}
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   NotImplementedYet,
@@ -12,6 +13,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 }
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.MediatorRejectionGroup
 import com.digitalasset.canton.error._
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.MediatorRejection.Code
@@ -24,8 +26,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.protobuf.empty
 import org.slf4j.event.Level
 import pprint.Tree

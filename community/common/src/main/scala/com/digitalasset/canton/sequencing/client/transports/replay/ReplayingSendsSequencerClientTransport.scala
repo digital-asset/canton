@@ -36,9 +36,9 @@ import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
-import scala.jdk.DurationConverters._
 import scala.concurrent.duration.{Duration, _}
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.jdk.DurationConverters._
 
 /** Replays previously recorded sends against the configured sequencer and using a real sequencer client transport.
   * Records the latencies/rates to complete the send itself, and latencies/rates for an event that was caused by the send to be witnessed.

@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.domain
 import cats.syntax.either._
 import cats.syntax.option._
 import cats.syntax.traverse._
+import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -18,6 +19,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.{
   HasProtoV0,
@@ -26,8 +28,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   VersionedMessage,
 }
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.topology.DomainId
 import com.google.protobuf.ByteString
 
 import java.net.URI

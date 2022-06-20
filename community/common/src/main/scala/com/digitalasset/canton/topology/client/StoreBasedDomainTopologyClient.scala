@@ -4,10 +4,12 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.functorFilter._
 import cats.syntax.functor._
+import cats.syntax.functorFilter._
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,7 +28,6 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.SequencerCounter
 import io.functionmeta.functionFullName
 
 import java.time.{Duration => JDuration}
@@ -279,6 +280,7 @@ class StoreBasedDomainTopologyClient(
     initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
     override val timeouts: ProcessingTimeout,
+    override protected val futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
     useStateTxs: Boolean = true,
 )(implicit val executionContext: ExecutionContext)

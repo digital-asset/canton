@@ -11,6 +11,12 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.HasProtoV0
 
+/** @param consumedInCore Whether the contract is consumed in the core of the view.
+  *   [[com.digitalasset.canton.protocol.WellFormedTransaction]] checks that a created contract
+  *   can only be used in the same or deeper rollback scopes as the create, so if `rolledBack` is true
+  *   then this is false.
+  * @param rolledBack Whether the contract creation has a different rollback scope than the view.
+  */
 case class CreatedContract private (
     contract: SerializableContract,
     consumedInCore: Boolean,
@@ -77,4 +83,24 @@ object CreatedContract {
       )
     } yield createdContract
   }
+}
+
+/** @param consumedInView Whether the contract is consumed in the view.
+  *   [[com.digitalasset.canton.protocol.WellFormedTransaction]] checks that a created contract
+  *   can only be used in the same or deeper rollback scopes as the create, so if `rolledBack` is true
+  *   then this is false.
+  * @param rolledBack Whether the contract creation has a different rollback scope than the view.
+  */
+case class CreatedContractInView(
+    contract: SerializableContract,
+    consumedInView: Boolean,
+    rolledBack: Boolean,
+)
+object CreatedContractInView {
+  def fromCreatedContract(created: CreatedContract): CreatedContractInView =
+    CreatedContractInView(
+      created.contract,
+      consumedInView = created.consumedInCore,
+      created.rolledBack,
+    )
 }

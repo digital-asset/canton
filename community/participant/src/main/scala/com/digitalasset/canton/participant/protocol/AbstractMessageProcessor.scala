@@ -15,12 +15,12 @@ import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessSet
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
+import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   MediatorResponse,
   ProtocolMessage,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
@@ -28,8 +28,8 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.protocol.{Batch, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -99,7 +99,7 @@ abstract class AbstractMessageProcessor(
         )
         maxSequencingTime = requestId.unwrap.add(domainParameters.participantResponseTimeout.unwrap)
         _ <- sequencerClient.sendAsync(
-          Batch.of(messages: _*),
+          Batch.of(sequencerClient.staticDomainParameters.protocolVersion, messages: _*),
           maxSequencingTime = maxSequencingTime,
           callback = SendCallback.log(s"Response message for request [$rc]", logger),
         )

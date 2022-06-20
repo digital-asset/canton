@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -25,7 +26,7 @@ import com.digitalasset.canton.{LfPartyId, checked}
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 // architecture-handbook-entry-begin: IdentityProvidingServiceClient
@@ -52,7 +53,7 @@ class IdentityProvidingServiceClient {
 
 }
 
-trait TopologyClientApi[T] {
+trait TopologyClientApi[+T] { this: HasFutureSupervision =>
 
   /** The domain this client applies to */
   def domainId: DomainId
@@ -106,10 +107,24 @@ trait TopologyClientApi[T] {
   /** Waits until a snapshot is available */
   def awaitSnapshot(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[T]
 
+  /** Supervised version of [[awaitSnapshot]] */
+  def awaitSnapshotSupervised(description: => String, warnAfter: Duration = 10.seconds)(
+      timestamp: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): Future[T] = supervised(description, warnAfter)(awaitSnapshot(timestamp))
+
   /** Shutdown safe version of await snapshot */
   def awaitSnapshotUS(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[T]
+
+  /** Supervised version of [[awaitSnapshotUS]] */
+  def awaitSnapshotUSSupervised(description: => String, warnAfter: Duration = 10.seconds)(
+      timestamp: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[T] = supervisedUS(description, warnAfter)(awaitSnapshotUS(timestamp))
 
   /** Returns the topology information at a certain point in time
     *
@@ -141,6 +156,7 @@ trait TopologyClientApi[T] {
 /** The client that provides the topology information on a per domain basis
   */
 trait DomainTopologyClient extends TopologyClientApi[TopologySnapshot] with AutoCloseable {
+  this: HasFutureSupervision =>
 
   /** Wait for a condition to become true according to the current snapshot approximation
     *
@@ -361,9 +377,10 @@ trait TopologySnapshot
 trait DomainTopologyClientWithInit
     extends DomainTopologyClient
     with TopologyTransactionProcessingSubscriber
+    with HasFutureSupervision
     with NamedLogging {
 
-  implicit def executionContext: ExecutionContext
+  implicit override protected def executionContext: ExecutionContext
 
   /** Move the most known timestamp ahead in future based of newly discovered information
     *

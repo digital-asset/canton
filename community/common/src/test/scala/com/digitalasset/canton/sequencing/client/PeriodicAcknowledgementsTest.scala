@@ -11,9 +11,9 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.collection.mutable
-import scala.jdk.DurationConverters._
-import scala.concurrent.{Future, Promise}
 import scala.concurrent.duration._
+import scala.concurrent.{Future, Promise}
+import scala.jdk.DurationConverters._
 
 class PeriodicAcknowledgementsTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

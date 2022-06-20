@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
@@ -13,7 +14,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   VersionedMessage,
 }
-import com.digitalasset.canton.LfPartyId
 
 import scala.collection.immutable.SortedSet
 

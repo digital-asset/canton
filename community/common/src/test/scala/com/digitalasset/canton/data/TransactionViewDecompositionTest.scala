@@ -4,14 +4,14 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.data.TransactionViewDecomposition._
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
   ExampleTransactionFactory,
   LfNodeId,
   RollbackContext,
 }
-import com.digitalasset.canton.data.TransactionViewDecomposition._
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Await

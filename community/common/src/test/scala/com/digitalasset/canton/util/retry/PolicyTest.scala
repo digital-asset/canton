@@ -23,8 +23,8 @@ import org.slf4j.event.Level
 
 import java.util.Random
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {
 

@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.tracing
 
-import java.util
-import java.util.concurrent.LinkedBlockingQueue
-
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.common.CompletableResultCode
-import io.opentelemetry.sdk.trace.`export`.SpanExporter
 import io.opentelemetry.sdk.trace.data.{EventData, SpanData}
+import io.opentelemetry.sdk.trace.`export`.SpanExporter
+
+import java.util
+import java.util.concurrent.LinkedBlockingQueue
 
 class TestTelemetrySetup() extends AutoCloseable {
   private lazy val testExporter = new TestTelemetry.TestExporter()

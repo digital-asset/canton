@@ -3,18 +3,24 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.{
   State => ProtoState
 }
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{HasProtoV0, ProtobufVersion, RepresentativeProtocolVersion}
-import cats.syntax.traverse._
+import com.digitalasset.canton.version.{
+  HasProtoV0,
+  HasProtocolVersionedCompanion,
+  ProtobufVersion,
+  ProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 
 final case class RegisterTopologyTransactionResponse(
     requestedBy: Member,
@@ -22,8 +28,11 @@ final case class RegisterTopologyTransactionResponse(
     requestId: TopologyRequestId,
     results: Seq[RegisterTopologyTransactionResponse.Result],
     override val domainId: DomainId,
-)(val representativeProtocolVersion: RepresentativeProtocolVersion)
-    extends ProtocolMessage
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      RegisterTopologyTransactionResponse
+    ]
+) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
     with HasProtoV0[v0.RegisterTopologyTransactionResponse]
@@ -49,7 +58,29 @@ final case class RegisterTopologyTransactionResponse(
     )
 }
 
-object RegisterTopologyTransactionResponse {
+object RegisterTopologyTransactionResponse
+    extends HasProtocolVersionedCompanion[RegisterTopologyTransactionResponse] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(v0.RegisterTopologyTransactionResponse)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
+
+  def apply(
+      requestedBy: Member,
+      participant: ParticipantId,
+      requestId: TopologyRequestId,
+      results: Seq[RegisterTopologyTransactionResponse.Result],
+      domainId: DomainId,
+      protocolVersion: ProtocolVersion,
+  ): RegisterTopologyTransactionResponse =
+    RegisterTopologyTransactionResponse(requestedBy, participant, requestId, results, domainId)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
+
   sealed trait State
   object State {
     @Deprecated
@@ -139,5 +170,24 @@ object RegisterTopologyTransactionResponse {
       requestId,
       results,
       DomainId(domainUid),
-    )(ProtocolMessage.protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+
+  override protected def name: String = "RegisterTopologyTransactionResponse"
+
+  def create(
+      request: RegisterTopologyTransactionRequest,
+      results: List[Result],
+  ): RegisterTopologyTransactionResponse = {
+    RegisterTopologyTransactionResponse(
+      request.requestedBy,
+      request.participant,
+      request.requestId,
+      results,
+      request.domainId,
+    )(
+      RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(
+        request.representativeProtocolVersion.unwrap
+      )
+    )
+  }
 }

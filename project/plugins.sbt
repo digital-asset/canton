@@ -2,6 +2,7 @@
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "2.4.16")
 addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "1.3.13")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.3")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.0")
 
 // Code coverage
 addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.9.2")

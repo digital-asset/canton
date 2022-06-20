@@ -7,6 +7,7 @@ import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.traverse._
 import com.daml.error._
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
@@ -41,7 +42,6 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.util.retry.Policy
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
@@ -129,7 +129,7 @@ class AcsCommitmentProcessor(
     domainId: DomainId,
     participantId: ParticipantId,
     val sequencerClient: SequencerClient,
-    domainCrypto: SyncCryptoClient,
+    domainCrypto: SyncCryptoClient[SyncCryptoApi],
     reconciliationInterval: PositiveSeconds,
     store: AcsCommitmentStore,
     commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
@@ -700,7 +700,7 @@ class AcsCommitmentProcessor(
       }
       _ = logger.debug(s"Computed and stored ${msgs.size} commitment messages for period $period")
       batchForm = msgs.toList.map { case (pid, msg) => (msg, Recipients.cc(pid)) }
-      batch = Batch.of[ProtocolMessage](batchForm: _*)
+      batch = Batch.of[ProtocolMessage](protocolVersion, batchForm: _*)
       _ = if (batch.envelopes.nonEmpty)
         performUnlessClosingEitherT(functionFullName, ()) {
           EitherTUtil
@@ -873,7 +873,7 @@ object AcsCommitmentProcessor {
   private[pruning] def commitments(
       participantId: ParticipantId,
       runningCommitments: Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType],
-      domainCrypto: SyncCryptoClient,
+      domainCrypto: SyncCryptoClient[SyncCryptoApi],
       timestamp: CantonTimestampSecond,
       pruningMetrics: Option[PruningMetrics],
       parallelism: PositiveNumeric[Int],

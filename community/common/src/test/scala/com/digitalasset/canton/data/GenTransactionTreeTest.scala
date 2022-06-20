@@ -4,17 +4,16 @@
 package com.digitalasset.canton.data
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
-import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
+import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
   ParticipantPermission,
   TrustLevel,
 }
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
+import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.annotation.nowarn
@@ -104,18 +103,18 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
         val fullInformeeTree = example.fullInformeeTree
         FullInformeeTree
           .fromByteString(factory.cryptoOps)(
-            fullInformeeTree.toByteString(ProtocolVersion.latestForTest)
+            fullInformeeTree.toByteString(defaultProtocolVersion)
           ) shouldEqual Right(fullInformeeTree)
 
         val (_, informeeTree) = example.informeeTreeBlindedFor
         InformeeTree
           .fromByteString(factory.cryptoOps)(
-            informeeTree.toByteString(ProtocolVersion.latestForTest)
+            informeeTree.toByteString(defaultProtocolVersion)
           ) shouldEqual Right(informeeTree)
 
         forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>
           LightTransactionViewTree.fromByteString(example.cryptoOps)(
-            lt.toByteString(ProtocolVersion.latestForTest)
+            lt.toByteString(defaultProtocolVersion)
           ) shouldBe Right(lt)
         }
       }
@@ -148,7 +147,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           .allLightTransactionViewTreesWithWitnessesAndSeeds(
             seed,
             hkdfOps,
-            ProtocolVersion.latestForTest,
+            defaultProtocolVersion,
           )
           .valueOrFail("Cant get the light transaction trees")
         val allTrees = example.transactionTree.allTransactionViewTrees.toList

@@ -15,9 +15,8 @@ import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk
 import io.opentelemetry.sdk.autoconfigure.spi.ConfigProperties
 import io.opentelemetry.sdk.common.CompletableResultCode
 import io.opentelemetry.sdk.resources.Resource
-import io.opentelemetry.sdk.trace.`export`.SpanExporter
 import io.opentelemetry.sdk.trace.data.SpanData
-import io.opentelemetry.sdk.trace.export.{BatchSpanProcessor, SimpleSpanProcessor}
+import io.opentelemetry.sdk.trace.export.{BatchSpanProcessor, SimpleSpanProcessor, SpanExporter}
 import io.opentelemetry.sdk.trace.samplers.Sampler
 import io.opentelemetry.sdk.trace.{SdkTracerProvider, SdkTracerProviderBuilder}
 import io.opentelemetry.semconv.resource.attributes.ResourceAttributes

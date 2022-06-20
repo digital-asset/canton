@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.transfer.{
   TransferData,
@@ -13,6 +12,7 @@ import com.digitalasset.canton.participant.protocol.transfer.{
 import com.digitalasset.canton.participant.store.TransferLookup
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}

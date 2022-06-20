@@ -63,7 +63,7 @@ import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
 import com.digitalasset.canton.sequencing.handlers.{CleanSequencerCounterTracker, EnvelopeOpener}
-import com.digitalasset.canton.sequencing.protocol.Batch
+import com.digitalasset.canton.sequencing.protocol.{Batch, Envelope}
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   DelayLogger,
@@ -145,6 +145,7 @@ class SyncDomain(
       seedGenerator,
       packageService,
       parameters.loggingConfig,
+      staticDomainParameters.uniqueContractKeys,
       loggerFactory,
     )
 
@@ -160,7 +161,6 @@ class SyncDomain(
     ephemeral,
     metrics.transactionProcessing,
     timeouts,
-    futureSupervisor,
     loggerFactory,
   )
 
@@ -175,7 +175,6 @@ class SyncDomain(
     seedGenerator,
     sequencerClient,
     timeouts,
-    futureSupervisor,
     staticDomainParameters.protocolVersion,
     loggerFactory,
   )
@@ -192,7 +191,6 @@ class SyncDomain(
     sequencerClient,
     parameters.enableCausalityTracking,
     timeouts,
-    futureSupervisor,
     staticDomainParameters.protocolVersion,
     loggerFactory,
   )
@@ -274,10 +272,14 @@ class SyncDomain(
 
   private val registerIdentityTransactionHandle =
     new SequencerBasedRegisterTopologyTransactionHandle(
-      (traceContext, env) => domainHandle.sequencerClient.sendAsync(Batch(List(env)))(traceContext),
+      (traceContext, env) =>
+        domainHandle.sequencerClient.sendAsync(
+          Batch(List(env), staticDomainParameters.protocolVersion)
+        )(traceContext),
       domainId,
       participantId,
       participantId,
+      staticDomainParameters.protocolVersion,
       timeouts,
       loggerFactory,
     )
@@ -541,7 +543,7 @@ class SyncDomain(
       )
       messageHandler =
         new ApplicationHandler[
-          Lambda[`+X` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
+          Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
           DefaultOpenEnvelope,
         ] {
           override def name: String = s"sync-domain-$domainId"
@@ -813,7 +815,7 @@ object SyncDomain {
       override val loggerFactory: NamedLoggerFactory,
   ) extends NamedLogging {
 
-    def apply[Env](
+    def apply[Env <: Envelope[_]](
         handler: PossiblyIgnoredApplicationHandler[Env]
     ): PossiblyIgnoredApplicationHandler[Env] = handler.replace { tracedBatch =>
       tracedBatch.withTraceContext { implicit batchTraceContext => tracedEvents =>

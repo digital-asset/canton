@@ -4,15 +4,14 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, NonEmptyChain}
-import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.error.definitions.LedgerApiErrors
+import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.ledger.participant.state.v2.{ChangeId, SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton._
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.SubmissionErrorGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -41,11 +40,11 @@ import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, Sequence
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil._
 import org.slf4j.event.Level
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
-import com.digitalasset.canton.util.ShowUtil._
 
 class TransactionProcessor(
     participantId: ParticipantId,
@@ -59,7 +58,6 @@ class TransactionProcessor(
     ephemeral: SyncDomainEphemeralState,
     metrics: TransactionProcessingMetrics,
     override protected val timeouts: ProcessingTimeout,
-    futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ProtocolProcessor[
@@ -94,8 +92,6 @@ class TransactionProcessor(
       ephemeral,
       crypto,
       sequencerClient,
-      participantId,
-      futureSupervisor,
       loggerFactory,
     ) {
 

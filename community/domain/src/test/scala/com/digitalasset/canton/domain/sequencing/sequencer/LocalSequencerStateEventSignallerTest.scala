@@ -7,9 +7,9 @@ import akka.stream.scaladsl.{Keep, Sink, SinkQueueWithCancel}
 import cats.syntax.traverse._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
-import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpec

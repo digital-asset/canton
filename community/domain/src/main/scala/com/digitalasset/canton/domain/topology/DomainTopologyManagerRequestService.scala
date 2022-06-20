@@ -14,7 +14,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
-
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, StoreBasedTopologySnapshot}
 import com.digitalasset.canton.topology.processing.{

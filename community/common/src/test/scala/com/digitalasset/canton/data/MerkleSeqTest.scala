@@ -4,7 +4,6 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
-import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import com.digitalasset.canton.crypto.{Hash, HashOps, TestHash}
 import com.digitalasset.canton.data.MerkleSeq.{Branch, MerkleSeqElement, Singleton}
 import com.digitalasset.canton.data.MerkleTree.{
@@ -16,6 +15,7 @@ import com.digitalasset.canton.data.MerkleTree.{
 import com.digitalasset.canton.data.MerkleTreeTest.Leaf1
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.protocol.RootHash
+import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.prop.TableFor4
 import org.scalatest.wordspec.AnyWordSpec
 

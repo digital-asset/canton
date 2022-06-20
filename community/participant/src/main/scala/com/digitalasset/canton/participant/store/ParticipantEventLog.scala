@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset

@@ -37,8 +37,9 @@ object SubscriptionResponse {
         maybeSignedSequencedEventP,
       )
       signedSequencedEvent <- SignedContent.fromProtoV0(
-        SequencedEvent.fromByteString(ClosedEnvelope.fromProtoV0)
-      )(signedSequencedEventP)
+        SequencedEvent.fromByteString(ClosedEnvelope.fromProtoV0),
+        signedSequencedEventP,
+      )
     } yield SubscriptionResponse(Traced(signedSequencedEvent)(traceContext))
   }
 }

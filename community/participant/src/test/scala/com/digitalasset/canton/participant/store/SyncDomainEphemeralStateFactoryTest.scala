@@ -21,8 +21,8 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryRequestJournalStore,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.sequencing.protocol.SignedContent
+import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{
   InMemoryIndexedStringStore,

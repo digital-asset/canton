@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import java.util.concurrent.TimeUnit
-
 import cats.data.EitherT
 import com.digitalasset.canton.domain.api.v0.HelloServiceGrpc.{HelloService, HelloServiceStub}
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
@@ -20,6 +18,7 @@ import io.grpc.util.MutableHandlerRegistry
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 

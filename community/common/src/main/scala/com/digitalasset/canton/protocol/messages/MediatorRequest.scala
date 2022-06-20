@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import java.util.UUID
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{Informee, ViewType}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
 import com.digitalasset.canton.topology.MediatorId
+
+import java.util.UUID
 
 trait MediatorRequest extends ProtocolMessage {
   def requestUuid: UUID

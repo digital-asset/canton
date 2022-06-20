@@ -6,8 +6,8 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.event.Level
-import java.util.concurrent.TimeUnit
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.Duration
 import scala.util.control.NonFatal
 

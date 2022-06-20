@@ -11,10 +11,9 @@ import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.option._
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils._
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils._
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.{
@@ -24,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule, TracedLogger}
+import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
@@ -32,7 +32,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   Recipients,
 }
-import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
@@ -47,8 +46,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, DiscardOps, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.mockito.Mockito
-import org.scalatest.{Assertion, FutureOutcome}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
+import org.scalatest.{Assertion, FutureOutcome}
 import org.slf4j.event.Level
 
 import java.util.UUID
@@ -122,7 +121,6 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       cryptoD,
       eventSignaller,
       topologyClientMember,
-      FutureSupervisor.Noop,
       ProtocolVersion.latestForTest,
       timeouts,
       loggerFactory,
@@ -184,7 +182,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     def storeAndWatermark(events: Seq[Sequenced[PayloadId]]): Future[Unit] = {
       val withPaylaods = events.map(
-        _.map(id => Payload(id, Batch.empty.toByteString(ProtocolVersion.latestForTest)))
+        _.map(id => Payload(id, Batch.empty(defaultProtocolVersion).toByteString))
       )
       storePayloadsAndWatermark(withPaylaods)
     }
@@ -588,7 +586,8 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             (signingToleranceInSec + 2L, 2L),
           )
           batch = Batch.fromClosed(
-            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob))
+            defaultProtocolVersion,
+            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob)),
           )
 
           delivers = testData.map { case (sequenceTs, signingTs) =>
@@ -601,7 +600,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                   traceContext = eventTraceContext,
                 )(recipients)
               }
-              .map(id => Payload(id, batch.toByteString(ProtocolVersion.latestForTest)))
+              .map(id => Payload(id, batch.toByteString))
             Sequenced(ts0.plusSeconds(sequenceTs), storeEvent)
           }
           _ <- storePayloadsAndWatermark(delivers)
@@ -660,7 +659,14 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                   ) =>
                 val expectedSequencedEvent =
                   if (signingTimestamp + signingTolerance >= sequencingTimestamp)
-                    Deliver.create(sc, sequencingTimestamp, domainId, messageId.some, batch)
+                    Deliver.create(
+                      sc,
+                      sequencingTimestamp,
+                      domainId,
+                      messageId.some,
+                      batch,
+                      defaultProtocolVersion,
+                    )
                   else
                     DeliverError.create(
                       sc,
@@ -671,6 +677,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                         signingTimestamp,
                         sequencingTimestamp,
                       ),
+                      defaultProtocolVersion,
                     )
                 delivered.signedEvent.content shouldBe expectedSequencedEvent
             }
@@ -700,9 +707,23 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                   ) =>
                 val expectedSequencedEvent =
                   if (signingTimestamp + signingTolerance >= sequencingTimestamp)
-                    Deliver.create(sc, sequencingTimestamp, domainId, None, batch)
+                    Deliver.create(
+                      sc,
+                      sequencingTimestamp,
+                      domainId,
+                      None,
+                      batch,
+                      defaultProtocolVersion,
+                    )
                   else
-                    Deliver.create(sc, sequencingTimestamp, domainId, None, Batch.empty)
+                    Deliver.create(
+                      sc,
+                      sequencingTimestamp,
+                      domainId,
+                      None,
+                      Batch.empty(defaultProtocolVersion),
+                      defaultProtocolVersion,
+                    )
                 delivered.signedEvent.content shouldBe expectedSequencedEvent
             }
           }
@@ -729,7 +750,8 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             (signingToleranceInSec + 1L, Some(0L), recipientsTopo),
           ) ++ (2L to 20L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
-            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob))
+            defaultProtocolVersion,
+            ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob)),
           )
 
           delivers = testData.map { case (sequenceTs, signingTsO, recipients) =>
@@ -742,7 +764,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                   traceContext = eventTraceContext,
                 )(recipients)
               }
-              .map(id => Payload(id, batch.toByteString(ProtocolVersion.latestForTest)))
+              .map(id => Payload(id, batch.toByteString))
             Sequenced(ts0.plusSeconds(sequenceTs), storeEvent)
           }
           _ <- storePayloadsAndWatermark(delivers)

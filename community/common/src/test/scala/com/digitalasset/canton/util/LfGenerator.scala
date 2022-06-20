@@ -5,7 +5,6 @@ package com.digitalasset.canton.util
 
 import cats.data.StateT
 import cats.syntax.traverse._
-
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.test.ValueGenerators
 import com.digitalasset.canton.BaseTest

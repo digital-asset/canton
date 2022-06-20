@@ -6,13 +6,12 @@ package com.digitalasset.canton.domain.mediator
 import cats.syntax.foldable._
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import java.util.concurrent.atomic.AtomicReference
-
 import com.digitalasset.canton.util.EitherTUtil
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** When a Mediator starts they will not be able to sign any events until their key has been assigned to the mediator

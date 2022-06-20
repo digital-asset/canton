@@ -12,11 +12,11 @@ import com.digitalasset.canton.config.RequireTypes.{
   String300,
   String68,
 }
-import com.digitalasset.canton.topology.SafeSimpleString
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.topology.SafeSimpleString
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString

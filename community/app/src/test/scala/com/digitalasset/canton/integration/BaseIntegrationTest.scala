@@ -18,9 +18,9 @@ import org.scalactic.source
 import org.scalactic.source.Position
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Assertion, ConfigMap, Outcome}
-import scala.concurrent.duration._
 
 import scala.collection.immutable
+import scala.concurrent.duration._
 
 /** A highly opinionated base trait for writing integration tests interacting with a canton environment using console commands.
   * Tests must mixin a further [[EnvironmentSetup]] implementation to define when the canton environment is setup around the individual tests:

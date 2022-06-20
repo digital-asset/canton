@@ -3,12 +3,11 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import java.util.concurrent.atomic.AtomicInteger
-
 import io.grpc.stub.StreamObserver
 
-import scala.jdk.CollectionConverters._
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{Future, Promise}
+import scala.jdk.CollectionConverters._
 
 /** Stream observer that records all incoming events.
   */

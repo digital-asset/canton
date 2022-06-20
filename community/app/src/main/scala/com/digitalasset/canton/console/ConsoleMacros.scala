@@ -12,12 +12,12 @@ import ch.qos.logback.core.{Appender, FileAppender}
 import com.daml.ledger.api.v1.commands.{Command, CreateCommand, ExerciseCommand}
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.value.{
+  Identifier => IdentifierV1,
+  List => ListV1,
   Optional,
   Record,
   RecordField,
   Value,
-  Identifier => IdentifierV1,
-  List => ListV1,
 }
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.ContractData
