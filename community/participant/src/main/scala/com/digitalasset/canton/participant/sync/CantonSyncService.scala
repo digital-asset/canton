@@ -73,7 +73,6 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
@@ -84,7 +83,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.FutureConverters._
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Right, Success}
 
 /** The Canton-based synchronization service.
   *
@@ -705,7 +704,6 @@ class CantonSyncService(
   def migrateDomain(
       source: DomainAlias,
       target: DomainConnectionConfig,
-      expectedVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
@@ -741,7 +739,6 @@ class CantonSyncService(
               .migrateDomain(
                 source,
                 target,
-                expectedVersion,
                 targetDomainInfo.domainId,
                 targetDomainInfo.parameters,
               )
@@ -1239,6 +1236,50 @@ class CantonSyncService(
     val connectedDomains =
       connectedDomainsMap.keys.toList.mapFilter(aliasManager.aliasForDomainId).distinct
     connectedDomains.traverse_(disconnectDomain)
+  }
+
+  /** Checks if a given party has any active contracts. */
+  def partyHasActiveContracts(
+      partyId: PartyId
+  )(implicit traceContext: TraceContext): Future[Boolean] = {
+    val stateInspection = new SyncStateInspection(
+      syncDomainPersistentStateManager,
+      participantNodePersistentState,
+      pruningProcessor,
+      parameters.processingTimeouts,
+      loggerFactory,
+    )
+
+    // checks active contracts for all stores of connected domains
+    syncDomainPersistentStateManager.getAll.toList
+      .findM { case (_, store) =>
+        partyHasActiveContractsInDomain(store, partyId, stateInspection)
+      }
+      .map(_.nonEmpty)
+  }
+
+  /** Checks if a given party has any active contracts for a given domain. */
+  private def partyHasActiveContractsInDomain(
+      domainStore: SyncDomainPersistentState,
+      partyId: PartyId,
+      stateInspection: SyncStateInspection,
+  )(implicit traceContext: TraceContext): Future[Boolean] = {
+    for {
+      acs <- stateInspection.currentAcsSnapshot(domainStore)
+      res <- acs match {
+        case Right(x) =>
+          domainStore.contractStore
+            .hasActiveContracts(
+              partyId,
+              x.keys.toVector,
+            )
+        case Left(err) =>
+          logger.error(
+            s"Error fetching current acs snapshot: $err."
+          )
+          Future.successful(false)
+      }
+    } yield res
   }
 
   /** Participant repair utility for manually adding contracts to a domain in an offline fashion.

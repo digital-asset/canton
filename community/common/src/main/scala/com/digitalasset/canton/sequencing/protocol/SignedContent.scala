@@ -128,14 +128,14 @@ object SignedContent {
     }
 
   def fromProtoV0[A <: ProtocolVersionedMemoizedEvidence](
-      deserializer: ContentDeserializer[A],
+      contentDeserializer: ContentDeserializer[A],
       signedValueP: v0.SignedContent,
   ): ParsingResult[SignedContent[A]] =
     signedValueP match {
       case v0.SignedContent(content, maybeSignatureP, timestampOfSigningKey) =>
         for {
           contentB <- ProtoConverter.required("content", content)
-          content <- deserializer(contentB)
+          content <- contentDeserializer(contentB)
           signature <- ProtoConverter.parseRequired(
             Signature.fromProtoV0,
             "signature",

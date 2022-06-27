@@ -813,7 +813,7 @@ trait TopologyStoreTest
             _ <- append(store, ts, first)
             _ <- append(store, ts1, dummy.toList)
             _ <- append(store, ts1.plusSeconds(1), snd)
-            initial <- store.findInitialState(domainManager.uid)
+            initial <- store.findInitialState(domainManager)
           } yield {
             initial shouldBe Map[KeyOwner, Seq[PublicKey]](
               domainManager -> Seq(factory.SigningKeys.key1),

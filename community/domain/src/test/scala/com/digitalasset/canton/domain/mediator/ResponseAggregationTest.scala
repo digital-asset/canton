@@ -104,7 +104,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           )
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)
       val rootHash = informeeMessage.rootHash
       val someOtherRootHash = Some(RootHash(TestHash.digest(12345)))
 
@@ -141,7 +141,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
         val sut = ResponseAggregation(
           requestId,
-          InformeeMessage(fullInformeeTreeThresholdTooLow, defaultProtocolVersion),
+          InformeeMessage(fullInformeeTreeThresholdTooLow),
         )(
           loggerFactory
         )
@@ -355,8 +355,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             b(2),
             MerkleSeq.fromSeq(hashOps)(view1 :: view2 :: Nil),
           )
-        ),
-        defaultProtocolVersion,
+        )
       )
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
@@ -454,7 +453,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             MerkleSeq.fromSeq(hashOps)(view1 :: Nil),
           )
         )
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)
       val rootHash = informeeMessage.rootHash
       val nonVip = ParticipantId("notAVip")
 

@@ -228,17 +228,17 @@ object Dependencies {
 
   // From digitalasset.jfrog.io
   lazy val vmbc_sequencer_protos =
-    "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
+    "com.digitalasset.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
 
   // From digitalasset.jfrog.io
   lazy val vmbc_sequencer_core_reference =
-    "com.daml.ledger.canton.driver.vmbc" % "canton-sequencer-core-reference" % vmbc_driver_libraries_version % Test classifier "all"
+    "com.digitalasset.canton.driver.vmbc" % "canton-sequencer-core-reference" % vmbc_driver_libraries_version % Test classifier "all"
   lazy val vmbc_sequencer_core_reference_artifact_file_name: String = {
     val artifact = vmbc_sequencer_core_reference.explicitArtifacts.head
     s"${artifact.name}-${vmbc_sequencer_core_reference.revision}-${artifact.classifier.get}.${artifact.extension}"
   }
   lazy val vmbc_sequencer_core_reference_artifact_file_sha256 = // Compute with "sha256sum <file> | cut -d " " -f1 | sed 's/[a-z]/\U&/g'"
-    "F23FD6FA0B332CE99D5CF650F90F5A7519A099C8C0A97DDFB069BBBBDDEBC968"
+    "60864E873E3DF10F91576A834CFD07C2F5A740823197483FD025B0DE4806907D"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

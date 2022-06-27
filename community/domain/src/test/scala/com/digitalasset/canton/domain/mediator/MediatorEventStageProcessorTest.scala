@@ -111,7 +111,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         None,
         Batch.of(
           defaultProtocolVersion,
-          (InformeeMessage(fullInformeeTree, defaultProtocolVersion), Recipients.cc(mediatorId)),
+          (InformeeMessage(fullInformeeTree), Recipients.cc(mediatorId)),
         ),
         defaultProtocolVersion,
       )
@@ -310,6 +310,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
     ResponseAggregation(
       requestId,
-      InformeeMessage(fullInformeeTree, defaultProtocolVersion),
+      InformeeMessage(fullInformeeTree),
     )(loggerFactory)
 }

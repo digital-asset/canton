@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.service.grpc
 
-import com.digitalasset.canton.domain.api.{v0 => adminProto}
+import com.digitalasset.canton.domain.api.{v0 => apiProto}
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.v0
@@ -17,12 +17,12 @@ import scala.concurrent.Future
 class GrpcDomainService(
     agreementManager: Option[ServiceAgreementManager],
     protected val loggerFactory: NamedLoggerFactory,
-) extends adminProto.DomainServiceGrpc.DomainService
+) extends apiProto.DomainServiceGrpc.DomainService
     with NamedLogging {
 
   override def getServiceAgreement(
-      request: adminProto.GetServiceAgreementRequest
-  ): Future[adminProto.GetServiceAgreementResponse] = {
+      request: apiProto.GetServiceAgreementRequest
+  ): Future[apiProto.GetServiceAgreementResponse] = {
     val agreement =
       agreementManager.map(manager =>
         v0.ServiceAgreement(
@@ -30,6 +30,6 @@ class GrpcDomainService(
           manager.agreement.text.toProtoPrimitive,
         )
       )
-    Future.successful(adminProto.GetServiceAgreementResponse(agreement))
+    Future.successful(apiProto.GetServiceAgreementResponse(agreement))
   }
 }

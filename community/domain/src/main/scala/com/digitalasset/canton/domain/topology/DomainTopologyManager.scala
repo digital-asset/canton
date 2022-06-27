@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
+import cats.syntax.traverse._
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
@@ -12,11 +13,21 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Topolo
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.{
+  StoreBasedDomainTopologyClient,
+  StoreBasedTopologySnapshot,
+}
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
+import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
+import com.digitalasset.canton.topology.store.{
+  TopologyStore,
+  TopologyStoreId,
+  ValidatedTopologyTransaction,
+}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -53,24 +64,83 @@ object DomainTopologyManager {
   val legalIdentityHookNoOp: X509Certificate => EitherT[Future, String, Unit] =
     (_: X509Certificate) => EitherT[Future, String, Unit](Future.successful(Right(())))
 
-  def isInitialized(
+  def transactionsAreSufficientToInitializeADomain(
       id: DomainId,
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
-  ): Boolean = {
-    def hasKey(owner: KeyOwner): Boolean = transactions.exists {
-      case SignedTopologyTransaction(
-            TopologyStateUpdate(
-              Add,
-              TopologyStateUpdateElement(_, OwnerToKeyMapping(`owner`, key)),
-            ),
-            _,
-            _,
-          ) =>
-        key.isSigning
-      case _ => false
-    }
-    DomainMember.listAll(id).map(hasKey).forall(identity)
+      mustHaveActiveMediator: Boolean,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[Future, String, Unit] = {
+    val store = new InMemoryTopologyStore(AuthorizedStore, loggerFactory)
+    val ts = CantonTimestamp.Epoch
+    EitherT
+      .right(
+        store
+          .append(
+            SequencedTime(ts),
+            EffectiveTime(ts),
+            transactions.map(x => ValidatedTopologyTransaction(x, None)),
+          )
+      )
+      .flatMap { _ =>
+        isInitializedAt(id, store, ts.immediateSuccessor, mustHaveActiveMediator, loggerFactory)
+      }
   }
+
+  def isInitializedAt[T <: TopologyStoreId](
+      id: DomainId,
+      store: TopologyStore[T],
+      timestamp: CantonTimestamp,
+      mustHaveActiveMediator: Boolean,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[Future, String, Unit] = {
+    val useStateStore = store.storeId match {
+      case AuthorizedStore => false
+      case DomainStore(_, _) => true
+    }
+    val dbSnapshot = new StoreBasedTopologySnapshot(
+      timestamp,
+      store,
+      initKeys =
+        Map(), // we need to do this because of this map here, as the target client will mix-in the map into the response
+      useStateTxs = useStateStore,
+      packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
+      loggerFactory,
+    )
+    def hasSigningKey(owner: KeyOwner): EitherT[Future, String, SigningPublicKey] = EitherT(
+      dbSnapshot
+        .signingKey(owner)
+        .map(_.toRight(s"$owner signing key is missing"))
+    )
+    // check that we have at least one mediator and one sequencer
+    for {
+      // first, check that we have domain parameters
+      _ <- EitherT(
+        dbSnapshot
+          .findDynamicDomainParameters()
+          .map(_.toRight("Dynamic domain parameters are not set yet"))
+      )
+      // then, check that we have at least one mediator
+      mediators <- EitherT.right(dbSnapshot.mediators())
+      _ <- EitherT.cond[Future](
+        !mustHaveActiveMediator || mediators.nonEmpty,
+        (),
+        "No mediator domain state authorized yet.",
+      )
+      // check that topology manager has a signing key
+      _ <- hasSigningKey(DomainTopologyManagerId(id.uid))
+      // check that all mediators have a signing key
+      _ <- mediators.toList.traverse(hasSigningKey)
+      // check that sequencer has a signing key
+      _ <- hasSigningKey(SequencerId(id.uid))
+    } yield ()
+  }
+
 }
 
 /** Domain manager implementation
@@ -92,7 +162,7 @@ object DomainTopologyManager {
   * set the participant state to enabled.
   */
 class DomainTopologyManager(
-    val id: UniqueIdentifier, // TODO(ratko) remove redundancy to managerId
+    val id: DomainTopologyManagerId,
     clock: Clock,
     override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     addParticipantHook: DomainTopologyManager.AddMemberHook,
@@ -109,8 +179,6 @@ class DomainTopologyManager(
       loggerFactory,
     )(ec)
     with RequestProcessingStrategy.ManagerHooks {
-
-  val managerId = DomainTopologyManagerId(id)
 
   private val observers = mutable.ListBuffer[DomainIdentityStateObserver]()
   def addObserver(observer: DomainIdentityStateObserver): Unit = blocking(synchronized {
@@ -163,7 +231,7 @@ class DomainTopologyManager(
     transaction.transaction.element.mapping match {
       case OwnerToKeyMapping(ParticipantId(_), _) | OwnerToKeyMapping(MediatorId(_), _) =>
         EitherT.rightT(())
-      case OwnerToKeyMapping(owner, _) if (owner.uid != this.id) =>
+      case OwnerToKeyMapping(owner, _) if (owner.uid != this.id.uid) =>
         EitherT.leftT(DomainTopologyManagerError.AlienDomainEntities.Failure(owner.uid))
       case _ => EitherT.rightT(())
     }
@@ -184,7 +252,7 @@ class DomainTopologyManager(
   private def checkNotAddingToWrongDomain(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
-    val domainId = managerId.domainId
+    val domainId = id.domainId
     transaction.restrictedToDomain match {
       case None | Some(`domainId`) => EitherT.pure(())
       case Some(otherDomain) =>
@@ -209,7 +277,7 @@ class DomainTopologyManager(
       ),
     )
 
-    val domainId = managerId.domainId
+    val domainId = id.domainId
     transaction.restrictedToDomain match {
       case None | Some(`domainId`) => EitherT.pure(())
       case Some(otherDomain) =>
@@ -259,7 +327,7 @@ class DomainTopologyManager(
             case (
                   (keys, _),
                   ParticipantState(otherSide, domain, `participantId`, permission, _),
-                ) if permission.isActive && managerId.domainId == domain && side != otherSide =>
+                ) if permission.isActive && id.domainId == domain && side != otherSide =>
               (keys, true)
             case (acc, _) => acc
           }
@@ -295,27 +363,31 @@ class DomainTopologyManager(
   ): DomainTopologyManagerError =
     TopologyManagerParentError(error)
 
-  /** Return true if domain identity is sufficiently initialized
-    *
-    * The state is sufficiently initialized if it contains the domain entities signing keys.
-    */
-  def isInitialized(implicit traceContext: TraceContext): Future[Boolean] = {
-    store
-      .findPositiveTransactions(
-        asOf = CantonTimestamp.MaxValue,
-        asOfInclusive = true,
-        includeSecondary = false,
-        types = Seq(DomainTopologyTransactionType.OwnerToKeyMapping),
-        filterUid = Some(Seq(id)),
-        filterNamespace = None,
-      )
-      .map { elements =>
-        DomainTopologyManager.isInitialized(
-          DomainId(id),
-          elements.combine.toDomainTopologyTransactions,
-        )
+  /** Return true if domain identity is sufficiently initialized such that it can be used */
+  def isInitialized(
+      mustHaveActiveMediator: Boolean,
+      logReason: Boolean = true,
+  )(implicit traceContext: TraceContext): Future[Boolean] =
+    isInitializedET(mustHaveActiveMediator).value
+      .map {
+        case Left(reason) =>
+          if (logReason)
+            logger.debug(s"Domain is not yet initialised: ${reason}")
+          false
+        case Right(_) => true
       }
-  }
+
+  def isInitializedET(
+      mustHaveActiveMediator: Boolean
+  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+    DomainTopologyManager
+      .isInitializedAt(
+        id.domainId,
+        store,
+        CantonTimestamp.MaxValue,
+        mustHaveActiveMediator,
+        loggerFactory,
+      )
 
   def executeSequential(fut: => Future[Unit], description: String)(implicit
       traceContext: TraceContext
@@ -330,7 +402,7 @@ class DomainTopologyManager(
       TopologyStateUpdate.createAdd(
         ParticipantState(
           RequestSide.From,
-          managerId.domainId,
+          id.domainId,
           participantId,
           ParticipantPermission.Submission,
           TrustLevel.Ordinary,

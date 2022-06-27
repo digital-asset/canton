@@ -68,6 +68,12 @@ trait BaseTest
   protected def defaultProtocolVersion: ProtocolVersion =
     TestDomainParameters.defaultStatic.protocolVersion
 
+  protected def testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
+    .getOrElse(defaultProtocolVersion)
+
+  protected def isTestedProtocolVersionDev: Boolean =
+    testedProtocolVersion == ProtocolVersion.unstable_development
+
   protected def signedTransactionProtocolVersionRepresentative
       : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(defaultProtocolVersion)
@@ -139,7 +145,6 @@ trait BaseTest
     optionTAssertion.getOrElse(fail(s"Unexpected None value"))
 
   /** Keeps evaluating `testCode` until it succeeds or a timeout occurs.
-    * @return the result of successfully evaluating `testCode`
     * @throws org.scalatest.exceptions.TestFailedException if `testCode` keeps throwing such an exception even after `timeout`
     * @throws java.lang.Throwable if `testCode` throws any other throwable
     * @throws java.lang.IllegalArgumentException if `timeUntilSuccess` is negative

@@ -131,7 +131,7 @@ object TopologyManagementInitialization {
       loggingContext: ErrorLoggingContext,
   ): EitherT[Future, String, TopologyManagementComponents] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
-    val managerId: DomainTopologyManagerId = domainTopologyManager.managerId
+    val managerId: DomainTopologyManagerId = domainTopologyManager.id
     val timeouts = parameters.processingTimeouts
     val protocolVersion = domainTopologyManager.protocolVersion
     val dispatcherLoggerFactory = loggerFactory.appendUnnamedKey("node", "identity")
@@ -207,6 +207,11 @@ object TopologyManagementInitialization {
           id,
           topologyClient,
           sequencedTopologyStore,
+          // by our definition / convention, an embedded domain runs all domain nodes at once
+          // hence, we require an active mediator before it is properly initialised.
+          // in contrast, a distributed domain can start without a domain manager (but
+          // then participants won't be able to submit transactions until we have a mediator)
+          mustHaveActiveMediator = isEmbedded,
           timeouts,
           loggerFactory,
         )

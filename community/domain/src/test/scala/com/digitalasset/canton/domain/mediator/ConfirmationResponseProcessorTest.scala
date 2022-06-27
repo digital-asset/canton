@@ -340,7 +340,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val domainSyncCryptoApi3 = identityFactory3.forOwnerAndDomain(mediatorId, domainId)
       val sut = new Fixture(domainSyncCryptoApi3)
 
-      val mediatorRequest = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val mediatorRequest = InformeeMessage(fullInformeeTree)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
@@ -495,7 +495,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         ),
       )
 
-      sequentialTraverse_(tests.zipWithIndex) { case ((testName, recipients), i) =>
+      sequentialTraverse_(tests.zipWithIndex) { case ((_testName, recipients), i) =>
         withClueF("testname") {
           val rootHashMessages =
             recipients.map(r => OpenEnvelope(rootHashMessage, r, defaultProtocolVersion))
@@ -513,7 +513,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "send rejections when receiving wrong root hash messages" in {
       val sut = Fixture()
 
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)
       val rootHash = informeeMessage.rootHash.value
       val wrongRootHash =
         RootHash(
@@ -698,7 +698,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         new ExampleTransactionFactory()(domainId = domainId, mediatorId = otherMediatorId)
       val fullInformeeTreeOther =
         factoryOtherMediatorId.MultipleRootsAndViewNestings.fullInformeeTree
-      val mediatorRequest = InformeeMessage(fullInformeeTreeOther, defaultProtocolVersion)
+      val mediatorRequest = InformeeMessage(fullInformeeTreeOther)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
@@ -708,7 +708,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       )
 
       val sc = 10L
-      val ts = CantonTimestamp.ofEpochSecond(sc.toLong)
+      val ts = CantonTimestamp.ofEpochSecond(sc)
       for {
         _ <- loggerFactory.assertLogs(
           sut.processor.processRequest(
@@ -735,7 +735,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
     "correct series of mediator events" in {
       val sut = Fixture()
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,
@@ -953,7 +953,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       // response is just too late
       val responseTs = requestTs.add(participantResponseTimeout.unwrap).addMicros(1)
 
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,

@@ -26,8 +26,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.Success
 import com.digitalasset.canton.util.{Thereafter, retry}
-import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import io.grpc.ClientInterceptors
 
 import scala.concurrent.duration.DurationInt
@@ -100,7 +99,11 @@ class GrpcSequencerConnectClient(
 
   } yield domainParameters
 
-  override def handshake(domainAlias: DomainAlias, request: HandshakeRequest)(implicit
+  override def handshake(
+      domainAlias: DomainAlias,
+      request: HandshakeRequest,
+      dontWarnOnDeprecatedPV: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, HandshakeResponse] =
     for {
@@ -120,8 +123,8 @@ class GrpcSequencerConnectClient(
       handshakeResponse <- EitherT
         .fromEither[Future](HandshakeResponse.fromProtoV0(responseP))
         .leftMap[Error](err => Error.DeserializationFailure(err.toString))
-      _ = if (handshakeResponse.serverVersion == ProtocolVersion.v2_0_0)
-        UnsafePvVersion2_0_0.WarnSequencerClient(domainAlias)
+      _ = if (handshakeResponse.serverVersion.isDeprecated && !dontWarnOnDeprecatedPV)
+        DeprecatedProtocolVersion.WarnSequencerClient(domainAlias, handshakeResponse.serverVersion)
     } yield handshakeResponse
 
   override def getAgreement(

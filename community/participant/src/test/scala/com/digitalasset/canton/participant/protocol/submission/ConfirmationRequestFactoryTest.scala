@@ -264,7 +264,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
     }
 
     ConfirmationRequest(
-      InformeeMessage(example.fullInformeeTree, defaultProtocolVersion),
+      InformeeMessage(example.fullInformeeTree),
       expectedTransactionViewMessages,
       defaultProtocolVersion,
     )

@@ -98,6 +98,7 @@ object PartyNotificationConfig {
 case class ParticipantProtocolConfig(
     minimumProtocolVersion: Option[ProtocolVersion],
     devVersionSupport: Boolean,
+    dontWarnOnDeprecatedPV: Boolean,
 )
 
 case class ParticipantNodeParameters(
@@ -124,6 +125,7 @@ case class ParticipantNodeParameters(
     unsafeEnableDamlLfDevVersion: Boolean,
 ) extends LocalNodeParameters {
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
+  override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
 }
 
 /** Configuration parameters for a single participant
@@ -685,6 +687,7 @@ object TestingTimeServiceConfig {
   * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
+  * @param dontWarnOnDeprecatedPV If true, then this participant will not emit a warning when connecting to a sequencer using a deprecated protocol version (such as 2.0.0).
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
   */
 case class ParticipantNodeParameterConfig(
@@ -704,6 +707,7 @@ case class ParticipantNodeParameterConfig(
     enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,
     willCorruptYourSystemDevVersionSupport: Boolean = false,
+    dontWarnOnDeprecatedPV: Boolean = false,
     warnIfOverloadedFor: Option[NonNegativeFiniteDuration] = Some(
       NonNegativeFiniteDuration.ofSeconds(20)
     ),

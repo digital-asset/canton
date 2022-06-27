@@ -22,7 +22,7 @@ import scala.language.postfixOps
 
 object BuildCommon {
 
-  lazy val sbtSettings: Seq[Def.Setting[_]] = {
+  lazy val sbtSettings: Seq[Setting[_]] = {
 
     def alsoTest(taskName: String) = s";$taskName; Test / $taskName"
 
@@ -352,7 +352,7 @@ object BuildCommon {
   ).flatMap(_.settings)
 
   // applies to all Canton-based sub-projects (descendants of community-common)
-  lazy val sharedCantonSettings = sharedSettings ++ cantonWarts ++ Seq(
+  lazy val sharedCantonSettings: Seq[Def.Setting[_]] = sharedSettings ++ cantonWarts ++ Seq(
     // Enable logging of begin and end of test cases, test suites, and test runs.
     Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
     // Ignore daml codegen generated files from code coverage

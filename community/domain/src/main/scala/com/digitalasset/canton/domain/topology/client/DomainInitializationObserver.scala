@@ -3,20 +3,15 @@
 
 package com.digitalasset.canton.domain.topology.client
 
-import cats.instances.future._
-import cats.instances.list._
-import cats.syntax.traverse._
+import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology.client.{
-  DomainTopologyClient,
-  StoreBasedDomainTopologyClient,
-  StoreBasedTopologySnapshot,
-}
+import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, SequencerId}
 import com.digitalasset.canton.tracing.NoTracing
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -26,40 +21,27 @@ private[domain] class DomainInitializationObserver(
     domainId: DomainId,
     client: DomainTopologyClient,
     sequencedStore: TopologyStore[TopologyStoreId],
+    mustHaveActiveMediator: Boolean,
     processingTimeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with NoTracing {
 
-  private val needKeys =
-    List(
-      SequencerId(domainId.unwrap),
-      DomainTopologyManagerId(domainId.unwrap),
-    )
-
-  private def initialisedAt(timestamp: CantonTimestamp): Future[Boolean] = {
-    val dbSnapshot = new StoreBasedTopologySnapshot(
-      timestamp,
+  private def initialisedAt(timestamp: CantonTimestamp): EitherT[Future, String, Unit] =
+    DomainTopologyManager.isInitializedAt(
+      domainId,
       sequencedStore,
-      initKeys =
-        Map(), // we need to do this because of this map here, as the target client will mix-in the map into the response
-      useStateTxs = true,
-      packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,
+      timestamp,
+      mustHaveActiveMediator,
       loggerFactory,
     )
-    for {
-      hasParams <- dbSnapshot.findDynamicDomainParameters().map(_.nonEmpty)
-      hasKeys <- needKeys
-        .traverse(dbSnapshot.signingKey(_).map(_.nonEmpty))
-        .map(_.forall(identity))
-    } yield hasParams && hasKeys
-  }
 
-  /** returns true if the initialisation data exists (but might not yet be effective) */
+  /** returns unit if the initialisation data exists (but might not yet be effective) */
   def initialisedAtHead: Future[Boolean] =
     sequencedStore.timestamp().flatMap {
-      case Some((_, effective)) => initialisedAt(effective.value.immediateSuccessor)
+      case Some((_, effective)) =>
+        initialisedAt(effective.value.immediateSuccessor).value.map(_.isRight)
       case None => Future.successful(false)
     }
 
@@ -69,9 +51,11 @@ private[domain] class DomainInitializationObserver(
       snapshot => {
         // this is a bit stinky, but we are using the "check on a change" mechanism of the
         // normal client to just get notified whenever there was an update to the topology state
-        initialisedAt(snapshot.timestamp).map { res =>
-          logger.debug(s"Domain ready at=${snapshot.timestamp} is ${res}.")
-          res
+        initialisedAt(snapshot.timestamp).value.map {
+          case Left(missing) =>
+            logger.debug(s"Domain is not ready at=${snapshot.timestamp} due to ${missing}.")
+            false
+          case Right(_) => true
         }
       },
       processingTimeouts.unbounded.duration,
@@ -91,6 +75,7 @@ private[domain] object DomainInitializationObserver {
       domainId: DomainId,
       client: DomainTopologyClient,
       sequencedStore: TopologyStore[TopologyStoreId.DomainStore],
+      mustHaveActiveMediator: Boolean,
       processingTimeout: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -101,6 +86,7 @@ private[domain] object DomainInitializationObserver {
         domainId,
         client,
         sequencedStore,
+        mustHaveActiveMediator,
         processingTimeout,
         loggerFactory,
       )

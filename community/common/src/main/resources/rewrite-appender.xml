@@ -278,6 +278,13 @@
             <contains>Docker image pull has not made progress in</contains>
             <testing>true</testing>
         </rewrite>
+        <!-- config validations don't support log suppression in tests as they use the root logger -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>com.digitalasset.canton.config.CommunityConfigValidations$</logger>
+            <maxLevel>INFO</maxLevel>
+            <contains>DEPRECATED_PROTOCOL_VERSION</contains>
+            <testing>true</testing>
+        </rewrite>
 
     </appender>
 

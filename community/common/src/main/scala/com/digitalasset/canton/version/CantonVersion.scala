@@ -6,7 +6,7 @@ package com.digitalasset.canton.version
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
-import com.daml.error.ErrorCode
+import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
@@ -18,7 +18,11 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.CantonVersion.releaseVersionToProtocolVersions
-import com.digitalasset.canton.version.ProtocolVersion.{InvalidProtocolVersion, UnsupportedVersion}
+import com.digitalasset.canton.version.ProtocolVersion.{
+  InvalidProtocolVersion,
+  UnsupportedVersion,
+  deprecated,
+}
 import com.google.common.annotations.VisibleForTesting
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -120,6 +124,7 @@ object CantonVersion {
     ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
     ReleaseVersion.v2_2_0 -> List(v2_0_0),
     ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
+    ReleaseVersion.v2_3_0_rc1 -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_0 -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_1_snapshot -> List(v2_0_0, v3_0_0),
   ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
@@ -191,6 +196,7 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
   lazy val v2_2_0: ReleaseVersion = ReleaseVersion(2, 2, 0)
   lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
+  lazy val v2_3_0_rc1: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("rc1"))
   lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
   lazy val v2_3_1_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 1, Some("SNAPSHOT"))
 
@@ -226,11 +232,16 @@ final case class ProtocolVersion(
     minor: Int,
     patch: Int,
     optSuffix: Option[String] = None,
-) extends CantonVersion
+) extends CantonVersion {
+  def isDeprecated: Boolean = deprecated.contains(this)
+}
 
 object ProtocolVersion extends CompanionTrait {
   private val allProtocolVersions: List[ProtocolVersion] =
     BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList
+
+  val deprecated: Seq[ProtocolVersion] = Seq(ProtocolVersion.v2_0_0)
+
   val latest: ProtocolVersion =
     allProtocolVersions.maxOption.getOrElse(
       sys.error("Release needs to support at least one protocol version")
@@ -247,6 +258,11 @@ object ProtocolVersion extends CompanionTrait {
       new ProtocolVersion(major, minor, patch, optSuffix)
     }
 
+  /** Parse a ProtocolVersion
+    * @param rawVersion
+    * @return Parsed protocol version
+    * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version
+    */
   def tryCreate(rawVersion: String): ProtocolVersion = create(rawVersion).fold(sys.error, identity)
 
   def fromProtoPrimitive(rawVersion: String): ParsingResult[ProtocolVersion] =
@@ -342,6 +358,15 @@ object ProtocolVersion extends CompanionTrait {
   // passed in via propagating the protocol version set in the domain parameters
   lazy val v2_0_0_Todo_i8793: ProtocolVersion = v2_0_0
 
+  /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
+    * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version
+    */
+  def tryGetOptFromEnv: Option[ProtocolVersion] = sys.env
+    .get("CANTON_PROTOCOL_VERSION")
+    .map(raw =>
+      if (raw.toUpperCase == "DEV") ProtocolVersion.unstable_development.fullVersion else raw
+    )
+    .map(ProtocolVersion.tryCreate)
 }
 
 /** This class represents a revision of the Sequencer.sol contract. */
@@ -410,30 +435,37 @@ final case class VersionNotSupportedError(
 }
 
 object HandshakeErrors extends HandshakeErrorGroup {
-  // TODO(i9466): Add description/resolution annotations
-  object UnsafePvVersion2_0_0
-      extends ErrorCode("PROTOCOL_VERSION_2_0_0_IS_UNSAFE", MaliciousOrFaultyBehaviour) {
-    case class WarnSequencerClient(domainAlias: DomainAlias)(implicit
+
+  @Explanation(
+    """This error is logged or returned if a participant or domain are using deprecated protocol versions.
+      |Deprecated protocol versions might not be secure anymore."""
+  )
+  @Resolution(
+    """Migrate to a new domain that uses the most recent protocol version."""
+  )
+  object DeprecatedProtocolVersion
+      extends ErrorCode("DEPRECATED_PROTOCOL_VERSION", MaliciousOrFaultyBehaviour) {
+    case class WarnSequencerClient(domainAlias: DomainAlias, version: ProtocolVersion)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          s"This node is connecting to a sequencer using the unsafe protocol version " +
-            s"2.0.0 which should not be used in production. We recommend only connecting to sequencers with a later protocol version (such as 3.0.0)."
+          cause = s"This node is connecting to a sequencer using the deprecated protocol version " +
+            s"${version} which should not be used in production. We recommend only connecting to sequencers with a later protocol version (such as ${ProtocolVersion.latest})."
         )
-    case class WarnDomain(name: InstanceName)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
-          s"This domain node is configured to use the unsafe protocol version " +
-            s"2.0.0 which should not be used in production. We recommend migrating to a later protocol version (such as 3.0.0)."
+    case class WarnDomain(name: InstanceName, version: ProtocolVersion)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          s"This domain node is configured to use the deprecated protocol version " +
+            s"${version} which should not be used in production. We recommend migrating to a later protocol version (such as ${ProtocolVersion.latest})."
         )
 
     case class WarnParticipant(name: InstanceName, minimumProtocolVersion: Option[ProtocolVersion])(
         implicit val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          s"This participant node's configured minimum protocol version does not exclude the unsafe protocol version " +
-            s"2.0.0 which should not be used in production. We recommend configuring at least minimum protocol version 3.0.0."
+          s"This participant node's configured minimum protocol version ${minimumProtocolVersion} includes deprecated protocol versions. " +
+            s"We recommend using only the most recent protocol versions."
         ) {
       override def logOnCreation: Boolean = false
     }
-
   }
 }
 

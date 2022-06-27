@@ -101,13 +101,6 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
     )
   )
 
-  def apply(
-      fullInformeeTree: FullInformeeTree,
-      protocolVersion: ProtocolVersion,
-  ): InformeeMessage = {
-    InformeeMessage(fullInformeeTree)
-  }
-
   // The inverse of "toProto<version>".
   //
   // On error, it returns `Left(...)` as callers cannot predict whether the conversion would succeed.

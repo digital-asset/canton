@@ -14,6 +14,8 @@ import com.digitalasset.canton.config.ConfigErrors.{
   SubstitutionError,
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.typesafe.config.{Config, ConfigFactory}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -249,10 +251,15 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
       inputDir
         .list(_.extension.contains(".conf"))
         .foreach(file =>
-          loadFiles(Seq(simpleConf, "documentation-snippets/" + file.name))
-            .valueOrFail(
-              "failed to load " + file.name
-            )
+          loggerFactory.assertLogsUnorderedOptional(
+            loadFiles(Seq(simpleConf, "documentation-snippets/" + file.name))
+              .valueOrFail(
+                "failed to load " + file.name
+              ),
+            LogEntryOptionality.Optional -> (entry =>
+              entry.shouldBeCantonErrorCode(DeprecatedProtocolVersion)
+            ),
+          )
         )
     }
   }

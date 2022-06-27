@@ -261,7 +261,7 @@ object TransferInView
       saltP,
       submitterP,
       contractP,
-      transferOutResultEventP,
+      transferOutResultEventPO,
       creatingTransactionIdP,
     ) =
       transferInViewP
@@ -271,23 +271,26 @@ object TransferInView
       contract <- ProtoConverter
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV0)
+
+      // TransferOutResultEvent deserialization
+      transferOutResultEventP <- ProtoConverter
+        .required("TransferInView.transferOutResultEvent", transferOutResultEventPO)
+
       // TODO(i9626): Requires protocol version of the source domain
       sourceDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
-      transferOutResultEventMC <- ProtoConverter
-        .required("TransferInView.transferOutResultEvent", transferOutResultEventP)
-        .flatMap(
-          SignedContent.fromProtoV0(
-            SequencedEvent.fromByteString(
-              OpenEnvelope.fromProtoV0(
-                EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
-                  _
-                ),
-                sourceDomainPV,
-              )
-            ),
-            _,
-          )
-        )
+      envelopeDeserializer = (envelopeP: v0.Envelope) =>
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
+            _
+          ),
+          sourceDomainPV,
+        )(envelopeP)
+
+      transferOutResultEventMC <- SignedContent.fromProtoV0(
+        contentDeserializer = SequencedEvent.fromByteString(envelopeDeserializer),
+        transferOutResultEventP,
+      )
+
       transferOutResultEvent <- DeliveredTransferOutResult
         .create(transferOutResultEventMC)
         .leftMap(err => OtherError(err.toString))

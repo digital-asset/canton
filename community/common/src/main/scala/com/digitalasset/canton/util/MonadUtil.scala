@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.traverse._
 import cats.{Monad, Monoid}
 
 import scala.annotation.tailrec
@@ -61,6 +62,21 @@ object MonadUtil {
     val result = foldLeftM(Seq.empty: Seq[S], xs)((ys, x) => monad.map(f(x))(y => y +: ys))
     monad.map(result)(seq => seq.reverse)
   }
+
+  /** Batched version of sequential traverse
+    *
+    * Can be used to avoid overloading the database queue
+    */
+  def batchedSequentialTraverse[X, M[_], S](parallelism: Int, batchSize: Int)(
+      xs: Seq[X]
+  )(f: Seq[X] => M[Seq[S]])(implicit
+      monad: Monad[M]
+  ): M[Seq[S]] =
+    monad.map(
+      sequentialTraverse(xs.grouped(parallelism).grouped(batchSize).toSeq)(_.flatTraverse(f))
+    )(
+      _.flatten
+    )
 
   /** Conceptually equivalent to `sequentialTraverse(xs)(step).map(monoid.combineAll)`.
     * The caller must ensure that the Iterable is immutable.

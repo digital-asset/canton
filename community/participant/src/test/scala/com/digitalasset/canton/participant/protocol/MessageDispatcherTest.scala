@@ -68,7 +68,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
   val domainId = DomainId.tryFromString("messageDispatcher::domain")
   val originDomain = DomainId.tryFromString("originDomain::originDomain")
-  val participantId = ParticipantId.tryFromProtoPrimitive("messageDispatcher::participant")
+  val participantId = ParticipantId.tryFromProtoPrimitive("PAR::messageDispatcher::participant")
   val mediatorId = MediatorId(domainId)
   val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
 
@@ -754,7 +754,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
             viewType,
             SerializedRootHashMessagePayload.empty,
           )
-        val otherParticipant = ParticipantId.tryFromProtoPrimitive("other::participant")
+        val otherParticipant = ParticipantId.tryFromProtoPrimitive("PAR::other::participant")
         // Batch -> expected alarms -> expected reaction
         val badBatches = List(
           Batch.of[ProtocolMessage](defaultProtocolVersion, view -> Recipients.cc(participantId)) ->

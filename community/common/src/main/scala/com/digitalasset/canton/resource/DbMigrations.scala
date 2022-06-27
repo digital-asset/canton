@@ -48,15 +48,6 @@ trait DbMigrations { this: NamedLogging =>
     */
   protected def devVersionSupport: Boolean
 
-  protected def createDataSource(jdbcDataSource: JdbcDataSource): DataSource =
-    jdbcDataSource match {
-      case dataS: DataSourceJdbcDataSource => dataS.ds
-      case dataS: HikariCPJdbcDataSource => dataS.ds
-      case unsupported =>
-        // This should never happen
-        sys.error(s"Data source not supported for migrations: ${unsupported.getClass}")
-    }
-
   /** Database is migrated using Flyway, which looks at the migration files at
     * src/main/resources/db/migration/canton as explained at https://flywaydb.org/documentation/getstarted/firststeps/api
     */
@@ -94,7 +85,7 @@ trait DbMigrations { this: NamedLogging =>
   protected def migrateDatabaseInternal(
       db: Database
   )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    val flyway = createFlyway(createDataSource(db.source))
+    val flyway = createFlyway(DbMigrations.createDataSource(db.source))
     // Retry the migration in case of failures, which may happen due to a race condition in concurrent migrations
     RetryEither.retry[DbMigrations.Error, Unit](10, 100, functionFullName, logger) {
       Either
@@ -107,7 +98,7 @@ trait DbMigrations { this: NamedLogging =>
   protected def repairFlywayMigrationInternal(
       db: Database
   )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    val flyway = createFlyway(createDataSource(db.source))
+    val flyway = createFlyway(DbMigrations.createDataSource(db.source))
     Either
       .catchOnly[FlywayException](flyway.repair())
       .map(r =>
@@ -149,7 +140,7 @@ trait DbMigrations { this: NamedLogging =>
   ): EitherT[UnlessShutdown, DbMigrations.Error, A] =
     withDb { createdDb =>
       ResourceUtil.withResource(createdDb) { db =>
-        val flyway = createFlyway(createDataSource(db.source))
+        val flyway = createFlyway(DbMigrations.createDataSource(db.source))
         fn(db, flyway)
       }
     }
@@ -298,6 +289,16 @@ class CommunityDbMigrations(
 }
 
 object DbMigrations {
+
+  def createDataSource(jdbcDataSource: JdbcDataSource): DataSource =
+    jdbcDataSource match {
+      case dataS: DataSourceJdbcDataSource => dataS.ds
+      case dataS: HikariCPJdbcDataSource => dataS.ds
+      case unsupported =>
+        // This should never happen
+        sys.error(s"Data source not supported for migrations: ${unsupported.getClass}")
+    }
+
   sealed trait Error extends PrettyPrinting
   case class FlywayError(err: FlywayException) extends Error {
     override def pretty: Pretty[FlywayError] = prettyOfClass(unnamedParam(_.err))

@@ -309,19 +309,27 @@ class SyncDomain(
   ): EitherT[Future, SyncDomainInitializationError, Unit] = {
     def liftF[A](f: Future[A]): EitherT[Future, SyncDomainInitializationError, A] = EitherT.liftF(f)
 
-    def withMetadata(cid: LfContractId): Future[StoredContract] = {
-      persistent.contractStore.lookup(cid).value.map {
-        case None =>
-          val errMsg = s"Contract $cid in active contract store but not in the contract store"
-          ErrorUtil.internalError(new IllegalStateException(errMsg))
-        case Some(sc) => sc
-      }
-    }
+    def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[StoredContract]] =
+      persistent.contractStore
+        .lookupManyUncached(cids)
+        .map(_.zip(cids).map {
+          case (None, cid) =>
+            val errMsg = s"Contract $cid is in active contract store but not in the contract store"
+            ErrorUtil.internalError(new IllegalStateException(errMsg))
+          case (Some(sc), _) => sc
+        })
 
     def lookupChangeMetadata(change: ActiveContractIdsChange): Future[AcsChange] = {
       for {
-        storedActivatedContracts <- change.activations.toList.traverse(withMetadata)
-        storedDeactivatedContracts <- change.deactivations.toList.traverse(withMetadata)
+        // TODO(i9270) extract magic numbers
+        storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
+          parallelism = 20,
+          batchSize = 500,
+        )(change.activations.toSeq)(withMetadataSeq)
+        storedDeactivatedContracts <- MonadUtil
+          .batchedSequentialTraverse(parallelism = 20, batchSize = 500)(change.deactivations.toSeq)(
+            withMetadataSeq
+          )
       } yield {
         AcsChange(
           activations = storedActivatedContracts

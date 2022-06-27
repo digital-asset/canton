@@ -238,6 +238,7 @@ class ParticipantPartiesAdministrationGroup(
   private def runPartyCommand(
       partyId: PartyId,
       op: TopologyChangeOp,
+      force: Boolean = false,
   ): ConsoleCommandResult[ByteString] = {
     runner
       .adminCommand(
@@ -249,15 +250,16 @@ class ParticipantPartiesAdministrationGroup(
           participantId,
           ParticipantPermission.Submission,
           replaceExisting = false,
+          force = force,
         )
       )
   }
 
   @Help.Summary("Disable party on participant")
-  def disable(name: Identifier): Unit = {
+  def disable(name: Identifier, force: Boolean = false): Unit = {
     val partyId = PartyId(participantId.uid.copy(id = name))
     val _ = consoleEnvironment.run {
-      runPartyCommand(partyId, TopologyChangeOp.Remove)
+      runPartyCommand(partyId, TopologyChangeOp.Remove, force)
     }
   }
 

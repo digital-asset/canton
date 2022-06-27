@@ -107,7 +107,7 @@ class SequencerRuntime(
     topologyClientMember: Member,
     topologyClient: DomainTopologyClientWithInit,
     topologyProcessor: TopologyTransactionProcessor,
-    sharedTopologyProcessor: Boolean,
+    sharedTopologyProcessor: Boolean, // means we are running in embedded mode
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
@@ -268,6 +268,7 @@ class SequencerRuntime(
             domainId,
             topologyClient,
             sequencedTopologyStore,
+            mustHaveActiveMediator = sharedTopologyProcessor,
             localNodeParameters.processingTimeouts,
             loggerFactory,
           )
@@ -403,10 +404,11 @@ class SequencerRuntime(
   def registerDomainService(
       register: ServerServiceDefinition => Unit
   )(implicit ec: ExecutionContext): Unit = {
-
-    v0.DomainServiceGrpc.bindService(
-      new GrpcDomainService(authenticationConfig.agreementManager, loggerFactory),
-      executionContext,
+    register(
+      v0.DomainServiceGrpc.bindService(
+        new GrpcDomainService(authenticationConfig.agreementManager, loggerFactory),
+        executionContext,
+      )
     )
 
     register(

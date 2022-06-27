@@ -51,20 +51,14 @@ class GrpcSequencerTopologyBootstrapService(
                 .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString).asException())
               topologySnapshot = topologySnapshotO
                 .getOrElse(StoredTopologyTransactions.empty)
-              isSnapshotComplete = DomainTopologyManager.isInitialized(
-                id,
-                topologySnapshot.result.map(_.transaction),
-              )
-              _ <-
-                if (!isSnapshotComplete) {
-                  EitherT.leftT[Future, Unit](
-                    Status.INVALID_ARGUMENT
-                      .withDescription(
-                        "The initial topology snapshot needs to have at least one signing key for each domain entity type"
-                      )
-                      .asException()
-                  )
-                } else EitherT.rightT[Future, StatusException](())
+              _ <- DomainTopologyManager
+                .transactionsAreSufficientToInitializeADomain(
+                  id,
+                  topologySnapshot.result.map(_.transaction),
+                  mustHaveActiveMediator = false,
+                  loggerFactory,
+                )
+                .leftMap(Status.INVALID_ARGUMENT.withDescription(_).asException())
               _ <- EitherT
                 .right[StatusException](
                   TopologyManagementInitialization

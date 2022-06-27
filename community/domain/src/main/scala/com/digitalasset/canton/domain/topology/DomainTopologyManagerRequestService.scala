@@ -514,7 +514,7 @@ object DomainTopologyManagerRequestService {
     new DomainTopologyManagerRequestService(
       new RequestProcessingStrategy.Impl(
         config,
-        manager.managerId.domainId,
+        manager.id.domainId,
         manager.protocolVersion,
         manager.store,
         domainClient,

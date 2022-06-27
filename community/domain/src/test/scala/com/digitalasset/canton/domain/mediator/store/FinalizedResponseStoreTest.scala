@@ -65,7 +65,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       )
     )
   }
-  val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+  val informeeMessage = InformeeMessage(fullInformeeTree)
   val currentVersion =
     ResponseAggregation(
       requestId,
