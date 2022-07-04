@@ -14,12 +14,12 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.version.{
   HasProtoV0,
+  HasProtoV1,
   HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
-import com.google.protobuf.ByteString
 
 import java.util.UUID
 
@@ -28,18 +28,19 @@ import java.util.UUID
 // This class is a reference example of serialization best practices.
 // It is a simple example for getting started with serialization.
 // Please consult the team if you intend to change the design of serialization.
-case class InformeeMessage(fullInformeeTree: FullInformeeTree)
+case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: ProtocolVersion)
     extends MediatorRequest
     // By default, we use ProtoBuf for serialization.
     // Serializable classes that have a corresponding Protobuf message should inherit from this trait to inherit common code and naming conventions.
     // If the corresponding Protobuf message of a class has multiple versions (e.g. `v0.InformeeMessage` and `v1.InformeeMessage`),
     // it should implement traits for each (e.g. InformeeMessage should implement HasProtoV0 and HasProtoV1)
     with HasProtoV0[v0.InformeeMessage]
+    with HasProtoV1[v1.InformeeMessage]
     with ProtocolMessageV0
     with ProtocolMessageV1 {
 
   val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeMessage] =
-    InformeeMessage.protocolVersionRepresentativeFor(fullInformeeTree.protocolVersion)
+    InformeeMessage.protocolVersionRepresentativeFor(protocolVersion)
 
   override def requestUuid: UUID = fullInformeeTree.transactionUuid
 
@@ -59,7 +60,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
       requestId,
       verdict,
       fullInformeeTree.informeeTreeUnblindedFor(recipientParties),
-      representativeProtocolVersion.unwrap,
+      protocolVersion,
     )
 
   // Implementing a `toProto<version>` method allows us to compose serializable classes.
@@ -78,11 +79,17 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)
     // indicate the version of the nested Protobuf message via calling `toProto<version>
     v0.InformeeMessage(fullInformeeTree = Some(fullInformeeTree.toProtoV0))
 
+  override def toProtoV1: v1.InformeeMessage =
+    v1.InformeeMessage(
+      fullInformeeTree = Some(fullInformeeTree.toProtoV0),
+      protocolVersion = protocolVersion.toProtoPrimitive,
+    )
+
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
 
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
-    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV0))
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV1))
 
   override def confirmationPolicy: ConfirmationPolicy = fullInformeeTree.confirmationPolicy
 
@@ -98,15 +105,14 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
       ProtocolVersion.v2_0_0,
       supportedProtoVersion(v0.InformeeMessage)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(i9423): Migrate to next protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersion(v1.InformeeMessage)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
+      _.toProtoV1.toByteString,
+    ),
   )
-
-  def apply(
-      fullInformeeTree: FullInformeeTree,
-      protocolVersion: ProtocolVersion,
-  ): InformeeMessage = {
-    InformeeMessage(fullInformeeTree)
-  }
 
   // The inverse of "toProto<version>".
   //
@@ -118,7 +124,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
   // There is no agreed convention on which type to use for errors. In this class it is "ProtoDeserializationError",
   // but other classes use something else (e.g. "String").
   // In the end, it is most important that the errors are informative and this can be achieved in different ways.
-  def fromProtoV0(
+  private[messages] def fromProtoV0(
       hashOps: HashOps
   )(informeeMessageP: v0.InformeeMessage): ParsingResult[InformeeMessage] = {
     // Use pattern matching to access the fields of v0.InformeeMessage,
@@ -131,22 +137,26 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         maybeFullInformeeTreeP,
       )
       fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
-    } yield new InformeeMessage(fullInformeeTree)
+    } yield new InformeeMessage(fullInformeeTree)(
+      protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
+    )
   }
 
-  // The inverse of "toByteString".
-  //
-  // Again, the method must return "Left(...)" (and not throw an exception), if deserialization fails.
-  //
-  // Optional method, feel free to omit it.
-  override def fromByteString(
+  private[messages] def fromProtoV1(
       hashOps: HashOps
-  )(bytes: ByteString): ParsingResult[InformeeMessage] = {
+  )(informeeMessageP: v1.InformeeMessage): ParsingResult[InformeeMessage] = {
+    // Use pattern matching to access the fields of v0.InformeeMessage,
+    // because this will break if a field is forgotten.
+    val v1.InformeeMessage(maybeFullInformeeTreeP, protocolVersionP) = informeeMessageP
     for {
-      // Do not directly call "v0.InformeeMessage.parseFrom", as this may throw an exception.
-      informeeMessageP <- ProtoConverter.protoParser(v0.InformeeMessage.parseFrom)(bytes)
-      informeeMessage <- fromProtoV0(hashOps)(informeeMessageP)
-    } yield informeeMessage
+      // Keep in mind that all fields of a proto class are optional. So the existence must be checked explicitly.
+      fullInformeeTreeP <- ProtoConverter.required(
+        "InformeeMessage.informeeTree",
+        maybeFullInformeeTreeP,
+      )
+      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+    } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }
 
   implicit val informeeMessageCast: ProtocolMessageContentCast[InformeeMessage] = {

@@ -19,9 +19,6 @@ addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
 addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.6")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.8"
 
-// Required to for packaging into a tarball and zip archive
-addSbtPlugin("org.xerial.sbt" % "sbt-pack" % "0.13")
-
 // helps scaladoc resolve links for common scala libraries
 addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.0.0")
 

@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
+import com.digitalasset.canton.version.SourceProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -618,6 +619,7 @@ object TransferStoreTest {
       Set.empty,
       coidAbs1,
       transferId.originDomain,
+      SourceProtocolVersion(protocolVersion),
       originMediator,
       targetDomainId,
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomainId),
@@ -630,7 +632,6 @@ object TransferStoreTest {
         pureCryptoApi,
         seed,
         uuid,
-        TestDomainParameters.defaultStatic.protocolVersion,
       )
     Future.successful(
       TransferData(
@@ -662,7 +663,8 @@ object TransferStoreTest {
         Verdict.Approve,
         mediatorMessage.allInformees,
       )
-      val signedResult = SignedProtocolMessage(result, sign("TransferOutResult-mediator"))
+      val signedResult =
+        SignedProtocolMessage(result, sign("TransferOutResult-mediator"), protocolVersion)
       val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(

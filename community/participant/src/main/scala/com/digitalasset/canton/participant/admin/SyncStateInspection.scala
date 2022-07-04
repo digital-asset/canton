@@ -161,7 +161,7 @@ class SyncStateInspection(
     }
   }
 
-  private def currentAcsSnapshot(persistentState: SyncDomainPersistentState)(implicit
+  def currentAcsSnapshot(persistentState: SyncDomainPersistentState)(implicit
       traceContext: TraceContext
   ): Future[Either[AcsError, Map[LfContractId, CantonTimestamp]]] =
     for {

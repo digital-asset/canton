@@ -326,7 +326,7 @@ class ConfirmationResponseProcessor(
                 protocolVersion,
               )
             SignedProtocolMessage
-              .tryCreate(rejection, snapshot, crypto.pureCrypto)
+              .tryCreate(rejection, snapshot, crypto.pureCrypto, protocolVersion)
               .map { signedRejection =>
                 signedRejection -> Recipients.groups(recipients.map(r => NonEmpty(Set, r)))
               }
@@ -528,7 +528,7 @@ class ConfirmationResponseProcessor(
             informees,
           )
           SignedProtocolMessage
-            .create(result, snapshot, crypto.pureCrypto)
+            .create(result, snapshot, crypto.pureCrypto, protocolVersion)
             .map(signedResult =>
               OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
             )

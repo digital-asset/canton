@@ -306,6 +306,9 @@ object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomai
   private val defaultLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(60)
 
+  /** Default dynamic domain parameters for non-static clocks */
+  lazy val defaultValues: DynamicDomainParameters = initialValues(defaultTopologyChangeDelay)
+
   def initialValues(topologyChangeDelay: NonNegativeFiniteDuration) = DynamicDomainParameters(
     participantResponseTimeout = defaultParticipantResponseTimeout,
     mediatorReactionTimeout = defaultMediatorReactionTimeout,

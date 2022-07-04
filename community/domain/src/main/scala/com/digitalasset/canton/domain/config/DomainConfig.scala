@@ -78,6 +78,7 @@ case class DomainNodeParameters(
     cachingConfigs: CachingConfigs,
     nonStandardConfig: Boolean,
     devVersionSupport: Boolean,
+    dontWarnOnDeprecatedPV: Boolean,
 ) extends LocalNodeParameters
 
 trait DomainBaseConfig extends LocalNodeConfig {
@@ -183,5 +184,6 @@ final case class RemoteDomainConfig(
   */
 final case class TopologyConfig(
     requireParticipantCertificate: Boolean = false,
+    // TODO(i4933) make false default for distributed enterprise deployments and move permissioning to enterprise
     open: Boolean = true,
 )

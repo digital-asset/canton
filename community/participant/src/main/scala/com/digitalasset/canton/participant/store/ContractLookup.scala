@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
+import cats.syntax.traverse._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.TracedLogger
@@ -24,6 +25,11 @@ trait ContractLookup {
   protected[store] def logger: TracedLogger
 
   def lookup(id: LfContractId)(implicit traceContext: TraceContext): OptionT[Future, StoredContract]
+
+  def lookupManyUncached(
+      ids: Seq[LfContractId]
+  )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] =
+    ids.toList.traverse(lookup(_).value)
 
   def lookupE(id: LfContractId)(implicit
       traceContext: TraceContext
@@ -88,6 +94,10 @@ object ContractAndKeyLookup {
           traceContext: TraceContext
       ): OptionT[Future, StoredContract] =
         OptionT.none[Future, StoredContract]
+
+      override def lookupManyUncached(ids: Seq[LfContractId])(implicit
+          traceContext: TraceContext
+      ): Future[List[Option[StoredContract]]] = Future.successful(ids.map(_ => None).toList)
 
       override def lookupKey(key: LfGlobalKey)(implicit
           traceContext: TraceContext

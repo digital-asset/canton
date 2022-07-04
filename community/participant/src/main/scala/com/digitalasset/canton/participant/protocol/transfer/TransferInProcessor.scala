@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.messages.TransferInResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.TargetProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -34,7 +34,7 @@ class TransferInProcessor(
     sequencerClient: SequencerClient,
     causalityTracking: Boolean,
     override protected val timeouts: ProcessingTimeout,
-    version: ProtocolVersion,
+    targetProtocolVersion: TargetProtocolVersion,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ProtocolProcessor[
@@ -51,7 +51,7 @@ class TransferInProcessor(
         transferCoordination,
         seedGenerator,
         causalityTracking,
-        version,
+        targetProtocolVersion,
         loggerFactory,
       ),
       inFlightSubmissionTracker,

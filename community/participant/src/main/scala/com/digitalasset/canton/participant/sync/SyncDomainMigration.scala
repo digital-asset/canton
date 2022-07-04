@@ -20,7 +20,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.MigrationErrors
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -63,7 +62,6 @@ class SyncDomainMigration(
       target: DomainConnectionConfig,
       targetDomainId: DomainId,
       targetParameters: StaticDomainParameters,
-      expectedVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncDomainMigrationError, Unit] = for {
@@ -101,17 +99,9 @@ class SyncDomainMigration(
     _ <- EitherT.cond[Future](
       sourceDomainId != targetDomainId,
       (),
-      SyncDomainMigrationError.InvalidArgument.SourceAndTargetAreSame(sourceDomainId),
-    )
-    // check that the new domain matches the protocol version we expect
-    _ <- EitherT.cond[Future](
-      expectedVersion == targetParameters.protocolVersion,
-      (),
-      InvalidArgument
-        .ProtocolVersionDiffers(
-          expectedVersion,
-          targetParameters.protocolVersion,
-        ): SyncDomainMigrationError,
+      SyncDomainMigrationError.InvalidArgument.SourceAndTargetAreSame(
+        sourceDomainId
+      ): SyncDomainMigrationError,
     )
   } yield ()
 
@@ -125,7 +115,6 @@ class SyncDomainMigration(
   def migrateDomain(
       source: DomainAlias,
       target: DomainConnectionConfig,
-      expectedVersion: ProtocolVersion,
       targetDomainId: DomainId,
       targetParameters: StaticDomainParameters,
   )(implicit
@@ -139,7 +128,6 @@ class SyncDomainMigration(
           target,
           targetDomainId,
           targetParameters,
-          expectedVersion,
         )
         // TODO(i9522) depending on protocol version, ensure that the current topology state exists in the target protocol version:  not applicable right now
         // check if the target alias already exists.
@@ -264,13 +252,6 @@ object SyncDomainMigrationError extends MigrationErrors() {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"Source domain $source has no domain-id stored: it's completely empty"
-        )
-        with SyncDomainMigrationError
-
-    case class ProtocolVersionDiffers(expected: ProtocolVersion, observed: ProtocolVersion)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
-          cause = s"Expected protocol version $expected differs from observed $observed"
         )
         with SyncDomainMigrationError
 

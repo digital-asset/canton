@@ -330,7 +330,7 @@ class TopologyAdministrationGroup(
       |to all members (participants, mediator, sequencer, topology manager) of a domain.
     ops: Either Add or Remove the key mapping update.
     signedBy: Optional fingerprint of the authorizing key which in turn refers to a specific, locally existing certificate.
-    ownerType: Role of the following owner (Participant, Sequencer, Mediator, DomainIdentityManager)
+    ownerType: Role of the following owner (Participant, Sequencer, Mediator, DomainTopologyManager)
     owner: Unique identifier of the owner.
     key: Fingerprint of key
     purposes: The purposes of the owner to key mapping.
@@ -463,6 +463,7 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         replaceExisting: Boolean = true,
+        force: Boolean = false,
     ): ByteString =
       check(FeatureFlag.Preview)(synchronisation.run(synchronize)(consoleEnvironment.run {
         adminCommand(
@@ -474,6 +475,7 @@ class TopologyAdministrationGroup(
             participant,
             permission,
             replaceExisting = replaceExisting,
+            force = force,
           )
         )
       }))

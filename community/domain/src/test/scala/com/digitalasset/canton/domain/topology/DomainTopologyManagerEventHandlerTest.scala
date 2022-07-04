@@ -65,7 +65,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       domainId,
     )(RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(defaultProtocolVersion))
 
-  "DomainIdentityManagerEventHandler" should {
+  "DomainTopologyManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
       val store = new InMemoryRegisterTopologyTransactionResponseStore()
 

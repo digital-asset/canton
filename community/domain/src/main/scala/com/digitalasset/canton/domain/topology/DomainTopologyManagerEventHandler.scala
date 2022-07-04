@@ -107,7 +107,11 @@ class DomainTopologyManagerEventHandler(
         request.participant,
         request.transactions,
       )
-      pendingResponse = RegisterTopologyTransactionResponse.create(request, responseResults)
+      pendingResponse = RegisterTopologyTransactionResponse.create(
+        request,
+        responseResults,
+        protocolVersion,
+      )
       _ <- store.savePendingResponse(pendingResponse)
       result <- sendResponse(pendingResponse)
     } yield result

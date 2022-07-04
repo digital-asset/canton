@@ -502,6 +502,12 @@ class ParticipantNodeBootstrap(
               traceContext: TraceContext
           ): EitherT[Future, PackageId, Set[PackageId]] =
             packageService.packageDependencies(packages)
+
+          override def partyHasActiveContracts(partyId: PartyId)(implicit
+              traceContext: TraceContext
+          ): Future[Boolean] = {
+            sync.partyHasActiveContracts(partyId)
+          }
         })
       }
 

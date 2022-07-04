@@ -5,6 +5,7 @@ package com.digitalasset.canton
 
 import cats.Functor
 import cats.data.{EitherT, OptionT}
+import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
@@ -67,6 +68,12 @@ trait BaseTest
 
   protected def defaultProtocolVersion: ProtocolVersion =
     TestDomainParameters.defaultStatic.protocolVersion
+
+  protected def testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
+    .getOrElse(defaultProtocolVersion)
+
+  protected def isTestedProtocolVersionDev: Boolean =
+    testedProtocolVersion == ProtocolVersion.unstable_development
 
   protected def signedTransactionProtocolVersionRepresentative
       : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
@@ -139,7 +146,6 @@ trait BaseTest
     optionTAssertion.getOrElse(fail(s"Unexpected None value"))
 
   /** Keeps evaluating `testCode` until it succeeds or a timeout occurs.
-    * @return the result of successfully evaluating `testCode`
     * @throws org.scalatest.exceptions.TestFailedException if `testCode` keeps throwing such an exception even after `timeout`
     * @throws java.lang.Throwable if `testCode` throws any other throwable
     * @throws java.lang.IllegalArgumentException if `timeUntilSuccess` is negative
@@ -305,6 +311,12 @@ trait BaseTest
     def failOnShutdown(clue: String)(implicit ec: ExecutionContext, pos: Position): Future[A] =
       fut.onShutdown(fail(s"Shutdown during $clue"))
   }
+
+  def forEveryParallel[A](inputs: Seq[A])(
+      body: A => Assertion
+  )(implicit executionContext: ExecutionContext): Assertion = forEvery(inputs.traverse { input =>
+    Future(Try(body(input)))
+  }.futureValue)(_.get)
 
   lazy val CantonExamplesPath: String = BaseTest.CantonExamplesPath
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath

@@ -39,14 +39,14 @@ case class TransferOutMediatorMessage(
 
   private[this] val commonData = tree.commonData.tryUnwrap
 
+  val protocolVersion = commonData.protocolVersion
+
   val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutMediatorMessage] =
-    TransferOutMediatorMessage.protocolVersionRepresentativeFor(
-      commonData.representativeProtocolVersion.unwrap
-    )
+    TransferOutMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
-  override def domainId: DomainId = commonData.originDomain
+  override def domainId: DomainId = commonData.sourceDomain
 
-  override def mediatorId: MediatorId = commonData.originMediator
+  override def mediatorId: MediatorId = commonData.sourceMediator
 
   override def requestUuid: UUID = commonData.uuid
 
@@ -73,7 +73,7 @@ case class TransferOutMediatorMessage(
       informees,
       TransferOutDomainId(domainId),
       verdict,
-      representativeProtocolVersion.unwrap,
+      protocolVersion.v,
     )
   }
 

@@ -526,7 +526,12 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
             )
 
             snapshotF.flatMap { snapshot =>
-              SignedProtocolMessage.tryCreate(payload, snapshot, crypto.pureCrypto)
+              SignedProtocolMessage.tryCreate(
+                payload,
+                snapshot,
+                crypto.pureCrypto,
+                defaultProtocolVersion,
+              )
             }
         }
 

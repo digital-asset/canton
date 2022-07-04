@@ -28,7 +28,6 @@ import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.util.hashing.MurmurHash3
 
@@ -630,19 +629,23 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
       """This method can be used to migrate all the contracts associated with a domain to a new domain connection.
          This method will register the new domain, connect to it and then re-associate all contracts on the source
          domain to the target domain. Please note that this migration needs to be done by all participants 
-         at the same time. The domain should only be used once all participants have finished their migration."""
+         at the same time. The domain should only be used once all participants have finished their migration.
+         
+         The arguments are:
+         source: the domain alias of the source domain
+         target: the configuration for the target domain
+         """
     )
     def migrate_domain(
         source: DomainAlias,
         target: DomainConnectionConfig,
-        expectedTargetVersion: ProtocolVersion,
     ): Unit = {
       implicit val ec = consoleEnvironment.environment.executionContext
       runRepairCommand(tc =>
         consoleEnvironment.commandTimeouts.unbounded.await()(
           access(
             _.sync
-              .migrateDomain(source, target, expectedTargetVersion)(tc)
+              .migrateDomain(source, target)(tc)
               .leftMap(_.asGrpcError.getStatus.getDescription)
               .value
               .onShutdown {

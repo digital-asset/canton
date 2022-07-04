@@ -29,8 +29,9 @@ import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
   * @param requiredSymmetricKeySchemes The optional required symmetric key schemes that a member has to support. If none is specified, all the allowed schemes are required.
   * @param requiredHashAlgorithms The optional required hash algorithms that a member has to support. If none is specified, all the allowed algorithms are required.
   * @param requiredCryptoKeyFormats The optional required crypto key formats that a member has to support. If none is specified, all the supported algorithms are required.
-  * @param protocolVersion The protocol version spoken on the domain. All participants and domain nodes attempting to connect to the sequencer need to support this protocol version to connect.
+  * @param protocolVersion                        The protocol version spoken on the domain. All participants and domain nodes attempting to connect to the sequencer need to support this protocol version to connect.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
+  * @param dontWarnOnDeprecatedPV If true, then this domain will not emit a warning when configured to use a deprecated protocol version (such as 2.0.0).
   */
 final case class DomainParametersConfig(
     reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
@@ -46,6 +47,7 @@ final case class DomainParametersConfig(
       ProtocolVersion.latest
     ),
     willCorruptYourSystemDevVersionSupport: Boolean = false,
+    dontWarnOnDeprecatedPV: Boolean = false,
 ) {
 
   /** Converts the domain parameters config into a domain parameters protocol message.

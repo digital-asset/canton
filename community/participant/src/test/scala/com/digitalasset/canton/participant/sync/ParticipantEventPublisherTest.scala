@@ -40,7 +40,8 @@ class ParticipantEventPublisherTest extends AsyncWordSpec with BaseTest {
       multiDomainEventLog: MultiDomainEventLog,
   )
 
-  lazy val participantId: ParticipantId = ParticipantId.tryFromProtoPrimitive("participant::id")
+  lazy val participantId: ParticipantId =
+    ParticipantId.tryFromProtoPrimitive("PAR::participant::id")
   lazy val clock = new SimClock(loggerFactory = loggerFactory)
 
   def withPublisher(test: Fixture => Future[Assertion]): Future[Assertion] = {

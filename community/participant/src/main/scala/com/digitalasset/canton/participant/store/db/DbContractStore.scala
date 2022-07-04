@@ -76,7 +76,12 @@ class DbContractStore(
   private val cache: AsyncCache[LfContractId, Option[StoredContract]] =
     cacheConfig.buildScaffeine().buildAsync[LfContractId, Option[StoredContract]]()
 
-  private val batchAggragator = {
+  // batch aggregator used for single point queries: damle will run many "lookups"
+  // during interpretation. they will hit the db like a nail gun. the batch
+  // aggregator will limit the number of parallel queries to the db and "batch them"
+  // together. so if there is high load with a lot of interpretation happening in parallel
+  // batching will kick in.
+  private val batchAggregator = {
     val processor: BatchAggregator.Processor[LfContractId, Option[StoredContract]] =
       new BatchAggregator.Processor[LfContractId, Option[StoredContract]] {
         override val kind: String = "request"
@@ -84,14 +89,8 @@ class DbContractStore(
 
         override def executeBatch(ids: NonEmpty[Seq[Traced[LfContractId]]])(implicit
             traceContext: TraceContext
-        ): Future[Iterable[Option[StoredContract]]] = {
-          processingTime.metric.event {
-            storage.sequentialQueryAndCombine(lookupQueries(ids.map(_.value)), functionFullName)(
-              traceContext,
-              closeContext,
-            )
-          }
-        }
+        ): Future[Iterable[Option[StoredContract]]] =
+          lookupManyUncachedInternal(ids.map(_.value))
 
         override def prettyItem: Pretty[LfContractId] = implicitly
       }
@@ -127,7 +126,7 @@ class DbContractStore(
       id: LfContractId
   )(implicit traceContext: TraceContext): OptionT[Future, StoredContract] = {
     def get(): Future[Option[StoredContract]] =
-      performUnlessClosingF(functionFullName)(batchAggragator.run(id))
+      performUnlessClosingF(functionFullName)(batchAggregator.run(id))
         .onShutdown(
           throw DbContractStore.AbortedDueToShutdownException(
             s"Shutdown in progress, unable to fetch contract $id"
@@ -139,6 +138,28 @@ class DbContractStore(
         logger.info(e.getMessage)
         None // TODO(Error handling) Consider propagating the shutdown info further instead of converting to None
     })
+  }
+
+  override def lookupManyUncached(
+      ids: Seq[LfContractId]
+  )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] = {
+    logger.debug(s"Loading ${ids.length}")
+    NonEmpty
+      .from(ids)
+      .fold(Future.successful(List.empty[Option[StoredContract]])) { items =>
+        lookupManyUncachedInternal(items).map(_.toList)
+      }
+  }
+
+  private def lookupManyUncachedInternal(
+      ids: NonEmpty[Seq[LfContractId]]
+  )(implicit traceContext: TraceContext) = {
+    processingTime.metric.event {
+      storage.sequentialQueryAndCombine(lookupQueries(ids), functionFullName)(
+        traceContext,
+        closeContext,
+      )
+    }
   }
 
   override def find(

@@ -111,7 +111,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         None,
         Batch.of(
           defaultProtocolVersion,
-          (InformeeMessage(fullInformeeTree, defaultProtocolVersion), Recipients.cc(mediatorId)),
+          (InformeeMessage(fullInformeeTree)(defaultProtocolVersion), Recipients.cc(mediatorId)),
         ),
         defaultProtocolVersion,
       )
@@ -150,7 +150,8 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       MediatorResponse.protocolVersionRepresentativeFor(defaultProtocolVersion)
     )
 
-    val signedConfirmationResponse = SignedProtocolMessage(mediatorResponse, mock[Signature])
+    val signedConfirmationResponse =
+      SignedProtocolMessage(mediatorResponse, mock[Signature], defaultProtocolVersion)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -290,7 +291,12 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       } yield {
         env.receivedEventsFor(requestId) should matchPattern {
           case Seq(
-                MediatorEvent.Request(_, `firstRequestTs`, InformeeMessage(_), _),
+                MediatorEvent.Request(
+                  _,
+                  `firstRequestTs`,
+                  InformeeMessage(_),
+                  _,
+                ),
                 MediatorEvent.Timeout(_, `timesOutAt`, `requestId`),
               ) =>
         }
@@ -310,6 +316,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
     ResponseAggregation(
       requestId,
-      InformeeMessage(fullInformeeTree, defaultProtocolVersion),
+      InformeeMessage(fullInformeeTree)(defaultProtocolVersion),
     )(loggerFactory)
 }

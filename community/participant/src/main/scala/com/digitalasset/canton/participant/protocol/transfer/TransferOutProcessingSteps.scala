@@ -66,13 +66,12 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.SourceProtocolVersion
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import org.slf4j.event.Level
 
 import scala.collection.{concurrent, mutable}
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Either
 
 class TransferOutProcessingSteps(
     domainId: DomainId,
@@ -80,7 +79,7 @@ class TransferOutProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
-    protocolVersion: ProtocolVersion,
+    originDomainProtocolVersion: SourceProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -147,6 +146,7 @@ class TransferOutProcessingSteps(
           submittingParty,
           stakeholders,
           domainId,
+          originDomainProtocolVersion,
           mediatorId,
           targetDomain,
           originRecentSnapshot.ipsSnapshot,
@@ -163,12 +163,11 @@ class TransferOutProcessingSteps(
         pureCrypto,
         seed,
         transferOutUuid,
-        protocolVersion,
       )
       mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferOutViewType)(fullTree, originRecentSnapshot, protocolVersion)
+        .create(TransferOutViewType)(fullTree, originRecentSnapshot, originDomainProtocolVersion.v)
         .leftMap[TransferProcessorError](EncryptionError)
         .mapK(FutureUnlessShutdown.outcomeK)
       maybeRecipients = Recipients.ofSet(recipients)
@@ -182,7 +181,7 @@ class TransferOutProcessingSteps(
         RootHashMessage(
           rootHash,
           domainId,
-          protocolVersion,
+          originDomainProtocolVersion.v,
           ViewType.TransferOutViewType,
           EmptyRootHashMessagePayload,
         )
@@ -200,7 +199,7 @@ class TransferOutProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
-      TransferSubmission(Batch.of(protocolVersion, messages: _*), rootHash)
+      TransferSubmission(Batch.of(originDomainProtocolVersion.v, messages: _*), rootHash)
     }
   }
 
@@ -241,11 +240,15 @@ class TransferOutProcessingSteps(
     FullTransferOutTree
   ]] = {
     EncryptedViewMessage
-      .decryptFor(originSnapshot, envelope.protocolMessage, participantId, protocolVersion) {
-        bytes =>
-          FullTransferOutTree
-            .fromByteString(originSnapshot.pureCrypto)(bytes)
-            .leftMap(e => DeserializationError(e.toString, bytes))
+      .decryptFor(
+        originSnapshot,
+        envelope.protocolMessage,
+        participantId,
+        originDomainProtocolVersion.v,
+      ) { bytes =>
+        FullTransferOutTree
+          .fromByteString(originSnapshot.pureCrypto)(bytes)
+          .leftMap(e => DeserializationError(e.toString, bytes))
       }
       .map(WithRecipients(_, envelope.recipients))
   }
@@ -672,7 +675,7 @@ class TransferOutProcessingSteps(
           Some(rootHash),
           confirmingParties,
           domainId,
-          protocolVersion,
+          originDomainProtocolVersion.v,
         )
       )
       Some(response)
@@ -719,6 +722,7 @@ object TransferOutProcessingSteps {
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
       originDomain: DomainId,
+      sourceProtocolVersion: SourceProtocolVersion,
       originMediator: MediatorId,
       targetDomain: DomainId,
       originIps: TopologySnapshot,
@@ -746,6 +750,7 @@ object TransferOutProcessingSteps {
         transferOutAdminParties,
         contractId,
         originDomain,
+        sourceProtocolVersion,
         originMediator,
         targetDomain,
         timeProof,

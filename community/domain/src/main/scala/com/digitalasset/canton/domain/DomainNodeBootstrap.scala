@@ -230,7 +230,7 @@ class DomainNodeBootstrap(
     logger.debug("Starting domain topology manager")
     staticDomainParameters.map { staticDomainParameters =>
       val manager = new DomainTopologyManager(
-        nodeId.identity,
+        DomainTopologyManagerId(nodeId.identity),
         clock,
         topologyStoreFactory.forId(AuthorizedStore),
         addMemberHook,
@@ -300,7 +300,7 @@ class DomainNodeBootstrap(
             val managerInitialized =
               initTimeout.await(
                 s"Domain startup waiting for the domain topology manager to be initialised"
-              )(manager.isInitialized)
+              )(manager.isInitialized(mustHaveActiveMediator = true))
             if (managerInitialized) {
               if (attemptedStart.compareAndSet(false, true)) {
                 // we're now the top level error handler of starting a domain so log appropriately
@@ -324,7 +324,7 @@ class DomainNodeBootstrap(
 
     for {
       // if the domain is starting up after previously running its identity will have been stored and will be immediately available
-      alreadyInitialized <- EitherT.right[String](manager.isInitialized)
+      alreadyInitialized <- EitherT.right(manager.isInitialized(mustHaveActiveMediator = true))
       // if not, then create an observer of topology transactions that will check each time whether full identity has been generated
       _ <- if (alreadyInitialized) startDomain(manager) else deferStart
     } yield ()
@@ -334,7 +334,7 @@ class DomainNodeBootstrap(
   private def startDomain(manager: DomainTopologyManager): EitherT[Future, String, Unit] =
     startInstanceUnlessClosing {
       // store with all topology transactions which were timestamped and distributed via sequencer
-      val domainId = DomainId(manager.id)
+      val domainId = manager.id.domainId
       val sequencedTopologyStore = topologyStoreFactory.forId(DomainStore(domainId))
       val publicSequencerConnectionEitherT =
         config.publicApi.toSequencerConnectionConfig.toConnection.toEitherT[Future]
@@ -342,7 +342,7 @@ class DomainNodeBootstrap(
       for {
         publicSequencerConnection <- publicSequencerConnectionEitherT
         managerDiscriminator <- EitherT.right(
-          SequencerClientDiscriminator.fromDomainMember(manager.managerId, indexedStringStore)
+          SequencerClientDiscriminator.fromDomainMember(manager.id, indexedStringStore)
         )
         topologyManagerSequencerCounterTrackerStore = SequencerCounterTrackerStore(
           storage,
@@ -399,7 +399,7 @@ class DomainNodeBootstrap(
         syncCrypto: DomainSyncCryptoClient = {
           ips.add(topologyClient)
           new SyncCryptoApiProvider(
-            manager.managerId,
+            manager.id,
             ips,
             crypto,
             parameters.cachingConfigs,
@@ -431,7 +431,7 @@ class DomainNodeBootstrap(
             crypto,
             sequencedTopologyStore,
             // The sequencer is using the topology manager's topology client
-            manager.managerId,
+            manager.id,
             topologyClient,
             topologyProcessor,
             storage,
@@ -641,7 +641,7 @@ class Domain(
         clients = topologyManagementArtefacts.client.numPendingChanges,
       )
       DomainStatus(
-        domainTopologyManager.id,
+        domainTopologyManager.id.uid,
         uptime(),
         ports,
         participants,

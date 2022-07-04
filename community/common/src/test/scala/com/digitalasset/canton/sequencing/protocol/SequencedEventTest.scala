@@ -30,6 +30,7 @@ class SequencedEventTest extends BaseTestWordSpec {
               defaultProtocolVersion,
             ),
           SymbolicCrypto.emptySignature,
+          defaultProtocolVersion,
         )
       val batch = Batch.of(
         defaultProtocolVersion,

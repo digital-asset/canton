@@ -29,9 +29,33 @@ message EncryptedViewMessage {
     v0.ViewType view_type = 7;
 }
 
+message TransferOutCommonData {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string source_domain = 2;
+    repeated string stakeholders = 3;
+    repeated string admin_parties = 4;
+    string uuid = 5;
+    string source_mediator = 6;
+    string source_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+}
+
+message TransferInCommonData {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string target_domain = 2;
+    repeated string stakeholders = 3;
+    string uuid = 4;
+    string target_mediator = 6;
+    string target_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+}
+
+message InformeeMessage {
+    v0.FullInformeeTree full_informee_tree = 1;
+    string protocol_version = 2; // added in v1 // TODO(#9312) change to int
+}
+
 message EnvelopeContent {
     oneof some_envelope_content {
-        v0.InformeeMessage informee_message = 1;
+        InformeeMessage informee_message = 1;
         v0.SignedProtocolMessage signed_message = 2;
         EncryptedViewMessage encrypted_view_message = 3;
         v0.DomainTopologyTransactionMessage domain_topology_transaction_message = 5;

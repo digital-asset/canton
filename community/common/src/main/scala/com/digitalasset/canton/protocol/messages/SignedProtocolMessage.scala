@@ -30,6 +30,10 @@ import scala.concurrent.{ExecutionContext, Future}
 case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
     message: M,
     signature: Signature,
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SignedProtocolMessage[SignedProtocolMessageContent]
+    ]
 ) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
@@ -39,12 +43,6 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
   override def domainId: DomainId = message.domainId
 
   override def companionObj = SignedProtocolMessage
-
-  override val representativeProtocolVersion
-      : RepresentativeProtocolVersion[SignedProtocolMessage[SignedProtocolMessageContent]] =
-    SignedProtocolMessage.protocolVersionRepresentativeFor(
-      message.representativeProtocolVersion.unwrap
-    )
 
   override protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = message.toProtoSomeSignedProtocolMessage
@@ -66,7 +64,7 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
   )(implicit F: Functor[F]): F[SignedProtocolMessage[MM]] = {
     F.map(f(message)) { newMessage =>
       if (newMessage eq message) this.asInstanceOf[SignedProtocolMessage[MM]]
-      else this.copy(message = newMessage)
+      else this.copy(message = newMessage)(representativeProtocolVersion)
     }
   }
 
@@ -88,25 +86,39 @@ object SignedProtocolMessage
     )
   )
 
+  def apply[M <: SignedProtocolMessageContent](
+      message: M,
+      signature: Signature,
+      protocolVersion: ProtocolVersion,
+  ): SignedProtocolMessage[M] = SignedProtocolMessage(message, signature)(
+    protocolVersionRepresentativeFor(protocolVersion)
+  )
+
   def create[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
       hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, SyncCryptoError, SignedProtocolMessage[M]] = {
     val serialization = message.getCryptographicEvidence
     val hash = hashOps.digest(message.hashPurpose, serialization)
-    cryptoApi.sign(hash).map(signature => SignedProtocolMessage(message, signature))
+    cryptoApi
+      .sign(hash)
+      .map(signature =>
+        SignedProtocolMessage(message, signature)(protocolVersionRepresentativeFor(protocolVersion))
+      )
   }
 
   def tryCreate[M <: SignedProtocolMessageContent](
       message: M,
       cryptoApi: SyncCryptoApi,
       hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[SignedProtocolMessage[M]] =
-    create(message, cryptoApi, hashOps)
+    create(message, cryptoApi, hashOps, protocolVersion)
       .fold(
         err => throw new IllegalStateException(s"Failed to create signed protocol message: $err"),
         identity,
@@ -134,7 +146,9 @@ object SignedProtocolMessage
           Left(OtherError("Deserialization of a SignedMessage failed due to a missing message"))
       }): ParsingResult[SignedProtocolMessageContent]
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", maybeSignatureP)
-    } yield SignedProtocolMessage(message, signature)
+    } yield SignedProtocolMessage(message, signature)(
+      protocolVersionRepresentativeFor(ProtobufVersion(0))
+    )
   }
 
   implicit def signedMessageCast[M <: SignedProtocolMessageContent](implicit

@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.topology
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.{
+  DomainTopologyManagerId,
   Identifier,
   Namespace,
   TopologyManagerTest,
@@ -23,7 +24,7 @@ class DomainTopologyManagerTest extends TopologyManagerTest {
           UniqueIdentifier(Identifier.tryCreate("da"), Namespace(keys.headOption.value.fingerprint))
 
         new DomainTopologyManager(
-          id,
+          DomainTopologyManagerId(id),
           clock,
           store,
           DomainTopologyManager.addMemberNoOp,

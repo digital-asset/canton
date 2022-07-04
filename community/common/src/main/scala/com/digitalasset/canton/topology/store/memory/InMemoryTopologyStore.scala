@@ -370,13 +370,13 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       filterNamespace = filterNamespace,
     ).map(_.positiveTransactions)
 
-  /** query interface used by DomainIdentityManager to find the set of initial keys */
+  /** query interface used by DomainTopologyManager to find the set of initial keys */
   override def findInitialState(
-      uid: UniqueIdentifier
+      id: DomainTopologyManagerId
   )(implicit traceContext: TraceContext): Future[Map[KeyOwner, Seq[PublicKey]]] = {
     val res = topologyTransactionStore.foldLeft((false, Map.empty[KeyOwner, Seq[PublicKey]])) {
       case ((false, acc), TopologyStoreEntry(Add, transaction, _, _, _, None)) =>
-        TopologyStore.findInitialStateAccumulator(uid, acc, transaction)
+        TopologyStore.findInitialStateAccumulator(id.uid, acc, transaction)
       case (acc, _) => acc
     }
     Future.successful(res._2)

@@ -328,9 +328,9 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
     import TopologyChangeOp._
 
     (op: AddRemoveChangeOp) match {
-      case Add => TopologyStateUpdate(Remove, element)(representativeProtocolVersion.unwrap)
+      case Add => new TopologyStateUpdate(Remove, element)(representativeProtocolVersion) {}
       case Remove =>
-        TopologyStateUpdate.createAdd(element.mapping, representativeProtocolVersion.unwrap)
+        TopologyStateUpdate.createAdd(element.mapping, representativeProtocolVersion)
     }
   }
 
@@ -414,6 +414,15 @@ object TopologyStateUpdate {
       TopologyChangeOp.Add,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
     )(protocolVersion)
+
+  def createAdd(
+      mapping: TopologyStateUpdateMapping,
+      protocolVersion: RepresentativeProtocolVersion[TopologyTransaction[TopologyChangeOp]],
+  ): TopologyStateUpdate[TopologyChangeOp.Add] =
+    new TopologyStateUpdate(
+      TopologyChangeOp.Add,
+      TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
+    )(protocolVersion) {}
 }
 
 sealed abstract case class DomainGovernanceTransaction(

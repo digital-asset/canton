@@ -71,7 +71,7 @@ class ParticipantTopologyManager(
   private val participantIdO = new AtomicReference[Option[ParticipantId]](None)
   def setParticipantId(participantId: ParticipantId) = participantIdO.set(Some(participantId))
 
-  private def packageService(implicit
+  private def packageAndSyncService(implicit
       traceContext: TraceContext
   ): EitherT[Future, ParticipantTopologyManagerError, PostInitCallbacks] =
     EitherT.fromEither[Future](
@@ -103,6 +103,39 @@ class ParticipantTopologyManager(
       .traverse(_.addedNewTransactions(timestamp, transactions))
       .map(_ => ())
       .onShutdown(())
+
+  private def checkPartyHasActiveContracts(
+      callbacks: PostInitCallbacks,
+      transaction: PartyToParticipant,
+      force: Boolean,
+  )(implicit traceContext: TraceContext): EitherT[Future, ParticipantTopologyManagerError, Unit] = {
+    transaction match {
+      case PartyToParticipant(_, partyId: PartyId, _, _) =>
+        if (force) {
+          logger.info(
+            show"Using force to disable party $partyId in participant ${transaction.participant}"
+          )
+          EitherT.rightT[Future, ParticipantTopologyManagerError](())
+        } else {
+          for {
+            hasActiveContracts <- EitherT.liftF(
+              callbacks
+                .partyHasActiveContracts(partyId)
+            )
+            res <- EitherT
+              .cond[Future](
+                !hasActiveContracts,
+                (),
+                ParticipantTopologyManagerError.DisablePartyWithActiveContractsRequiresForce.Reject(
+                  partyId
+                ),
+              ): EitherT[Future, ParticipantTopologyManagerError, Unit]
+          } yield res
+        }
+      // anything else, pass through
+      case _ => EitherT.rightT(())
+    }
+  }
 
   private def checkOwnerToKeyMappingRefersToExistingKeys(
       participantId: ParticipantId,
@@ -181,6 +214,20 @@ class ParticipantTopologyManager(
   )(implicit traceContext: TraceContext): EitherT[Future, ParticipantTopologyManagerError, Unit] =
     runIfInitialized(participantIdO, "Participant id is not set yet", run)
 
+  private def runWithCallbacksAndParticipantId(
+      run: (
+          ParticipantId,
+          PostInitCallbacks,
+      ) => EitherT[Future, ParticipantTopologyManagerError, Unit]
+  )(implicit traceContext: TraceContext): EitherT[Future, ParticipantTopologyManagerError, Unit] =
+    runWithParticipantId(participantId =>
+      runIfInitialized(
+        postInitCallbacks,
+        "Post init callbacks are not set yet",
+        (callbacks: PostInitCallbacks) => run(participantId, callbacks),
+      )
+    )
+
   private def runIfInitialized[A](
       itemO: AtomicReference[Option[A]],
       msg: String,
@@ -200,21 +247,15 @@ class ParticipantTopologyManager(
       force: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, ParticipantTopologyManagerError, Unit] =
     transaction.transaction.element.mapping match {
+      case x: PartyToParticipant if transaction.operation == TopologyChangeOp.Remove =>
+        runWithCallbacksAndParticipantId((_, callbacks) =>
+          checkPartyHasActiveContracts(callbacks, x, force)
+        )
       case x: OwnerToKeyMapping if transaction.operation == TopologyChangeOp.Add =>
         runWithParticipantId(checkOwnerToKeyMappingRefersToExistingKeys(_, x, force))
       case _: VettedPackages =>
-        runWithParticipantId(participantId =>
-          runIfInitialized(
-            postInitCallbacks,
-            "Post init callbacks are not set yet",
-            (callbacks: PostInitCallbacks) =>
-              checkPackageVettingRefersToExistingPackages(
-                participantId,
-                callbacks,
-                transaction,
-                force,
-              ),
-          )
+        runWithCallbacksAndParticipantId(
+          checkPackageVettingRefersToExistingPackages(_, _, transaction, force)
         )
       case _ => EitherT.rightT(())
     }
@@ -343,7 +384,7 @@ class ParticipantTopologyManager(
               .Reject("Participant id is not yet set")
           )
       )
-      callbacks <- packageService
+      callbacks <- packageAndSyncService
       isVetted <- EitherT.right(unvettedPackages(participantId, packageSet).map(_.isEmpty))
       _ <-
         if (isVetted) {
@@ -365,14 +406,17 @@ class ParticipantTopologyManager(
 }
 
 object ParticipantTopologyManager {
-  // the package service depends on the topology manager and vice versa. therefore, we do have to inject these callbacks after init
+  // the package and sync service
+  // depends on the topology manager and vice versa. therefore, we do have to inject these callbacks after init
   trait PostInitCallbacks {
     def clients(): Seq[DomainTopologyClient]
     def packageDependencies(packages: List[PackageId])(implicit
         traceContext: TraceContext
     ): EitherT[Future, PackageId, Set[PackageId]]
+    def partyHasActiveContracts(partyId: PartyId)(implicit
+        traceContext: TraceContext
+    ): Future[Boolean]
   }
-
 }
 
 sealed trait ParticipantTopologyManagerError extends CantonError
@@ -493,6 +537,26 @@ object ParticipantTopologyManagerError extends ParticipantErrorGroup {
     case class NoSuchKey(fingerprint: Fingerprint)(implicit val loggingContext: ErrorLoggingContext)
         extends CantonError.Impl(
           cause = show"Can not assign unknown key $fingerprint to this participant"
+        )
+        with ParticipantTopologyManagerError
+  }
+
+  @Explanation(
+    """This error indicates that a dangerous PartyToParticipant mapping deletion was rejected.
+      |If the command is run and there are active contracts where the party is a stakeholder these contracts
+      |will become inoperable and will never get pruned, leaking storage.
+      | """
+  )
+  @Resolution("Set force=true if you really know what you are doing.")
+  object DisablePartyWithActiveContractsRequiresForce
+      extends ErrorCode(
+        id = "DISABLE_PARTY_WITH_ACTIVE_CONTRACTS_REQUIRES_FORCE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class Reject(partyId: PartyId)(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            show"Disable party $partyId failed because there are active contracts where the party is a stakeholder"
         )
         with ParticipantTopologyManagerError
   }

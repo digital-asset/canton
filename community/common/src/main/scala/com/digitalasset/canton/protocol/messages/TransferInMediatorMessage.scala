@@ -19,6 +19,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
+  TargetProtocolVersion,
 }
 
 import java.util.UUID
@@ -40,10 +41,10 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
   private[this] val commonData = tree.commonData.tryUnwrap
 
   // Align the protocol version with the common data's protocol version
+  lazy val protocolVersion: TargetProtocolVersion = commonData.targetProtocolVersion
+
   lazy val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInMediatorMessage] =
-    TransferInMediatorMessage.protocolVersionRepresentativeFor(
-      commonData.representativeProtocolVersion.unwrap
-    )
+    TransferInMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.v)
 
   override def domainId: DomainId = commonData.targetDomain
 
@@ -74,7 +75,7 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
       informees,
       TransferInDomainId(domainId),
       verdict,
-      representativeProtocolVersion.unwrap,
+      protocolVersion.v,
     )
   }
 
