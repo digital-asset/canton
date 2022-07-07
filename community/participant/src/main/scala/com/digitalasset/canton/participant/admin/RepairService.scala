@@ -676,10 +676,12 @@ class RepairService(
       skipInactive: Boolean,
       batchSize: PositiveInt,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
-    cids
-      .grouped(batchSize.value)
-      .toSeq
-      .traverse_(moveContracts(_, repairSource, repairTarget, skipInactive))
+    // TODO(i9270) extract magic numbers
+    MonadUtil
+      .batchedSequentialTraverse(20, batchSize.value)(cids)(
+        moveContracts(_, repairSource, repairTarget, skipInactive).map(_ => Seq[Unit]())
+      )
+      .map(_ => ())
 
   /** Move contract from `repairSource` to `repairTarget`. */
   private def moveContracts(

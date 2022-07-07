@@ -54,12 +54,12 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     }
 
     "return the protocol representative" in {
-      protocolVersionRepresentative(2).unwrap shouldBe protocolVersion(2)
-      protocolVersionRepresentative(3).unwrap shouldBe protocolVersion(2)
-      protocolVersionRepresentative(4).unwrap shouldBe protocolVersion(4)
-      protocolVersionRepresentative(5).unwrap shouldBe protocolVersion(5)
-      protocolVersionRepresentative(6).unwrap shouldBe protocolVersion(5)
-      protocolVersionRepresentative(7).unwrap shouldBe protocolVersion(5)
+      protocolVersionRepresentative(2).representative shouldBe protocolVersion(2)
+      protocolVersionRepresentative(3).representative shouldBe protocolVersion(2)
+      protocolVersionRepresentative(4).representative shouldBe protocolVersion(4)
+      protocolVersionRepresentative(5).representative shouldBe protocolVersion(5)
+      protocolVersionRepresentative(6).representative shouldBe protocolVersion(5)
+      protocolVersionRepresentative(7).representative shouldBe protocolVersion(5)
     }
   }
 }

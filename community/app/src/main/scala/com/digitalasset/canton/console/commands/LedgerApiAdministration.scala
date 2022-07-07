@@ -953,7 +953,11 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
     // as the Exercise events don't contain the informees of the Exercise action.
     val tree = ledger_api.transactions
       .by_id(domainParties, transactionId)
-      .getOrElse(throw new IllegalStateException(s"Can't find transaction by ID: ${transactionId}"))
+      .getOrElse(
+        throw new IllegalStateException(
+          s"Can't find transaction by ID: ${transactionId}. Queried parties: $domainParties"
+        )
+      )
     val witnesses = tree.eventsById.values
       .flatMap { ev =>
         ev.kind.created.fold(Seq.empty[String])(ev => ev.witnessParties) ++

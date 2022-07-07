@@ -85,6 +85,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 
@@ -175,7 +176,7 @@ class SyncDomain(
     seedGenerator,
     sequencerClient,
     timeouts,
-    staticDomainParameters.protocolVersion,
+    SourceProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
   )
 
@@ -191,7 +192,7 @@ class SyncDomain(
     sequencerClient,
     parameters.enableCausalityTracking,
     timeouts,
-    staticDomainParameters.protocolVersion,
+    TargetProtocolVersion(staticDomainParameters.protocolVersion),
     loggerFactory,
   )
 
@@ -309,19 +310,27 @@ class SyncDomain(
   ): EitherT[Future, SyncDomainInitializationError, Unit] = {
     def liftF[A](f: Future[A]): EitherT[Future, SyncDomainInitializationError, A] = EitherT.liftF(f)
 
-    def withMetadata(cid: LfContractId): Future[StoredContract] = {
-      persistent.contractStore.lookup(cid).value.map {
-        case None =>
-          val errMsg = s"Contract $cid in active contract store but not in the contract store"
-          ErrorUtil.internalError(new IllegalStateException(errMsg))
-        case Some(sc) => sc
-      }
-    }
+    def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[StoredContract]] =
+      persistent.contractStore
+        .lookupManyUncached(cids)
+        .map(_.zip(cids).map {
+          case (None, cid) =>
+            val errMsg = s"Contract $cid is in active contract store but not in the contract store"
+            ErrorUtil.internalError(new IllegalStateException(errMsg))
+          case (Some(sc), _) => sc
+        })
 
     def lookupChangeMetadata(change: ActiveContractIdsChange): Future[AcsChange] = {
       for {
-        storedActivatedContracts <- change.activations.toList.traverse(withMetadata)
-        storedDeactivatedContracts <- change.deactivations.toList.traverse(withMetadata)
+        // TODO(i9270) extract magic numbers
+        storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
+          parallelism = 20,
+          batchSize = 500,
+        )(change.activations.toSeq)(withMetadataSeq)
+        storedDeactivatedContracts <- MonadUtil
+          .batchedSequentialTraverse(parallelism = 20, batchSize = 500)(change.deactivations.toSeq)(
+            withMetadataSeq
+          )
       } yield {
         AcsChange(
           activations = storedActivatedContracts

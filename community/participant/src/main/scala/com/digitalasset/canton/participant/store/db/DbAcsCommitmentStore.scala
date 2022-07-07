@@ -73,7 +73,8 @@ class DbAcsCommitmentStore(
           ),
         m =>
           m.message match {
-            case cmt: AcsCommitment => SignedProtocolMessage(cmt, m.signature)
+            case cmt: AcsCommitment =>
+              SignedProtocolMessage(cmt, m.signature)(m.representativeProtocolVersion)
             case v =>
               throw new DbDeserializationException(
                 s"Expected a signed ACS commitment, but got a $v"

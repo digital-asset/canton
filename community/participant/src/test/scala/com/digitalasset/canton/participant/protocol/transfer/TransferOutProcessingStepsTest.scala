@@ -55,6 +55,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.SourceProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -190,7 +191,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       damle,
       coordination,
       seedGenerator,
-      defaultProtocolVersion,
+      SourceProtocolVersion(defaultProtocolVersion),
       loggerFactory,
     )(executorService)
 
@@ -237,6 +238,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           submitter,
           stakeholders,
           originDomain,
+          SourceProtocolVersion(defaultProtocolVersion),
           originMediator,
           targetDomain,
           originIps,
@@ -373,6 +375,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               adminParties = Set(adminSubmitter, admin3, admin4),
               contractId = contractId,
               originDomain = originDomain,
+              sourceProtocolVersion = SourceProtocolVersion(defaultProtocolVersion),
               originMediator = originMediator,
               targetDomain = targetDomain,
               targetTimeProof = timeEvent,
@@ -395,6 +398,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               adminParties = Set(adminSubmitter, admin1),
               contractId = contractId,
               originDomain = originDomain,
+              sourceProtocolVersion = SourceProtocolVersion(defaultProtocolVersion),
               originMediator = originMediator,
               targetDomain = targetDomain,
               targetTimeProof = timeEvent,
@@ -479,6 +483,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       Set(party1),
       contractId,
       originDomain,
+      SourceProtocolVersion(defaultProtocolVersion),
       originMediator,
       targetDomain,
       timeEvent,
@@ -557,6 +562,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         Set(submittingParticipant.adminParty.toLf),
         contractId,
         originDomain,
+        SourceProtocolVersion(defaultProtocolVersion),
         originMediator,
         targetDomain,
         timeEvent,
@@ -607,7 +613,12 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           defaultProtocolVersion,
         )
       for {
-        signedResult <- SignedProtocolMessage.tryCreate(transferResult, cryptoSnapshot, pureCrypto)
+        signedResult <- SignedProtocolMessage.tryCreate(
+          transferResult,
+          cryptoSnapshot,
+          pureCrypto,
+          defaultProtocolVersion,
+        )
         deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] = {
           val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
             Batch.of(defaultProtocolVersion, (signedResult, Recipients.cc(submittingParticipant)))
@@ -660,7 +671,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       uuid: UUID = new UUID(6L, 7L),
   ): FullTransferOutTree = {
     val seed = seedGenerator.generateSaltSeed()
-    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid, defaultProtocolVersion)
+    request.toFullTransferOutTree(pureCrypto, pureCrypto, seed, uuid)
   }
 
   def encryptTransferOutTree(

@@ -68,7 +68,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
   val domainId = DomainId.tryFromString("messageDispatcher::domain")
   val originDomain = DomainId.tryFromString("originDomain::originDomain")
-  val participantId = ParticipantId.tryFromProtoPrimitive("messageDispatcher::participant")
+  val participantId = ParticipantId.tryFromProtoPrimitive("PAR::messageDispatcher::participant")
   val mediatorId = MediatorId(domainId)
   val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
 
@@ -300,11 +300,13 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
     SignedProtocolMessage(
       TestRegularMediatorResult(TestViewType, domainId, Verdict.Approve, requestId),
       dummySignature,
+      defaultProtocolVersion,
     )
   val otherTestMediatorResult =
     SignedProtocolMessage(
       TestRegularMediatorResult(OtherTestViewType, domainId, Verdict.Approve, requestId),
       dummySignature,
+      defaultProtocolVersion,
     )
 
   val causalityMessage = CausalityMessage(
@@ -355,7 +357,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       AcsCommitment.protocolVersionRepresentativeFor(defaultProtocolVersion)
     )
 
-    val commitment = SignedProtocolMessage(rawCommitment, dummySignature)
+    val commitment = SignedProtocolMessage(rawCommitment, dummySignature, defaultProtocolVersion)
 
     val reject = MediatorReject.Timeout.Reject()
     val malformedMediatorRequestResult =
@@ -368,6 +370,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           defaultProtocolVersion,
         ),
         dummySignature,
+        defaultProtocolVersion,
       )
 
     def checkTickIdentityProcessor(
@@ -682,6 +685,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         SignedProtocolMessage(
           TestRegularMediatorResult(UnknownTestViewType, domainId, Verdict.Approve, requestId),
           dummySignature,
+          defaultProtocolVersion,
         )
       val event =
         mkDeliver(
@@ -754,7 +758,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
             viewType,
             SerializedRootHashMessagePayload.empty,
           )
-        val otherParticipant = ParticipantId.tryFromProtoPrimitive("other::participant")
+        val otherParticipant = ParticipantId.tryFromProtoPrimitive("PAR::other::participant")
         // Batch -> expected alarms -> expected reaction
         val badBatches = List(
           Batch.of[ProtocolMessage](defaultProtocolVersion, view -> Recipients.cc(participantId)) ->
@@ -1085,6 +1089,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                 defaultProtocolVersion,
               ),
               dummySignature,
+              defaultProtocolVersion,
             )
           val batch = Batch.of(defaultProtocolVersion, result -> Recipients.cc(participantId))
           val sut = mk()

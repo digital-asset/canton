@@ -20,6 +20,7 @@ import com.digitalasset.canton.protocol.{
   TransactionId,
   ViewHash,
   v0,
+  v1,
 }
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -34,6 +35,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
+  TargetProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -102,12 +104,15 @@ sealed abstract case class TransferInCommonData private (
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInCommonData],
+    val targetProtocolVersion: TargetProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferInCommonData]
     with ProtocolVersionedMemoizedEvidence
     with NoCopy {
+
+  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInCommonData] =
+    TransferInCommonData.protocolVersionRepresentativeFor(targetProtocolVersion.v)
 
   def confirmingParties: Set[Informee] = stakeholders.map(ConfirmingParty(_, 1))
 
@@ -119,6 +124,15 @@ sealed abstract case class TransferInCommonData private (
     targetMediator = targetMediator.toProtoPrimitive,
     stakeholders = stakeholders.toSeq,
     uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+  )
+
+  protected def toProtoV1: v1.TransferInCommonData = v1.TransferInCommonData(
+    salt = Some(salt.toProtoV0),
+    targetDomain = targetDomain.toProtoPrimitive,
+    targetMediator = targetMediator.toProtoPrimitive,
+    stakeholders = stakeholders.toSeq,
+    uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+    targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
   )
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInCommonData
@@ -144,7 +158,13 @@ object TransferInCommonData
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(i9423): Migrate to next protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersionMemoized(v1.TransferInCommonData)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -153,11 +173,11 @@ object TransferInCommonData
       targetMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       uuid: UUID,
-      protocolVersion: ProtocolVersion,
+      targetProtocolVersion: TargetProtocolVersion,
   ): TransferInCommonData =
     new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(
       hashOps,
-      protocolVersionRepresentativeFor(protocolVersion),
+      targetProtocolVersion,
       None,
     ) {}
 
@@ -174,7 +194,35 @@ object TransferInCommonData
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
     } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      TargetProtocolVersion(
+        protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
+      ),
+      Some(bytes),
+    ) {}
+  }
+
+  private[this] def fromProtoV1(hashOps: HashOps, transferInCommonDataP: v1.TransferInCommonData)(
+      bytes: ByteString
+  ): ParsingResult[TransferInCommonData] = {
+    val v1.TransferInCommonData(
+      saltP,
+      targetDomainP,
+      stakeholdersP,
+      uuidP,
+      targetMediatorP,
+      protocolVersionP,
+    ) =
+      transferInCommonDataP
+    for {
+      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
+      targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "target_domain")
+      targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
+      stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
+      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+    } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
+      hashOps,
+      TargetProtocolVersion(protocolVersion),
       Some(bytes),
     ) {}
   }
@@ -261,7 +309,7 @@ object TransferInView
       saltP,
       submitterP,
       contractP,
-      transferOutResultEventP,
+      transferOutResultEventPO,
       creatingTransactionIdP,
     ) =
       transferInViewP
@@ -271,23 +319,26 @@ object TransferInView
       contract <- ProtoConverter
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV0)
+
+      // TransferOutResultEvent deserialization
+      transferOutResultEventP <- ProtoConverter
+        .required("TransferInView.transferOutResultEvent", transferOutResultEventPO)
+
       // TODO(i9626): Requires protocol version of the source domain
       sourceDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
-      transferOutResultEventMC <- ProtoConverter
-        .required("TransferInView.transferOutResultEvent", transferOutResultEventP)
-        .flatMap(
-          SignedContent.fromProtoV0(
-            SequencedEvent.fromByteString(
-              OpenEnvelope.fromProtoV0(
-                EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
-                  _
-                ),
-                sourceDomainPV,
-              )
-            ),
-            _,
-          )
-        )
+      envelopeDeserializer = (envelopeP: v0.Envelope) =>
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
+            _
+          ),
+          sourceDomainPV,
+        )(envelopeP)
+
+      transferOutResultEventMC <- SignedContent.fromProtoV0(
+        contentDeserializer = SequencedEvent.fromByteString(envelopeDeserializer),
+        transferOutResultEventP,
+      )
+
       transferOutResultEvent <- DeliveredTransferOutResult
         .create(transferOutResultEventMC)
         .leftMap(err => OtherError(err.toString))

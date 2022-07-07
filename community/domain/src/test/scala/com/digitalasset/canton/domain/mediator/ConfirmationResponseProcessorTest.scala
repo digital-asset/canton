@@ -193,12 +193,13 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         response,
         participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
         participantCrypto.pureCrypto,
+        defaultProtocolVersion,
       )
     }
 
     "timestamp of mediator request is propagated" in {
       val sut = Fixture()
-      val testMediatorRequest = new InformeeMessage(fullInformeeTree) {
+      val testMediatorRequest = new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
         override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           super.informeesAndThresholdByView map { case (key, (informee, _)) =>
             (key, (informee, NonNegativeInt.zero))
@@ -231,7 +232,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
     "request timestamp is propagated to mediator result when response aggregation is performed" should {
       // Send mediator request
-      val informeeMessage = new InformeeMessage(fullInformeeTree) {
+      val informeeMessage = new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
         override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val top = super.informeesAndThresholdByView
           top map { case (key, (informee, _)) =>
@@ -340,7 +341,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val domainSyncCryptoApi3 = identityFactory3.forOwnerAndDomain(mediatorId, domainId)
       val sut = new Fixture(domainSyncCryptoApi3)
 
-      val mediatorRequest = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val mediatorRequest = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
@@ -392,7 +393,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
     "request rejected when informee not hosted on active participant" in {
       val sut = Fixture()
-      val informeeMessage = new InformeeMessage(fullInformeeTree) {
+      val informeeMessage = new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
         override def informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val top = super.informeesAndThresholdByView
           top map { case (key, (informee, _)) =>
@@ -450,7 +451,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val sut = new Fixture(domainSyncCryptoApi2)
       val correctRootHash = RootHash(TestHash.digest("root-hash"))
       // Create a custom informee message with several recipient participants
-      val informeeMessage = new InformeeMessage(fullInformeeTree) {
+      val informeeMessage = new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
         override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val submitterI = Informee.tryCreate(submitter, 1)
           val signatoryI = Informee.tryCreate(signatory, 1)
@@ -495,7 +496,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         ),
       )
 
-      sequentialTraverse_(tests.zipWithIndex) { case ((testName, recipients), i) =>
+      sequentialTraverse_(tests.zipWithIndex) { case ((_testName, recipients), i) =>
         withClueF("testname") {
           val rootHashMessages =
             recipients.map(r => OpenEnvelope(rootHashMessage, r, defaultProtocolVersion))
@@ -513,7 +514,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     "send rejections when receiving wrong root hash messages" in {
       val sut = Fixture()
 
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
       val rootHash = informeeMessage.rootHash.value
       val wrongRootHash =
         RootHash(
@@ -583,7 +584,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           .cc(mediatorId, otherMember),
       )
       val requestWithoutExpectedRootHashMessage = exampleForRequest(
-        new InformeeMessage(fullInformeeTree) {
+        new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
           override def rootHash: Option[RootHash] = None
         },
         correctRootHashMessage -> Recipients.cc(mediatorId, participant),
@@ -698,7 +699,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         new ExampleTransactionFactory()(domainId = domainId, mediatorId = otherMediatorId)
       val fullInformeeTreeOther =
         factoryOtherMediatorId.MultipleRootsAndViewNestings.fullInformeeTree
-      val mediatorRequest = InformeeMessage(fullInformeeTreeOther, defaultProtocolVersion)
+      val mediatorRequest = InformeeMessage(fullInformeeTreeOther)(defaultProtocolVersion)
       val rootHashMessage = RootHashMessage(
         mediatorRequest.rootHash.value,
         domainId,
@@ -708,7 +709,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       )
 
       val sc = 10L
-      val ts = CantonTimestamp.ofEpochSecond(sc.toLong)
+      val ts = CantonTimestamp.ofEpochSecond(sc)
       for {
         _ <- loggerFactory.assertLogs(
           sut.processor.processRequest(
@@ -735,7 +736,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
     "correct series of mediator events" in {
       val sut = Fixture()
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,
@@ -829,7 +830,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val sut = new Fixture(domainSyncCryptoApi2)
 
       // Create a custom informee message with many quorums such that the first Malformed rejection doesn't finalize the request
-      val informeeMessage = new InformeeMessage(fullInformeeTree) {
+      val informeeMessage = new InformeeMessage(fullInformeeTree)(defaultProtocolVersion) {
         override val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] = {
           val submitterI = Informee.tryCreate(submitter, 1)
           val signatoryI = Informee.tryCreate(signatory, 1)
@@ -888,6 +889,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           response,
           participantCrypto.tryForDomain(domainId).currentSnapshotApproximation,
           participantCrypto.pureCrypto,
+          defaultProtocolVersion,
         )
       }
 
@@ -953,7 +955,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       // response is just too late
       val responseTs = requestTs.add(participantResponseTimeout.unwrap).addMicros(1)
 
-      val informeeMessage = InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      val informeeMessage = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
       val rootHashMessage = RootHashMessage(
         fullInformeeTree.transactionId.toRootHash,
         domainId,

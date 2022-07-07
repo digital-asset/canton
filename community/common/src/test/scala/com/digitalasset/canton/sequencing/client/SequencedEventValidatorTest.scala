@@ -65,7 +65,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
     val message = {
       val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()
       val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
-      InformeeMessage(fullInformeeTree, defaultProtocolVersion)
+      InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
     }
     val deliver: Deliver[ClosedEnvelope] = Deliver.create[ClosedEnvelope](
       counter,

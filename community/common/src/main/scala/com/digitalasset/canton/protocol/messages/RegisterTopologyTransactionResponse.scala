@@ -177,6 +177,7 @@ object RegisterTopologyTransactionResponse
   def create(
       request: RegisterTopologyTransactionRequest,
       results: List[Result],
+      protocolVersion: ProtocolVersion,
   ): RegisterTopologyTransactionResponse = {
     RegisterTopologyTransactionResponse(
       request.requestedBy,
@@ -185,9 +186,7 @@ object RegisterTopologyTransactionResponse
       results,
       request.domainId,
     )(
-      RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(
-        request.representativeProtocolVersion.unwrap
-      )
+      RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(protocolVersion)
     )
   }
 }

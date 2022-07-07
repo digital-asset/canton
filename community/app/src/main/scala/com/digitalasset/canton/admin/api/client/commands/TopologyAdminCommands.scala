@@ -230,12 +230,13 @@ object TopologyAdminCommands {
         participant: ParticipantId,
         permission: ParticipantPermission,
         replaceExisting: Boolean,
+        force: Boolean,
     ) extends BaseCommand[v0.PartyToParticipantAuthorization] {
 
       override def createRequest(): Either[String, v0.PartyToParticipantAuthorization] =
         Right(
           v0.PartyToParticipantAuthorization(
-            authData(ops, signedBy, replaceExisting = replaceExisting, force = false),
+            authData(ops, signedBy, replaceExisting = replaceExisting, force = force),
             side.toProtoEnum,
             party.uid.toProtoPrimitive,
             participant.toProtoPrimitive,

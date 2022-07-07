@@ -799,9 +799,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       filterOps = Seq(TopologyChangeOp.Add, TopologyChangeOp.Replace),
     ).map(_.positiveTransactions)
 
-  /** query interface used by DomainIdentityManager to find the set of initial keys */
+  /** query interface used by DomainTopologyManager to find the set of initial keys */
   override def findInitialState(
-      uid: UniqueIdentifier
+      id: DomainTopologyManagerId
   )(implicit traceContext: TraceContext): Future[Map[KeyOwner, Seq[PublicKey]]] = {
     val batchNum = 100
     def go(
@@ -814,7 +814,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       queryForTransactions(transactionStoreIdName, query, lm)
         .map(_.toDomainTopologyTransactions.foldLeft(start) {
           case ((false, count, acc), transaction) =>
-            val (bl, map) = TopologyStore.findInitialStateAccumulator(uid, acc, transaction)
+            val (bl, map) = TopologyStore.findInitialStateAccumulator(id.uid, acc, transaction)
             (bl, count + 1, map)
           case ((bl, count, map), _) => (bl, count + 1, map)
         })

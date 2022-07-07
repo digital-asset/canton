@@ -94,12 +94,16 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         .mapK(FutureUnlessShutdown.outcomeK)
 
       // Perform the version handshake
-      _ <- performHandshake(
+      success <- performHandshake(
         sequencerConnectClient,
         config.domain,
         domainId,
         protocolConfig,
       ).mapK(FutureUnlessShutdown.outcomeK)
+
+      _ = logger.info(
+        s"Version handshake with domain using protocol version ${success.serverVersion} succeeded."
+      )
 
       _ <- aliasManager
         .processHandshake(config.domain, domainId)(loggingContext.traceContext)
@@ -315,6 +319,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             ),
             protocolConfig.minimumProtocolVersion,
           ),
+          protocolConfig.dontWarnOnDeprecatedPV,
         )
         .leftMap(DomainRegistryHelpers.toDomainRegistryError(alias))
         .subflatMap {
@@ -322,7 +327,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           case HandshakeResponse.Failure(_, reason) =>
             DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(reason).asLeft
         }
-
       _ <- aliasManager
         .processHandshake(alias, domainId)(loggingContext.traceContext)
         .leftMap(toDomainRegistryError)

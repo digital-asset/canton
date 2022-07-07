@@ -13,7 +13,7 @@ import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.HandshakeErrors.UnsafePvVersion2_0_0
+import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.net.URI
@@ -192,8 +192,11 @@ object CommunityConfigValidations
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     config.participants.toSeq.map { case (name, config) =>
       val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
-      if (minimum.getOrElse(ProtocolVersion.v2_0_0) == ProtocolVersion.v2_0_0)
-        UnsafePvVersion2_0_0.WarnParticipant(name, minimum)
+      val isMinimumDeprecatedVersion =
+        ProtocolVersion.deprecated.contains(minimum.getOrElse(ProtocolVersion.v2_0_0))
+
+      if (isMinimumDeprecatedVersion && !config.parameters.dontWarnOnDeprecatedPV)
+        DeprecatedProtocolVersion.WarnParticipant(name, minimum)
     }
     Validated.valid(())
   }
@@ -201,10 +204,12 @@ object CommunityConfigValidations
   private def warnIfUnsafeProtocolVersionEmbeddedDomain(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    config.domains.toSeq.map { case (name, config) =>
+    config.domains.toSeq.foreach { case (name, config) =>
       val pv = config.domainParameters.protocolVersion.unwrap
-      if (pv == ProtocolVersion.v2_0_0)
-        UnsafePvVersion2_0_0.WarnDomain(name)
+      if (pv.isDeprecated && !config.domainParameters.dontWarnOnDeprecatedPV)
+        DeprecatedProtocolVersion.WarnDomain(name, pv)
+
+      logger.info(s"Domain $name is using protocol version $pv")
     }
     Validated.valid(())
   }

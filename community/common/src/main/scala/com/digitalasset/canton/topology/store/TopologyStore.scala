@@ -388,8 +388,8 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: Execution
       traceContext: TraceContext
   ): Future[PositiveStoredTopologyTransactions]
 
-  /** query interface used by DomainIdentityManager to find the set of initial keys */
-  def findInitialState(uid: UniqueIdentifier)(implicit
+  /** query interface used by DomainTopologyManager to find the set of initial keys */
+  def findInitialState(id: DomainTopologyManagerId)(implicit
       traceContext: TraceContext
   ): Future[Map[KeyOwner, Seq[PublicKey]]]
 

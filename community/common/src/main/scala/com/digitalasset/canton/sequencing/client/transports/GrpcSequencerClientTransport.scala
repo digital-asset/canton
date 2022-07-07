@@ -126,7 +126,7 @@ class GrpcSequencerClientTransport(
       // log that we're swallowing the error
       result.foreach { _ =>
         logger.info(
-          s"Send [${request.messageId}] returned an error however may still be possibility sequenced so we are ignoring the error: $error"
+          s"Send [${request.messageId}] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
         )
       }
 

@@ -4,9 +4,12 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
+import cats.instances.list._
+import cats.syntax.foldable._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract, TransactionId}
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
@@ -76,6 +79,23 @@ trait ContractStore extends ContractLookup {
   def deleteDivulged(upTo: RequestCounter)(implicit traceContext: TraceContext): Future[Unit]
 
   def contractCount()(implicit traceContext: TraceContext): Future[Int]
+
+  def hasActiveContracts(partyId: PartyId, contractIds: Vector[LfContractId], batchSize: Int = 10)(
+      implicit traceContext: TraceContext
+  ): Future[Boolean] = {
+    val lfParty = partyId.toLf
+    contractIds
+      .grouped(batchSize)
+      .toList
+      .findM(cids =>
+        lookupStakeholders(cids.toSet).value.map {
+          case Right(x) =>
+            x.exists { case (_, listParties) => listParties.contains(lfParty) }
+          case Left(_) => false
+        }
+      )
+      .map(_.nonEmpty)
+  }
 }
 
 /** Data to be stored for a contract.

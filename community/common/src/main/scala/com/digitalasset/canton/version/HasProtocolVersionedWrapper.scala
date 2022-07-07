@@ -16,8 +16,17 @@ trait HasRepresentativeProtocolVersion {
 }
 
 /** See method `representativeProtocolVersion` below for more context */
-sealed abstract case class RepresentativeProtocolVersion[+ValueClass](v: ProtocolVersion) {
-  def unwrap: ProtocolVersion = v
+sealed abstract case class RepresentativeProtocolVersion[+ValueClass](
+    private val v: ProtocolVersion
+) {
+
+  /** When using this method, keep in mind that for a given companion object `C` that implements
+    * `HasProtocolVersionedWrapperCompanion` and for a protocol version `pv`, then
+    * `C.protocolVersionRepresentativeFor(pv).representative` is different than `pv`.
+    * In particular, do not use a representative for a given class to construct a representative
+    * for another class.
+    */
+  def representative: ProtocolVersion = v
 }
 
 final case class ProtobufVersion(v: Int) extends AnyVal
@@ -45,6 +54,9 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
 
   protected def companionObj: HasProtocolVersionedWrapperCompanion[ValueClass]
 
+  def isEquivalentTo(protocolVersion: ProtocolVersion): Boolean =
+    companionObj.protocolVersionRepresentativeFor(protocolVersion) == representativeProtocolVersion
+
   /** We have a correspondence {protobuf version} <-> {[protocol version]}: each proto version
     * correspond to a list of consecutive protocol versions. The representative is one instance
     * of this list, usually the smallest value. In other words, the protobuf versions induce an
@@ -65,7 +77,7 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
     companionObj.supportedProtoVersions.converters
       .collectFirst {
         case (protoVersion, supportedVersion)
-            if representativeProtocolVersion.unwrap >= supportedVersion.fromInclusive.unwrap =>
+            if representativeProtocolVersion.representative >= supportedVersion.fromInclusive.representative =>
           VersionedMessage(supportedVersion.serializer(self), protoVersion.v)
       }
       .getOrElse {
@@ -139,7 +151,7 @@ trait HasSupportedProtoVersions[ValueClass] {
     def converterFor(protocolVersion: ProtocolVersion): VersionedProtoConverter =
       converters
         .collectFirst {
-          case (_, converter) if protocolVersion >= converter.fromInclusive.unwrap =>
+          case (_, converter) if protocolVersion >= converter.fromInclusive.representative =>
             converter
         }
         .getOrElse(higherConverter)
@@ -152,9 +164,7 @@ trait HasSupportedProtoVersions[ValueClass] {
     ).deserializer
 
     def serializerFor(protocolVersion: RepresentativeProtocolVersion[ValueClass]): Serializer =
-      converterFor(
-        protocolVersion.unwrap
-      ).serializer
+      converterFor(protocolVersion.representative).serializer
 
     def protocolVersionRepresentativeFor(
         protoVersion: ProtobufVersion
@@ -189,7 +199,7 @@ trait HasSupportedProtoVersions[ValueClass] {
       val (_, lowestProtocolVersion) = sortedConverters.last1
 
       require(
-        lowestProtocolVersion.fromInclusive.v == ProtocolVersion.minimum_protocol_version,
+        lowestProtocolVersion.fromInclusive.representative == ProtocolVersion.minimum_protocol_version,
         s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum_protocol_version}, found $lowestProtocolVersion",
       )
 

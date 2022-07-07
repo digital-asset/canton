@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
-import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.time.TimeProof
@@ -25,6 +25,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
+  SourceProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -104,22 +105,22 @@ object TransferOutViewTree
 /** Aggregates the data of a transfer-out request that is sent to the mediator and the involved participants.
   *
   * @param salt Salt for blinding the Merkle hash
-  * @param originDomain The domain to which the transfer-out request is sent
-  * @param originMediator The mediator that coordinates the transfer-out request on the origin domain
+  * @param sourceDomain The domain to which the transfer-out request is sent
+  * @param sourceMediator The mediator that coordinates the transfer-out request on the origin domain
   * @param stakeholders The stakeholders of the contract to be transferred
   * @param adminParties The admin parties of transferring transfer-out participants
   * @param uuid The request UUID of the transfer-out
   */
 sealed abstract case class TransferOutCommonData private (
     override val salt: Salt,
-    originDomain: DomainId,
-    originMediator: MediatorId,
+    sourceDomain: DomainId,
+    sourceMediator: MediatorId,
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
     uuid: UUID,
 )(
     hashOps: HashOps,
-    val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutCommonData],
+    val protocolVersion: SourceProtocolVersion,
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferOutCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferOutCommonData]
@@ -128,14 +129,28 @@ sealed abstract case class TransferOutCommonData private (
 
   override def companionObj = TransferOutCommonData
 
+  val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutCommonData] =
+    TransferOutCommonData.protocolVersionRepresentativeFor(protocolVersion.v)
+
   protected def toProtoV0: v0.TransferOutCommonData =
     v0.TransferOutCommonData(
       salt = Some(salt.toProtoV0),
-      originDomain = originDomain.toProtoPrimitive,
-      originMediator = originMediator.toProtoPrimitive,
+      originDomain = sourceDomain.toProtoPrimitive,
+      originMediator = sourceMediator.toProtoPrimitive,
       stakeholders = stakeholders.toSeq,
       adminParties = adminParties.toSeq,
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+    )
+
+  protected def toProtoV1: v1.TransferOutCommonData =
+    v1.TransferOutCommonData(
+      salt = Some(salt.toProtoV0),
+      sourceDomain = sourceDomain.toProtoPrimitive,
+      sourceMediator = sourceMediator.toProtoPrimitive,
+      stakeholders = stakeholders.toSeq,
+      adminParties = adminParties.toSeq,
+      uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
+      sourceProtocolVersion = protocolVersion.v.toProtoPrimitive,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -146,8 +161,8 @@ sealed abstract case class TransferOutCommonData private (
   def confirmingParties: Set[Informee] = (stakeholders ++ adminParties).map(ConfirmingParty(_, 1))
 
   override def pretty: Pretty[TransferOutCommonData] = prettyOfClass(
-    param("origin domain", _.originDomain),
-    param("origin mediator", _.originMediator),
+    param("origin domain", _.sourceDomain),
+    param("origin mediator", _.sourceMediator),
     param("stakeholders", _.stakeholders),
     param("admin parties", _.adminParties),
     param("uuid", _.uuid),
@@ -167,7 +182,13 @@ object TransferOutCommonData
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(i9423): Migrate to next protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersionMemoized(v1.TransferOutCommonData)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -177,7 +198,7 @@ object TransferOutCommonData
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
       uuid: UUID,
-      protocolVersion: ProtocolVersion,
+      protocolVersion: SourceProtocolVersion,
   ): TransferOutCommonData =
     new TransferOutCommonData(
       salt,
@@ -186,7 +207,7 @@ object TransferOutCommonData
       stakeholders,
       adminParties,
       uuid,
-    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None) {}
+    )(hashOps, protocolVersion, None) {}
 
   private[this] def fromProtoV0(hashOps: HashOps, transferOutCommonDataP: v0.TransferOutCommonData)(
       bytes: ByteString
@@ -213,7 +234,43 @@ object TransferOutCommonData
       stakeholders.toSet,
       adminParties.toSet,
       uuid,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
+    )(
+      hashOps,
+      SourceProtocolVersion(
+        protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
+      ),
+      Some(bytes),
+    ) {}
+  }
+
+  private[this] def fromProtoV1(hashOps: HashOps, transferOutCommonDataP: v1.TransferOutCommonData)(
+      bytes: ByteString
+  ): ParsingResult[TransferOutCommonData] = {
+    val v1.TransferOutCommonData(
+      saltP,
+      originDomainP,
+      stakeholdersP,
+      adminPartiesP,
+      uuidP,
+      mediatorIdP,
+      protocolVersionP,
+    ) = transferOutCommonDataP
+    for {
+      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
+      originDomain <- DomainId.fromProtoPrimitive(originDomainP, "origin_domain")
+      originMediator <- MediatorId.fromProtoPrimitive(mediatorIdP, "origin_mediator")
+      stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
+      adminParties <- adminPartiesP.traverse(ProtoConverter.parseLfPartyId)
+      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+    } yield new TransferOutCommonData(
+      salt,
+      originDomain,
+      originMediator,
+      stakeholders.toSet,
+      adminParties.toSet,
+      uuid,
+    )(hashOps, SourceProtocolVersion(protocolVersion), Some(bytes)) {}
   }
 }
 
@@ -336,7 +393,7 @@ case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def contractId: LfContractId = view.contractId
 
-  def originDomain: DomainId = commonData.originDomain
+  def originDomain: DomainId = commonData.sourceDomain
 
   def targetDomain: DomainId = view.targetDomain
 
@@ -346,7 +403,7 @@ case class FullTransferOutTree(tree: TransferOutViewTree)
 
   override def domainId: DomainId = originDomain
 
-  override def mediatorId: MediatorId = commonData.originMediator
+  override def mediatorId: MediatorId = commonData.sourceMediator
 
   override def informees: Set[Informee] = commonData.confirmingParties
 

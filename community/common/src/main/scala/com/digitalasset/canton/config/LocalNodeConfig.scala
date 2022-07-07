@@ -44,5 +44,6 @@ trait LocalNodeParameters {
   def cachingConfigs: CachingConfigs
   def nonStandardConfig: Boolean
   def devVersionSupport: Boolean
+  def dontWarnOnDeprecatedPV: Boolean
 
 }

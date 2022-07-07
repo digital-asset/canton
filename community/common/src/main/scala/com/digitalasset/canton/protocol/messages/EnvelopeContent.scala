@@ -24,11 +24,11 @@ final case class EnvelopeContent(message: ProtocolMessage)(
 ) extends HasProtocolVersionedWrapper[EnvelopeContent] {
 
   // TODO(i9627): Remove this distinction and define an unwrapped serialization for PV2 in the companion object
-  override def toByteString: ByteString = representativeProtocolVersion.unwrap match {
-    // TODO(i9423): Migrate to next protocol version
-    case ProtocolVersion.unstable_development => toProtoVersioned.toByteString
-    case _ => toProtoVersioned.getData
-  }
+  // TODO(i9423): Migrate to next protocol version
+  override def toByteString: ByteString =
+    if (isEquivalentTo(ProtocolVersion.unstable_development))
+      toProtoVersioned.toByteString
+    else toProtoVersioned.getData
 
   override def companionObj = EnvelopeContent
 }
@@ -99,7 +99,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
     import v1.EnvelopeContent.{SomeEnvelopeContent => Content}
     val message = envelopeContent.someEnvelopeContent match {
       case Content.InformeeMessage(messageP) =>
-        InformeeMessage.fromProtoV0(hashOps)(messageP)
+        InformeeMessage.fromProtoV1(hashOps)(messageP)
       case Content.DomainTopologyTransactionMessage(messageP) =>
         DomainTopologyTransactionMessage.fromProtoV0(messageP)
       case Content.EncryptedViewMessage(messageP) =>

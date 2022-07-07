@@ -75,8 +75,8 @@ object RegisterTopologyTransactionRequest
       domainId: DomainId,
       protocolVersion: ProtocolVersion,
   ): Iterable[RegisterTopologyTransactionRequest] =
-    transactions.groupBy(_.representativeProtocolVersion.unwrap).map {
-      case (transactionProtocolVersion, transactions) =>
+    transactions.groupBy(_.representativeProtocolVersion).map {
+      case (_transactionRepresentativeProtocolVersion, transactions) =>
         new RegisterTopologyTransactionRequest(
           requestedBy = requestedBy,
           participant = participant,

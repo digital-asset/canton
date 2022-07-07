@@ -271,7 +271,7 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
   @Help.Summary("List active owners with keys for given search arguments.")
   @Help.Description("""This command allows deep inspection of the topology state.
       |The response includes the public keys.
-      |Optional filterKeyOwnerType type can be 'ParticipantId.Code' , 'MediatorId.Code','SequencerId.Code', 'DomainIdentityManagerId.Code'.
+      |Optional filterKeyOwnerType type can be 'ParticipantId.Code' , 'MediatorId.Code','SequencerId.Code', 'DomainTopologyManagerId.Code'.
       |""")
   def list_owners(
       filterKeyOwnerUid: String = "",

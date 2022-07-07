@@ -61,6 +61,7 @@ import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -212,6 +213,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         Set.empty,
         coidAbs1,
         transferId.originDomain,
+        SourceProtocolVersion(defaultProtocolVersion),
         originMediator,
         targetDomain,
         TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
@@ -225,7 +227,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             pureCrypto,
             seed,
             uuid,
-            defaultProtocolVersion,
           )
         TransferData(
           transferId.requestTimestamp,
@@ -654,6 +655,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       Set.empty,
       contractId,
       transferId.originDomain,
+      SourceProtocolVersion(defaultProtocolVersion),
       originMediator,
       targetDomain,
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
@@ -666,7 +668,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pureCrypto,
         seed,
         uuid,
-        defaultProtocolVersion,
       )
     val transferData =
       TransferData(
@@ -824,7 +825,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       ),
       seedGenerator,
       causalityTracking = true,
-      defaultProtocolVersion,
+      TargetProtocolVersion(defaultProtocolVersion),
       loggerFactory = loggerFactory,
     )
   }
@@ -851,7 +852,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetMediator,
       transferOutResult,
       uuid,
-      defaultProtocolVersion,
+      TargetProtocolVersion(defaultProtocolVersion),
     )
   }
 
@@ -928,7 +929,10 @@ object TransferInProcessingStepsTest {
         protocolVersion,
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
-      Await.result(SignedProtocolMessage.tryCreate(result, cryptoSnapshot, hashOps), 10.seconds)
+      Await.result(
+        SignedProtocolMessage.tryCreate(result, cryptoSnapshot, hashOps, protocolVersion),
+        10.seconds,
+      )
     val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
       Batch.of(protocolVersion, (signedResult, Recipients.cc(participantId)))
     val deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =

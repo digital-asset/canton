@@ -30,6 +30,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Recipients}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -42,6 +43,8 @@ abstract class AbstractMessageProcessor(
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with FlagCloseable {
+  private lazy val protocolVersion: ProtocolVersion =
+    sequencerClient.staticDomainParameters.protocolVersion
 
   protected def terminateRequest(
       requestCounter: RequestCounter,
@@ -79,7 +82,7 @@ abstract class AbstractMessageProcessor(
   protected def signResponse(ips: DomainSnapshotSyncCryptoApi, response: MediatorResponse)(implicit
       traceContext: TraceContext
   ): Future[SignedProtocolMessage[MediatorResponse]] =
-    SignedProtocolMessage.tryCreate(response, ips, ips.pureCrypto)
+    SignedProtocolMessage.tryCreate(response, ips, ips.pureCrypto, protocolVersion)
 
   // Assumes that we are not closing (i.e., that this is synchronized with shutdown somewhere higher up the call stack)
   protected def sendResponses(

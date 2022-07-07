@@ -412,7 +412,7 @@ case class TransactionView private (
         )
       )
     )
-    if (vpd.representativeProtocolVersion.unwrap < ProtocolVersion.v3_0_0) {
+    if (vpd.isEquivalentTo(ProtocolVersion.v2_0_0)) {
       ErrorUtil.internalError(
         new UnsupportedOperationException(
           s"$name can be computed only for protocol version ${ProtocolVersion.v3_0_0} and higher"
