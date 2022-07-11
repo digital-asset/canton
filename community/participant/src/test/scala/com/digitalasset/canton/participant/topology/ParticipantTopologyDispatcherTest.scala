@@ -31,7 +31,6 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, DomainAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -61,7 +60,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("beta"), namespace), publicKey),
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("gamma"), namespace), publicKey),
       IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("delta"), namespace), publicKey),
-    ).map(TopologyStateUpdate.createAdd(_, defaultProtocolVersion))
+    ).map(TopologyStateUpdate.createAdd(_, testedProtocolVersion))
   val slice1 = transactions.slice(0, 2)
   val slice2 = transactions.slice(slice1.length, transactions.length)
 
@@ -71,7 +70,14 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       TopologyStoreId.DomainStore(DefaultTestIdentities.domainId),
       loggerFactory,
     )
-    val manager = new ParticipantTopologyManager(clock, source, crypto, timeouts, loggerFactory)
+    val manager = new ParticipantTopologyManager(
+      clock,
+      source,
+      crypto,
+      timeouts,
+      testedProtocolVersion,
+      loggerFactory,
+    )
     val dispatcher =
       new ParticipantTopologyDispatcher(manager, timeouts, loggerFactory)
     val handle = new MockHandle(expect, store = target)
@@ -139,7 +145,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
   ] =
     MonadUtil
       .sequentialTraverse(transactions)(x =>
-        manager.authorize(x, Some(publicKey.fingerprint), ProtocolVersion.latestForTest)
+        manager.authorize(x, Some(publicKey.fingerprint), testedProtocolVersion)
       )
       .value
 
@@ -149,7 +155,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       client: DomainTopologyClientWithInit,
       target: TopologyStore[TopologyStoreId.DomainStore],
   ): Future[Unit] = dispatcher
-    .domainConnected(domain, domainId, defaultProtocolVersion, handle, client, target)
+    .domainConnected(domain, domainId, testedProtocolVersion, handle, client, target, crypto)
     .value
     .map(_ => ())
     .onShutdown(())
@@ -220,7 +226,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
       val another =
         TopologyStateUpdate.createAdd(
           IdentifierDelegation(UniqueIdentifier(Identifier.tryCreate("eta"), namespace), publicKey),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         )
 
       for {

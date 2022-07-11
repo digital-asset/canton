@@ -16,6 +16,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.NodeId
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
@@ -48,6 +49,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override def loggingConfig: LoggingConfig = ???
     override def devVersionSupport: Boolean = ???
     override def dontWarnOnDeprecatedPV: Boolean = ???
+    override def initialProtocolVersion: ProtocolVersion = ???
   }
   class TestNodeBootstrap extends CantonNodeBootstrap[TestNode] {
     override def name: InstanceName = ???

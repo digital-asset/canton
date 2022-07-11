@@ -112,7 +112,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
         actionDescription,
         RollbackContext.empty,
         salt,
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
     }
 

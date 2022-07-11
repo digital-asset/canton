@@ -45,7 +45,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         Set(alice, bob),
         NonNegativeInt.tryCreate(2),
         s(999),
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
     val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
     val commonMetadata = CommonMetadata(hashOps)(
@@ -54,7 +54,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       mediatorId,
       s(5417),
       new UUID(0L, 0L),
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
     FullInformeeTree(
       GenTransactionTree(hashOps)(
@@ -65,7 +65,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       )
     )
   }
-  val informeeMessage = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
+  val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
   val currentVersion =
     ResponseAggregation(
       requestId,
@@ -151,7 +151,7 @@ trait DbFinalizedResponseStoreTest
       new DbFinalizedResponseStore(
         storage,
         pureCryptoApi,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )

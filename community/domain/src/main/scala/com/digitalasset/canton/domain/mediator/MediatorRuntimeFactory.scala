@@ -109,15 +109,16 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[Future, String, MediatorRuntime] = {
+    val finalizedResponseStore = FinalizedResponseStore(
+      storage,
+      syncCrypto.pureCrypto,
+      protocolVersion,
+      nodeParameters.processingTimeouts,
+      loggerFactory,
+    )
     val state =
       new MediatorState(
-        FinalizedResponseStore(
-          storage,
-          syncCrypto.pureCrypto,
-          protocolVersion,
-          nodeParameters.processingTimeouts,
-          loggerFactory,
-        ),
+        finalizedResponseStore,
         metrics,
         nodeParameters.processingTimeouts,
         loggerFactory,

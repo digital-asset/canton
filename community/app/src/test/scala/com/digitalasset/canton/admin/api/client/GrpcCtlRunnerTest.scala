@@ -21,7 +21,7 @@ class GrpcCtlRunnerTest extends AsyncWordSpec with BaseTest {
       val (channel, command) = defaultMocks()
 
       "run successfully" in {
-        new GrpcCtlRunner(loggerFactory).run(
+        new GrpcCtlRunner(1000, 1000, loggerFactory).run(
           "participant1",
           command,
           channel,

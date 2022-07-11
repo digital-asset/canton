@@ -253,7 +253,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
               targetDomainStore,
               loggerFactory,
               sequencerClientFactory,
-              cryptoApiProvider.crypto.pureCrypto,
+              cryptoApiProvider.crypto,
               staticDomainParameters.protocolVersion,
             )
             _ <- EitherT.cond[FutureUnlessShutdown](

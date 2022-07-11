@@ -66,18 +66,14 @@ trait BaseTest
 
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
-  protected def defaultProtocolVersion: ProtocolVersion =
-    TestDomainParameters.defaultStatic.protocolVersion
-
-  protected def testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
-    .getOrElse(defaultProtocolVersion)
+  protected def testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
 
   protected def isTestedProtocolVersionDev: Boolean =
     testedProtocolVersion == ProtocolVersion.unstable_development
 
   protected def signedTransactionProtocolVersionRepresentative
       : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
-    SignedTopologyTransaction.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    SignedTopologyTransaction.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   // default to providing an empty trace context to all tests
   protected implicit def traceContext = TraceContext.empty
@@ -326,6 +322,8 @@ trait BaseTest
 }
 
 object BaseTest {
+  def testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
+    .getOrElse(TestDomainParameters.defaultStatic.protocolVersion)
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")

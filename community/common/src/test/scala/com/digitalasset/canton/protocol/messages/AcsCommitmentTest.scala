@@ -41,7 +41,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       counterParticipant,
       period1,
       cmt,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
 
   val commitment2 = AcsCommitment
@@ -51,7 +51,7 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
       counterParticipant,
       period2,
       cmt,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
 
   def fromByteString(bytes: ByteString): AcsCommitment = {

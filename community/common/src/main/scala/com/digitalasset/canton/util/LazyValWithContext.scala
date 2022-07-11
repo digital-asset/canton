@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.util
 
+import scala.concurrent.blocking
+
 /** "Implements" a `lazy val` field whose initialization expression can refer to implicit context information of type `Context`.
   * The "val" is initialized upon the first call to [[get]], using the context information supplied for this call,
   * like a `lazy val`.
@@ -32,14 +34,13 @@ final class LazyValWithContext[T, Context](initialize: Context => T) {
   @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
   private var value_0: T = _
 
-  // Scalac's lazy val initialization does not call `blocking`. So we don't add it here either
-  // TODO(Andreas/Matthias) try to write a test case that depletes our execution context of threads
-  @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))
   private def value_lzycompute(context: Context): T = {
-    this.synchronized {
-      if (!bitmap_0) {
-        value_0 = initialize(context)
-        bitmap_0 = true
+    blocking {
+      this.synchronized {
+        if (!bitmap_0) {
+          value_0 = initialize(context)
+          bitmap_0 = true
+        }
       }
     }
     value_0

@@ -29,16 +29,16 @@ class GrpcTransferService(service: TransferService)(implicit ec: ExecutionContex
   override def transferOut(request: AdminTransferOutRequest): Future[AdminTransferOutResponse] =
     TraceContext.fromGrpcContext { implicit traceContext =>
       request match {
-        case AdminTransferOutRequest(submittingPartyP, contractIdP, originDomainP, targetDomainP) =>
+        case AdminTransferOutRequest(submittingPartyP, contractIdP, sourceDomainP, targetDomainP) =>
           val res = for {
-            originDomain <- mapErr(DomainAlias.create(originDomainP))
+            sourceDomain <- mapErr(DomainAlias.create(sourceDomainP))
             targetDomain <- mapErr(DomainAlias.create(targetDomainP))
             contractId <- mapErr(LfContractId.fromProtoPrimitive(contractIdP))
             submittingParty <- mapErr(
               EitherT.fromEither[Future](ProtoConverter.parseLfPartyId(submittingPartyP))
             )
             transferId <- mapErr(
-              service.transferOut(submittingParty, contractId, originDomain, targetDomain)
+              service.transferOut(submittingParty, contractId, sourceDomain, targetDomain)
             )
           } yield AdminTransferOutResponse(transferId = Some(transferId.toProtoV0))
           EitherTUtil.toFuture(res)
@@ -70,14 +70,14 @@ class GrpcTransferService(service: TransferService)(implicit ec: ExecutionContex
       searchRequest match {
         case AdminTransferSearchQuery(
               searchDomainP,
-              filterOriginDomainP,
+              filterSourceDomainP,
               filterTimestampP,
               filterSubmitterP,
               limit,
             ) =>
           val res = for {
-            filterOriginDomain <- mapErr(DomainAlias.create(filterOriginDomainP))
-            filterDomain = if (filterOriginDomainP == "") None else Some(filterOriginDomain)
+            filterSourceDomain <- mapErr(DomainAlias.create(filterSourceDomainP))
+            filterDomain = if (filterSourceDomainP == "") None else Some(filterSourceDomain)
             searchDomain <- mapErr(DomainAlias.create(searchDomainP))
             filterSubmitterO <- mapErr(
               OptionUtil
@@ -110,7 +110,7 @@ case class TransferSearchResult(
     transferId: TransferId,
     submittingParty: String,
     targetDomain: String,
-    originDomain: String,
+    sourceDomain: String,
     contractId: LfContractId,
     readyForTransferIn: Boolean,
 ) extends HasProtoV0[AdminTransferSearchResponse.TransferSearchResult] {
@@ -118,7 +118,7 @@ case class TransferSearchResult(
     AdminTransferSearchResponse.TransferSearchResult(
       contractId = contractId.toProtoPrimitive,
       transferId = Some(transferId.toProtoV0),
-      originDomain = originDomain,
+      originDomain = sourceDomain,
       targetDomain = targetDomain,
       submittingParty = submittingParty,
       readyForTransferIn = readyForTransferIn,
@@ -134,7 +134,7 @@ object TransferSearchResult {
             .TransferSearchResult(
               contractIdP,
               transferIdP,
-              originDomain,
+              sourceDomain,
               targetDomain,
               submitter,
               ready,
@@ -145,14 +145,14 @@ object TransferSearchResult {
           transferId <- ProtoConverter
             .required("transferId", transferIdP)
             .flatMap(TransferId.fromProtoV0)
-          _ <- Either.cond(!originDomain.isEmpty, (), FieldNotSet("originDomain"))
+          _ <- Either.cond(!sourceDomain.isEmpty, (), FieldNotSet("originDomain"))
           _ <- Either.cond(!targetDomain.isEmpty, (), FieldNotSet("targetDomain"))
           _ <- Either.cond(!submitter.isEmpty, (), FieldNotSet("submitter"))
         } yield TransferSearchResult(
           transferId,
           submitter,
           targetDomain,
-          originDomain,
+          sourceDomain,
           contractId,
           ready,
         )
@@ -163,7 +163,7 @@ object TransferSearchResult {
       transferData.transferId,
       transferData.transferOutRequest.submitter,
       transferData.targetDomain.toProtoPrimitive,
-      transferData.originDomain.toProtoPrimitive,
+      transferData.sourceDomain.toProtoPrimitive,
       transferData.contract.contractId,
       transferData.transferOutResult.isDefined,
     )

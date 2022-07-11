@@ -172,19 +172,19 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
           List(
             CausalityMessage(
               domain2,
-              defaultProtocolVersion,
+              testedProtocolVersion,
               id,
               VectorClock(
-                id.originDomain,
+                id.sourceDomain,
                 id.requestTimestamp,
                 alice,
-                Map(id.originDomain -> id.requestTimestamp),
+                Map(id.sourceDomain -> id.requestTimestamp),
               ),
             )
           )
         )
         .futureValue
-      gco.registerPublished(EventClock(id.originDomain, id.requestTimestamp, 0L)(Map.empty))
+      gco.registerPublished(EventClock(id.sourceDomain, id.requestTimestamp, 0L)(Map.empty))
 
       // The flush should now complete
       sut.flush().futureValue

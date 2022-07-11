@@ -34,7 +34,7 @@ class DbMultiDomainCausalityStore private (
   )(implicit tc: TraceContext): Future[Unit] = {
 
     val requestCounter =
-      None // We aren't connected to the origin domain, so we don't have a request counter
+      None // We aren't connected to the source domain, so we don't have a request counter
     val clocks = vectorClocks.map { vc =>
       vc.partyId -> vc.clock
     }.toMap
@@ -43,7 +43,7 @@ class DbMultiDomainCausalityStore private (
       id.requestTimestamp,
       clocks,
       Some(id),
-      id.originDomain,
+      id.sourceDomain,
       storage.profile,
     )
   }
@@ -62,12 +62,12 @@ class DbMultiDomainCausalityStore private (
       }
       .intercalate(sql", ")
 
-    // Get the highest timestamp that each stakeholder informee has observed from the transfer's origin domain at the
+    // Get the highest timestamp that each stakeholder informee has observed from the transfer's source domain at the
     // time of the transfer-out
     val constraintsSql = {
       (sql"""select party_id, domain_id, max(domain_ts)
                  from per_party_causal_dependencies
-                 where owning_domain_id = ${transferId.originDomain} 
+                 where owning_domain_id = ${transferId.sourceDomain} 
                  and party_id in (""" ++ partiesSql ++ sql""")
                  and constraint_ts <= ${transferId.requestTimestamp}
                  group by (party_id, domain_id)
@@ -87,11 +87,11 @@ class DbMultiDomainCausalityStore private (
           }
 
         val clocks = perPartyDependencies.map { case (id, domains) =>
-          id -> VectorClock(transferId.originDomain, transferId.requestTimestamp, id, domains)
+          id -> VectorClock(transferId.sourceDomain, transferId.requestTimestamp, id, domains)
         }
 
         val allPartiesSeenTxOut = clocks.values.forall { clk =>
-          clk.clock.get(transferId.originDomain).contains(transferId.requestTimestamp)
+          clk.clock.get(transferId.sourceDomain).contains(transferId.requestTimestamp)
         }
         if (allPartiesSeenTxOut) Some(clocks) else None
 

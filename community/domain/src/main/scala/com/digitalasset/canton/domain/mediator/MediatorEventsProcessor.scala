@@ -91,6 +91,7 @@ class MediatorEventsProcessor(
     handleMediatorEvents: (
         RequestId,
         Seq[Traced[MediatorEvent]],
+        TraceContext,
     ) => HandlerResult,
     readyCheck: MediatorReadyCheck,
     protected val loggerFactory: NamedLoggerFactory,
@@ -106,13 +107,14 @@ class MediatorEventsProcessor(
       events: NonEmpty[Seq[OrdinaryProtocolEvent]]
   )(implicit traceContext: TraceContext): HandlerResult = {
     val identityF = StripSignature(identityClientEventHandler)(Traced(events))
-    for {
-      determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(events))
-      (hasIdentityUpdates, stages) = determinedStages
 
-      _ <- MonadUtil.sequentialTraverseMonoid(stages)(
-        executeStage()
-      )
+    val envelopesByEvent = envelopesGroupedByEvent(events)
+
+    for {
+      determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(envelopesByEvent))
+      (hasIdentityUpdates, stages) = determinedStages
+      _ <- MonadUtil.sequentialTraverseMonoid(stages)(executeStage(traceContext))
+
       resI <- identityF
     } yield {
       // reset the ready check if there was an identity update.
@@ -122,10 +124,10 @@ class MediatorEventsProcessor(
     }
   }
 
-  private def executeStage()(stage: MediatorEventStage): HandlerResult = {
+  private def executeStage(traceContext: TraceContext)(stage: MediatorEventStage): HandlerResult = {
     for {
       result <- stage.requests.forgetNE.toSeq.traverse { case (requestId, events) =>
-        handleMediatorEvents(requestId, events)
+        handleMediatorEvents(requestId, events, traceContext)
       } map Monoid[AsyncResult].combineAll
     } yield result
   }
@@ -211,51 +213,67 @@ class MediatorEventsProcessor(
     def complete: (Boolean, List[MediatorEventStage]) = (hasIdentityUpdate, stages)
   }
 
-  private[mediator] def determineStages(
+  private def envelopesGroupedByEvent(
       events: NonEmpty[Seq[OrdinaryProtocolEvent]]
-  ): Future[(Boolean, List[MediatorEventStage])] = {
-    // work out requests that will timeout during this range of events
-    // (keep in mind that they may receive a result during this time, in which case the timeout will be ignored)
-    val lastEventTimestamp = events.last1.timestamp
-    val unfinalized = state.pendingRequestIdsBefore(lastEventTimestamp)
+  ): NonEmpty[Seq[(OrdinaryProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]] =
+    events.map { event =>
+      implicit val traceContext: TraceContext = event.traceContext
+      event.signedEvent.content match {
+        case deliver: Deliver[DefaultOpenEnvelope] =>
+          val domainEnvelopes = ProtocolMessage.filterDomainsEnvelopes(
+            deliver.batch,
+            deliver.domainId,
+            (wrongMessages: List[DefaultOpenEnvelope]) => {
+              val wrongDomainIds = wrongMessages.map(_.protocolMessage.domainId)
+              logger.error(s"Received messages with wrong domain ids: $wrongDomainIds")
+            },
+          )
+          (event, domainEnvelopes)
 
-    val stagesF = events.foldLeft(Future.successful(EventProcessingStages(unfinalized))) {
-      (stages, event) =>
-        implicit val traceContext: TraceContext = event.traceContext
-        event.signedEvent.content match {
-          case Deliver(counter, timestamp, domainId, _messageId, batch) =>
-            val envelopes = ProtocolMessage.filterDomainsEnvelopes(
-              batch,
-              domainId,
-              (wrongMessages: List[DefaultOpenEnvelope]) => {
-                val wrongDomainIds = wrongMessages.map(_.protocolMessage.domainId)
-                logger.error(s"Received messages with wrong domain ids: $wrongDomainIds")
-              },
-            )
-
-            for {
-              stages <- extractMediatorEventsStage(counter, timestamp, envelopes).toList.foldLeft(
-                stages
-              ) { case (acc, stage) => acc.map(_.addStage(stage)) }
-
-              stagesWithTimeouts <- stages.addTimeouts(counter, timestamp)
-            } yield stagesWithTimeouts.withIdentityUpdate(
-              envelopes
-                .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
-                .nonEmpty
-            )
-
-          case _: DeliverError => stages
-        }
+        case _: DeliverError => (event, Seq.empty)
+      }
     }
 
-    stagesF.map(_.complete)
+  private def determineStages(
+      envelopesByEvent: Seq[(OrdinaryProtocolEvent, Seq[OpenEnvelope[ProtocolMessage]])]
+  ): Future[(Boolean, List[MediatorEventStage])] = {
+    NonEmpty
+      .from(envelopesByEvent)
+      .fold(Future.successful((false, List.empty[MediatorEventStage]))) { envelopesByEventNE =>
+        // work out requests that will timeout during this range of events
+        // (keep in mind that they may receive a result during this time, in which case the timeout will be ignored)
+        val (lastEvent, _) = envelopesByEventNE.last1
+        val unfinalized = state.pendingRequestIdsBefore(lastEvent.timestamp)
+
+        val stagesF =
+          envelopesByEventNE.foldLeft(Future.successful(EventProcessingStages(unfinalized))) {
+            case (stages, (event, envelopes)) =>
+              implicit val traceContext: TraceContext = event.traceContext
+              for {
+                stages <- extractMediatorEventsStage(
+                  event.counter,
+                  event.timestamp,
+                  envelopes,
+                ).toList
+                  .foldLeft(
+                    stages
+                  ) { case (acc, stage) => acc.map(_.addStage(stage)) }
+
+                stagesWithTimeouts <- stages.addTimeouts(event.counter, event.timestamp)
+              } yield stagesWithTimeouts.withIdentityUpdate(
+                envelopes
+                  .mapFilter(ProtocolMessage.select[DomainTopologyTransactionMessage])
+                  .nonEmpty
+              )
+          }
+        stagesF.map(_.complete)
+      }
   }
 
   private def extractMediatorEventsStage(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,
-      envelopes: List[DefaultOpenEnvelope],
+      envelopes: Seq[DefaultOpenEnvelope],
   )(implicit traceContext: TraceContext): Option[MediatorEventStage] = {
     val requests = envelopes.mapFilter(ProtocolMessage.select[MediatorRequest])
     val responses =
@@ -271,7 +289,14 @@ class MediatorEventsProcessor(
             envelopes.mapFilter(
               ProtocolMessage.select[RootHashMessage[SerializedRootHashMessagePayload]]
             )
-          Seq(MediatorEvent.Request(counter, timestamp, request.protocolMessage, rootHashMessages))
+          Seq(
+            MediatorEvent.Request(
+              counter,
+              timestamp,
+              request.protocolMessage,
+              rootHashMessages.toList,
+            )
+          )
 
         case _ =>
           logger.error("Received more than one mediator request.")
@@ -283,8 +308,8 @@ class MediatorEventsProcessor(
 
     NonEmpty.from(events).map(MediatorEventStage(_))
   }
-
 }
+
 object MediatorEventsProcessor {
   def apply(
       state: MediatorState,

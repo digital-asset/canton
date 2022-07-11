@@ -79,7 +79,7 @@ class TransferOutProcessingSteps(
     val engine: DAMLe,
     transferCoordination: TransferCoordination,
     seedGenerator: SeedGenerator,
-    originDomainProtocolVersion: SourceProtocolVersion,
+    sourceDomainProtocolVersion: SourceProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TransferProcessingSteps[
@@ -116,19 +116,19 @@ class TransferOutProcessingSteps(
       param: SubmissionParam,
       mediatorId: MediatorId,
       ephemeralState: SyncDomainEphemeralStateLookup,
-      originRecentSnapshot: DomainSnapshotSyncCryptoApi,
+      sourceRecentSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
     val SubmissionParam(submittingParty, contractId, targetDomain) = param
-    val pureCrypto = originRecentSnapshot.pureCrypto
+    val pureCrypto = sourceRecentSnapshot.pureCrypto
 
     def withDetails(message: String) = s"Transfer-out $contractId to $targetDomain: $message"
 
     for {
       _ <- condUnitET[FutureUnlessShutdown](
         targetDomain != domainId,
-        TargetDomainIsOriginDomain(domainId, contractId),
+        TargetDomainIsSourceDomain(domainId, contractId),
       )
       stakeholders <- stakeholdersOfContractId(ephemeralState.contractLookup, contractId).mapK(
         FutureUnlessShutdown.outcomeK
@@ -146,10 +146,10 @@ class TransferOutProcessingSteps(
           submittingParty,
           stakeholders,
           domainId,
-          originDomainProtocolVersion,
+          sourceDomainProtocolVersion,
           mediatorId,
           targetDomain,
-          originRecentSnapshot.ipsSnapshot,
+          sourceRecentSnapshot.ipsSnapshot,
           targetCrypto.ipsSnapshot,
           logger,
         )
@@ -167,7 +167,7 @@ class TransferOutProcessingSteps(
       mediatorMessage = fullTree.mediatorMessage
       rootHash = fullTree.rootHash
       viewMessage <- EncryptedViewMessageFactory
-        .create(TransferOutViewType)(fullTree, originRecentSnapshot, originDomainProtocolVersion.v)
+        .create(TransferOutViewType)(fullTree, sourceRecentSnapshot, sourceDomainProtocolVersion.v)
         .leftMap[TransferProcessorError](EncryptionError)
         .mapK(FutureUnlessShutdown.outcomeK)
       maybeRecipients = Recipients.ofSet(recipients)
@@ -181,7 +181,7 @@ class TransferOutProcessingSteps(
         RootHashMessage(
           rootHash,
           domainId,
-          originDomainProtocolVersion.v,
+          sourceDomainProtocolVersion.v,
           ViewType.TransferOutViewType,
           EmptyRootHashMessagePayload,
         )
@@ -199,7 +199,7 @@ class TransferOutProcessingSteps(
         viewMessage -> recipientsT,
         rootHashMessage -> rootHashRecipients,
       )
-      TransferSubmission(Batch.of(originDomainProtocolVersion.v, messages: _*), rootHash)
+      TransferSubmission(Batch.of(sourceDomainProtocolVersion.v, messages: _*), rootHash)
     }
   }
 
@@ -234,20 +234,20 @@ class TransferOutProcessingSteps(
       .toRight[TransferProcessorError](TransferOutProcessingSteps.UnknownContract(contractId))
       .map(storedContract => storedContract.contract.metadata.stakeholders)
 
-  override protected def decryptTree(originSnapshot: DomainSnapshotSyncCryptoApi)(
+  override protected def decryptTree(sourceSnapshot: DomainSnapshotSyncCryptoApi)(
       envelope: OpenEnvelope[EncryptedViewMessage[TransferOutViewType]]
   ): EitherT[Future, EncryptedViewMessageDecryptionError[TransferOutViewType], WithRecipients[
     FullTransferOutTree
   ]] = {
     EncryptedViewMessage
       .decryptFor(
-        originSnapshot,
+        sourceSnapshot,
         envelope.protocolMessage,
         participantId,
-        originDomainProtocolVersion.v,
+        sourceDomainProtocolVersion.v,
       ) { bytes =>
         FullTransferOutTree
-          .fromByteString(originSnapshot.pureCrypto)(bytes)
+          .fromByteString(sourceSnapshot.pureCrypto)(bytes)
           .leftMap(e => DeserializationError(e.toString, bytes))
       }
       .map(WithRecipients(_, envelope.recipients))
@@ -259,7 +259,7 @@ class TransferOutProcessingSteps(
       sc: SequencerCounter,
       correctRootHashes: NonEmpty[Seq[WithRecipients[FullTransferOutTree]]],
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
-      originSnapshot: DomainSnapshotSyncCryptoApi,
+      sourceSnapshot: DomainSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, CheckActivenessAndWritePendingContracts] = {
@@ -273,9 +273,9 @@ class TransferOutProcessingSteps(
       WithRecipients(txOutRequest, recipients) = txOutRequestAndRecipients
       contractId = txOutRequest.contractId
       _ <- condUnitET[Future](
-        txOutRequest.originDomain == domainId,
+        txOutRequest.sourceDomain == domainId,
         UnexpectedDomain(
-          TransferId(txOutRequest.originDomain, ts),
+          TransferId(txOutRequest.sourceDomain, ts),
           domainId,
         ): TransferProcessorError,
       )
@@ -295,7 +295,7 @@ class TransferOutProcessingSteps(
     } yield CheckActivenessAndWritePendingContracts(
       activenessSet,
       Seq.empty,
-      PendingDataAndResponseArgs(txOutRequest, recipients, ts, rc, sc, originSnapshot),
+      PendingDataAndResponseArgs(txOutRequest, recipients, ts, rc, sc, sourceSnapshot),
     )
   }
 
@@ -310,7 +310,7 @@ class TransferOutProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, StorePendingDataAndSendResponseAndCreateTimeout] = {
-    val PendingDataAndResponseArgs(fullTree, recipients, ts, rc, sc, originSnapshot) =
+    val PendingDataAndResponseArgs(fullTree, recipients, ts, rc, sc, sourceSnapshot) =
       pendingDataAndResponseArgs
     for {
       // Wait for earlier writes to the contract store having completed
@@ -320,11 +320,11 @@ class TransferOutProcessingSteps(
       // we can expect to find the contract in the contract store.
       storedContract <- contractLookup.lookupE(fullTree.contractId).leftMap(ContractStoreFailed)
 
-      originIps = originSnapshot.ipsSnapshot
+      sourceIps = sourceSnapshot.ipsSnapshot
       transferringParticipant <- validateTransferOutRequest(
         fullTree,
         storedContract.contract.metadata.stakeholders,
-        originIps,
+        sourceIps,
         recipients,
       )
 
@@ -336,10 +336,10 @@ class TransferOutProcessingSteps(
 
       activenessResult <- EitherT.right(activenessF)
 
-      hostedStks <- EitherT.liftF(hostedStakeholders(fullTree.stakeholders.toList, originIps))
+      hostedStks <- EitherT.liftF(hostedStakeholders(fullTree.stakeholders.toList, sourceIps))
 
       requestId = RequestId(ts)
-      transferId: TransferId = TransferId(fullTree.originDomain, ts)
+      transferId: TransferId = TransferId(fullTree.sourceDomain, ts)
       entry = PendingTransferOut(
         requestId,
         rc,
@@ -354,13 +354,13 @@ class TransferOutProcessingSteps(
         fullTree.targetTimeProof,
       )
 
-      originDomainParameters <- EitherT.right(originIps.findDynamicDomainParametersOrDefault())
+      sourceDomainParameters <- EitherT.right(sourceIps.findDynamicDomainParametersOrDefault())
 
       transferData = TransferData(
         ts,
         rc,
         fullTree,
-        originDomainParameters.decisionTimeFor(ts),
+        sourceDomainParameters.decisionTimeFor(ts),
         storedContract.contract,
         creatingTransactionId,
         None,
@@ -370,7 +370,7 @@ class TransferOutProcessingSteps(
       }
       confirmingStakeholders <- EitherT.right(
         storedContract.contract.metadata.stakeholders.toList.traverseFilter(stakeholder =>
-          originIps.canConfirm(participantId, stakeholder).map(if (_) Some(stakeholder) else None)
+          sourceIps.canConfirm(participantId, stakeholder).map(if (_) Some(stakeholder) else None)
         )
       )
       responseOpt = createTransferOutResponse(
@@ -392,7 +392,7 @@ class TransferOutProcessingSteps(
   private[this] def validateTransferOutRequest(
       txOutRequest: FullTransferOutTree,
       actualStakeholders: Set[LfPartyId],
-      originIps: TopologySnapshot,
+      sourceIps: TopologySnapshot,
       recipients: Recipients,
   )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Boolean] = {
     val isTransferringParticipant =
@@ -444,7 +444,7 @@ class TransferOutProcessingSteps(
         validateTransferOutRequest(
           txOutRequest,
           actualStakeholders,
-          originIps,
+          sourceIps,
           targetIps,
           recipients,
         )
@@ -555,7 +555,7 @@ class TransferOutProcessingSteps(
   private[this] def validateTransferOutRequest(
       request: FullTransferOutTree,
       expectedStakeholders: Set[LfPartyId],
-      originIps: TopologySnapshot,
+      sourceIps: TopologySnapshot,
       maybeTargetIps: Option[TopologySnapshot],
       recipients: Recipients,
   )(implicit traceContext: TraceContext): EitherT[Future, TransferProcessorError, Unit] = {
@@ -565,7 +565,7 @@ class TransferOutProcessingSteps(
     def checkStakeholderHasTransferringParticipant(
         stakeholder: LfPartyId
     ): Future[ValidatedNec[String, Unit]] =
-      originIps
+      sourceIps
         .activeParticipantsOf(stakeholder)
         .map(
           _.filter(_._2.permission.canConfirm)
@@ -601,7 +601,7 @@ class TransferOutProcessingSteps(
           _ <- EitherT.fromEither[Future](checkStakeholders)
           _ <- EitherT(
             adminParties.toList
-              .traverse(checkAdminParticipantCanConfirm(originIps, logger))
+              .traverse(checkAdminParticipantCanConfirm(sourceIps, logger))
               .map(
                 _.sequence.toEither.leftMap(errors =>
                   AdminPartyPermissionErrors(stringOfNec(errors)): TransferProcessorError
@@ -626,7 +626,7 @@ class TransferOutProcessingSteps(
             .adminPartiesWithoutSubmitterCheck(
               request.submitter,
               expectedStakeholders,
-              originIps,
+              sourceIps,
               targetIps,
               logger,
             )
@@ -675,7 +675,7 @@ class TransferOutProcessingSteps(
           Some(rootHash),
           confirmingParties,
           domainId,
-          originDomainProtocolVersion.v,
+          sourceDomainProtocolVersion.v,
         )
       )
       Some(response)
@@ -721,11 +721,11 @@ object TransferOutProcessingSteps {
       contractId: LfContractId,
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
-      originDomain: DomainId,
+      sourceDomain: DomainId,
       sourceProtocolVersion: SourceProtocolVersion,
-      originMediator: MediatorId,
+      sourceMediator: MediatorId,
       targetDomain: DomainId,
-      originIps: TopologySnapshot,
+      sourceIps: TopologySnapshot,
       targetIps: TopologySnapshot,
       logger: TracedLogger,
   )(implicit
@@ -738,7 +738,7 @@ object TransferOutProcessingSteps {
         participantId,
         submitter,
         stakeholders,
-        originIps,
+        sourceIps,
         targetIps,
         logger,
       )
@@ -749,9 +749,9 @@ object TransferOutProcessingSteps {
         stakeholders,
         transferOutAdminParties,
         contractId,
-        originDomain,
+        sourceDomain,
         sourceProtocolVersion,
-        originMediator,
+        sourceMediator,
         targetDomain,
         timeProof,
       )
@@ -764,7 +764,7 @@ object TransferOutProcessingSteps {
       participantId: ParticipantId,
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
-      originIps: TopologySnapshot,
+      sourceIps: TopologySnapshot,
       targetIps: TopologySnapshot,
       logger: TracedLogger,
   )(implicit
@@ -773,7 +773,7 @@ object TransferOutProcessingSteps {
   ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[Member])] = {
     for {
       canSubmit <- EitherT.right(
-        originIps.hostedOn(submitter, participantId).map(_.exists(_.permission == Submission))
+        sourceIps.hostedOn(submitter, participantId).map(_.exists(_.permission == Submission))
       )
       _ <- EitherTUtil.condUnitET[Future](
         canSubmit,
@@ -782,7 +782,7 @@ object TransferOutProcessingSteps {
       adminPartiesAndRecipients <- adminPartiesWithoutSubmitterCheck(
         submitter,
         stakeholders,
-        originIps,
+        sourceIps,
         targetIps,
         logger,
       )
@@ -794,7 +794,7 @@ object TransferOutProcessingSteps {
   private def adminPartiesWithoutSubmitterCheck(
       submitter: LfPartyId,
       stakeholders: Set[LfPartyId],
-      originIps: TopologySnapshot,
+      sourceIps: TopologySnapshot,
       targetIps: TopologySnapshot,
       logger: TracedLogger,
   )(implicit
@@ -804,12 +804,12 @@ object TransferOutProcessingSteps {
 
     val stakeholdersWithParticipantPermissionsF = stakeholders.toList
       .traverse { stakeholder =>
-        val originF = partyParticipants(originIps, stakeholder)
+        val sourceF = partyParticipants(sourceIps, stakeholder)
         val targetF = partyParticipants(targetIps, stakeholder)
         for {
-          origin <- originF
+          source <- sourceF
           target <- targetF
-        } yield (stakeholder, (origin, target))
+        } yield (stakeholder, (source, target))
       }
       .map(_.toMap)
 
@@ -827,7 +827,7 @@ object TransferOutProcessingSteps {
       )
       transferOutAdminParties <- EitherT(
         transferOutParticipants.toList
-          .traverse(adminPartyFor(originIps, logger))
+          .traverse(adminPartyFor(sourceIps, logger))
           .map(
             _.sequence.toEither
               .bimap(
@@ -848,14 +848,14 @@ object TransferOutProcessingSteps {
     }
   }
 
-  private def adminPartyFor(originIps: TopologySnapshot, logger: TracedLogger)(
+  private def adminPartyFor(sourceIps: TopologySnapshot, logger: TracedLogger)(
       participant: ParticipantId
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): Future[ValidatedNec[String, LfPartyId]] = {
     val adminParty = participant.adminParty.toLf
-    confirmingAdminParticipants(originIps, adminParty, logger).map { adminParticipants =>
+    confirmingAdminParticipants(sourceIps, adminParty, logger).map { adminParticipants =>
       Validated.condNec(
         adminParticipants.get(participant).exists(_.permission.canConfirm),
         adminParty,
@@ -864,10 +864,10 @@ object TransferOutProcessingSteps {
     }
   }
 
-  private def checkAdminParticipantCanConfirm(originIps: TopologySnapshot, logger: TracedLogger)(
+  private def checkAdminParticipantCanConfirm(sourceIps: TopologySnapshot, logger: TracedLogger)(
       adminParty: LfPartyId
   )(implicit traceContext: TraceContext, ec: ExecutionContext): Future[ValidatedNec[String, Unit]] =
-    confirmingAdminParticipants(originIps, adminParty, logger).map { adminParticipants =>
+    confirmingAdminParticipants(sourceIps, adminParty, logger).map { adminParticipants =>
       Validated.condNec(
         adminParticipants.exists { case (participant, _) =>
           participant.adminParty.toLf == adminParty
@@ -913,14 +913,14 @@ object TransferOutProcessingSteps {
   ): Either[TransferProcessorError, Set[ParticipantId]] = {
 
     participantsByParty.toList
-      .traverse { case (party, (origin, target)) =>
+      .traverse { case (party, (source, target)) =>
         val submissionPermissionCheck = Validated.condNec(
-          origin.submitters.isEmpty || origin.submitters.exists(target.submitters.contains),
+          source.submitters.isEmpty || source.submitters.exists(target.submitters.contains),
           (),
-          show"For party $party, no participant with submission permission on origin domain has submission permission on target domain.",
+          show"For party $party, no participant with submission permission on source domain has submission permission on target domain.",
         )
 
-        val transferOutParticipants = origin.confirmers.intersect(target.confirmers)
+        val transferOutParticipants = source.confirmers.intersect(target.confirmers)
         val confirmersOverlap =
           Validated.condNec(
             transferOutParticipants.nonEmpty,
@@ -1123,7 +1123,7 @@ object TransferOutProcessingSteps {
       ts: CantonTimestamp,
       rc: RequestCounter,
       sc: SequencerCounter,
-      originSnapshot: DomainSnapshotSyncCryptoApi,
+      sourceSnapshot: DomainSnapshotSyncCryptoApi,
   )
 
   sealed trait TransferOutProcessorError extends TransferProcessorError
@@ -1131,7 +1131,7 @@ object TransferOutProcessingSteps {
   case class UnexpectedDomain(transferId: TransferId, receivedOn: DomainId)
       extends TransferOutProcessorError
 
-  case class TargetDomainIsOriginDomain(domain: DomainId, contractId: LfContractId)
+  case class TargetDomainIsSourceDomain(domain: DomainId, contractId: LfContractId)
       extends TransferOutProcessorError
 
   case class UnknownContract(contractId: LfContractId) extends TransferOutProcessorError

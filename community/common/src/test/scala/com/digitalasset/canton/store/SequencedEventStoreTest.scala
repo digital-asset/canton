@@ -37,7 +37,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
   val domainId: DomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
   def mkBatch(envelopes: ClosedEnvelope*): Batch[ClosedEnvelope] =
-    Batch(envelopes.toList, defaultProtocolVersion)
+    Batch(envelopes.toList, testedProtocolVersion)
 
   def signDeliver(event: Deliver[ClosedEnvelope]): SignedContent[Deliver[ClosedEnvelope]] =
     SignedContent(event, sign(s"deliver signature ${event.counter}"), None)
@@ -54,7 +54,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("deliver")),
           mkBatch(closedEnvelope),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         sign("deliver signature"),
         None,
@@ -74,7 +74,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-max-positive-deliver")),
           mkBatch(closedEnvelope),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MaxValue),
@@ -91,7 +91,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-min-deliver")),
           mkBatch(closedEnvelope),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         sign("single deliver signature"),
         Some(CantonTimestamp.MinValue),
@@ -108,7 +108,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("single-deliver")),
           mkBatch(closedEnvelope),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         singleDeliver.signedEvent.signature,
         None,
@@ -137,7 +137,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           Some(MessageId.tryCreate("empty-deliver")),
           mkBatch(),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         sign("Deliver signature"),
         None,
@@ -153,7 +153,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
           domainId,
           MessageId.tryCreate("deliver-error"),
           DeliverErrorReason.BatchRefused("paniertes schnitzel"),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         ),
         sign("Deliver error signature"),
         None,
@@ -499,7 +499,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
                 domainId,
                 Some(MessageId.tryCreate("deliver1")),
                 emptyBatch,
-                defaultProtocolVersion,
+                testedProtocolVersion,
               )
           )
         )
@@ -511,7 +511,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
             domainId,
             Some(MessageId.tryCreate("deliver2")),
             emptyBatch,
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         )
       )
@@ -563,7 +563,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               domainId,
               Some(MessageId.tryCreate("deliver1")),
               emptyBatch,
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
           )
         )
@@ -576,7 +576,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
               domainId,
               Some(MessageId.tryCreate("deliver2")),
               emptyBatch,
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
           )
         )

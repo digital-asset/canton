@@ -36,7 +36,7 @@ trait DbAcsCommitmentStoreTest extends AcsCommitmentStoreTest { this: DbTest =>
       new DbAcsCommitmentStore(
         storage,
         IndexedDomain.tryCreate(domainId, 1),
-        defaultProtocolVersion,
+        testedProtocolVersion,
         cryptoApi,
         timeouts,
         loggerFactory,
@@ -62,7 +62,7 @@ trait DbIncrementalCommitmentStoreTest extends IncrementalCommitmentStoreTest { 
       new DbIncrementalCommitmentStore(
         storage,
         IndexedDomain.tryCreate(domainId, 1),
-        defaultProtocolVersion,
+        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )(ec)
@@ -86,7 +86,7 @@ trait DbCommitmentQueueTest extends CommitmentQueueTest { this: DbTest =>
       new DbCommitmentQueue(
         storage,
         IndexedDomain.tryCreate(domainId, 1),
-        defaultProtocolVersion,
+        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )(ec)

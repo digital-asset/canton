@@ -6,6 +6,7 @@ package com.digitalasset.canton.config
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.version.ProtocolVersion
 
 trait NodeConfig {
   def crypto: CryptoConfig
@@ -45,5 +46,10 @@ trait LocalNodeParameters {
   def nonStandardConfig: Boolean
   def devVersionSupport: Boolean
   def dontWarnOnDeprecatedPV: Boolean
+
+  /** The initial protocol version before connected to any domain, e.g., when creating the initial topology transactions.
+    * TODO(#9719): Currently this protocol version is also used when writing topology transactions to the authorized store.
+    */
+  def initialProtocolVersion: ProtocolVersion
 
 }

@@ -47,15 +47,6 @@ case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
     e.recipients.allRecipients
   }.toSet
 
-  /** builds a message batch containing only messages including the given recipient
-    */
-  def filterEnvelopesFor(recipient: Member): Batch[_] = {
-    val forRecipient: List[Envelope[_]] = envelopes.mapFilter { env =>
-      env.forRecipient(recipient)
-    }
-    Batch(forRecipient)(representativeProtocolVersion)
-  }
-
   override def toProtoV0: v0.CompressedBatch = {
     val batch = v0.Batch(envelopes = envelopes.map(_.toProtoV0))
     val compressed = ByteStringUtil.compressGzip(batch.toByteString)

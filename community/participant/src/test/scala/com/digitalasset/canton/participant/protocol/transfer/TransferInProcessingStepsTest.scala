@@ -71,9 +71,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
-  private val originDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::origin"))
-  private val originMediator = MediatorId(
-    UniqueIdentifier.tryFromProtoPrimitive("mediator::origin")
+  private val sourceDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::source"))
+  private val sourceMediator = MediatorId(
+    UniqueIdentifier.tryFromProtoPrimitive("mediator::source")
   )
   private val targetDomain = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::target"))
   private val targetMediator = MediatorId(
@@ -98,7 +98,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private val staticDomainParameters = TestDomainParameters.defaultStatic
 
   private val identityFactory = TestingTopology()
-    .withDomains(originDomain)
+    .withDomains(sourceDomain)
     .withReversedTopology(
       Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Submission))
     )
@@ -107,7 +107,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
   private val cryptoSnapshot =
     identityFactory
-      .forOwnerAndDomain(submitterParticipant, originDomain)
+      .forOwnerAndDomain(submitterParticipant, sourceDomain)
       .currentSnapshotApproximation
 
   private val pureCrypto = TestingIdentityFactory.pureCrypto()
@@ -176,13 +176,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       } yield ()
     }
 
-    val transferId = TransferId(originDomain, CantonTimestamp.Epoch)
+    val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferDataF =
-      TransferStoreTest.mkTransferDataForDomain(transferId, originMediator, party1, targetDomain)
+      TransferStoreTest.mkTransferDataForDomain(transferId, sourceMediator, party1, targetDomain)
     val submissionParam = SubmissionParam(party1, transferId)
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
-        originDomain,
+        sourceDomain,
         cryptoSnapshot,
         pureCrypto,
         participant,
@@ -212,9 +212,9 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
         Set.empty,
         coidAbs1,
-        transferId.originDomain,
-        SourceProtocolVersion(defaultProtocolVersion),
-        originMediator,
+        transferId.sourceDomain,
+        SourceProtocolVersion(testedProtocolVersion),
+        sourceMediator,
         targetDomain,
         TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
       )
@@ -303,13 +303,13 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "fail when participant does not have submission permission for party" in {
 
-      val failingTopology = TestingTopology(domains = Set(originDomain))
+      val failingTopology = TestingTopology(domains = Set(sourceDomain))
         .withReversedTopology(
           Map(submitterParticipant -> Map(party1 -> ParticipantPermission.Observation))
         )
         .build(loggerFactory)
       val cryptoSnapshot2 =
-        failingTopology.forOwnerAndDomain(participant, originDomain).currentSnapshotApproximation
+        failingTopology.forOwnerAndDomain(participant, sourceDomain).currentSnapshotApproximation
 
       for {
         transferData <- transferDataF
@@ -337,7 +337,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       for {
         transferData2 <- TransferStoreTest.mkTransferDataForDomain(
           transferId,
-          originMediator,
+          sourceMediator,
           party2,
           targetDomain,
         )
@@ -368,7 +368,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
-        originDomain,
+        sourceDomain,
         cryptoSnapshot,
         pureCrypto,
         submitterParticipant,
@@ -406,7 +406,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         inRequest <- inRequestF
         envelopes = NonEmpty(
           Seq,
-          OpenEnvelope(inRequest, RecipientsTest.testInstance, defaultProtocolVersion),
+          OpenEnvelope(inRequest, RecipientsTest.testInstance, testedProtocolVersion),
         )
         decrypted <- valueOrFail(transferInProcessingSteps.decryptViews(envelopes, cryptoSnapshot))(
           "decrypt request failed"
@@ -502,7 +502,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       )
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
-        originDomain,
+        sourceDomain,
         cryptoSnapshot,
         pureCrypto,
         submitterParticipant,
@@ -585,7 +585,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           .registerTransferOut(
             fullTransferInTree.transferOutResultEvent.transferId,
             Set(
-              VectorClock(originDomain, CantonTimestamp.MinValue.plusSeconds(1L), party1, Map.empty)
+              VectorClock(sourceDomain, CantonTimestamp.MinValue.plusSeconds(1L), party1, Map.empty)
             ),
           )
 
@@ -615,7 +615,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     )
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
-        originDomain,
+        sourceDomain,
         cryptoSnapshot,
         pureCrypto,
         submitterParticipant,
@@ -648,15 +648,15 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       }
     }
 
-    val transferId = TransferId(originDomain, CantonTimestamp.Epoch)
+    val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferOutRequest = TransferOutRequest(
       party1,
       Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
       contractId,
-      transferId.originDomain,
-      SourceProtocolVersion(defaultProtocolVersion),
-      originMediator,
+      transferId.sourceDomain,
+      SourceProtocolVersion(testedProtocolVersion),
+      sourceMediator,
       targetDomain,
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
     )
@@ -745,7 +745,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
           contractInstance = ExampleTransactionFactory.contractInstance(),
           metadata = ContractMetadata.tryCreate(Set(party1), Set(party1), None),
         )
-      val transferId = TransferId(originDomain, CantonTimestamp.Epoch)
+      val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
       val pendingRequestData = TransferInProcessingSteps.PendingTransferIn(
         RequestId(CantonTimestamp.Epoch),
         1L,
@@ -825,7 +825,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       ),
       seedGenerator,
       causalityTracking = true,
-      TargetProtocolVersion(defaultProtocolVersion),
+      TargetProtocolVersion(testedProtocolVersion),
       loggerFactory = loggerFactory,
     )
   }
@@ -852,7 +852,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetMediator,
       transferOutResult,
       uuid,
-      TargetProtocolVersion(defaultProtocolVersion),
+      TargetProtocolVersion(testedProtocolVersion),
     )
   }
 
@@ -860,7 +860,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       tree: FullTransferInTree
   ): Future[EncryptedViewMessage[TransferInViewType]] =
     EncryptedViewMessageFactory
-      .create(TransferInViewType)(tree, cryptoSnapshot, defaultProtocolVersion)
+      .create(TransferInViewType)(tree, cryptoSnapshot, testedProtocolVersion)
       .fold(
         error => throw new IllegalArgumentException(s"Cannot encrypt transfer-in request: $error"),
         Predef.identity,
@@ -896,7 +896,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     RootHashMessage(
       tree.rootHash,
       tree.domainId,
-      defaultProtocolVersion,
+      testedProtocolVersion,
       TransferInViewType,
       SerializedRootHashMessagePayload.empty,
     )
@@ -905,7 +905,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 object TransferInProcessingStepsTest {
 
   def transferOutResult(
-      originDomain: DomainId,
+      sourceDomain: DomainId,
       cryptoSnapshot: SyncCryptoApi,
       hashOps: HashOps,
       participantId: ParticipantId,
@@ -924,7 +924,7 @@ object TransferInProcessingStepsTest {
       TransferResult.create(
         RequestId(CantonTimestamp.Epoch),
         Set(),
-        TransferOutDomainId(originDomain),
+        TransferOutDomainId(sourceDomain),
         Verdict.Approve,
         protocolVersion,
       )
@@ -939,7 +939,7 @@ object TransferInProcessingStepsTest {
       Deliver.create(
         0L,
         CantonTimestamp.Epoch,
-        originDomain,
+        sourceDomain,
         Some(MessageId.tryCreate("msg-0")),
         batch,
         protocolVersion,

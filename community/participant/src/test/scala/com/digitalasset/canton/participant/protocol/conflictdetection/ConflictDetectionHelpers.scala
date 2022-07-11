@@ -70,11 +70,11 @@ trait ConflictDetectionHelpers { this: AsyncTestSuite with BaseTest with HasExec
       entries: (TransferId, MediatorId)*
   )(implicit traceContext: TraceContext): Future[TransferCache] = {
     Future
-      .traverse(entries) { case (transferId, originMediator) =>
+      .traverse(entries) { case (transferId, sourceMediator) =>
         for {
           transfer <- TransferStoreTest.mkTransferDataForDomain(
             transferId,
-            originMediator,
+            sourceMediator,
             targetDomainId = TransferStoreTest.targetDomain,
           )
           result <- store

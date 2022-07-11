@@ -7,7 +7,7 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{HashOps, RandomOps}
+import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
@@ -50,7 +50,7 @@ object ParticipantInitializeTopology {
       targetDomainStore: TopologyStore[TopologyStoreId.DomainStore],
       loggerFactory: NamedLoggerFactory,
       sequencerClientFactory: SequencerClientFactory,
-      cryptoOps: HashOps with RandomOps,
+      crypto: Crypto,
       protocolVersion: ProtocolVersion,
   )(implicit
       executionContext: ExecutionContextExecutor,
@@ -60,7 +60,7 @@ object ParticipantInitializeTopology {
       loggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
     val unauthenticatedMember =
-      UnauthenticatedMemberId.tryCreate(participantId.uid.namespace)(cryptoOps)
+      UnauthenticatedMemberId.tryCreate(participantId.uid.namespace)(crypto.pureCrypto)
 
     loggingContext.logger.debug(
       s"Unauthenticated member $unauthenticatedMember will register initial topology transactions on behalf of participant $participantId"
@@ -106,7 +106,7 @@ object ParticipantInitializeTopology {
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
               DiscardIgnoredEvents {
-                StripSignature { EnvelopeOpener(protocolVersion, cryptoOps)(eventHandler) }
+                StripSignature { EnvelopeOpener(protocolVersion, crypto.pureCrypto)(eventHandler) }
               },
               domainTimeTracker,
             )
@@ -124,6 +124,7 @@ object ParticipantInitializeTopology {
             targetDomainStore,
             processingTimeout,
             loggerFactory,
+            crypto,
           )
           .leftMap(
             DomainRegistryError.DomainRegistryInternalError

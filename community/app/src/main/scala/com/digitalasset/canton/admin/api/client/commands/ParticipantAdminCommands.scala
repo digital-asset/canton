@@ -658,14 +658,14 @@ object ParticipantAdminCommands {
     final case class TransferOut(
         submittingParty: PartyId,
         contractId: LfContractId,
-        originDomain: DomainAlias,
+        sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
     ) extends Base[AdminTransferOutRequest, AdminTransferOutResponse, TransferId] {
       override def createRequest(): Either[String, AdminTransferOutRequest] =
         Right(
           AdminTransferOutRequest(
             submittingParty = submittingParty.toLf,
-            originDomain = originDomain.toProtoPrimitive,
+            originDomain = sourceDomain.toProtoPrimitive,
             targetDomain = targetDomain.toProtoPrimitive,
             contractId = contractId.coid,
           )
@@ -714,7 +714,7 @@ object ParticipantAdminCommands {
 
     final case class TransferSearch(
         targetDomain: DomainAlias,
-        originDomainFilter: Option[DomainAlias],
+        sourceDomainFilter: Option[DomainAlias],
         timestampFilter: Option[Instant],
         submittingPartyFilter: Option[PartyId],
         limit0: Int,
@@ -728,7 +728,7 @@ object ParticipantAdminCommands {
         Right(
           AdminTransferSearchQuery(
             searchDomain = targetDomain.toProtoPrimitive,
-            filterOriginDomain = originDomainFilter.map(_.toProtoPrimitive).getOrElse(""),
+            filterOriginDomain = sourceDomainFilter.map(_.toProtoPrimitive).getOrElse(""),
             filterTimestamp =
               timestampFilter.map((value: Instant) => InstantConverter.toProtoPrimitive(value)),
             filterSubmittingParty = submittingPartyFilter.fold("")(_.toLf),

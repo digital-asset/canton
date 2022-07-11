@@ -13,42 +13,16 @@ import com.daml.lf.transaction.{ContractKeyUniquenessMode, ContractStateMachine}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
-import com.digitalasset.canton.data.{
-  AssignedKey,
-  CantonTimestamp,
-  FreeKey,
-  SerializableKeyResolution,
-  TransactionView,
-  TransactionViewDecomposition,
-  ViewPosition,
-}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.data._
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractKeyResolutionError,
   MissingContractKeyLookupError,
   SerializableContractOfId,
-  TooFewSalts,
   TransactionTreeConversionError,
 }
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
-import com.digitalasset.canton.protocol.{
-  LfActionNode,
-  LfContractId,
-  LfContractInst,
-  LfGlobalKey,
-  LfHash,
-  LfKeyWithMaintainers,
-  LfNodeCreate,
-  LfNodeExercises,
-  LfNodeFetch,
-  LfNodeId,
-  LfNodeLookupByKey,
-  LfTransactionVersion,
-  PackageInfoService,
-  SerializableContract,
-  SerializableRawContractInstance,
-  Unicum,
-}
+import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
@@ -86,18 +60,18 @@ class TransactionTreeFactoryImplV3(
     s"${this.getClass.getSimpleName} can only be used with protocol version ${ProtocolVersion.v3_0_0} or higher, but not for $protocolVersion",
   )
 
+  private[TransactionTreeFactoryImplV3] val csm: ContractStateMachine[Unit] =
+    new ContractStateMachine[Unit](
+      if (uniqueContractKeys) ContractKeyUniquenessMode.Strict else ContractKeyUniquenessMode.Off
+    )
+
   protected[submission] class State private (
       override val mediatorId: MediatorId,
       override val transactionUUID: UUID,
       override val ledgerTime: CantonTimestamp,
-      private val salts: Iterator[Salt],
+      override protected val salts: Iterator[Salt],
       initialResolver: LfKeyResolver,
   ) extends TransactionTreeFactoryImpl.State {
-    private val unicumOfCreatedContractMap: mutable.Map[LfHash, Unicum] = mutable.Map.empty
-
-    /** All contracts created by a node that has already been processed. */
-    val createdContractInfo: mutable.Map[LfContractId, SerializableContract] =
-      mutable.Map.empty
 
     /** An [[com.digitalasset.canton.protocol.LfGlobalKey]] stores neither the
       * [[com.digitalasset.canton.protocol.LfTransactionVersion]] to be used during serialization
@@ -108,19 +82,6 @@ class TransactionTreeFactoryImplV3(
       */
     val keyVersionAndMaintainers: mutable.Map[LfGlobalKey, (LfTransactionVersion, Set[LfPartyId])] =
       mutable.Map.empty
-
-    private val suffixedNodesBuilder
-        : mutable.Builder[(LfNodeId, LfActionNode), Map[LfNodeId, LfActionNode]] =
-      Map.newBuilder[LfNodeId, LfActionNode]
-
-    /** Out parameter for contracts created in the view (including subviews). */
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    var createdContractsInView: collection.Set[LfContractId] = Set.empty
-
-    val csm: ContractStateMachine[Unit] = new ContractStateMachine[Unit](
-      // TODO(#9386) figure out whether we get away with a single state in UCK mode
-      if (uniqueContractKeys) ContractKeyUniquenessMode.Strict else ContractKeyUniquenessMode.Off
-    )
 
     /** Out parameter for the [[com.daml.lf.transaction.ContractStateMachine.State]]
       *
@@ -140,40 +101,6 @@ class TransactionTreeFactoryImplV3(
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     private var rollbackScope: RollbackScope = RollbackScope.empty
-
-    override def nextSalt(): Either[TooFewSalts, Salt] =
-      Either.cond(salts.hasNext, salts.next(), TooFewSalts)
-
-    override def suffixedNodes(): Map[LfNodeId, LfActionNode] = suffixedNodesBuilder.result()
-
-    override def unicumOfCreatedContract: LfHash => Option[Unicum] = unicumOfCreatedContractMap.get
-
-    override def setUnicumFor(discriminator: LfHash, unicum: Unicum)(implicit
-        traceContext: TraceContext
-    ): Unit =
-      unicumOfCreatedContractMap.put(discriminator, unicum).foreach { _ =>
-        ErrorUtil.internalError(
-          new IllegalStateException(
-            s"Two contracts have the same discriminator: $discriminator"
-          )
-        )
-      }
-
-    override def setCreatedContractInfo(
-        contractId: LfContractId,
-        createdInfo: SerializableContract,
-    )(implicit traceContext: TraceContext): Unit =
-      createdContractInfo.put(contractId, createdInfo).foreach { _ =>
-        ErrorUtil.internalError(
-          new IllegalStateException(
-            s"Two created contracts have the same contract id: $contractId"
-          )
-        )
-      }
-
-    override def addSuffixedNode(nodeId: LfNodeId, suffixedNode: LfActionNode): Unit = {
-      suffixedNodesBuilder += nodeId -> suffixedNode
-    }
 
     def signalRollbackScope(target: RollbackScope): Unit = {
       val (pops, pushes) = RollbackScope.popsAndPushes(rollbackScope, target)
@@ -246,7 +173,7 @@ class TransactionTreeFactoryImplV3(
     val previousCsmState = state.csmState
     val previousResolver = state.currentResolver
     state.currentResolver = state.csmState.projectKeyResolver(previousResolver)
-    state.csmState = state.csm.initial
+    state.csmState = csm.initial
 
     // Process core nodes and subviews
     val coreCreatedBuilder =
@@ -254,7 +181,7 @@ class TransactionTreeFactoryImplV3(
     val coreOtherBuilder = // contract IDs have not yet been suffixed
       List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
     val childViewsBuilder = Seq.newBuilder[TransactionView]
-    val subViewKeyInputs = mutable.Map.empty[LfGlobalKey, SerializableKeyResolution]
+    val subViewKeyResolutions = mutable.Map.empty[LfGlobalKey, SerializableKeyResolution]
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var createIndex = 0
@@ -288,12 +215,13 @@ class TransactionTreeFactoryImplV3(
 
               val subviewRolledBack =
                 childView.rbContext.rollbackScope != view.rbContext.rollbackScope
-              val keyInputsInSubview = v.globalKeyInputs.fmap { resolution =>
+              val keyResolutionsInSubview = v.globalKeyInputs.fmap { resolution =>
                 val serRes = resolution.asSerializable
                 if (subviewRolledBack) serRes.withRolledBack(true) else serRes
               }
-              MapsUtil.extendMapWith(subViewKeyInputs, keyInputsInSubview) { (accRes, newRes) =>
-                accRes.withRolledBack(accRes.rolledBack && newRes.rolledBack)
+              MapsUtil.extendMapWith(subViewKeyResolutions, keyResolutionsInSubview) {
+                (accRes, newRes) =>
+                  accRes.withRolledBack(accRes.rolledBack && newRes.rolledBack)
               }
             }
 
@@ -325,7 +253,7 @@ class TransactionTreeFactoryImplV3(
               state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
           }
           state.signalRollbackScope(rbScope)
-          val nextStateE = suffixedNode match {
+          val nextStateE = suffixedNode match { // TODO(i9720): call state.handleNode instead
             case create: LfNodeCreate =>
               state.csmState.handleCreate(create).leftMap(ContractKeyResolutionError)
             case exercise: LfNodeExercises =>
@@ -371,7 +299,6 @@ class TransactionTreeFactoryImplV3(
 
       // Compute the parameters of the view
       seed = view.rootSeed
-      rbContext = view.rbContext
       actionDescription = createActionDescription(suffixedRootNode, seed)
       viewCommonData = createViewCommonData(view, viewCommonDataSalt)
       viewKeyInputs = state.csmState.globalKeyInputs
@@ -387,7 +314,7 @@ class TransactionTreeFactoryImplV3(
           viewKeyInputs,
           coreUsedKeysOutsideRollback,
           state.keyVersionAndMaintainers,
-          subViewKeyInputs,
+          subViewKeyResolutions,
         )
       )
       viewParticipantData <- createViewParticipantData(
@@ -399,7 +326,7 @@ class TransactionTreeFactoryImplV3(
         actionDescription,
         viewParticipantDataSalt,
         contractOfId,
-        rbContext,
+        view.rbContext,
       )
 
       // fast-forward the former state over the subtree
@@ -418,43 +345,7 @@ class TransactionTreeFactoryImplV3(
       val transactionView =
         TransactionView(cryptoOps)(viewCommonData, viewParticipantData, childViews)
 
-      // Check that we correctly reconstruct the csm state machine
-      // Canton does not distinguish between the different com.daml.lf.transaction.Transaction.KeyInactive forms right now
-      val viewGki = transactionView.globalKeyInputs.fmap(_.resolution)
-      val stateGki = state.csmState.globalKeyInputs.fmap(_.toKeyMapping)
-      ErrorUtil.requireState(
-        viewGki == stateGki,
-        show"Failed to reconstruct the global key inputs for the view at position $viewPosition.\n  Reconstructed: $viewGki\n  Expected: $stateGki",
-      )
-      val viewLocallyCreated = transactionView.createdContracts.keySet
-      val stateLocallyCreated = state.csmState.locallyCreated
-      ErrorUtil.requireState(
-        viewLocallyCreated == stateLocallyCreated,
-        show"Failed to reconstruct created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreated\n  Expected: $stateLocallyCreated",
-      )
-      // Reconstruction of the active ledger state works currently only in UCK mode
-      if (uniqueContractKeys) {
-        // The locally created contracts should also be computable in non-UCK mode from the view data.
-        // However, `activeLedgerState` as a whole can be reconstructed only in UCK mode,
-        // and therefore we check this only in UCK mode.
-        val viewLocallyCreatedThisTimeline =
-          transactionView.activeLedgerState.locallyCreatedThisTimeline
-        val stateLocallyCreatedThisTimeline = state.csmState.activeState.locallyCreatedThisTimeline
-        ErrorUtil.requireState(
-          viewLocallyCreatedThisTimeline == stateLocallyCreatedThisTimeline,
-          show"Failed to reconstruct non-rolled back created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreatedThisTimeline\n  Expected: $stateLocallyCreatedThisTimeline",
-        )
-        val viewConsumed = transactionView.activeLedgerState.consumedBy.keySet
-        val stateConsumed = state.csmState.activeState.consumedBy.keySet
-        ErrorUtil.requireState(
-          viewConsumed == stateConsumed,
-          show"Failed to reconstruct the consumed contracts for the view at position $viewPosition.\n  Reconstructed: $viewConsumed\n  Expected: $stateConsumed",
-        )
-        ErrorUtil.requireState(
-          transactionView.activeLedgerState.keys == state.csmState.activeState.keys,
-          show"Failed to reconstruct active key state for the view at position $viewPosition.\n  Reconstructed: ${transactionView.activeLedgerState.keys}\n  Expected: ${state.csmState.activeState.keys}",
-        )
-      }
+      checkCsmStateMatchesView(state.csmState, transactionView, viewPosition)
 
       // Update the out parameters in the `State`
       state.createdContractsInView = createdInView
@@ -465,12 +356,63 @@ class TransactionTreeFactoryImplV3(
     }
   }
 
-  /** The map difference between `viewGlobalKeyInputs` and `subviewKeyInputs`,
-    * where the key inputs in `viewGlobalKeyInputs` have been extended with the information
-    * in `coreUsedOutsideRollback` and `keyVersionAndMaintainers` as expected.
-    * The [[com.digitalasset.canton.data.SerializableKeyResolution.rolledBack]] field
-    * merges (using `&&`) the rollback status from `subviewKeyInputs` with whether `coreUsedOutsideRollback`
-    * does not contain the key for the minuend of the map difference.
+  /** Check that we correctly reconstruct the csm state machine
+    * Canton does not distinguish between the different com.daml.lf.transaction.Transaction.KeyInactive forms right now
+    */
+  private def checkCsmStateMatchesView(
+      csmState: ContractStateMachine[Unit]#State,
+      transactionView: TransactionView,
+      viewPosition: ViewPosition,
+  )(implicit loggingContext: ErrorLoggingContext): Unit = {
+    val viewGki = transactionView.globalKeyInputs.fmap(_.resolution)
+    val stateGki = csmState.globalKeyInputs.fmap(_.toKeyMapping)
+    ErrorUtil.requireState(
+      viewGki == stateGki,
+      show"""Failed to reconstruct the global key inputs for the view at position $viewPosition.
+            |  Reconstructed: $viewGki
+            |  Expected: $stateGki""".stripMargin,
+    )
+    val viewLocallyCreated = transactionView.createdContracts.keySet
+    val stateLocallyCreated = csmState.locallyCreated
+    ErrorUtil.requireState(
+      viewLocallyCreated == stateLocallyCreated,
+      show"Failed to reconstruct created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreated\n  Expected: $stateLocallyCreated",
+    )
+    // Reconstruction of the active ledger state works currently only in UCK mode
+    if (uniqueContractKeys) {
+      // The locally created contracts should also be computable in non-UCK mode from the view data.
+      // However, `activeLedgerState` as a whole can be reconstructed only in UCK mode,
+      // and therefore we check this only in UCK mode.
+      val viewLocallyCreatedThisTimeline =
+        transactionView.activeLedgerState.locallyCreatedThisTimeline
+      val stateLocallyCreatedThisTimeline = csmState.activeState.locallyCreatedThisTimeline
+      ErrorUtil.requireState(
+        viewLocallyCreatedThisTimeline == stateLocallyCreatedThisTimeline,
+        show"Failed to reconstruct non-rolled back created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreatedThisTimeline\n  Expected: $stateLocallyCreatedThisTimeline",
+      )
+      val viewConsumed = transactionView.activeLedgerState.consumedBy.keySet
+      val stateConsumed = csmState.activeState.consumedBy.keySet
+      ErrorUtil.requireState(
+        viewConsumed == stateConsumed,
+        show"Failed to reconstruct the consumed contracts for the view at position $viewPosition.\n  Reconstructed: $viewConsumed\n  Expected: $stateConsumed",
+      )
+      ErrorUtil.requireState(
+        transactionView.activeLedgerState.keys == csmState.activeState.keys,
+        show"Failed to reconstruct active key state for the view at position $viewPosition.\n  Reconstructed: ${transactionView.activeLedgerState.keys}\n  Expected: ${csmState.activeState.keys}",
+      )
+    }
+  }
+
+  /** The difference between `viewKeyInputs: Map[LfGlobalKey, KeyInput]` and
+    * `subviewKeyResolutions: Map[LfGlobalKey, SerializableKeyResolution]`, computed as follows:
+    * <ul>
+    * <li>First, `keyVersionAndMaintainers` and `coreUsedOutsideRollback` are used to compute
+    *     `viewKeyResolutions: Map[LfGlobalKey, SerializableKeyResolution]` from `viewKeyInputs`.
+    *     A key `k` is considered rolled back, if it is rolled back everywhere, i.e.,
+    *     `subviewKeyResolutions.get(k).forall(_.rolledBack)` and `k` is not contained in `coreUsedOutsideRollback`.</li>
+    * <li>Second, the result consists of all key-resolution pairs that are in `viewKeyResolutions`,
+    *     but not in `subviewKeyResolutions`.</li>
+    * </ul>
     *
     * Note: The following argument depends on how this method is used.
     * It just sits here because we can then use scaladoc referencing.
@@ -479,10 +421,10 @@ class TransactionTreeFactoryImplV3(
     * Suppose that the map difference resolves a key `k` to a contract ID `cid`.
     * - In mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]],
     *   the first node (in execution order) involving the key `k` determines the key's resolution for the view.
-    *   So the first node `n` in execution order involving `k` is an Exercise, Fetch, or LookupByKey node.
+    *   So the first node `n` in execution order involving `k` is an Exercise, Fetch, or positive LookupByKey node.
     * - In mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Off]],
     *   the first by-key node (in execution order, including Creates) determines the global key input of the view.
-    *   So the first by-key node `n` is an ExerciseByKey, FetchByKey, or LookupByKey node.
+    *   So the first by-key node `n` is an ExerciseByKey, FetchByKey, or positive LookupByKey node.
     * In particular, `n` cannot be a Create node because then the resolution for the view
     * would be [[com.daml.lf.transaction.ContractStateMachine.KeyInactive]].
     * If this node `n` is in the core of the view, then `cid` is a core input and we are done.
@@ -491,20 +433,22 @@ class TransactionTreeFactoryImplV3(
     * of the subviews resolve `k` to `cid` (as resolutions from earlier subviews are preferred)
     * and therefore the map difference does not resolve `k` at all.
     *
-    * @param coreUsedOutsideRollback The set of keys that are used by core nodes that are not under a rollback scope within the view.
+    * @param coreUsedOutsideRollback The set of keys that are used by core nodes that are not under a rollback within the view.
+    * @return `Left(...)` if `viewKeyInputs` contains a key not in the `keyVersionAndMaintainers.keySet`
+    * @throws java.lang.IllegalArgumentException if `subviewKeyResolutions.keySet` is not a subset of `viewKeyInputs.keySet`
     */
   private def resolvedKeys(
-      viewGlobalKeyInputs: Map[LfGlobalKey, KeyInput],
+      viewKeyInputs: Map[LfGlobalKey, KeyInput],
       coreUsedOutsideRollback: Set[LfGlobalKey],
       keyVersionAndMaintainers: collection.Map[LfGlobalKey, (LfTransactionVersion, Set[LfPartyId])],
-      subviewKeyInputs: collection.Map[LfGlobalKey, SerializableKeyResolution],
+      subviewKeyResolutions: collection.Map[LfGlobalKey, SerializableKeyResolution],
   )(implicit
       traceContext: TraceContext
   ): Either[TransactionTreeConversionError, Map[LfGlobalKey, SerializableKeyResolution]] = {
     ErrorUtil.requireArgument(
-      subviewKeyInputs.keySet.subsetOf(viewGlobalKeyInputs.keySet),
-      s"Global key inputs of subview not part of the global key inputs of the parent view. Missing keys: ${subviewKeyInputs.keySet
-        .diff(viewGlobalKeyInputs.keySet)}",
+      subviewKeyResolutions.keySet.subsetOf(viewKeyInputs.keySet),
+      s"Global key inputs of subview not part of the global key inputs of the parent view. Missing keys: ${subviewKeyResolutions.keySet
+        .diff(viewKeyInputs.keySet)}",
     )
 
     def resolutionFor(
@@ -523,14 +467,14 @@ class TransactionTreeFactoryImplV3(
     }
 
     for {
-      viewGlobalKeyInputsWithSerializableResolutionSeq <- viewGlobalKeyInputs.toSeq
+      viewKeyResolutionSeq <- viewKeyInputs.toSeq
         .traverse { case (gkey, keyInput) =>
           val rolledBack = !coreUsedOutsideRollback.contains(gkey) &&
-            subviewKeyInputs.get(gkey).fold(true)(_.rolledBack)
+            subviewKeyResolutions.get(gkey).forall(_.rolledBack)
           resolutionFor(gkey, rolledBack, keyInput).map(gkey -> _)
         }
     } yield {
-      MapsUtil.mapDiff(viewGlobalKeyInputsWithSerializableResolutionSeq.toMap, subviewKeyInputs)
+      MapsUtil.mapDiff(viewKeyResolutionSeq.toMap, subviewKeyResolutions)
     }
   }
 }

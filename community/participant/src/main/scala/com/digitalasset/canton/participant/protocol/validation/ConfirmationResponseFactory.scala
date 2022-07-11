@@ -92,9 +92,9 @@ class ConfirmationResponseFactory(
         hostedConfirmingPartiesOfView(viewValidationResult, confirmationPolicy)
 
       val ViewActivenessResult(
+        inactive,
         alreadyLocked,
         existing,
-        inactive,
         duplicateKeys,
         inconsistentKeys,
         alreadyLockedKeys,

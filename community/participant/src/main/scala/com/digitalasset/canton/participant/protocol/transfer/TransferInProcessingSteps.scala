@@ -62,7 +62,7 @@ import scala.collection.concurrent
 import scala.collection.immutable.HashMap
 import scala.concurrent.{ExecutionContext, Future}
 
-class TransferInProcessingSteps(
+private[transfer] class TransferInProcessingSteps(
     domainId: DomainId,
     val participantId: ParticipantId,
     val engine: DAMLe,
@@ -544,21 +544,21 @@ class TransferInProcessingSteps(
 
     transferDataO match {
       case Some(transferData) =>
-        val originDomain = transferData.transferOutRequest.originDomain
+        val sourceDomain = transferData.transferOutRequest.sourceDomain
         val transferOutTimestamp = transferData.transferOutTimestamp
         for {
           _ready <- {
             logger.info(
-              s"Waiting for topology state at ${transferOutTimestamp} on transfer-out domain $originDomain ..."
+              s"Waiting for topology state at ${transferOutTimestamp} on transfer-out domain $sourceDomain ..."
             )
             EitherT(
               transferCoordination
-                .awaitTransferOutTimestamp(originDomain, transferOutTimestamp)
+                .awaitTransferOutTimestamp(sourceDomain, transferOutTimestamp)
                 .sequence
             )
           }
 
-          originCrypto <- transferCoordination.cryptoSnapshot(originDomain, transferOutTimestamp)
+          sourceCrypto <- transferCoordination.cryptoSnapshot(sourceDomain, transferOutTimestamp)
           // TODO(M40): Check the signatures of the mediator and the sequencer
 
           _ <- condUnitET[Future](
@@ -609,13 +609,13 @@ class TransferInProcessingSteps(
               transferData.creatingTransactionId,
             ): TransferProcessorError,
           )
-          originIps = originCrypto.ipsSnapshot
+          sourceIps = sourceCrypto.ipsSnapshot
           confirmingParties <- EitherT.right(transferInRequest.stakeholders.toList.traverseFilter {
             stakeholder =>
               for {
-                origin <- originIps.canConfirm(participantId, stakeholder)
+                source <- sourceIps.canConfirm(participantId, stakeholder)
                 target <- targetIps.canConfirm(participantId, stakeholder)
-              } yield if (origin && target) Some(stakeholder) else None
+              } yield if (source && target) Some(stakeholder) else None
           })
 
         } yield Some(TransferInValidationResult(confirmingParties.toSet))
@@ -878,7 +878,7 @@ object TransferInProcessingSteps {
 
   case class IdentityStateNotAvailable(
       transferId: TransferId,
-      originDomain: DomainId,
+      sourceDomain: DomainId,
       timestamp: CantonTimestamp,
   ) extends TransferInProcessorError
 

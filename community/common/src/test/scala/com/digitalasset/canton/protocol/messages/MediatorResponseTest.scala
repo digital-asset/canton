@@ -24,7 +24,7 @@ class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptograph
     Some(RootHash(TestHash.digest("txid1"))),
     Set(LfPartyId.assertFromString("p1"), LfPartyId.assertFromString("p2")),
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
-    defaultProtocolVersion,
+    testedProtocolVersion,
   )
   val response2: MediatorResponse = MediatorResponse.tryCreate(
     RequestId(CantonTimestamp.now()),
@@ -34,7 +34,7 @@ class MediatorResponseTest extends AnyWordSpec with BaseTest with HasCryptograph
     Some(RootHash(TestHash.digest("txid3"))),
     Set.empty,
     DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default")),
-    defaultProtocolVersion,
+    testedProtocolVersion,
   )
 
   def fromByteString(bytes: ByteString): MediatorResponse = {

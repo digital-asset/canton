@@ -267,6 +267,7 @@ abstract class CantonNodeBootstrapBase[
             topologyManager,
             authorizedStore,
             crypto.cryptoPublicStore,
+            parameterConfig.initialProtocolVersion,
             loggerFactory,
           ),
           executionContext,

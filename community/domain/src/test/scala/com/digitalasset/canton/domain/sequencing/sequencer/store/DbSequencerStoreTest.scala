@@ -23,7 +23,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
     behave like sequencerStore(() =>
       new DbSequencerStore(
         storage,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         MaxInClauseSize,
         timeouts,
         loggerFactory,
@@ -32,7 +32,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
     behave like multiTenantedSequencerStore(() =>
       new DbSequencerStore(
         storage,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         MaxInClauseSize,
         timeouts,
         loggerFactory,

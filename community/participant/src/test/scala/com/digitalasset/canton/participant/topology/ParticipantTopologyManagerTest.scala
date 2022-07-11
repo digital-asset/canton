@@ -18,6 +18,7 @@ class ParticipantTopologyManagerTest extends TopologyManagerTest {
           store,
           crypto,
           DefaultProcessingTimeouts.testing,
+          testedProtocolVersion,
           factory,
         )
         mgr.setParticipantId(DefaultTestIdentities.participant1)

@@ -128,7 +128,7 @@ class TestProcessingSteps(
     val recipient: Member = ParticipantId("participant1")
     EitherT.rightT(new UntrackedSubmission {
       override def batch: Batch[DefaultOpenEnvelope] =
-        Batch.of(defaultProtocolVersion, (envelope, Recipients.cc(recipient)))
+        Batch.of(testedProtocolVersion, (envelope, Recipients.cc(recipient)))
       override def pendingSubmissionId: Int = param
       override def maxSequencingTimeO: OptionT[Future, CantonTimestamp] = OptionT.none
 

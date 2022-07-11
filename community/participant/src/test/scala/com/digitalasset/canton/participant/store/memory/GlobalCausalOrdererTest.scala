@@ -223,7 +223,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
   "transfer-ins block on transfer-outs" in {
     val sut = createForTesting()
 
-    val id = TransferId(originDomain = domain1, CantonTimestamp.Epoch)
+    val id = TransferId(sourceDomain = domain1, CantonTimestamp.Epoch)
     val party = LfPartyId.assertFromString("Alice::domain")
     val vc =
       VectorClock(domain1, CantonTimestamp.Epoch, party, Map.empty)

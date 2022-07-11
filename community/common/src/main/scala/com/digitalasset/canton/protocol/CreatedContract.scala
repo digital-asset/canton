@@ -14,7 +14,7 @@ import com.digitalasset.canton.version.HasProtoV0
 /** @param consumedInCore Whether the contract is consumed in the core of the view.
   *   [[com.digitalasset.canton.protocol.WellFormedTransaction]] checks that a created contract
   *   can only be used in the same or deeper rollback scopes as the create, so if `rolledBack` is true
-  *   then this is false.
+  *   then `consumedInCore` is false.
   * @param rolledBack Whether the contract creation has a different rollback scope than the view.
   */
 case class CreatedContract private (
@@ -88,7 +88,7 @@ object CreatedContract {
 /** @param consumedInView Whether the contract is consumed in the view.
   *   [[com.digitalasset.canton.protocol.WellFormedTransaction]] checks that a created contract
   *   can only be used in the same or deeper rollback scopes as the create, so if `rolledBack` is true
-  *   then this is false.
+  *   then `consumedInView` is false.
   * @param rolledBack Whether the contract creation has a different rollback scope than the view.
   */
 case class CreatedContractInView(

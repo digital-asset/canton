@@ -61,7 +61,7 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
         createDbContractStoreForTesting(
           storage,
           acsDomainId,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           domainIndex,
           loggerFactory,
         ),

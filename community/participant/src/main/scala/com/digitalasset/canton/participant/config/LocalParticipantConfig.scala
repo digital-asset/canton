@@ -99,6 +99,7 @@ case class ParticipantProtocolConfig(
     minimumProtocolVersion: Option[ProtocolVersion],
     devVersionSupport: Boolean,
     dontWarnOnDeprecatedPV: Boolean,
+    initialProtocolVersion: ProtocolVersion,
 )
 
 case class ParticipantNodeParameters(
@@ -126,6 +127,7 @@ case class ParticipantNodeParameters(
 ) extends LocalNodeParameters {
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
+  override def initialProtocolVersion: ProtocolVersion = protocolConfig.initialProtocolVersion
 }
 
 /** Configuration parameters for a single participant
@@ -686,6 +688,7 @@ object TestingTimeServiceConfig {
   * @param minimumProtocolVersion The minimum protocol version that this participant will speak when connecting to a domain
   * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
+  * @param initialProtocolVersion The initial protocol version used by the participant (default latest), e.g., used to create the initial topology transactions.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
   * @param dontWarnOnDeprecatedPV If true, then this participant will not emit a warning when connecting to a sequencer using a deprecated protocol version (such as 2.0.0).
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
@@ -706,6 +709,9 @@ case class ParticipantNodeParameterConfig(
     uniqueContractKeys: Boolean = true,
     enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,
+    initialProtocolVersion: ParticipantProtocolVersion = ParticipantProtocolVersion(
+      ProtocolVersion.latest
+    ),
     willCorruptYourSystemDevVersionSupport: Boolean = false,
     dontWarnOnDeprecatedPV: Boolean = false,
     warnIfOverloadedFor: Option[NonNegativeFiniteDuration] = Some(

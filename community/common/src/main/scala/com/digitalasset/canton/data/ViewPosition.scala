@@ -5,10 +5,9 @@ package com.digitalasset.canton.data
 
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
-import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.google.protobuf.ByteString
-import pprint.Tree
 
 /** A position encodes the path from a view in a transaction tree to its root.
   * The encoding must not depend on the hashes of the nodes.
@@ -31,28 +30,13 @@ object ViewPosition {
   /** The root [[ViewPosition]] has an empty path. */
   val root: ViewPosition = new ViewPosition(List.empty[MerklePathElement])
 
-  implicit def prettyViewPosition: Pretty[ViewPosition] = { pos =>
-    import com.digitalasset.canton.logging.pretty.Pretty.PrettyOps
-    implicit val prettyMPE: Pretty[MerklePathElement] = prettyMerklePathElement
-    Tree.Apply("", Iterator(pos.position.toTree))
-  }
-
-  private val prettyMerklePathElement: Pretty[MerklePathElement] = {
-    case ListIndex(index) => Tree.Literal(index.toString)
-    case MerkleSeqIndex(index) =>
-      val sb = new StringBuilder(index.length)
-      index.reverse.foreach { dir =>
-        val dirChar = dir match {
-          case Direction.Left => "L"
-          case Direction.Right => "R"
-        }
-        sb.append(dirChar)
-      }
-      Tree.Literal(sb.toString())
+  implicit def prettyViewPosition: Pretty[ViewPosition] = {
+    import com.digitalasset.canton.logging.pretty.Pretty._
+    prettyOfClass(unnamedParam(_.position))
   }
 
   /** A single element on a path through a Merkle tree. */
-  sealed trait MerklePathElement extends Product with Serializable {
+  sealed trait MerklePathElement extends Product with Serializable with PrettyPrinting {
     def encodeDeterministically: ByteString
   }
 
@@ -64,6 +48,8 @@ object ViewPosition {
       DeterministicEncoding
         .encodeByte(MerklePathElement.ListIndexPrefix)
         .concat(DeterministicEncoding.encodeInt(index))
+
+    override def pretty: Pretty[ListIndex] = prettyOfString(_.index.toString)
   }
 
   /** A leaf position in a [[MerkleSeq]], encodes as a path of directions from the leaf to the root.
@@ -74,6 +60,9 @@ object ViewPosition {
       DeterministicEncoding
         .encodeByte(MerklePathElement.MerkleSeqIndexPrefix)
         .concat(DeterministicEncoding.encodeSeqWith(index)(_.encodeDeterministically))
+
+    override def pretty: Pretty[MerkleSeqIndex] =
+      prettyOfString(_ => index.reverse.map(_.show).mkString(""))
   }
 
   object MerklePathElement {
@@ -84,17 +73,21 @@ object ViewPosition {
   }
 
   object MerkleSeqIndex {
-    sealed trait Direction extends Product with Serializable {
+    sealed trait Direction extends Product with Serializable with PrettyPrinting {
       def encodeDeterministically: ByteString
     }
     object Direction {
 
       case object Left extends Direction {
         override def encodeDeterministically: ByteString = DeterministicEncoding.encodeByte(0)
+
+        override def pretty: Pretty[Left.type] = prettyOfString(_ => "L")
       }
 
       case object Right extends Direction {
         override def encodeDeterministically: ByteString = DeterministicEncoding.encodeByte(1)
+
+        override def pretty: Pretty[Right.type] = prettyOfString(_ => "R")
       }
     }
   }

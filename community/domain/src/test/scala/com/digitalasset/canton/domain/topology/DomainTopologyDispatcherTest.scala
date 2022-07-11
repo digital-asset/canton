@@ -515,7 +515,7 @@ class DomainTopologySenderTest
     val responses = new AtomicReference[List[Response]](List.empty)
     val sender = new DomainTopologySender.Impl(
       domainId,
-      defaultProtocolVersion,
+      testedProtocolVersion,
       client,
       timeTracker,
       clock,
@@ -628,7 +628,7 @@ class DomainTopologySenderTest
                   domainId,
                   messageId = MessageId.tryCreate("booh"),
                   reason = DeliverErrorReason.BatchInvalid("booh"),
-                  protocolVersion = defaultProtocolVersion,
+                  protocolVersion = testedProtocolVersion,
                 )
               )
             ),

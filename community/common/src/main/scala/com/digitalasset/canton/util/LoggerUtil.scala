@@ -94,4 +94,21 @@ object LoggerUtil {
     }
   }
 
+  /** truncates a string
+    *
+    * @param maxLines truncate after observing the given number of newline characters
+    * @param maxSize truncate after observing the given number of characters
+    */
+  def truncateString(maxLines: Int, maxSize: Int)(str: String): String = {
+    val builder = new StringBuilder()
+    val (lines, length) = str.foldLeft((0, 0)) {
+      case ((lines, length), elem) if lines < maxLines && length < maxSize =>
+        builder.append(elem)
+        (lines + (if (elem == '\n') 1 else 0), length + 1)
+      case (acc, _) => acc
+    }
+    val append = if (lines == maxLines || length == maxSize) " ..." else ""
+    builder.toString + append
+  }
+
 }

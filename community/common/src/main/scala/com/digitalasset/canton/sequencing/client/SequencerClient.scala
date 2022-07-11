@@ -162,7 +162,8 @@ class SequencerClient(
     val loggerFactory: NamedLoggerFactory,
     initialCounter: Option[SequencerCounter] = None,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
-    extends FlagCloseableAsync
+    extends SequencerClientSend
+    with FlagCloseableAsync
     with NamedLogging
     with HasFlushFuture
     with Spanning {
@@ -201,34 +202,7 @@ class SequencerClient(
   def subscriptionIsHealthy: Boolean =
     currentSubscription.get().exists(x => !x.subscription.isDegraded)
 
-  /** Sends a request to sequence a deliver event to the sequencer.
-    * If we fail to make the request to the sequencer and are certain that it was not received by the sequencer an
-    * error is returned. In this circumstance it is safe for the caller to retry the request without causing a duplicate
-    * request.
-    * A successful response however does not mean that the request will be successfully sequenced. Instead the caller
-    * must subscribe to the sequencer and can observe one of the following outcomes:
-    *   1. A deliver event is sequenced with a messageId matching this send.
-    *   2. A deliver error is sequenced with a messageId matching this send.
-    *   3. The sequencing time progresses beyond the provided max-sequencing-time. The caller can assume that the send
-    *      will now never be sequenced.
-    * Callers should be aware that a message-id can be reused once one of these outcomes is observed so cannot assume
-    * that an event with a matching message-id at any point in the future matches their send. Use the `sendTracker` to
-    * aid tracking timeouts for events (if useful this could be enriched in the future to provide send completion
-    * callbacks alongside the existing timeout notifications).
-    * For convenience callers can provide a callback that the SendTracker will invoke when the outcome of the send
-    * is known. However this convenience comes with significant limitations that a caller must understand:
-    *  - the callback has no ability to be persisted so will be lost after a restart or recreation of the SequencerClient
-    *  - the callback is called by the send tracker while handling an event from a SequencerSubscription.
-    *    If the callback returns an error this will be returned to the underlying subscription handler and shutdown the sequencer
-    *    client. If handlers do not want to halt the sequencer subscription errors should be appropriately handled
-    *    (particularly logged) and a successful value returned from the callback.
-    *  - If witnessing an event causes many prior sends to timeout there is no guaranteed order in which the
-    *    callbacks of these sends will be notified.
-    *  - If replay is enabled, the callback will be called immediately with a fake `SendResult`.
-    *  For more robust send result tracking callers should persist metadata about the send they will make and
-    *  monitor the sequenced events when read, so actions can be taken even if in-memory state is lost.
-    */
-  def sendAsync(
+  override def sendAsync(
       batch: Batch[DefaultOpenEnvelope],
       sendType: SendType = SendType.Other,
       timestampOfSigningKey: Option[CantonTimestamp] = None,
@@ -405,15 +379,10 @@ class SequencerClient(
     )
   }
 
-  /** Provides a value for max-sequencing-time to use for `sendAsync` if no better application provided timeout is available.
-    * Is currently a configurable offset from our clock.
-    */
-  def generateMaxSequencingTime: CantonTimestamp =
+  override def generateMaxSequencingTime: CantonTimestamp =
     clock.now.add(config.defaultMaxSequencingTimeOffset.unwrap)
 
-  // the message id is only for correlation within this client and does not need to be globally unique.
-  @VisibleForTesting // or more to the point visible to mocks in tests
-  protected def generateMessageId: MessageId = MessageId.randomMessageId()
+  override protected def generateMessageId: MessageId = MessageId.randomMessageId()
 
   /** Create a subscription for sequenced events for this member,
     * starting after the prehead in the `sequencerCounterTrackerStore`.
@@ -429,12 +398,15 @@ class SequencerClient(
       eventHandler: PossiblyIgnoredApplicationHandler[ClosedEnvelope],
       timeTracker: DomainTimeTracker,
       timeoutHandler: SendTimeoutHandler = loggingTimeoutHandler,
+      onCleanHandler: Traced[CursorPrehead[SequencerCounter]] => Future[Unit] = _ => Future.unit,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     sequencerCounterTrackerStore.preheadSequencerCounter.flatMap { cleanPrehead =>
-      val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(_.timestamp)
+      val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(
+        _.timestamp
+      ) // Sequencer client will feed events right after this ts to the handler.
       val cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
         sequencerCounterTrackerStore,
-        onUpdate = _ => Future.unit,
+        onCleanHandler,
         loggerFactory,
       )
       subscribeAfter(

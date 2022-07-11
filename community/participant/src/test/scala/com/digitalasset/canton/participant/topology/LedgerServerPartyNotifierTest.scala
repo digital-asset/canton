@@ -84,7 +84,7 @@ class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
   }
 
   private def genTransactionFromMapping(mapping: TopologyStateUpdateMapping) =
-    crypto.mkTrans(TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion))(
+    crypto.mkTrans(TopologyStateUpdate.createAdd(mapping, testedProtocolVersion))(
       directExecutionContext
     )
 

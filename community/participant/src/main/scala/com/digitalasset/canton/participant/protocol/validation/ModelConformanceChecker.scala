@@ -68,13 +68,15 @@ class ModelConformanceChecker(
 
   /** Reinterprets the transaction resulting from the received transaction view trees.
     *
-    * @param rootViewsWithInputKeys all received transaction view trees contained in a confirmation request that
-    *                      have the same transaction id and represent a top-most view
+    * @param rootViews all received transaction view trees contained in a confirmation request that
+    *                  have the same transaction id and represent a top-most view
+    * @param keyResolverFor The key resolver to be used for re-interpreting root views
     * @param commonData the common data of all the (rootViewTree :  TransactionViewTree) trees in `rootViewsWithInputKeys`
     * @return the resulting LfTransaction with [[com.digitalasset.canton.protocol.LfContractId]]s only
     */
   def check(
-      rootViewsWithInputKeys: NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]],
+      rootViews: NonEmpty[Seq[TransactionViewTree]],
+      keyResolverFor: TransactionViewTree => LfKeyResolver,
       requestCounter: RequestCounter,
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
@@ -82,10 +84,10 @@ class ModelConformanceChecker(
     val CommonData(transactionId, ledgerTime, submissionTime, confirmationPolicy) = commonData
 
     for {
-      suffixedTxs <- rootViewsWithInputKeys.toNEF.traverse { case (v, keys) =>
+      suffixedTxs <- rootViews.toNEF.traverse { v =>
         checkView(
           v,
-          keys,
+          keyResolverFor(v),
           requestCounter,
           ledgerTime,
           submissionTime,
@@ -106,7 +108,7 @@ class ModelConformanceChecker(
 
   private def checkView(
       view: TransactionViewTree,
-      resolvedKeys: LfKeyResolver,
+      resolverFromView: LfKeyResolver,
       requestCounter: RequestCounter,
       ledgerTime: CantonTimestamp,
       submissionTime: CantonTimestamp,
@@ -128,7 +130,7 @@ class ModelConformanceChecker(
       new ExtendedContractLookup(
         ContractLookup.noContracts(logger), // all contracts and keys specified explicitly
         viewInputContracts,
-        resolvedKeys,
+        resolverFromView,
       )
 
     for {
@@ -143,8 +145,13 @@ class ModelConformanceChecker(
         traceContext,
       )
         .leftWiden[Error]
-      (lfTx, metadata, resolver) = lfTxAndMetadata
-      // TODO(#9386) Figure out the relation between `resolvedKeys` and `resolver`
+      (lfTx, metadata, resolverFromReinterpretation) = lfTxAndMetadata
+      // For transaction views of protocol version 3 or higher,
+      // the `resolverFromReinterpretation` is the same as the `resolverFromView`.
+      // The `TransactionTreeFactoryImplV3` rebuilds the `resolverFromReinterpreation`
+      // again by re-running the `ContractStateMachine` and checks consistency
+      // with the reconstructed view's global key inputs,
+      // which by the view equality check is the same as the `resolverFromView`.
       wfTx <- EitherT
         .fromEither[Future](
           WellFormedTransaction.normalizeAndCheck(lfTx, metadata, WithoutSuffixes)
@@ -162,7 +169,7 @@ class ModelConformanceChecker(
           transactionUuid = view.transactionUuid,
           topologySnapshot = topologySnapshot,
           contractOfId = TransactionTreeFactory.contractInstanceLookup(lookupWithKeys),
-          keyResolver = resolver,
+          keyResolver = resolverFromReinterpretation,
         )
       ).leftMap(err =>
         TransactionTreeError(lfTx, s"Failed to construct transaction view tree: $err")

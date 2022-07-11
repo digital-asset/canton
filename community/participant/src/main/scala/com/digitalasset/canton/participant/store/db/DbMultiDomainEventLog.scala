@@ -334,15 +334,6 @@ class DbMultiDomainEventLog private[db] (
       traceContext: TraceContext
   ): Future[Unit] =
     processingTime.metric.event {
-      val syncCommit = storage.profile match {
-        case _: Profile.Postgres => sqlu"set local synchronous_commit=on"
-        // Don't do anything for H2/Oracle. According to our docs it is up to the user to enforce synchronous replication.
-        // Any changes here are on a best-effort basis, but we won't guarantee they will be sufficient.
-        case _: Profile.H2 => sqlu" "
-        // Oracle requires an updating statement here and will not accept an empty string so using a noop dummy update
-        case _: Profile.Oracle => sqlu"UPDATE linearized_event_log SET log_id = 1 WHERE 1 = 0"
-      }
-
       val insertStatement = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
           """merge /*+ INDEX ( linearized_event_log ( local_offset, log_id ) ) */ 
@@ -367,7 +358,7 @@ class DbMultiDomainEventLog private[db] (
         pp >> event.localOffset
         pp >> publicationTime
       }
-      val query = syncCommit.andThen(bulkInsert).transactionally
+      val query = storage.withSyncCommitOnPostgres(bulkInsert)
       storage.queryAndUpdate(query, functionFullName)
     }
 

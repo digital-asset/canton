@@ -49,6 +49,7 @@ class ParticipantTopologyManager(
     override val store: TopologyStore[TopologyStoreId.AuthorizedStore],
     crypto: Crypto,
     override protected val timeouts: ProcessingTimeout,
+    protocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyManager[ParticipantTopologyManagerError](
@@ -56,6 +57,7 @@ class ParticipantTopologyManager(
       crypto,
       store,
       timeouts,
+      protocolVersion,
       loggerFactory,
     )(ec) {
 
@@ -346,7 +348,6 @@ class ParticipantTopologyManager(
     ): EitherT[Future, ParticipantTopologyManagerError, SignedTopologyTransaction[
       TopologyChangeOp
     ]] = {
-      val protocolVersion = ProtocolVersion.latest // TODO(#9396)
       authorize(
         TopologyStateUpdate.createAdd(VettedPackages(pid, packages), protocolVersion),
         None,

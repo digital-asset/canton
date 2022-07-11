@@ -115,13 +115,13 @@ class TransferCache(transferStore: TransferStore, override val loggerFactory: Na
     }
 
   override def find(
-      filterOrigin: Option[DomainId],
+      filterSource: Option[DomainId],
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
     transferStore
-      .find(filterOrigin, filterRequestTimestamp, filterSubmitter, limit)
+      .find(filterSource, filterRequestTimestamp, filterSubmitter, limit)
       .map(_.filter(transferData => !pendingCompletions.contains(transferData.transferId)))
 
   override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit

@@ -79,7 +79,7 @@ private[sync] class PartyAllocation(
     }
 
     val partyName = hint.getOrElse(s"party-${UUID.randomUUID().toString}")
-    val protocolVersion = ProtocolVersion.latest // TODO(#9396)
+    val protocolVersion = parameters.protocolConfig.initialProtocolVersion
 
     val result =
       for {

@@ -56,9 +56,9 @@ object BuildCommon {
       Seq(
         organization := "com.digitalasset.canton",
         scalaVersion := scala_version,
-        resolvers ++= Seq(Dependencies.use_custom_daml_version).collect { case true =>
+        resolvers := Seq(Dependencies.use_custom_daml_version).collect { case true =>
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
-        },
+        } ++ resolvers.value,
         // , scalacOptions += "-Ystatistics" // re-enable if you need to debug compile times
       )
     )

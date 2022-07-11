@@ -42,7 +42,7 @@ object SequencerTestUtils extends BaseTest {
       deserializedFrom: Option[ByteString] = None,
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
   ): Deliver[ClosedEnvelope] = {
-    val batch = Batch.empty(defaultProtocolVersion)
+    val batch = Batch.empty(testedProtocolVersion)
 
     val deliver = Deliver.create[ClosedEnvelope](
       counter,
@@ -71,7 +71,7 @@ object SequencerTestUtils extends BaseTest {
       domainId: DomainId = DefaultTestIdentities.domainId,
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
   ): Deliver[Nothing] = {
-    val batch = Batch.empty(defaultProtocolVersion)
+    val batch = Batch.empty(testedProtocolVersion)
     Deliver.create[Nothing](
       counter,
       timestamp,

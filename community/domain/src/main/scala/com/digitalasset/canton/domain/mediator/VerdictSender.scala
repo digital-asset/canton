@@ -1,0 +1,199 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.domain.mediator
+
+import cats.data.EitherT
+import cats.syntax.functor._
+import cats.syntax.traverse._
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.RequestId
+import com.digitalasset.canton.protocol.messages.{
+  DefaultOpenEnvelope,
+  MediatorRequest,
+  SignedProtocolMessage,
+  Verdict,
+}
+import com.digitalasset.canton.sequencing.client.{
+  SendCallback,
+  SendResult,
+  SendType,
+  SequencerClientSend,
+}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  DeliverErrorReason,
+  OpenEnvelope,
+  Recipients,
+}
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ProtocolVersion
+
+import scala.concurrent.{ExecutionContext, Future}
+
+trait VerdictSender {
+  def sendResult(
+      requestId: RequestId,
+      request: MediatorRequest,
+      verdict: Verdict,
+      decisionTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit]
+
+  def sendResultBatch(
+      requestId: RequestId,
+      batch: Batch[DefaultOpenEnvelope],
+      decisionTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit]
+}
+
+object VerdictSender {
+  def apply(
+      sequencerSend: SequencerClientSend,
+      crypto: DomainSyncCryptoClient,
+      protocolVersion: ProtocolVersion,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit executionContext: ExecutionContext): VerdictSender =
+    new DefaultVerdictSender(sequencerSend, crypto, protocolVersion, loggerFactory)
+}
+
+class DefaultVerdictSender(
+    sequencerSend: SequencerClientSend,
+    crypto: DomainSyncCryptoClient,
+    protocolVersion: ProtocolVersion,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends VerdictSender
+    with NamedLogging {
+  override def sendResult(
+      requestId: RequestId,
+      request: MediatorRequest,
+      verdict: Verdict,
+      decisionTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val resultET = for {
+      batch <- createResults(requestId, request, verdict)
+      _ <- EitherT.right[SyncCryptoError](
+        sendResultBatch(requestId, batch, decisionTime)
+      )
+    } yield ()
+
+    // we don't want to halt the mediator if an individual send fails or if we're unable to create a batch, so just log
+    resultET
+      .leftMap(err => logger.warn(s"Failed to send verdict for $requestId: $err"))
+      .value
+      .map(_.merge)
+  }
+
+  override def sendResultBatch(
+      requestId: RequestId,
+      batch: Batch[DefaultOpenEnvelope],
+      decisionTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val callback: SendCallback = {
+      case SendResult.Success(_) =>
+        logger.debug(s"Sent result for request ${requestId.unwrap}")
+      case SendResult.Error(error) =>
+        val reason = error.reason
+        reason match {
+          case _: DeliverErrorReason.BatchRefused =>
+            logger.warn(
+              s"Sequencing result was refused for request ${requestId.unwrap}: ${reason.toString}"
+            )
+          case _ =>
+            logger.error(
+              s"Failed to sequence result for request ${requestId.unwrap}: ${reason.toString}"
+            )
+        }
+      case _: SendResult.Timeout =>
+        logger.warn("Sequencing result timed out")
+    }
+
+    // the result of send request will be logged within the returned future however any error is effectively
+    // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
+    // completed.
+    // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
+    // that point.
+    val sendET = sequencerSend.sendAsync(
+      batch,
+      SendType.Other,
+      Some(requestId.unwrap),
+      callback = callback,
+      maxSequencingTime = decisionTime,
+      messageId = VerdictMessageId(requestId).toMessageId,
+    )
+
+    EitherTUtil
+      .logOnError(sendET, s"Failed to send result to sequencer for request ${requestId.unwrap}")
+      .value
+      .void
+  }
+
+  private def informeesGroupedByParticipant(requestId: RequestId, informees: Set[LfPartyId])(
+      implicit traceContext: TraceContext
+  ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
+
+    def participantInformeeMapping(
+        topologySnapshot: TopologySnapshot
+    ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
+      val start = Map.empty[ParticipantId, Set[LfPartyId]]
+      val prefetchF =
+        informees.toList.traverse(partyId =>
+          topologySnapshot.activeParticipantsOf(partyId).map(res => (partyId, res))
+        )
+      prefetchF.map { fetched =>
+        fetched.foldLeft((start, Set.empty[LfPartyId]))({
+          case (
+                (participantsToInformees, informeesNoParticipant),
+                (informee, activeParticipants),
+              ) =>
+            val activeParticipantsOfInformee = activeParticipants.keySet
+            if (activeParticipantsOfInformee.isEmpty)
+              (participantsToInformees, informeesNoParticipant + informee)
+            else {
+              val updatedMap = activeParticipantsOfInformee.foldLeft(participantsToInformees)({
+                case (map, participant) =>
+                  map + (participant -> (map.getOrElse(participant, Set.empty) + informee))
+              })
+              (updatedMap, informeesNoParticipant)
+            }
+        })
+      }
+    }
+
+    crypto.ips.awaitSnapshot(requestId.unwrap).flatMap(participantInformeeMapping)
+  }
+
+  private[this] def createResults(requestId: RequestId, request: MediatorRequest, verdict: Verdict)(
+      implicit traceContext: TraceContext
+  ): EitherT[Future, SyncCryptoError, Batch[DefaultOpenEnvelope]] =
+    for {
+      informeesMapAndAnyInformeeNoActiveParticipant <- EitherT.right(
+        informeesGroupedByParticipant(requestId, request.allInformees)
+      )
+      (informeesMap, informeesNoParticipant) = informeesMapAndAnyInformeeNoActiveParticipant
+      snapshot <- EitherT.right(crypto.awaitSnapshot(requestId.unwrap))
+      verdictWithInformeeCheck = {
+        if (informeesNoParticipant.nonEmpty)
+          Verdict.MediatorReject.Topology.InformeesNotHostedOnActiveParticipants
+            .Reject(show"$informeesNoParticipant")
+        else verdict
+      }
+      envelopes <- informeesMap.toList
+        .traverse { case (participantId, informees) =>
+          val result = request.createMediatorResult(requestId, verdictWithInformeeCheck, informees)
+          SignedProtocolMessage
+            .create(result, snapshot, crypto.pureCrypto, protocolVersion)
+            .map(signedResult =>
+              OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
+            )
+        }
+    } yield Batch(envelopes, protocolVersion)
+}

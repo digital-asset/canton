@@ -43,6 +43,7 @@ abstract class TopologyManager[E <: CantonError](
     val crypto: Crypto,
     protected val store: TopologyStore[TopologyStoreId],
     timeouts: ProcessingTimeout,
+    protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -419,7 +420,7 @@ abstract class TopologyManager[E <: CantonError](
             build(
               x.transaction.reverse,
               None,
-              x.representativeProtocolVersion.representative, // TODO(#9688) remove this lift
+              protocolVersion,
             )
           )
       } yield reverse

@@ -7,9 +7,11 @@ import com.daml.error.ErrorCode
 import com.digitalasset.canton.error.BaseCantonError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.ShowUtil._
 import org.scalactic.source
+import org.scalatest.AppendedClues._
 import org.scalatest.Assertion
-import org.scalatest.Inspectors.forAll
+import org.scalatest.Inspectors.{forAll, forAtLeast, forEvery}
 import org.scalatest.matchers.should.Matchers.{include, _}
 import org.slf4j.MDC
 import org.slf4j.event.Level
@@ -150,4 +152,31 @@ object LogEntry {
 
   def format(entries: IterableOnce[LogEntry]): String =
     entries.iterator.mkString("\n\t", "\n\t", "\n")
+
+  /** Verifies a sequence of log entries.
+    *
+    * @param mustContainWithClue describes entries that must occur inside of `entries`;
+    *                            the string component is a clue that will be output in case of failure
+    * @param mayContain describes entries that may optionally occur inside of `entries`
+    * @param entries the log entries to be checked
+    * @return
+    */
+  def assertLogSeq(
+      mustContainWithClue: Seq[(LogEntry => Assertion, String)],
+      mayContain: Seq[LogEntry => Assertion],
+  )(entries: Iterable[LogEntry]): Assertion = {
+    val mustContain = mustContainWithClue.map { case (assertion, _) => assertion }
+
+    forEvery(entries) { entry =>
+      withClue(show"Unexpected log entry:\n\t$entry") {
+        forAtLeast(1, mustContain ++ mayContain) { assertion => assertion(entry) }
+      }
+    }
+
+    forEvery(mustContainWithClue) { case (assertion, clue) =>
+      withClue(s"Missing log entry: $clue") {
+        forAtLeast(1, entries) { entry => assertion(entry) }
+      }
+    }
+  } withClue s"\n\nAll log entries:${LogEntry.format(entries)}"
 }

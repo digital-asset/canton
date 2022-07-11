@@ -25,9 +25,9 @@ case class TransferOutRequest(
     stakeholders: Set[LfPartyId],
     adminParties: Set[LfPartyId],
     contractId: LfContractId,
-    originDomain: DomainId,
+    sourceDomain: DomainId,
     sourceProtocolVersion: SourceProtocolVersion,
-    originMediator: MediatorId,
+    sourceMediator: MediatorId,
     targetDomain: DomainId,
     targetTimeProof: TimeProof,
 ) {
@@ -43,8 +43,8 @@ case class TransferOutRequest(
     val commonData =
       TransferOutCommonData.create(hashOps)(
         commonDataSalt,
-        originDomain,
-        originMediator,
+        sourceDomain,
+        sourceMediator,
         stakeholders,
         adminParties,
         uuid,

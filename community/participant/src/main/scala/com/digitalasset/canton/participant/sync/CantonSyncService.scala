@@ -373,7 +373,7 @@ class CantonSyncService(
         Right(())
       case Left(LedgerPruningOnlySupportedInEnterpriseEdition(message)) =>
         logger.warn(
-          s"Canton participant pruning not supported in canton-community edition: ${message}"
+          s"Canton participant pruning not supported in canton-open-source edition: ${message}"
         )
         Left(PruningServiceError.PruningNotSupportedInCommunityEdition.Error())
       case Left(err: LedgerPruningOffsetNonCantonFormat) =>

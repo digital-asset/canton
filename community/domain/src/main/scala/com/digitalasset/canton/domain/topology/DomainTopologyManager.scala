@@ -176,6 +176,7 @@ class DomainTopologyManager(
       crypto,
       store,
       timeouts,
+      protocolVersion,
       loggerFactory,
     )(ec)
     with RequestProcessingStrategy.ManagerHooks {

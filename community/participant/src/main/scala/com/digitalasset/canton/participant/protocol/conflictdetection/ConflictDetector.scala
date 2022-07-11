@@ -311,7 +311,7 @@ class ConflictDetector(
     *   <li>Contracts in `commitSet.`[[CommitSet.archivals archivals]] are archived.</li>
     *   <li>Contracts in `commitSet.`[[CommitSet.creations creations]] are created.</li>
     *   <li>Contracts in `commitSet.`[[CommitSet.transferOuts transferOuts]] are transferred away to the given target domain.</li>
-    *   <li>Contracts in `commitSet.`[[CommitSet.transferIns transferIns]] become active with the given origin domain</li>
+    *   <li>Contracts in `commitSet.`[[CommitSet.transferIns transferIns]] become active with the given source domain</li>
     *   <li>Keys in `commitSet.`[[CommitSet.keyUpdates keyUpdates]] are set to the given [[com.digitalasset.canton.participant.store.ContractKeyJournal.Status]]</li>
     *   <li>All contracts and keys locked by the [[ActivenessSet]] are unlocked.</li>
     *   <li>Transfers in [[ActivenessSet.transferIds]] are completed if they are in `commitSet.`[[CommitSet.transferIns transferIns]].</li>
@@ -451,7 +451,7 @@ class ConflictDetector(
             acs.transferOutContracts(transferOuts.fmap(_.unwrap._1).to(LazyList), toc)
           val transferInWrites =
             acs.transferInContracts(
-              transferIns.fmap(_.unwrap.unwrap.originDomain).to(LazyList),
+              transferIns.fmap(_.unwrap.unwrap.sourceDomain).to(LazyList),
               toc,
             )
           val transferCompletions = pendingTransferWrites.sequence_

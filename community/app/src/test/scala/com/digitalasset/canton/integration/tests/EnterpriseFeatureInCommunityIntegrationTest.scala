@@ -63,7 +63,7 @@ class EnterpriseFeatureInCommunityIntegrationTest
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         task,
         _.warningMessage should include(
-          "Canton participant pruning not supported in canton-community edition"
+          "Canton participant pruning not supported in canton-open-source edition"
         ),
         _.errorMessage should include(PruningNotSupportedInCommunityEdition.id),
       )

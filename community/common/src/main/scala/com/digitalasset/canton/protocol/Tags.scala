@@ -158,19 +158,19 @@ object RequestId {
   implicit val requestIdOrder = Order.fromOrdering[RequestId]
 }
 
-/** A transfer is identified by the origin domain and the sequencer timestamp on the transfer-out request. */
-case class TransferId(originDomain: DomainId, requestTimestamp: CantonTimestamp)
+/** A transfer is identified by the source domain and the sequencer timestamp on the transfer-out request. */
+case class TransferId(sourceDomain: DomainId, requestTimestamp: CantonTimestamp)
     extends PrettyPrinting
     with HasProtoV0[v0.TransferId] {
   override def toProtoV0: v0.TransferId =
     v0.TransferId(
-      originDomain = originDomain.toProtoPrimitive,
+      originDomain = sourceDomain.toProtoPrimitive,
       timestamp = Some(requestTimestamp.toProtoPrimitive),
     )
 
   override def pretty: Pretty[TransferId] = prettyOfClass(
     param("ts", _.requestTimestamp),
-    param("origin", _.originDomain),
+    param("source", _.sourceDomain),
   )
 
 }
@@ -180,10 +180,10 @@ object TransferId {
     transferIdP match {
       case v0.TransferId(originDomainP, requestTimestampP) =>
         for {
-          originDomain <- DomainId.fromProtoPrimitive(originDomainP, "TransferId.originDomain")
+          sourceDomain <- DomainId.fromProtoPrimitive(originDomainP, "TransferId.originDomain")
           requestTimestamp <- ProtoConverter
             .required("TransferId.timestamp", requestTimestampP)
             .flatMap(CantonTimestamp.fromProtoPrimitive)
-        } yield TransferId(originDomain, requestTimestamp)
+        } yield TransferId(sourceDomain, requestTimestamp)
     }
 }

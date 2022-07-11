@@ -10,10 +10,7 @@ import com.daml.lf.engine
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionViewTree}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
-import com.digitalasset.canton.participant.protocol.submission.{
-  TransactionTreeFactoryImpl,
-  TransactionTreeFactoryImplV3,
-}
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker._
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol._
@@ -66,17 +63,17 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
   ): NonEmpty[Seq[(TransactionViewTree, LfKeyResolver)]] =
     NonEmptyUtil.fromUnsafe(rootViews.map(_ -> Map.empty))
 
-  val transactionTreeFactory: TransactionTreeFactoryImpl =
-    new TransactionTreeFactoryImplV3(
+  val transactionTreeFactory: TransactionTreeFactoryImpl = {
+    TransactionTreeFactoryImpl(
       ExampleTransactionFactory.submitterParticipant,
       factory.domainId,
-      defaultProtocolVersion,
-      ExampleTransactionFactory.asSerializableRaw,
-      ExampleTransactionFactory.defaultPackageInfoService,
+      testedProtocolVersion,
       factory.cryptoOps,
+      ExampleTransactionFactory.defaultPackageInfoService,
       uniqueContractKeys = true,
       loggerFactory,
     )
+  }
 
   def check(
       mcc: ModelConformanceChecker,
@@ -85,7 +82,8 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
   ): EitherT[Future, Error, Result] = {
     val rootViewTrees = views.map(_._1)
     val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
-    mcc.check(views, 0L, ips, commonData)
+    val keyResolvers = views.forgetNE.toMap
+    mcc.check(rootViewTrees, keyResolvers, 0L, ips, commonData)
   }
 
   "A model conformance checker" when {

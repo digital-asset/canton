@@ -14,6 +14,7 @@ import com.daml.ledger.api.v1.commands.Commands.DeduplicationPeriod
 import com.daml.ledger.api.v1.commands.{Command, Commands}
 import com.daml.ledger.api.v1.event.CreatedEvent
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.package_service.GetPackageStatusResponse
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.value.Identifier
@@ -113,6 +114,8 @@ trait LedgerConnection extends LedgerSubmit {
   def transactionById(id: String): Future[Option[Transaction]]
 
   def allocatePartyViaLedgerApi(hint: Option[String], displayName: Option[String]): Future[PartyId]
+
+  def getPackageStatus(packageId: String): Future[GetPackageStatusResponse]
 
 }
 
@@ -446,6 +449,10 @@ object LedgerConnection {
         client.partyManagementClient.allocateParty(hint, displayName, token).map { details =>
           PartyId.tryFromLfParty(details.party)
         }
+
+      override def getPackageStatus(packageId: String): Future[GetPackageStatusResponse] =
+        client.packageClient.getPackageStatus(packageId, token)
+
     }
 
   def transactionFilter(ps: P.Party*): TransactionFilter =

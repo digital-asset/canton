@@ -36,7 +36,11 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
   override val loggerFactory: NamedLoggerFactory = consoleEnvironment.environment.loggerFactory
   implicit val tracer: Tracer = consoleEnvironment.tracer
 
-  private val grpcRunner = new GrpcCtlRunner(loggerFactory)
+  private val grpcRunner = new GrpcCtlRunner(
+    consoleEnvironment.environment.config.monitoring.logging.api.maxMessageLines,
+    consoleEnvironment.environment.config.monitoring.logging.api.maxStringLength,
+    loggerFactory,
+  )
   private val channels = TrieMap[(String, String, Port), CloseableChannel]()
 
   def runCommand[Result](

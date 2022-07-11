@@ -35,7 +35,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
   protected val transferStore: TrieMap[TransferId, Map[LfPartyId, VectorClock]] =
     new TrieMap()
 
-  // Use to synchronize between a transfer's origin domain and target domain on a transferring participant
+  // Use to synchronize between a transfer's source domain and target domain on a transferring participant
   protected val transferOutPromises: TrieMap[TransferId, Promise[Unit]] =
     new TrieMap()
 

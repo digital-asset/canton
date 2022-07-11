@@ -50,7 +50,7 @@ trait TopologyManagerTest
       def createRootCert() = {
         TopologyStateUpdate.createAdd(
           NamespaceDelegation(namespace, namespaceKey, isRootDelegation = true),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         )
       }
     }
@@ -90,7 +90,7 @@ trait TopologyManagerTest
           .authorize(
             rootCert,
             Some(setup.namespace.fingerprint),
-            defaultProtocolVersion,
+            testedProtocolVersion,
             force = false,
           )
           .value
@@ -120,9 +120,9 @@ trait TopologyManagerTest
       "automatically find a signing key" in {
         def add(mgr: TopologyManager[E], mapping: TopologyStateUpdateMapping) =
           mgr.authorize(
-            TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion),
+            TopologyStateUpdate.createAdd(mapping, testedProtocolVersion),
             None,
-            defaultProtocolVersion,
+            testedProtocolVersion,
             force = true,
           )
 
@@ -176,7 +176,7 @@ trait TopologyManagerTest
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
               false,
             )
             .value
@@ -192,7 +192,7 @@ trait TopologyManagerTest
             .authorize(
               removeCert,
               Some(setup.namespace.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
               false,
             )
             .value
@@ -202,7 +202,7 @@ trait TopologyManagerTest
             .authorize(
               removeCert.reverse,
               Some(setup.namespace.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
             .value
           _ = authAdd2.value shouldBe a[SignedTopologyTransaction[_]]
@@ -213,7 +213,7 @@ trait TopologyManagerTest
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
           authAgain <- mgr
-            .authorize(rootCert, Some(setup.namespace.fingerprint), defaultProtocolVersion)
+            .authorize(rootCert, Some(setup.namespace.fingerprint), testedProtocolVersion)
             .value
           _ = authAgain.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
@@ -226,14 +226,14 @@ trait TopologyManagerTest
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
             .value
           authFail <- mgr
             .authorize(
               rootCert.reverse,
               Some(setup.namespace.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
             .value
           _ = authFail.left.value shouldBe a[CantonError]
@@ -243,13 +243,13 @@ trait TopologyManagerTest
       "fail on invalid removal" in {
         (for {
           (mgr, setup, rootCert, _) <- genAndAddRootCert()
-          removeRootCert = TopologyStateUpdate(Remove, rootCert.element)(defaultProtocolVersion)
+          removeRootCert = TopologyStateUpdate(Remove, rootCert.element)(testedProtocolVersion)
           invalidRev = removeRootCert.reverse.reverse
           _ = assert(
             invalidRev.element.id != rootCert.element.id
           ) // ensure transaction ids are different so we are sure to fail the test
           authFail <- mgr
-            .authorize(invalidRev, Some(setup.namespace.fingerprint), defaultProtocolVersion)
+            .authorize(invalidRev, Some(setup.namespace.fingerprint), testedProtocolVersion)
             .value
           _ = authFail.left.value shouldBe a[CantonError]
           _ <- checkStore(setup.store, numTransactions = 1, numActive = 1)
@@ -278,7 +278,7 @@ trait TopologyManagerTest
             .authorize(
               reverted,
               Some(setup.namespaceKey.fingerprint),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
             .value
           _ = authRev.value shouldBe a[SignedTopologyTransaction[_]]

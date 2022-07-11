@@ -40,7 +40,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
         forAll(exampleResults) { (resultType: String, original: Verdict) =>
           val cycled =
             Verdict.fromProtoVersioned(
-              original.toProtoVersioned(defaultProtocolVersion)
+              original.toProtoVersioned(testedProtocolVersion)
             ) match {
               case Left(err) => fail(err.toString)
               case Right(verdict) => verdict

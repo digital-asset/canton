@@ -32,7 +32,7 @@ class UntypedVersionedMessageTest extends AnyWordSpec with BaseTest {
       def test(content: String): Assertion = {
         val message: Message = Message(content)
 
-        val newByteString = message.toProtoVersioned(defaultProtocolVersion).toByteString
+        val newByteString = message.toProtoVersioned(testedProtocolVersion).toByteString
         val oldByteString = VersionedDummyMessage(
           VersionedDummyMessage.Version.V0(DummyMessage(content))
         ).toByteString

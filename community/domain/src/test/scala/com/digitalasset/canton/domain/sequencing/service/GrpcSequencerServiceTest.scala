@@ -124,7 +124,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       batch,
       CantonTimestamp.MaxValue,
       None,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
   }
 
@@ -135,7 +135,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val sender: Member = participant
       val recipient = DefaultTestIdentities.participant2
       mkSubmissionRequest(
-        Batch(List(ClosedEnvelope(content, Recipients.cc(recipient))), defaultProtocolVersion),
+        Batch(List(ClosedEnvelope(content, Recipients.cc(recipient))), testedProtocolVersion),
         sender,
       )
     }
@@ -300,7 +300,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           .replace(
             Batch(
               List(ClosedEnvelope(content, Recipients.cc(unauthenticatedMember))),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
           )
         loggerFactory.assertLogs(
@@ -325,7 +325,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         .replace(
           Batch(
             List(ClosedEnvelope(content, Recipients.cc(unauthenticatedMember))),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         )
       val domEnvironment = new Environment(DefaultTestIdentities.domainManager)
@@ -362,7 +362,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         .replace(
           Batch(
             List(ClosedEnvelope(content, Recipients.cc(DefaultTestIdentities.domainManager))),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         )
       new Environment(unauthenticatedMember).service
@@ -403,7 +403,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val mediator1: Member = DefaultTestIdentities.mediator
       val mediator2: Member = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
       val differentEnvelopes = Batch.fromClosed(
-        defaultProtocolVersion,
+        testedProtocolVersion,
         ClosedEnvelope(
           ByteString.copyFromUtf8("message to first mediator"),
           Recipients.cc(mediator1),
@@ -414,7 +414,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         ),
       )
       val sameEnvelope = Batch.fromClosed(
-        defaultProtocolVersion,
+        testedProtocolVersion,
         ClosedEnvelope(
           ByteString.copyFromUtf8("message to two mediators and the participant"),
           Recipients(
@@ -484,7 +484,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         .replace(
           Batch(
             List(ClosedEnvelope(content, Recipients.cc(DefaultTestIdentities.domainManager))),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         )
 
@@ -512,7 +512,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         .replace(
           Batch(
             List(ClosedEnvelope(content, Recipients.cc(unauthenticatedMember))),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         )
 

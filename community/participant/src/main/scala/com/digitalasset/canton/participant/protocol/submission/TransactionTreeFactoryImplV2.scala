@@ -8,40 +8,18 @@ import cats.syntax.bifunctor._
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
-import com.digitalasset.canton.data.{
-  AssignedKey,
-  CantonTimestamp,
-  FreeKey,
-  SerializableKeyResolution,
-  TransactionView,
-  TransactionViewDecomposition,
-  ViewPosition,
-}
+import com.digitalasset.canton.data._
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   DivergingKeyResolutionError,
   SerializableContractOfId,
-  TooFewSalts,
   TransactionTreeConversionError,
 }
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
-import com.digitalasset.canton.protocol.{
-  LfActionNode,
-  LfContractId,
-  LfContractInst,
-  LfGlobalKey,
-  LfHash,
-  LfKeyWithMaintainers,
-  LfNodeCreate,
-  LfNodeId,
-  PackageInfoService,
-  SerializableContract,
-  SerializableRawContractInstance,
-  Unicum,
-}
+import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MonadUtil}
+import com.digitalasset.canton.util.{LfTransactionUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfKeyResolver, checked}
 
@@ -78,20 +56,8 @@ final class TransactionTreeFactoryImplV2(
       override val mediatorId: MediatorId,
       override val transactionUUID: UUID,
       override val ledgerTime: CantonTimestamp,
-      private val salts: Iterator[Salt],
+      override protected val salts: Iterator[Salt],
   ) extends TransactionTreeFactoryImpl.State {
-    private val unicumOfCreatedContractMap: mutable.Map[LfHash, Unicum] = mutable.Map.empty
-
-    val createdContractInfo: mutable.Map[LfContractId, SerializableContract] =
-      mutable.Map.empty
-
-    private val suffixedNodesBuilder
-        : mutable.Builder[(LfNodeId, LfActionNode), Map[LfNodeId, LfActionNode]] =
-      Map.newBuilder[LfNodeId, LfActionNode]
-
-    /** Out parameter for contracts created in the view (including subviews). */
-    @SuppressWarnings(Array("org.wartremover.warts.Var"))
-    var createdContractsInView: collection.Set[LfContractId] = Set.empty
 
     /** Out parameter for contracts consumed in the view (including subviews). */
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -102,40 +68,6 @@ final class TransactionTreeFactoryImplV2(
       */
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var resolvedKeysInView: collection.Map[LfGlobalKey, Option[LfContractId]] = Map.empty
-
-    override def nextSalt(): Either[TooFewSalts, Salt] =
-      Either.cond(salts.hasNext, salts.next(), TooFewSalts)
-
-    override def suffixedNodes(): Map[LfNodeId, LfActionNode] = suffixedNodesBuilder.result()
-
-    override def unicumOfCreatedContract: LfHash => Option[Unicum] = unicumOfCreatedContractMap.get
-
-    override def setUnicumFor(discriminator: LfHash, unicum: Unicum)(implicit
-        traceContext: TraceContext
-    ): Unit =
-      unicumOfCreatedContractMap.put(discriminator, unicum).foreach { _ =>
-        ErrorUtil.internalError(
-          new IllegalStateException(
-            s"Two contracts have the same discriminator: $discriminator"
-          )
-        )
-      }
-
-    override def setCreatedContractInfo(
-        contractId: LfContractId,
-        createdInfo: SerializableContract,
-    )(implicit traceContext: TraceContext): Unit =
-      createdContractInfo.put(contractId, createdInfo).foreach { _ =>
-        ErrorUtil.internalError(
-          new IllegalStateException(
-            s"Two created contracts have the same contract id: $contractId"
-          )
-        )
-      }
-
-    override def addSuffixedNode(nodeId: LfNodeId, suffixedNode: LfActionNode): Unit = {
-      suffixedNodesBuilder += nodeId -> suffixedNode
-    }
   }
 
   private[submission] object State {
