@@ -13,4 +13,4 @@ package com.digitalasset.canton.config
 final case class LoggingConfig(
     api: ApiLoggingConfig = ApiLoggingConfig(),
     eventDetails: Boolean = false,
-) {}
+)

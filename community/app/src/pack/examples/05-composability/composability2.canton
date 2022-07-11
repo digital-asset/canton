@@ -94,7 +94,7 @@ participant3.ledger_api.acs.await_active_contract(Painter, paintOffer.contractId
 val paintOfferTransferId = participant3.transfer.out(
   Painter,                      // Initiator of the transfer
   paintOffer.contractId.toLf,   // Contract to be transferred
-  paintAlias,                   // Origin domain
+  paintAlias,                   // Source domain
   iouAlias                      // Target domain
 )
 // architecture-handbook-entry-end: transfer-out

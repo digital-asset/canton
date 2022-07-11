@@ -589,7 +589,10 @@ object WellFormedTransaction {
           val headNodeIds = wfTx.unwrap.nodes.keys
 
           val (rbPops, rbPushes) =
-            RollbackScope.popsAndPushes(rbScopeWithNodeIds.map(_._1), rbScope)
+            RollbackScope.popsAndPushes(
+              rbScopeWithNodeIds.map { case (rbSibling, _) => rbSibling },
+              rbScope,
+            )
 
           for {
             _ <- Either.cond(

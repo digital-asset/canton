@@ -231,12 +231,10 @@ object Dependencies {
     "com.digitalasset.canton.driver.vmbc" % "canton-sequencer-grpc" % vmbc_driver_libraries_version
 
   // From digitalasset.jfrog.io
-  lazy val vmbc_sequencer_core_reference =
-    "com.digitalasset.canton.driver.vmbc" % "canton-sequencer-core-reference" % vmbc_driver_libraries_version % Test classifier "all"
-  lazy val vmbc_sequencer_core_reference_artifact_file_name: String = {
-    val artifact = vmbc_sequencer_core_reference.explicitArtifacts.head
-    s"${artifact.name}-${vmbc_sequencer_core_reference.revision}-${artifact.classifier.get}.${artifact.extension}"
-  }
+  lazy val vmbc_sequencer_core_reference_docker_image_name: String =
+    "digitalasset/canton-sequencer-core-reference"
+  lazy val vmbc_sequencer_core_reference_docker_image_label: String =
+    "sdk-version_2.3.0-snapshot.20220611.10066.0.458cfc43_vmbc-driver-commit_53f118f46"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

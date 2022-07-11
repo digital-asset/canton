@@ -8,6 +8,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.LoggerUtil
 import io.grpc.ManagedChannel
 import io.grpc.stub.AbstractStub
 
@@ -16,7 +17,11 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Run a command using the default workflow
   */
-class GrpcCtlRunner(val loggerFactory: NamedLoggerFactory) extends NamedLogging {
+class GrpcCtlRunner(
+    maxRequestDebugLines: Int,
+    maxRequestDebugStringLength: Int,
+    val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   /** Runs a command
     * @return Either a printable error as a String or a Unit indicating all was successful
@@ -51,7 +56,9 @@ class GrpcCtlRunner(val loggerFactory: NamedLoggerFactory) extends NamedLogging 
     CantonGrpcUtil
       .sendGrpcRequest(service, instanceName)(
         command.submitRequest(_, request),
-        command.toString,
+        LoggerUtil.truncateString(maxRequestDebugLines, maxRequestDebugStringLength)(
+          command.toString
+        ),
         timeout,
         logger,
         CantonGrpcUtil.silentLogPolicy, // silent log policy, as the ConsoleEnvironment will log the result

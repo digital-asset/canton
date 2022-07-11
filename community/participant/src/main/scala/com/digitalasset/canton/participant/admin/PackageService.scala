@@ -353,14 +353,15 @@ class PackageService(
       )
     } yield ()
 
-  private def vetPackages(archives: List[DamlLf.Archive], synchronizeVetting: Boolean)(implicit
+  def vetPackages(packages: Seq[PackageId], syncVetting: Boolean)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, DamlError, Unit] =
-    vetPackages(Traced((archives.map(DamlPackageStore.readPackageId), synchronizeVetting)))
+  ): EitherT[Future, DamlError, Unit] = {
+    vetPackages(Traced((packages, syncVetting)))
       .leftMap[DamlError] { err =>
         implicit val code = err.code
         CantonPackageServiceError.IdentityManagerParentError(err)
       }
+  }
 
   private val dependencyCache = Scaffeine()
     .maximumSize(10000)
@@ -458,6 +459,9 @@ class PackageService(
           }
           .transformWith {
             case Success(_) =>
+              logger.debug(
+                s"Managed to upload one or more archives in submissionId $submissionId and sourceDescription $sourceDescription"
+              )
               eventPublisher.publish(
                 LedgerSyncEvent.PublicPackageUpload(
                   archives = archives,
@@ -482,7 +486,7 @@ class PackageService(
       )
       .flatMap { _ =>
         if (vetAllPackages)
-          vetPackages(archives, synchronizeVetting)
+          vetPackages(archives.map(DamlPackageStore.readPackageId), synchronizeVetting)
         else
           EitherT.rightT(())
       }

@@ -88,6 +88,28 @@ case class TransactionView private (
   override def subtrees: Seq[MerkleTree[_]] =
     Seq[MerkleTree[_]](viewCommonData, viewParticipantData) ++ subviews
 
+  def tryUnblindViewParticipantData(
+      fieldName: String
+  )(implicit loggingContext: ErrorLoggingContext): ViewParticipantData =
+    viewParticipantData.unwrap.getOrElse(
+      ErrorUtil.internalError(
+        new IllegalStateException(
+          s"$fieldName of view $viewHash can be computed only if the view participant data is unblinded"
+        )
+      )
+    )
+
+  private def tryUnblindSubview(subview: MerkleTree[TransactionView], fieldName: String)(implicit
+      loggingContext: ErrorLoggingContext
+  ): TransactionView =
+    subview.unwrap.getOrElse(
+      ErrorUtil.internalError(
+        new IllegalStateException(
+          s"$fieldName of view $viewHash can be computed only if all subviews are unblinded, but ${subview.rootHash} is blinded"
+        )
+      )
+    )
+
   override private[data] def withBlindedSubtrees(
       blindingCommandPerNode: PartialFunction[RootHash, MerkleTree.BlindingCommand]
   ): MerkleTree[TransactionView] =
@@ -171,10 +193,19 @@ case class TransactionView private (
   private[this] val _globalKeyInputs
       : ErrorLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] =
     ErrorLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] { implicit loggingContext =>
-      val viewParticipantData =
-        tryGetViewParticipantDataWithProtocolVersionAtLeast3("Global key inputs")
+      val viewParticipantData = tryUnblindViewParticipantData("Global key inputs")
+
+      if (viewParticipantData.isEquivalentTo(ProtocolVersion.v2_0_0)) {
+        ErrorUtil.internalError(
+          new UnsupportedOperationException(
+            s"Global key inputs can be computed only for protocol version ${ProtocolVersion.v3_0_0} and higher"
+          )
+        )
+      }
+
       subviews.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) { (acc, subview) =>
-        val (unblindedSubview, subviewVpd) = tryUnblindedSubviewAndVpd(subview, "Global key inputs")
+        val unblindedSubview = tryUnblindSubview(subview, "Global key inputs")
+        val subviewVpd = unblindedSubview.tryUnblindViewParticipantData("Global key inputs")
         val subviewRolledBack =
           subviewVpd.rollbackContext.rollbackScope != viewParticipantData.rollbackContext.rollbackScope
         val subviewGki =
@@ -216,8 +247,9 @@ case class TransactionView private (
     )
     val currentRollbackScope = vpd.rollbackContext.rollbackScope
     val subviewInputsAndCreated = subviews.map { subview =>
-      val (unblindedSubview, subviewVpd) =
-        tryUnblindedSubviewAndVpd(subview, "Inputs and created contracts")
+      val unblindedSubview = tryUnblindSubview(subview, "Inputs and created contracts")
+      val subviewVpd =
+        unblindedSubview.tryUnblindViewParticipantData("Inputs and created contracts")
       val created = unblindedSubview.createdContracts
       val inputs = unblindedSubview.inputContracts
       val subviewRollbackScope = subviewVpd.rollbackContext.rollbackScope
@@ -294,23 +326,6 @@ case class TransactionView private (
       : ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] =
     ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] {
       implicit loggingContext =>
-        // In strict mode, every node involving a key updates the active ledger state
-        // unless it is under a rollback node.
-        // So it suffices to look at the created and input contracts
-        // Contract consumption under a rollback is ignored.
-
-        val consumedInputs = inputContracts.collect {
-          // No need to check for contract.rolledBack because consumption under a rollback does not set the consumed flag
-          case (cid, contract) if contract.consumed => cid -> ()
-        }
-        val consumedCreates = createdContracts.collect {
-          // If the creation is rolled back, then so are all archivals
-          // because a rolled-back create can only be used in the same or deeper rollback scopes,
-          // as ensured by `WellformedTransaction.checkCreatedContracts`.
-          case (cid, contract) if !contract.rolledBack && contract.consumedInView => cid -> ()
-        }
-        val consumed = consumedInputs ++ consumedCreates
-
         val affectedKeysB = Seq.newBuilder[(LfGlobalKey, AffectedKey)]
         val updatedKeysB = Map.newBuilder[LfGlobalKey, Set[LfPartyId]]
 
@@ -402,46 +417,24 @@ case class TransactionView private (
           updatedKeysB.result()
     }
 
-  private def tryGetViewParticipantDataWithProtocolVersionAtLeast3(name: String)(implicit
-      loggingContext: ErrorLoggingContext
-  ): ViewParticipantData = {
-    val vpd = viewParticipantData.unwrap.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          s"$name of view $viewHash can be computed only if the view participant data is unblinded"
-        )
-      )
-    )
-    if (vpd.isEquivalentTo(ProtocolVersion.v2_0_0)) {
-      ErrorUtil.internalError(
-        new UnsupportedOperationException(
-          s"$name can be computed only for protocol version ${ProtocolVersion.v3_0_0} and higher"
-        )
-      )
+  def consumed(implicit loggingContext: ErrorLoggingContext): Map[LfContractId, Unit] = {
+    // In strict mode, every node involving a key updates the active ledger state
+    // unless it is under a rollback node.
+    // So it suffices to look at the created and input contracts
+    // Contract consumption under a rollback is ignored.
+
+    val consumedInputs = inputContracts.collect {
+      // No need to check for contract.rolledBack because consumption under a rollback does not set the consumed flag
+      case (cid, contract) if contract.consumed => cid -> ()
     }
-    vpd
+    val consumedCreates = createdContracts.collect {
+      // If the creation is rolled back, then so are all archivals
+      // because a rolled-back create can only be used in the same or deeper rollback scopes,
+      // as ensured by `WellformedTransaction.checkCreatedContracts`.
+      case (cid, contract) if !contract.rolledBack && contract.consumedInView => cid -> ()
+    }
+    consumedInputs ++ consumedCreates
   }
-
-  private def tryUnblindedSubviewAndVpd(subview: MerkleTree[TransactionView], name: String)(implicit
-      loggingContext: ErrorLoggingContext
-  ): (TransactionView, ViewParticipantData) = {
-    val unblindedSubview = subview.unwrap.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          s"$name of view $viewHash can be computed only if all subviews are unblinded, but ${subview.rootHash} is blinded"
-        )
-      )
-    )
-    val subviewVpd = unblindedSubview.viewParticipantData.unwrap.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          s"$name of view $viewHash can be computed only if the view participant data of all subviews are unblinded, but ${subview.rootHash}'s is blinded"
-        )
-      )
-    )
-    (unblindedSubview, subviewVpd)
-  }
-
 }
 
 object TransactionView {
@@ -704,9 +697,9 @@ object ViewCommonData
 
 /** Information concerning every '''participant''' involved in processing the underlying view.
   *
-  * @param coreInputs  [[LfContractId]] used by the core of the view and not assigned by a Create node the view or its subviews,
+  * @param coreInputs  [[LfContractId]] used by the core of the view and not assigned by a Create node in the view or its subviews,
   *                    independently of whether the creation is rolled back.
-  *                    Every contract Id is mapped to its contract instances and their meta-information.
+  *                    Every contract id is mapped to its contract instances and their meta-information.
   *                    Contracts are marked as being [[InputContract.consumed]] iff
   *                    they are consumed in the core of the view.
   * @param createdCore associates contract ids of Create nodes in the core of the view to the corresponding contract
@@ -917,7 +910,7 @@ sealed abstract case class ViewParticipantData(
         )
     }
 
-  override def companionObj = ViewParticipantData
+  override def companionObj: ViewParticipantData.type = ViewParticipantData
 
   private[ViewParticipantData] def toProtoV0: v0.ViewParticipantData =
     v0.ViewParticipantData(

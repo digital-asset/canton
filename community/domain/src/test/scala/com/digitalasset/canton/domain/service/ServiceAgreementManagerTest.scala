@@ -31,7 +31,7 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
           tmpf,
           new MemoryStorage,
           hasher,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           timeouts,
           loggerFactory,
         )
@@ -71,7 +71,7 @@ class ServiceAgreementManagerTest extends AsyncWordSpec with BaseTest {
           File(file),
           new MemoryStorage,
           hasher,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           timeouts,
           loggerFactory,
         )

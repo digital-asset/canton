@@ -26,8 +26,8 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.{DbQueueMetrics, DbStorageMetrics}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, LfHash}
-import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
+import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.StorageFactory.StorageCreationException
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.tracing.TraceContext
@@ -200,6 +200,26 @@ trait DbStorage extends Storage with FlagCloseable { self: NamedLogging =>
   /** Automatically performs #$ interpolation for a call to `limit` */
   def limitSql(numberOfItems: Int, skipItems: Long = 0L): SQLActionBuilder = {
     sql" #${limit(numberOfItems, skipItems)} "
+  }
+
+  /** Runs the given `query` transactionally with synchronous commit replication if
+    * the database provides the ability to configure synchronous commits per transaction.
+    *
+    * Currently only Postgres supports this.
+    */
+  def withSyncCommitOnPostgres[A, E <: Effect](
+      query: DBIOAction[A, NoStream, E]
+  ): DBIOAction[A, NoStream, Effect.Write with E with Effect.Transactional] = {
+    import profile.DbStorageAPI.jdbcActionExtensionMethods
+    profile match {
+      case _: Profile.Postgres =>
+        val syncCommit = sqlu"set local synchronous_commit=on"
+        syncCommit.andThen(query).transactionally
+      case _: Profile.H2 | _: Profile.Oracle =>
+        // Don't do anything for H2/Oracle. According to our docs it is up to the user to enforce synchronous replication.
+        // Any changes here are on a best-effort basis, but we won't guarantee they will be sufficient.
+        query.transactionally
+    }
   }
 
   def metrics: DbStorageMetrics

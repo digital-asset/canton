@@ -19,8 +19,9 @@ import com.digitalasset.canton.protocol.messages.{
   EnvelopeContent,
   ProtocolMessage,
   ProtocolMessageV0,
+  ProtocolMessageV1,
 }
-import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol._
@@ -65,7 +66,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         clock,
         domainId,
         topologyClientMember,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         crypto,
         loggerFactory,
       )(parallelExecutionContext, tracer, materializer)
@@ -107,7 +108,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     }
   }
 
-  class TestProtocolMessage(text: String) extends ProtocolMessage with ProtocolMessageV0 {
+  class TestProtocolMessage(text: String)
+      extends ProtocolMessage
+      with ProtocolMessageV0
+      with ProtocolMessageV1 {
     private val payload =
       v0.SignedProtocolMessage(
         None,
@@ -122,6 +126,10 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
       v0.EnvelopeContent(
         v0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )
+
+    override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
+      v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload))
+
     override def productElement(n: Int): Any = ???
     override def productArity: Int = ???
     override def canEqual(that: Any): Boolean = ???
@@ -141,14 +149,14 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
         true,
         Batch.closeEnvelopes(
           Batch.of(
-            defaultProtocolVersion,
+            testedProtocolVersion,
             (message1, Recipients.cc(bob)),
             (message2, Recipients.cc(carole)),
           )
         ),
         clock.now.plusSeconds(10),
         None,
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
 
       for {
@@ -173,11 +181,11 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
         bobDeliverEvent.messageId shouldBe None
         bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only
-          EnvelopeContent(message1, defaultProtocolVersion).toByteString
+          EnvelopeContent(message1, testedProtocolVersion).toByteString
 
         caroleDeliverEvent.messageId shouldBe None
         caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only
-          EnvelopeContent(message2, defaultProtocolVersion).toByteString
+          EnvelopeContent(message2, testedProtocolVersion).toByteString
       }
     }
   }

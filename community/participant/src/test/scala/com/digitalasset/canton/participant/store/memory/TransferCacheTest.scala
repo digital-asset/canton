@@ -281,12 +281,12 @@ object TransferCacheTest {
       baseStore.deleteCompletionsSince(criterionInclusive)
 
     override def find(
-        filterOrigin: Option[DomainId],
+        filterSource: Option[DomainId],
         filterTimestamp: Option[CantonTimestamp],
         filterSubmitter: Option[LfPartyId],
         limit: Int,
     )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
-      baseStore.find(filterOrigin, filterTimestamp, filterSubmitter, limit)
+      baseStore.find(filterSource, filterTimestamp, filterSubmitter, limit)
 
     override def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit
         traceContext: TraceContext

@@ -25,7 +25,7 @@ trait RegisterTopologyTransactionResponseStoreTest {
   private val requestId2 = String255.tryCreate("requestId2")
 
   private lazy val representativeProtocolVersion =
-    RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   private val response1 = RegisterTopologyTransactionResponse(
     p1,
@@ -114,7 +114,7 @@ trait DbRegisterTopologyTransactionResponseStoreTest
       new DbRegisterTopologyTransactionResponseStore(
         storage,
         pureCryptoApi,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )

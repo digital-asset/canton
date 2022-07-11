@@ -107,7 +107,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
               domain,
               Some(messageId),
               Batch.filterOpenEnvelopesFor(batch, participant),
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
           )
         )
@@ -127,7 +127,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val parameters = DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
 
   private val protocolMessagePVRepresentative =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(defaultProtocolVersion)
+    EncryptedViewMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   private type TestInstance =
     ProtocolProcessor[
@@ -288,13 +288,13 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   lazy val rootHashMessage = RootHashMessage(
     rootHash,
     DefaultTestIdentities.domainId,
-    defaultProtocolVersion,
+    testedProtocolVersion,
     TestViewType,
     SerializedRootHashMessagePayload.empty,
   )
   lazy val someRecipients = Recipients.cc(DefaultTestIdentities.participant1)
   lazy val someRequestBatch = RequestAndRootHashMessage(
-    NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients, defaultProtocolVersion)),
+    NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients, testedProtocolVersion)),
     rootHashMessage,
     DefaultTestIdentities.mediator,
   )
@@ -470,8 +470,8 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val requestBatchWrongRH = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
-          OpenEnvelope(viewMessage, someRecipients, defaultProtocolVersion),
-          OpenEnvelope(viewMessageWrongRH, someRecipients, defaultProtocolVersion),
+          OpenEnvelope(viewMessage, someRecipients, testedProtocolVersion),
+          OpenEnvelope(viewMessageWrongRH, someRecipients, testedProtocolVersion),
         ),
         rootHashMessage,
         DefaultTestIdentities.mediator,
@@ -503,7 +503,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       val requestBatchDecryptError = RequestAndRootHashMessage(
         NonEmpty(
           Seq,
-          OpenEnvelope(viewMessageDecryptError, someRecipients, defaultProtocolVersion),
+          OpenEnvelope(viewMessageDecryptError, someRecipients, testedProtocolVersion),
         ),
         rootHashMessage,
         DefaultTestIdentities.mediator,
@@ -527,7 +527,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     "check the declared mediator ID against the root hash message mediator" in {
       val otherMediatorId = MediatorId(UniqueIdentifier.tryCreate("mediator", "other"))
       val requestBatch = RequestAndRootHashMessage(
-        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients, defaultProtocolVersion)),
+        NonEmpty(Seq, OpenEnvelope(viewMessage, someRecipients, testedProtocolVersion)),
         rootHashMessage,
         otherMediatorId,
       )

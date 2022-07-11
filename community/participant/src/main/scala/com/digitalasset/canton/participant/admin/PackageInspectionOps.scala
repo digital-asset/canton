@@ -70,6 +70,7 @@ class PackageInspectionOpsImpl(
     syncCryptoApiProvider: SyncCryptoApiProvider,
     timeouts: ProcessingTimeout,
     topologyManager: ParticipantTopologyManager,
+    protocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends PackageInspectionOps {
@@ -185,7 +186,7 @@ class PackageInspectionOpsImpl(
     val op = TopologyChangeOp.Remove
     val mapping = VettedPackages(participantId, packages)
     topologyManager
-      .genTransaction(op, mapping, ProtocolVersion.latest) // TODO(#9396)
+      .genTransaction(op, mapping, protocolVersion)
       .leftMap(err =>
         participant.topology.ParticipantTopologyManagerError
           .IdentityManagerParentError(err)

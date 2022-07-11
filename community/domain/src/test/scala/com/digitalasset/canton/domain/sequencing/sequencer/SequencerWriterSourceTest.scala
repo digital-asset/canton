@@ -120,7 +120,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
             clock,
           ),
           writerStore,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           clock,
           eventSignaller,
           loggerFactory,
@@ -330,12 +330,12 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
               MessageId.tryCreate("test-unknown-recipients"),
               isRequest = true,
               batch = Batch.fromClosed(
-                defaultProtocolVersion,
+                testedProtocolVersion,
                 ClosedEnvelope(ByteString.EMPTY, Recipients.cc(bob)),
               ),
               maxSequencingTime = CantonTimestamp.MaxValue,
               timestampOfSigningKey = None,
-              protocolVersion = defaultProtocolVersion,
+              protocolVersion = testedProtocolVersion,
             )
           )
         )("send to unknown recipient")

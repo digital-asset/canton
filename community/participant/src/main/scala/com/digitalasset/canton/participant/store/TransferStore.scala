@@ -176,21 +176,21 @@ trait TransferLookup {
     * Results need not be consistent with [[lookup]].
     */
   def find(
-      filterOrigin: Option[DomainId],
+      filterSource: Option[DomainId],
       filterRequestTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]]
 
   /** Find utility to look for in-flight transfers.
-    * Transfers are ordered by the tuple (request timestamp, origin domain ID), ie transfers are ordered by request timestamps
+    * Transfers are ordered by the tuple (request timestamp, source domain ID), ie transfers are ordered by request timestamps
     * and ties are broken with lexicographic ordering on domain IDs.
     *
     * The ordering here has been chosen to allow a participant to fetch all the pending transfers. The ordering has to
     * be consistent accross calls and uniquely identify a pending transfer, but is otherwise arbitary.
     *
     * @param requestAfter optionally, specify a strict lower bound for the transfers returned, according to the
-    *                     (request timestamp, origin domain ID) ordering
+    *                     (request timestamp, source domain ID) ordering
     * @param limit limit the number of results
     */
   def findAfter(requestAfter: Option[(CantonTimestamp, DomainId)], limit: Int)(implicit

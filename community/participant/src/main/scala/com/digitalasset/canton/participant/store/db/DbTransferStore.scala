@@ -151,7 +151,7 @@ class DbTransferStore(
         transfer_out_request, transfer_out_decision_time, contract, creating_transaction_id, transfer_out_result, submitter_lf)
         values (
           $domain,
-          ${transferId.originDomain},
+          ${transferId.sourceDomain},
           ${transferId.requestTimestamp},
           ${transferData.transferOutTimestamp},
           ${transferData.transferOutRequestCounter},
@@ -176,7 +176,7 @@ class DbTransferStore(
             contract=${data.contract}, creating_transaction_id=${data.creatingTransactionId},
             transfer_out_result=${data.transferOutResult}, submitter_lf=${data.transferOutRequest.submitter}
        where
-          target_domain=$domain and origin_domain=${id.originDomain} and request_timestamp =${id.requestTimestamp}
+          target_domain=$domain and origin_domain=${id.sourceDomain} and request_timestamp =${id.requestTimestamp}
         """
         }
         existingEntry.mergeWith(newEntry).map(entry => Some(update(entry)))
@@ -207,7 +207,7 @@ class DbTransferStore(
   private def entryExists(id: TransferId): DbAction.ReadOnly[Option[TransferEntry]] = sql"""
      select transfer_out_timestamp, transfer_out_request_counter, transfer_out_request, transfer_out_decision_time,
      contract, creating_transaction_id, transfer_out_result, time_of_completion_request_counter, time_of_completion_timestamp
-     from transfers where target_domain = $domain and origin_domain = ${id.originDomain} and request_timestamp =${id.requestTimestamp}
+     from transfers where target_domain = $domain and origin_domain = ${id.sourceDomain} and request_timestamp =${id.requestTimestamp}
     """.as[TransferEntry].headOption
 
   override def addTransferOutResult(
@@ -220,7 +220,7 @@ class DbTransferStore(
        select transfer_out_result
        from transfers
        where
-          target_domain=$domain and origin_domain=${transferId.originDomain} and request_timestamp =${transferId.requestTimestamp}
+          target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp =${transferId.requestTimestamp}
         """.as[Option[DeliveredTransferOutResult]].headOption
 
       def update(previousResult: Option[DeliveredTransferOutResult]) = {
@@ -228,7 +228,7 @@ class DbTransferStore(
           .fold[Checked[TransferStoreError, Nothing, Option[DBIO[Int]]]](Checked.result(Some(sqlu"""
               update transfers
               set transfer_out_result = ${transferOutResult}
-              where target_domain=$domain and origin_domain=${transferId.originDomain} and request_timestamp=${transferId.requestTimestamp}
+              where target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp=${transferId.requestTimestamp}
               """)))(previous =>
             if (previous == transferOutResult) Checked.result(None)
             else
@@ -255,7 +255,7 @@ class DbTransferStore(
               update transfers
                 set time_of_completion_request_counter=${timeOfCompletion.rc}, time_of_completion_timestamp=${timeOfCompletion.timestamp}
               where
-                target_domain=$domain and origin_domain=${transferId.originDomain} and request_timestamp=${transferId.requestTimestamp}
+                target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp=${transferId.requestTimestamp}
                 and (time_of_completion_request_counter is NULL 
                   or (time_of_completion_request_counter = ${timeOfCompletion.rc} and time_of_completion_timestamp = ${timeOfCompletion.timestamp}))
             """
@@ -286,7 +286,7 @@ class DbTransferStore(
     processingTime.metric.event {
       storage.update_(
         sqlu"""delete from transfers
-                where target_domain=$domain and origin_domain=${transferId.originDomain} and request_timestamp=${transferId.requestTimestamp}""",
+                where target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp=${transferId.requestTimestamp}""",
         functionFullName,
       )
     }
@@ -310,7 +310,7 @@ class DbTransferStore(
     """
 
   override def find(
-      filterOrigin: Option[DomainId],
+      filterSource: Option[DomainId],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -321,12 +321,12 @@ class DbTransferStore(
           import DbStorage.Implicits.BuilderChain._
           import DbStorage.Implicits._
 
-          val originFilter = filterOrigin.fold(sql"")(domain => sql" and origin_domain=${domain}")
+          val sourceFilter = filterSource.fold(sql"")(domain => sql" and origin_domain=${domain}")
           val timestampFilter = filterTimestamp.fold(sql"")(ts => sql" and request_timestamp=${ts}")
           val submitterFilter =
             filterSubmitter.fold(sql"")(submitter => sql" and submitter_lf=${submitter}")
           val limitSql = storage.limitSql(limit)
-          (findPendingBase ++ originFilter ++ timestampFilter ++ submitterFilter ++ limitSql)
+          (findPendingBase ++ sourceFilter ++ timestampFilter ++ submitterFilter ++ limitSql)
             .as[TransferData]
         },
         functionFullName,
@@ -343,12 +343,12 @@ class DbTransferStore(
           import DbStorage.Implicits.BuilderChain._
 
           val timestampFilter =
-            requestAfter.fold(sql"")({ case (requestTimestamp, originDomain) =>
+            requestAfter.fold(sql"")({ case (requestTimestamp, sourceDomain) =>
               storage.profile match {
                 case Profile.Oracle(_) =>
-                  sql"and (request_timestamp > ${requestTimestamp} or (request_timestamp = ${requestTimestamp} and origin_domain > ${originDomain}))"
+                  sql"and (request_timestamp > ${requestTimestamp} or (request_timestamp = ${requestTimestamp} and origin_domain > ${sourceDomain}))"
                 case _ =>
-                  sql" and (request_timestamp, origin_domain) > (${requestTimestamp}, ${originDomain}) "
+                  sql" and (request_timestamp, origin_domain) > (${requestTimestamp}, ${sourceDomain}) "
               }
             })
           val order = sql" order by request_timestamp, origin_domain "

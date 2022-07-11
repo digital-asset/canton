@@ -54,8 +54,8 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           timestamp,
           DefaultTestIdentities.domainId,
           Some(msgId),
-          Batch.empty(defaultProtocolVersion),
-          defaultProtocolVersion,
+          Batch.empty(testedProtocolVersion),
+          testedProtocolVersion,
         )
       )
     )(traceContext)
@@ -69,7 +69,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
           DefaultTestIdentities.domainId,
           msgId,
           DeliverErrorReason.BatchRefused("test"),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         )
       )
     )(traceContext)

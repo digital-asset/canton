@@ -22,14 +22,14 @@ class TransferService(
     submissionHandles: DomainId => Option[TransferSubmissionHandle],
     transferLookups: DomainId => Option[TransferLookup],
 )(implicit ec: ExecutionContext) {
-  def transferOut(
+  private[admin] def transferOut(
       submittingParty: LfPartyId,
       contractId: LfContractId,
-      originDomain: DomainAlias,
+      sourceDomain: DomainAlias,
       targetDomain: DomainAlias,
   )(implicit traceContext: TraceContext): EitherT[Future, String, TransferId] =
     for {
-      submissionHandle <- EitherT.fromEither[Future](submissionHandleFor(originDomain))
+      submissionHandle <- EitherT.fromEither[Future](submissionHandleFor(sourceDomain))
       targetDomainId <- EitherT.fromEither[Future](domainIdFor(targetDomain))
       transferId <- submissionHandle
         .submitTransferOut(submittingParty, contractId, targetDomainId)
@@ -67,7 +67,7 @@ class TransferService(
 
   def transferSearch(
       searchDomainAlias: DomainAlias,
-      filterOriginDomainAlias: Option[DomainAlias],
+      filterSourceDomainAlias: Option[DomainAlias],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -77,7 +77,7 @@ class TransferService(
       transferLookup <- EitherT.fromEither[Future](
         transferLookups(searchDomainId).toRight(s"Unknown domain alias $searchDomainAlias")
       )
-      filterDomain <- EitherT.fromEither[Future](filterOriginDomainAlias match {
+      filterDomain <- EitherT.fromEither[Future](filterSourceDomainAlias match {
         case None => Right(None)
         case Some(value) =>
           domainIdOfAlias(value).toRight(s"Unknown domain alias $value").map(x => Some(x))

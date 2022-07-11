@@ -4,7 +4,9 @@
 package com.digitalasset.canton.participant.admin
 
 import akka.actor.ActorSystem
+import cats.data.EitherT
 import cats.implicits._
+import com.daml.error.definitions.DamlError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.refinements.{ApiTypes => A}
@@ -40,7 +42,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.io.InputStream
 import java.util.concurrent.ScheduledExecutorService
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
 /** Manages our admin workflow applications (ping, dar distribution).
@@ -70,16 +72,17 @@ class AdminWorkflowServices(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
+  private val adminParty = Converters.toParty(adminPartyId)
+
   if (syncService.isActive() && parameters.adminWorkflow.autoloadDar) {
     withNewTraceContext { implicit traceContext =>
       logger.debug("Loading admin workflows DAR")
       // load the admin workflows daml archive before moving forward
       // We use the pre-packaged dar from the resources/dar folder instead of the compiled one.
-      loadDamlArchiveResource()
+      loadDamlArchiveUnlessRegistered()
     }
   }
 
-  private val adminParty = Converters.toParty(adminPartyId)
   val (pingSubscription, ping) = createService("admin-ping") { connection =>
     new PingService(
       connection,
@@ -119,37 +122,80 @@ class AdminWorkflowServices(
     )
   )
 
+  private def checkPackagesStatus(
+      pkgs: Map[PackageId, Ast.Package],
+      lc: LedgerConnection,
+  ): Future[Boolean] =
+    for {
+      pkgRes <- pkgs.keys.toList.traverse(lc.getPackageStatus)
+    } yield pkgRes.forall(pkgResponse => pkgResponse.packageStatus.isRegistered)
+
+  private def handleDamlErrorDuringPackageLoading(
+      res: EitherT[Future, DamlError, Unit]
+  ): EitherT[Future, IllegalStateException, Unit] =
+    EitherTUtil.leftSubflatMap(res) {
+      case CantonPackageServiceError.IdentityManagerParentError(
+            ParticipantTopologyManagerError.IdentityManagerParentError(
+              NoAppropriateSigningKeyInStore.Failure(_)
+            )
+          ) =>
+        // Log error by creating error object, but continue processing.
+        AdminWorkflowServices.CanNotAutomaticallyVetAdminWorkflowPackage.Error()
+        Right(())
+      case err =>
+        Left(new IllegalStateException(CantonError.stringFromContext(err)))
+    }
+
+  /** Parses dar and checks if all contained packages are already loaded and recorded in the indexer. If not,
+    * loads the dar.
+    * @throws java.lang.IllegalStateException if the daml archive cannot be found on the classpath
+    */
+  private def loadDamlArchiveUnlessRegistered()(implicit traceContext: TraceContext): Unit =
+    withResource({
+      val (_, conn) = createConnection("admin-checkStatus", "admin-checkStatus")
+      conn
+    }) { conn =>
+      parameters.processingTimeouts.unbounded.await_(s"Load Daml packages") {
+        checkPackagesStatus(AdminWorkflowServices.AdminWorkflowPackages, conn).flatMap {
+          isAlreadyLoaded =>
+            if (!isAlreadyLoaded) EitherTUtil.toFuture(loadDamlArchiveResource())
+            else {
+              logger.debug("Admin workflow packages are already present. Skipping loading.")
+              // vet any packages that have not yet been vetted
+              EitherTUtil.toFuture(
+                handleDamlErrorDuringPackageLoading(
+                  packageService
+                    .vetPackages(
+                      AdminWorkflowServices.AdminWorkflowPackages.keys.toSeq,
+                      syncVetting = false,
+                    )
+                )
+              )
+            }
+        }
+      }
+    }
+
   /** For the admin workflows to run inside the participant we require their daml packages to be loaded.
-    * This assumes that the daml archive has been included on the classpath and can be loaded as a resource.
+    * This assumes that the daml archive has been included on the classpath and is loaded
+    * or can be loaded as a resource.
+    * @return Future that contains an IllegalStateException or a Unit
     * @throws RuntimeException if the daml archive cannot be found on the classpath
     */
-  private def loadDamlArchiveResource()(implicit traceContext: TraceContext): Unit = {
+  private def loadDamlArchiveResource()(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, IllegalStateException, Unit] = {
     val bytes =
       withResource(AdminWorkflowServices.adminWorkflowDarInputStream())(ByteString.readFrom)
-    parameters.processingTimeouts.unbounded.await_(s"Load Daml packages")(
-      EitherTUtil.toFuture(
-        packageService
-          .appendDarFromByteString(
-            bytes,
-            AdminWorkflowServices.AdminWorkflowDarResourceName,
-            vetAllPackages = true,
-            synchronizeVetting = false,
-          )
-          .transform {
-            case Right(_) => Right(())
-            case Left(
-                  CantonPackageServiceError.IdentityManagerParentError(
-                    ParticipantTopologyManagerError
-                      .IdentityManagerParentError(NoAppropriateSigningKeyInStore.Failure(_))
-                  )
-                ) =>
-              // Log error by creating error object, but continue processing.
-              AdminWorkflowServices.CanNotAutomaticallyVetAdminWorkflowPackage.Error()
-              Right(())
-            case Left(err) =>
-              Left(new IllegalStateException(CantonError.stringFromContext(err)))
-          }
-      )
+    handleDamlErrorDuringPackageLoading(
+      packageService
+        .appendDarFromByteString(
+          bytes,
+          AdminWorkflowServices.AdminWorkflowDarResourceName,
+          vetAllPackages = true,
+          synchronizeVetting = false,
+        )
+        .void
     )
   }
 

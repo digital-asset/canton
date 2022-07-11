@@ -37,7 +37,7 @@ final case class ApiLoggingConfig(
 
 object ApiLoggingConfig {
   val defaultMaxMethodLength: Int = 30
-  val defaultMaxMessageLines: Int = 10
-  val defaultMaxStringLength: Int = 20
+  val defaultMaxMessageLines: Int = 20
+  val defaultMaxStringLength: Int = 250
   val defaultMaxMetadataSize: Int = 200
 }

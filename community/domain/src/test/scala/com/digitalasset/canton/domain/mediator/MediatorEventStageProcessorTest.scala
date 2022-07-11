@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.{InMemoryFinalizedResponseStore, MediatorState}
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
@@ -70,7 +70,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         defaultDynamicDomainParameters
   ) {
     val identityClientEventHandler: UnsignedProtocolEventHandler = ApplicationHandler.success()
-    val receivedEvents = mutable.Buffer[(RequestId, Seq[Traced[MediatorEvent]])]()
+    val receivedEvents: mutable.Buffer[(RequestId, Seq[Traced[MediatorEvent]])] = mutable.Buffer()
 
     val state = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
@@ -79,7 +79,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       loggerFactory,
     )
 
-    val domainSyncCryptoApi = new TestingIdentityFactory(
+    val domainSyncCryptoApi: DomainSyncCryptoClient = new TestingIdentityFactory(
       TestingTopology(),
       loggerFactory,
       dynamicDomainParameters,
@@ -92,7 +92,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       state,
       domainSyncCryptoApi,
       identityClientEventHandler,
-      (requestId, events) => {
+      (requestId, events, _tc) => {
         receivedEvents.append((requestId, events))
         HandlerResult.done
       },
@@ -110,10 +110,10 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         domainId,
         None,
         Batch.of(
-          defaultProtocolVersion,
-          (InformeeMessage(fullInformeeTree)(defaultProtocolVersion), Recipients.cc(mediatorId)),
+          testedProtocolVersion,
+          (InformeeMessage(fullInformeeTree)(testedProtocolVersion), Recipients.cc(mediatorId)),
         ),
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
 
     def handle(events: RawProtocolEvent*): FutureUnlessShutdown[Unit] =
@@ -147,11 +147,11 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
     val mediatorResponse = mock[MediatorResponse]
     when(mediatorResponse.representativeProtocolVersion).thenReturn(
-      MediatorResponse.protocolVersionRepresentativeFor(defaultProtocolVersion)
+      MediatorResponse.protocolVersionRepresentativeFor(testedProtocolVersion)
     )
 
     val signedConfirmationResponse =
-      SignedProtocolMessage(mediatorResponse, mock[Signature], defaultProtocolVersion)
+      SignedProtocolMessage(mediatorResponse, mock[Signature], testedProtocolVersion)
     when(signedConfirmationResponse.message.domainId).thenReturn(domainId)
     val informeeMessageWithWrongDomainId = mock[InformeeMessage]
     when(informeeMessageWithWrongDomainId.domainId)
@@ -159,7 +159,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     val badBatches = List(
       (
         Batch.of[ProtocolMessage](
-          defaultProtocolVersion,
+          testedProtocolVersion,
           informeeMessage -> RecipientsTest.testInstance,
           informeeMessage -> RecipientsTest.testInstance,
         ),
@@ -167,7 +167,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       ),
       (
         Batch.of[ProtocolMessage](
-          defaultProtocolVersion,
+          testedProtocolVersion,
           informeeMessage -> RecipientsTest.testInstance,
           signedConfirmationResponse -> RecipientsTest.testInstance,
         ),
@@ -175,7 +175,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       ),
       (
         Batch.of[ProtocolMessage](
-          defaultProtocolVersion,
+          testedProtocolVersion,
           informeeMessageWithWrongDomainId -> RecipientsTest.testInstance,
         ),
         List("Received messages with wrong domain ids: List(wrong::domain)"),
@@ -186,7 +186,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         env.processor.handle(
           toTracedSignedEvents(
-            Deliver.create(1L, CantonTimestamp.Epoch, domainId, None, batch, defaultProtocolVersion)
+            Deliver.create(1L, CantonTimestamp.Epoch, domainId, None, batch, testedProtocolVersion)
           )
         ),
         expectedMessages map { error => logEntry: LogEntry =>
@@ -316,6 +316,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
   private def responseAggregation(requestId: RequestId): ResponseAggregation =
     ResponseAggregation(
       requestId,
-      InformeeMessage(fullInformeeTree)(defaultProtocolVersion),
+      InformeeMessage(fullInformeeTree)(testedProtocolVersion),
     )(loggerFactory)
 }

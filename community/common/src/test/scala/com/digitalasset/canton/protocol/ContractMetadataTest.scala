@@ -47,7 +47,7 @@ class ContractMetadataTest extends AnyWordSpec with BaseTest {
           )
         ),
       )
-      val serialization = metadata.toProtoVersioned(defaultProtocolVersion)
+      val serialization = metadata.toProtoVersioned(testedProtocolVersion)
 
       ContractMetadata.fromProtoVersioned(serialization) shouldBe Right(metadata)
     }

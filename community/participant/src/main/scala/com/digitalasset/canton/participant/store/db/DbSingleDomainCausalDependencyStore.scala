@@ -116,7 +116,7 @@ object DbSingleDomainCausalDependencyStore {
       pp >> ts
       pp >> rc
       pp >> party
-      pp >> transferOutId.map(_.originDomain)
+      pp >> transferOutId.map(_.sourceDomain)
       pp >> otherDomain
       pp >> ts
     }

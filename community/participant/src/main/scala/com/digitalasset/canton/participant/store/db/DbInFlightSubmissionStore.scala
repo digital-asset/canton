@@ -165,6 +165,8 @@ class DbInFlightSubmissionStore(
         pp >> domainId
         pp >> messageId
     }
+    // No need for synchronous commit because this method is driven by the event stream from the sequencer,
+    // which is the same across all replicas of the participant
     storage.queryAndUpdate(batchUpdate, "observe sequencing")
   }
 
@@ -194,6 +196,11 @@ class DbInFlightSubmissionStore(
             pp >> sequenced.sequencerCounter
         }
 
+      // No need for synchronous commits across DB replicas because this is driven off the multi-domain event log,
+      // which itself uses synchronous commits and therefore ensures synchronization among `delete`s.
+      // For the interaction with `register`, it is enough that `register` uses synchronous commits
+      // as a synchronous commit ensures that all earlier commits in the WAL such as the delete
+      // have also reached the DB replica.
       for {
         _ <- storage.queryAndUpdate(batchById, "delete submission by message id")
         _ <- storage.queryAndUpdate(batchBySequencing, "delete sequenced submission")
@@ -214,6 +221,9 @@ class DbInFlightSubmissionStore(
           where change_id_hash = $changeIdHash and submission_domain = $submissionDomain and message_id = $messageId
             and sequencing_timeout >= ${newSequencingInfo.timeout}
           """
+      // No need for synchronous commit here because this method is called only from the submission phase
+      // after registration, so a fail-over participant would not call this method anyway.
+      // The registered submission would simply time out in such a case.
       storage.update(updateQuery, functionFullName).flatMap {
         case 1 =>
           logger.debug(
@@ -409,7 +419,7 @@ object DbInFlightSubmissionStore {
       }
       implicit val loggingContext: ErrorLoggingContext =
         ErrorLoggingContext.fromTracedLogger(logger)
-      DbStorage.bulkOperation(
+      val bulkQuery = DbStorage.bulkOperation(
         insertQuery,
         submissions.map(_.value),
         storage.profile,
@@ -423,6 +433,12 @@ object DbInFlightSubmissionStore {
         pp >> submission.sequencingInfo.trackingData
         pp >> submission.submissionTraceContext
       }
+      // We need a synchronous commit here to ensure that there can be at most one submission
+      // for the same change ID in flight. Without synchronous commits,
+      // a participant may have sent off a submission to the sequencer before this write reaches all DB replicas.
+      // If a fail-over happens to another participant talking to the stale DB replica,
+      // it may send off the same submission again to the sequencer.
+      storage.withSyncCommitOnPostgres(bulkQuery)
     }
 
     private val success: Try[Result] = Success(Outcome(Some(Right(()))))

@@ -5,32 +5,19 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
 import cats.syntax.alternative._
-import cats.syntax.functor._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
-import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
+import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
-import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
 import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{
-  AlarmStreamer,
-  DynamicDomainParameters,
-  RequestId,
-  RootHash,
-}
+import com.digitalasset.canton.protocol.{AlarmStreamer, RequestId, RootHash}
 import com.digitalasset.canton.sequencing.HandlerResult
-import com.digitalasset.canton.sequencing.client.{
-  SendCallback,
-  SendResult,
-  SendType,
-  SequencerClient,
-}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology._
@@ -51,8 +38,8 @@ import scala.concurrent.{ExecutionContext, Future}
 class ConfirmationResponseProcessor(
     domain: DomainId,
     private val mediatorId: MediatorId,
+    verdictSender: VerdictSender,
     crypto: DomainSyncCryptoClient,
-    sequencer: SequencerClient,
     timeTracker: DomainTimeTracker,
     val mediatorState: MediatorState,
     alarmer: AlarmStreamer,
@@ -68,19 +55,41 @@ class ConfirmationResponseProcessor(
   def handleRequestEvents(
       requestId: RequestId,
       events: Seq[Traced[MediatorEvent]],
+      callerTraceContext: TraceContext,
   ): HandlerResult = {
-    val future = MonadUtil.sequentialTraverse_(events) {
-      _.withTraceContext { implicit traceContext =>
-        {
-          case MediatorEvent.Request(counter, _, request, rootHashMessages) =>
-            processRequest(requestId, counter, request, rootHashMessages)
-          case MediatorEvent.Response(counter, timestamp, response) =>
-            processResponse(timestamp, counter, response)
-          case MediatorEvent.Timeout(_counter, timestamp, requestId) =>
-            handleTimeout(requestId, timestamp)
+    val future = for {
+      snapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)(callerTraceContext)
+      domainParameters <- snapshot.findDynamicDomainParametersOrDefault()(callerTraceContext)
+      participantResponseDeadline =
+        domainParameters.participantResponseDeadlineFor(requestId.unwrap)
+      decisionTime = domainParameters.decisionTimeFor(requestId.unwrap)
+
+      _ <- MonadUtil.sequentialTraverse_(events) {
+        _.withTraceContext { implicit traceContext =>
+          {
+            case MediatorEvent.Request(counter, _, request, rootHashMessages) =>
+              processRequest(
+                requestId,
+                counter,
+                participantResponseDeadline,
+                decisionTime,
+                request,
+                rootHashMessages,
+              )
+            case MediatorEvent.Response(counter, timestamp, response) =>
+              processResponse(
+                timestamp,
+                counter,
+                participantResponseDeadline,
+                decisionTime,
+                response,
+              )
+            case MediatorEvent.Timeout(_counter, timestamp, requestId) =>
+              handleTimeout(requestId, timestamp, decisionTime)
+          }
         }
       }
-    }
+    } yield ()
     HandlerResult.synchronous(FutureUnlessShutdown.outcomeF(future))
   }
 
@@ -88,6 +97,7 @@ class ConfirmationResponseProcessor(
   private[mediator] def handleTimeout(
       requestId: RequestId,
       timestamp: CantonTimestamp,
+      decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     def pendingRequestNotFound: Future[Unit] = {
       logger.debug(
@@ -110,13 +120,7 @@ class ConfirmationResponseProcessor(
           logger.error(e.toString)
           Future.unit
         case Right(()) =>
-          for {
-            domainParameters <- crypto.ips
-              .awaitSnapshot(requestId.unwrap)
-              .flatMap(_.findDynamicDomainParametersOrDefault())
-
-            _ <- sendResultIfDone(timeout, domainParameters)
-          } yield ()
+          sendResultIfDone(timeout, decisionTime)
       }
     }
   }
@@ -130,6 +134,8 @@ class ConfirmationResponseProcessor(
   private[mediator] def processRequest(
       requestId: RequestId,
       counter: SequencerCounter,
+      participantResponseDeadline: CantonTimestamp,
+      decisionTime: CantonTimestamp,
       request: MediatorRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
   )(implicit traceContext: TraceContext): Future[Unit] = {
@@ -137,26 +143,20 @@ class ConfirmationResponseProcessor(
       span.setAttribute("request_id", requestId.toString)
       span.setAttribute("counter", counter.toString)
 
-      def immediatelyReject(
-          reject: MediatorReject,
-          domainParameters: DynamicDomainParameters,
-      ): Future[Unit] = {
+      def immediatelyReject(reject: MediatorReject): Future[Unit] = {
         reject.logWithContext(Map("requestId" -> requestId.toString))
-        sendMalformedRejection(requestId, rootHashMessages, reject, domainParameters)
+        sendMalformedRejection(requestId, rootHashMessages, reject, decisionTime)
       }
 
-      def processNormally(domainParameters: DynamicDomainParameters): Future[Unit] = {
+      def processNormally(): Future[Unit] = {
         val aggregation = ResponseAggregation(requestId, request)(loggerFactory)
         logger.debug(
           show"$requestId: registered informee message. Initial state: ${aggregation.state.showMerged}"
         )
         for {
-          _ <- sendResultIfDone(aggregation, domainParameters)
+          _ <- sendResultIfDone(aggregation, decisionTime)
           _ = if (!aggregation.isFinalized) {
-            val timeoutAt = aggregation.requestId.unwrap.add(
-              domainParameters.participantResponseTimeout.unwrap
-            )
-            timeTracker.requestTick(timeoutAt)
+            timeTracker.requestTick(participantResponseDeadline)
           }
           _ <- mediatorState.add(aggregation)
         } yield ()
@@ -165,27 +165,23 @@ class ConfirmationResponseProcessor(
       crypto.ips.awaitSnapshot(requestId.unwrap).flatMap { topologySnapshot =>
         topologySnapshot.isMediatorActive(mediatorId).flatMap {
           case true =>
-            topologySnapshot.findDynamicDomainParametersOrDefault().flatMap { domainParameters =>
-              checkRootHashMessages(request, rootHashMessages, topologySnapshot).value.flatMap {
-                case Left(rejectionReason) =>
+            checkRootHashMessages(request, rootHashMessages, topologySnapshot).value.flatMap {
+              case Left(rejectionReason) =>
+                immediatelyReject(
+                  MediatorReject.Topology.InvalidRootHashMessages.Reject(rejectionReason)
+                )
+              case Right(_) =>
+                val declaredMediator = request.mediatorId
+                if (declaredMediator == mediatorId) {
+                  processNormally()
+                } else {
+                  // The mediator request was meant to be sent to a different mediator.
                   immediatelyReject(
-                    MediatorReject.Topology.InvalidRootHashMessages.Reject(rejectionReason),
-                    domainParameters,
-                  )
-                case Right(_) =>
-                  val declaredMediator = request.mediatorId
-                  if (declaredMediator == mediatorId) {
-                    processNormally(domainParameters)
-                  } else {
-                    // The mediator request was meant to be sent to a different mediator.
-                    immediatelyReject(
-                      MediatorReject.MaliciousSubmitter.WrongDeclaredMediator.Reject(
-                        s"Declared mediator $declaredMediator is not the processing mediator $mediatorId"
-                      ),
-                      domainParameters,
+                    MediatorReject.MaliciousSubmitter.WrongDeclaredMediator.Reject(
+                      s"Declared mediator $declaredMediator is not the processing mediator $mediatorId"
                     )
-                  }
-              }
+                  )
+                }
             }
 
           case false =>
@@ -301,7 +297,7 @@ class ConfirmationResponseProcessor(
       requestId: RequestId,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       rejectionReason: MediatorReject,
-      domainParameters: DynamicDomainParameters,
+      decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     // For each view type among the root hash messages,
     // we send one rejection message to all participants, where each participant is in its own recipient group.
@@ -332,7 +328,7 @@ class ConfirmationResponseProcessor(
               }
           }
         batch = Batch.of(protocolVersion, envs: _*)
-        _ <- sendResultBatch(requestId, batch, domainParameters)
+        _ <- verdictSender.sendResultBatch(requestId, batch, decisionTime)
       } yield ()
     } else Future.unit
   }
@@ -340,6 +336,8 @@ class ConfirmationResponseProcessor(
   def processResponse(
       ts: CantonTimestamp,
       counter: SequencerCounter,
+      participantResponseDeadline: CantonTimestamp,
+      decisionTime: CantonTimestamp,
       signedResponse: SignedProtocolMessage[MediatorResponse],
   )(implicit traceContext: TraceContext): Future[Unit] =
     withSpan("ConfirmationResponseProcessor.processResponse") { implicit traceContext => span =>
@@ -351,9 +349,6 @@ class ConfirmationResponseProcessor(
       val hash = crypto.pureCrypto.digest(response.hashPurpose, bytes)
       (for {
         snapshot <- EitherT.right(crypto.awaitSnapshot(response.requestId.unwrap))
-        domainParameters <- EitherT.right(
-          snapshot.ipsSnapshot.findDynamicDomainParametersOrDefault()
-        )
         _ <- snapshot
           .verifySignature(hash, response.sender, signedResponse.signature)
           .leftMap(err => {
@@ -371,10 +366,10 @@ class ConfirmationResponseProcessor(
           ),
         )
         _ <- EitherT.cond[Future](
-          ts <= domainParameters.participantResponseDeadlineFor(response.requestId.unwrap),
+          ts <= participantResponseDeadline,
           (),
           logger.warn(
-            s"Response ${ts} is too late as request ${response.requestId} has already exceeded the participant response deadline [${domainParameters.participantResponseTimeout}]"
+            s"Response ${ts} is too late as request ${response.requestId} has already exceeded the participant response deadline [$participantResponseDeadline]"
           ),
         )
         responseAggregation <- mediatorState.fetch(response.requestId).leftMap { _ =>
@@ -388,150 +383,19 @@ class ConfirmationResponseProcessor(
         _unit <- mediatorState
           .replace(responseAggregation, nextResponseAggregation)
           .leftMap(e => logger.error(e.toString))
-        _ <- EitherT.right[Unit](sendResultIfDone(nextResponseAggregation, domainParameters))
+        _ <- EitherT.right[Unit](sendResultIfDone(nextResponseAggregation, decisionTime))
       } yield ()).value.map(_ => ())
     }
 
   private def sendResultIfDone(
       responseAggregation: ResponseAggregation,
-      domainParameters: DynamicDomainParameters,
+      decisionTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Unit] =
     responseAggregation match {
       case ResponseAggregation(requestId, request, _, Left(verdict)) =>
-        sendResult(requestId, request, verdict, domainParameters)
+        verdictSender.sendResult(requestId, request, verdict, decisionTime)
       case ResponseAggregation(_, _, _, Right(_)) =>
         /* no op */
         Future.unit
     }
-
-  private def sendResult(
-      requestId: RequestId,
-      request: MediatorRequest,
-      verdict: Verdict,
-      domainParameters: DynamicDomainParameters,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val resultET = for {
-      batch <- createResults(requestId, request, verdict)
-      _ <- EitherT.right[SyncCryptoError](
-        sendResultBatch(requestId, batch, domainParameters)
-      )
-    } yield ()
-
-    // we don't want to halt the mediator if an individual send fails or if we're unable to create a batch, so just log
-    resultET
-      .leftMap(err => logger.warn(s"Failed to send verdict for $requestId: $err"))
-      .value
-      .map(_.merge)
-  }
-
-  private def sendResultBatch(
-      requestId: RequestId,
-      batch: Batch[DefaultOpenEnvelope],
-      domainParameters: DynamicDomainParameters,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val decisionTime = domainParameters.decisionTimeFor(requestId.unwrap)
-
-    val callback: SendCallback = {
-      case SendResult.Success(_) =>
-        logger.debug(s"Sent result for request ${requestId.unwrap}")
-      case SendResult.Error(error) =>
-        val reason = error.reason
-        reason match {
-          case _: DeliverErrorReason.BatchRefused =>
-            logger.warn(
-              s"Sequencing result was refused for request ${requestId.unwrap}: ${reason.toString}"
-            )
-          case _ =>
-            logger.error(
-              s"Failed to sequence result for request ${requestId.unwrap}: ${reason.toString}"
-            )
-        }
-      case _: SendResult.Timeout =>
-        logger.warn("Sequencing result timed out")
-    }
-
-    // the result of send request will be logged within the returned future however any error is effectively
-    // discarded. Any error logged by the eventual callback will most likely occur after the returned future has
-    // completed.
-    // we use decision-time for max-sequencing-time as recipients will simply ignore the message if received after
-    // that point.
-    val sendET = sequencer.sendAsync(
-      batch,
-      SendType.Other,
-      Some(requestId.unwrap),
-      callback = callback,
-      maxSequencingTime = decisionTime,
-      messageId = VerdictMessageId(requestId).toMessageId,
-    )
-
-    EitherTUtil
-      .logOnError(sendET, s"Failed to send result to sequencer for request ${requestId.unwrap}")
-      .value
-      .void
-  }
-
-  private def informeesGroupedByParticipant(requestId: RequestId, informees: Set[LfPartyId])(
-      implicit traceContext: TraceContext
-  ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
-
-    def participantInformeeMapping(
-        topologySnapshot: TopologySnapshot
-    ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
-      val start = Map.empty[ParticipantId, Set[LfPartyId]]
-      val prefetchF =
-        informees.toList.traverse(partyId =>
-          topologySnapshot.activeParticipantsOf(partyId).map(res => (partyId, res))
-        )
-      prefetchF.map { fetched =>
-        fetched.foldLeft((start, Set.empty[LfPartyId]))({
-          case (
-                (participantsToInformees, informeesNoParticipant),
-                (informee, activeParticipants),
-              ) =>
-            val activeParticipantsOfInformee = activeParticipants.keySet
-            if (activeParticipantsOfInformee.isEmpty)
-              (participantsToInformees, informeesNoParticipant + informee)
-            else {
-              val updatedMap = activeParticipantsOfInformee.foldLeft(participantsToInformees)({
-                case (map, participant) =>
-                  map + (participant -> (map.getOrElse(participant, Set.empty) + informee))
-              })
-              (updatedMap, informeesNoParticipant)
-            }
-        })
-      }
-    }
-
-    crypto.ips.awaitSnapshot(requestId.unwrap).flatMap(participantInformeeMapping)
-  }
-
-  private[this] def createResults(requestId: RequestId, request: MediatorRequest, verdict: Verdict)(
-      implicit traceContext: TraceContext
-  ): EitherT[Future, SyncCryptoError, Batch[DefaultOpenEnvelope]] =
-    for {
-      informeesMapAndAnyInformeeNoActiveParticipant <- EitherT.right(
-        informeesGroupedByParticipant(requestId, request.allInformees)
-      )
-      (informeesMap, informeesNoParticipant) = informeesMapAndAnyInformeeNoActiveParticipant
-      snapshot <- EitherT.right(crypto.awaitSnapshot(requestId.unwrap))
-      verdictWithInformeeCheck = {
-        if (informeesNoParticipant.nonEmpty)
-          Verdict.MediatorReject.Topology.InformeesNotHostedOnActiveParticipants
-            .Reject(show"$informeesNoParticipant")
-        else verdict
-      }
-      envelopes <- informeesMap.toList
-        .traverse { case (participantId, informees) =>
-          val result = request.createMediatorResult(
-            requestId,
-            verdictWithInformeeCheck,
-            informees,
-          )
-          SignedProtocolMessage
-            .create(result, snapshot, crypto.pureCrypto, protocolVersion)
-            .map(signedResult =>
-              OpenEnvelope(signedResult, Recipients.cc(participantId), protocolVersion)
-            )
-        }
-    } yield Batch(envelopes, protocolVersion)
 }

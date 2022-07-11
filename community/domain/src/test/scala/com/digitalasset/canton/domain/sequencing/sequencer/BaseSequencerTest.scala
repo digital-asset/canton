@@ -32,7 +32,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
       ClosedEnvelope(ByteString.EMPTY, Recipients.ofSet(recipients).value) :: Nil,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
   def submission(from: Member, to: Set[Member]) =
     SubmissionRequest(
@@ -42,7 +42,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       mkBatch(to),
       CantonTimestamp.MaxValue,
       None,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
 
   private implicit val materializer = mock[Materializer] // not used

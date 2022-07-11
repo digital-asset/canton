@@ -23,7 +23,6 @@ import com.digitalasset.canton.version.ProtocolVersion.{
   UnsupportedVersion,
   deprecated,
 }
-import com.google.common.annotations.VisibleForTesting
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -122,6 +121,7 @@ object CantonVersion {
     ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
     ReleaseVersion.v2_2_0 -> List(v2_0_0),
     ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
+    ReleaseVersion.v2_2_1 -> List(v2_0_0),
     ReleaseVersion.v2_2_0 -> List(v2_0_0),
     ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_0_rc1 -> List(v2_0_0, v3_0_0),
@@ -195,6 +195,7 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
   lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
   lazy val v2_2_0: ReleaseVersion = ReleaseVersion(2, 2, 0)
+  lazy val v2_2_1: ReleaseVersion = ReleaseVersion(2, 2, 1)
   lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
   lazy val v2_3_0_rc1: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("rc1"))
   lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
@@ -241,21 +242,25 @@ case class SourceProtocolVersion(v: ProtocolVersion) extends AnyVal
 case class TargetProtocolVersion(v: ProtocolVersion) extends AnyVal
 
 object ProtocolVersion extends CompanionTrait {
-  private val allProtocolVersions: List[ProtocolVersion] =
+
+  implicit val protocolVersionWriter: ConfigWriter[ProtocolVersion] =
+    ConfigWriter.toString(_.fullVersion)
+
+  lazy implicit val protocolVersionReader: ConfigReader[ProtocolVersion] = {
+    ConfigReader.fromString[ProtocolVersion] { str =>
+      ProtocolVersion.create(str).leftMap[FailureReason](InvalidProtocolVersion)
+    }
+  }
+
+  val all: List[ProtocolVersion] =
     BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList
 
   val deprecated: Seq[ProtocolVersion] = Seq(ProtocolVersion.v2_0_0)
 
   val latest: ProtocolVersion =
-    allProtocolVersions.maxOption.getOrElse(
+    all.maxOption.getOrElse(
       sys.error("Release needs to support at least one protocol version")
     )
-
-  /** Should be used when hardcoding a protocol version for a test to signify that a hardcoded protocol version is safe
-    * in this instance.
-    */
-  @VisibleForTesting
-  val latestForTest: ProtocolVersion = latest
 
   def create(rawVersion: String): Either[String, ProtocolVersion] =
     createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
@@ -351,6 +356,18 @@ object ProtocolVersion extends CompanionTrait {
     else if (!clientSupportsRequiredVersion)
       Left(VersionNotSupportedError(server, clientSupportedVersions))
     else Right(())
+  }
+
+  /** Check used by domain nodes (mediator / sequencer) to verify whether they are able to join a domain using a specific protocol */
+  def isSupportedByDomainNode(
+      haveDevVersionSupport: Boolean,
+      protocolVersion: ProtocolVersion,
+  ): Either[String, Unit] = {
+    val supported =
+      ProtocolVersion.supportedProtocolsDomain(includeDevelopmentVersions = haveDevVersionSupport)
+    ProtocolVersion
+      .canClientConnectToServer(supported, protocolVersion, None)
+      .leftMap(_.description)
   }
 
   lazy val unstable_development: ProtocolVersion = ProtocolVersion(Int.MaxValue, 0, 0, Some("DEV"))
@@ -513,6 +530,7 @@ final case class ParticipantProtocolVersion(version: ProtocolVersion) {
 object ParticipantProtocolVersion {
   implicit val participantProtocolVersionWriter: ConfigWriter[ParticipantProtocolVersion] =
     ConfigWriter.toString(_.version.fullVersion)
+
   lazy implicit val participantProtocolVersionReader: ConfigReader[ParticipantProtocolVersion] = {
     ConfigReader.fromString[ParticipantProtocolVersion] { str =>
       for {

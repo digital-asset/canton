@@ -77,7 +77,7 @@ class SingleDomainCausalTrackerTest
         )
 
       val id =
-        TransferId(originDomain = domain1, requestTimestamp = CantonTimestamp.Epoch.minusSeconds(1))
+        TransferId(sourceDomain = domain1, requestTimestamp = CantonTimestamp.Epoch.minusSeconds(1))
       val outTime = CantonTimestamp.Epoch.plusSeconds(5)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
@@ -95,7 +95,7 @@ class SingleDomainCausalTrackerTest
       val cm =
         CausalityMessage(
           domain2,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           id,
           VectorClock(domain1, localTs = outTime, alice, Map(domain1 -> outTime)),
         )
@@ -109,7 +109,7 @@ class SingleDomainCausalTrackerTest
             case TransactionUpdate(parties, ts, domain, rc) => Map.empty
             // Causal dependencies should be introduced by the transfer in
             case TransferInUpdate(parties, ts, domain, rc, transferId) =>
-              Map(transferId.originDomain -> outTime)
+              Map(transferId.sourceDomain -> outTime)
             case _ => fail()
           }
           // For this test, the next event clock is the previous event clock plus any extra causal dependencies
@@ -137,7 +137,7 @@ class SingleDomainCausalTrackerTest
         )
 
       val outTime = CantonTimestamp.Epoch.plusSeconds(1)
-      val id = TransferId(originDomain = domain2, requestTimestamp = outTime)
+      val id = TransferId(sourceDomain = domain2, requestTimestamp = outTime)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
         TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0),
@@ -182,11 +182,11 @@ class SingleDomainCausalTrackerTest
 
       // First transfer from d1 to d4
       val outTime = CantonTimestamp.Epoch.plusSeconds(5)
-      val transfer1ID = TransferId(originDomain = domain1, requestTimestamp = outTime)
+      val transfer1ID = TransferId(sourceDomain = domain1, requestTimestamp = outTime)
 
       // Second transfer out from d4
       val outTime2 = CantonTimestamp.Epoch.plusSeconds(10)
-      val transfer2ID = TransferId(originDomain = domain4, requestTimestamp = outTime2)
+      val transfer2ID = TransferId(sourceDomain = domain4, requestTimestamp = outTime2)
 
       // Represents a transfer in to domain d4 followed by a transfer out
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
@@ -213,7 +213,7 @@ class SingleDomainCausalTrackerTest
       val cmAlice =
         CausalityMessage(
           domain4,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           transfer1ID,
           VectorClock(
             domain1,
@@ -227,7 +227,7 @@ class SingleDomainCausalTrackerTest
       val cmBob =
         CausalityMessage(
           domain4,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           transfer1ID,
           VectorClock(
             domain1,
@@ -261,7 +261,7 @@ class SingleDomainCausalTrackerTest
               )
 
             case TransferOutUpdate(parties, ts, transferId, rc) =>
-              (parties.toList.map(p => p -> Map(transferId.originDomain -> ts)).toMap)
+              (parties.toList.map(p => p -> Map(transferId.sourceDomain -> ts)).toMap)
 
             case _ =>
               fail()

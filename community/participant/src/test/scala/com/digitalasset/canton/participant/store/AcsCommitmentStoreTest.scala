@@ -17,7 +17,6 @@ import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -79,10 +78,10 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
       localId,
       period(0, 1),
       dummyCommitment,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
   val dummySigned =
-    SignedProtocolMessage(dummyCommitmentMsg, dummySignature, defaultProtocolVersion)
+    SignedProtocolMessage(dummyCommitmentMsg, dummySignature, testedProtocolVersion)
 
   val alice: LfPartyId = LfPartyId.assertFromString("Alice")
   val bob: LfPartyId = LfPartyId.assertFromString("bob")
@@ -290,18 +289,18 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         localId,
         period(2, 3),
         dummyCommitment,
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
-      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, defaultProtocolVersion)
+      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, testedProtocolVersion)
       val dummyMsg3 = AcsCommitment.create(
         domainId,
         remoteId2,
         localId,
         period(0, 1),
         dummyCommitment,
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
-      val dummySigned3 = SignedProtocolMessage(dummyMsg3, dummySignature, defaultProtocolVersion)
+      val dummySigned3 = SignedProtocolMessage(dummyMsg3, dummySignature, testedProtocolVersion)
 
       for {
         _ <- store.storeReceived(dummySigned)
@@ -324,9 +323,9 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         localId,
         period(0, 1),
         dummyCommitment2,
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
-      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, defaultProtocolVersion)
+      val dummySigned2 = SignedProtocolMessage(dummyMsg2, dummySignature, testedProtocolVersion)
 
       for {
         _ <- store.storeReceived(dummySigned)
@@ -525,7 +524,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         localId,
         CommitmentPeriod(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
         cmt,
-        ProtocolVersion.latestForTest,
+        testedProtocolVersion,
       )
 
     "work sensibly in a basic scenario" in {

@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.{
   UnauthenticatedMemberId,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -128,7 +129,7 @@ class DomainTopologyManagerRequestServiceTest
         new RequestProcessingStrategy.Impl(
           config = config,
           domainId = DefaultTestIdentities.domainId,
-          protocolVersion = defaultProtocolVersion,
+          protocolVersion = testedProtocolVersion,
           authorizedStore = authorizedStore,
           targetDomainClient = client,
           hooks,
@@ -270,14 +271,15 @@ class DomainTopologyManagerRequestServiceTest
             List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3),
           )
         )
-        // excess transactions
-        request7 <- expectMalicious(
-          service.newRequest(
-            unauthenticatedMember,
-            participant1,
-            List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3, ps1d1T_k3, p1p1B_k2),
+        // excess transactions only rejected since PV=3
+        request7 <-
+          expectMalicious(
+            service.newRequest(
+              unauthenticatedMember,
+              participant1,
+              List(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak1E_k3, okm1ak5_k3, ps1d1T_k3, p1p1B_k2),
+            )
           )
-        )
         // bad signatures
         request8 <- expectMalicious(
           service.newRequest(
@@ -304,9 +306,14 @@ class DomainTopologyManagerRequestServiceTest
         all(request4, 5, Failed)
         all(request5, 5, Failed)
         all(request6, 5, Failed)
-        all(request7, 7, Failed)
         all(request8, 6, Failed)
-        stored should have length (if (config.open) 0 else 1)
+        // excess transactions only rejected since PV=3
+        if (testedProtocolVersion >= ProtocolVersion.v3_0_0) {
+          all(request7, 7, Failed)
+          stored should have length (if (config.open) 0 else 1)
+        } else {
+          succeed
+        }
       }
     }
 

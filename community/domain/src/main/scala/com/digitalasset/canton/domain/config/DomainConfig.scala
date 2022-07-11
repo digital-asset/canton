@@ -10,6 +10,7 @@ import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.version.ProtocolVersion
 import io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens._
 
@@ -79,6 +80,7 @@ case class DomainNodeParameters(
     nonStandardConfig: Boolean,
     devVersionSupport: Boolean,
     dontWarnOnDeprecatedPV: Boolean,
+    initialProtocolVersion: ProtocolVersion,
 ) extends LocalNodeParameters
 
 trait DomainBaseConfig extends LocalNodeConfig {

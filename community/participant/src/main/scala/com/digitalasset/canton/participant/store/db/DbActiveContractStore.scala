@@ -163,13 +163,13 @@ class DbActiveContractStore(
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     processingTime.metric.checkedTEvent {
       for {
-        byOriginIndexed <- indexedDomains(transferIns).map(_.groupBy(_._2).toList)
-        _ <- byOriginIndexed.traverse_ { case (originDomain, contractIdsAndDomain) =>
+        bySourceDomainIndexed <- indexedDomains(transferIns).map(_.groupBy(_._2).toList)
+        _ <- bySourceDomainIndexed.traverse_ { case (sourceDomain, contractIdsAndDomain) =>
           bulkInsert(
             contractIdsAndDomain.map(_._1),
             toc,
             ChangeType.Activation,
-            remoteDomain = Some(originDomain),
+            remoteDomain = Some(sourceDomain),
           )
         }
         _ <- checkTransfersConsistency(transferIns, toc)

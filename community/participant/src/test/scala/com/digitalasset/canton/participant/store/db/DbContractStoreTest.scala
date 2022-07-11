@@ -39,7 +39,7 @@ trait DbContractStoreTest extends AsyncWordSpec with BaseTest with ContractStore
       createDbContractStoreForTesting(
         storage,
         DomainId.tryFromString("domain-contract-store::default"),
-        defaultProtocolVersion,
+        testedProtocolVersion,
         domainIndex,
         loggerFactory,
       )

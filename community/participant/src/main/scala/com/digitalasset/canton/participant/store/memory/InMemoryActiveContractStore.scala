@@ -111,8 +111,8 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
     CheckedT(Future.successful {
       logger.trace(s"Transferring-in contracts at $toc: $transferIns")
-      transferIns.to(LazyList).traverse_ { case (contractId, originDomain) =>
-        updateTable(contractId, _.addTransferIn(contractId, toc, originDomain))
+      transferIns.to(LazyList).traverse_ { case (contractId, sourceDomain) =>
+        updateTable(contractId, _.addTransferIn(contractId, toc, sourceDomain))
       }
     })
 
@@ -251,8 +251,8 @@ object InMemoryActiveContractStore {
     def archive(toc: TimeOfChange): IndividualChange = Deactivation(toc) -> CreationArchivalDetail
     def transferOut(toc: TimeOfChange, targetDomain: DomainId): IndividualChange =
       Deactivation(toc) -> TransferDetail(targetDomain)
-    def transferIn(toc: TimeOfChange, originDomain: DomainId): IndividualChange =
-      Activation(toc) -> TransferDetail(originDomain)
+    def transferIn(toc: TimeOfChange, sourceDomain: DomainId): IndividualChange =
+      Activation(toc) -> TransferDetail(sourceDomain)
   }
 
   case class ActivenessChange(toc: TimeOfChange, isActivation: Boolean) {
@@ -369,10 +369,10 @@ object InMemoryActiveContractStore {
     private[InMemoryActiveContractStore] def addTransferIn(
         contractId: LfContractId,
         transfer: TimeOfChange,
-        originDomain: DomainId,
+        sourceDomain: DomainId,
     ): Checked[AcsError, AcsWarning, ContractStatus] =
       for {
-        nextChanges <- addIndividualChange(contractId, transferIn(transfer, originDomain))
+        nextChanges <- addIndividualChange(contractId, transferIn(transfer, sourceDomain))
         nextLatestCreation <- checkTimestampAgainstCreation(contractId, transfer)
         nextEarliestArchival <- checkTimestampAgainstArchival(contractId, transfer)
       } yield ContractStatus(nextChanges, nextLatestCreation, nextEarliestArchival)

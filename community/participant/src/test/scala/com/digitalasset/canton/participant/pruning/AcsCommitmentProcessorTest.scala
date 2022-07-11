@@ -192,7 +192,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       (_, _) => FutureUnlessShutdown.unit,
       killSwitch,
       ParticipantTestMetrics.pruning,
-      defaultProtocolVersion,
+      testedProtocolVersion,
       DefaultProcessingTimeouts.testing
         .copy(storageMaxRetryInterval = TimeoutDuration.tryFromDuration(1.millisecond)),
       loggerFactory,
@@ -522,7 +522,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
               localId,
               period,
               cmt,
-              defaultProtocolVersion,
+              testedProtocolVersion,
             )
 
             snapshotF.flatMap { snapshot =>
@@ -530,7 +530,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
                 payload,
                 snapshot,
                 crypto.pureCrypto,
-                defaultProtocolVersion,
+                testedProtocolVersion,
               )
             }
         }
@@ -545,7 +545,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         delivered = remote.map(cmt =>
           (
             cmt.message.period.toInclusive.plusSeconds(1),
-            List(OpenEnvelope(cmt, Recipients.cc(localId), defaultProtocolVersion)),
+            List(OpenEnvelope(cmt, Recipients.cc(localId), testedProtocolVersion)),
           )
         )
         // First ask for the remote commitments to be processed, and then compute locally

@@ -103,18 +103,18 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
         val fullInformeeTree = example.fullInformeeTree
         FullInformeeTree
           .fromByteString(factory.cryptoOps)(
-            fullInformeeTree.toByteString(defaultProtocolVersion)
+            fullInformeeTree.toByteString(testedProtocolVersion)
           ) shouldEqual Right(fullInformeeTree)
 
         val (_, informeeTree) = example.informeeTreeBlindedFor
         InformeeTree
           .fromByteString(factory.cryptoOps)(
-            informeeTree.toByteString(defaultProtocolVersion)
+            informeeTree.toByteString(testedProtocolVersion)
           ) shouldEqual Right(informeeTree)
 
         forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>
           LightTransactionViewTree.fromByteString(example.cryptoOps)(
-            lt.toByteString(defaultProtocolVersion)
+            lt.toByteString(testedProtocolVersion)
           ) shouldBe Right(lt)
         }
       }
@@ -147,7 +147,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           .allLightTransactionViewTreesWithWitnessesAndSeeds(
             seed,
             hkdfOps,
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
           .valueOrFail("Cant get the light transaction trees")
         val allTrees = example.transactionTree.allTransactionViewTrees.toList

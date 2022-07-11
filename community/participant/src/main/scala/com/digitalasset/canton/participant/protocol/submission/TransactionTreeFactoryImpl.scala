@@ -31,6 +31,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
 import scala.collection.immutable.SortedSet
+import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Factory class that can create the [[com.digitalasset.canton.data.GenTransactionTree]]s from a
@@ -594,22 +595,63 @@ object TransactionTreeFactoryImpl {
       .merge
 
   trait State {
-    def nextSalt(): Either[TransactionTreeFactory.TooFewSalts, Salt]
+    def mediatorId: MediatorId
+    def transactionUUID: UUID
+    def ledgerTime: CantonTimestamp
+
+    protected def salts: Iterator[Salt]
+
+    def nextSalt(): Either[TransactionTreeFactory.TooFewSalts, Salt] =
+      Either.cond(salts.hasNext, salts.next(), TooFewSalts)
+
     def tryNextSalt()(implicit loggingContext: ErrorLoggingContext): Salt =
       nextSalt().valueOr { case TooFewSalts =>
         ErrorUtil.internalError(new IllegalStateException("No more salts available"))
       }
-    def suffixedNodes(): Map[LfNodeId, LfActionNode]
-    def mediatorId: MediatorId
-    def transactionUUID: UUID
-    def ledgerTime: CantonTimestamp
-    def unicumOfCreatedContract: LfHash => Option[Unicum]
+
+    private val suffixedNodesBuilder
+        : mutable.Builder[(LfNodeId, LfActionNode), Map[LfNodeId, LfActionNode]] =
+      Map.newBuilder[LfNodeId, LfActionNode]
+
+    def suffixedNodes(): Map[LfNodeId, LfActionNode] = suffixedNodesBuilder.result()
+
+    def addSuffixedNode(nodeId: LfNodeId, suffixedNode: LfActionNode): Unit = {
+      suffixedNodesBuilder += nodeId -> suffixedNode
+    }
+
+    private val unicumOfCreatedContractMap: mutable.Map[LfHash, Unicum] = mutable.Map.empty
+
+    def unicumOfCreatedContract: LfHash => Option[Unicum] = unicumOfCreatedContractMap.get
+
     def setUnicumFor(discriminator: LfHash, unicum: Unicum)(implicit
-        traceContext: TraceContext
-    ): Unit
-    def setCreatedContractInfo(contractId: LfContractId, createdInfo: SerializableContract)(implicit
-        traceContext: TraceContext
-    ): Unit
-    def addSuffixedNode(nodeId: LfNodeId, suffixedNode: LfActionNode): Unit
+        loggingContext: ErrorLoggingContext
+    ): Unit =
+      unicumOfCreatedContractMap.put(discriminator, unicum).foreach { _ =>
+        ErrorUtil.internalError(
+          new IllegalStateException(
+            s"Two contracts have the same discriminator: $discriminator"
+          )
+        )
+      }
+
+    /** All contracts created by a node that has already been processed. */
+    val createdContractInfo: mutable.Map[LfContractId, SerializableContract] =
+      mutable.Map.empty
+
+    def setCreatedContractInfo(
+        contractId: LfContractId,
+        createdInfo: SerializableContract,
+    )(implicit loggingContext: ErrorLoggingContext): Unit =
+      createdContractInfo.put(contractId, createdInfo).foreach { _ =>
+        ErrorUtil.internalError(
+          new IllegalStateException(
+            s"Two created contracts have the same contract id: $contractId"
+          )
+        )
+      }
+
+    /** Out parameter for contracts created in the view (including subviews). */
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    var createdContractsInView: collection.Set[LfContractId] = Set.empty
   }
 }

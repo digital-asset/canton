@@ -37,7 +37,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           Set(alice, bob),
           NonNegativeInt.tryCreate(2),
           s(999),
-          defaultProtocolVersion,
+          testedProtocolVersion,
         )
       val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
       val commonMetadata = CommonMetadata(hashOps)(
@@ -46,7 +46,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         mediatorId,
         s(5417),
         new UUID(0, 0),
-        defaultProtocolVersion,
+        testedProtocolVersion,
       )
       FullInformeeTree(
         GenTransactionTree(hashOps)(
@@ -57,7 +57,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         )
       )
     }
-    val informeeMessage = InformeeMessage(fullInformeeTree)(defaultProtocolVersion)
+    val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     val currentVersion = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
 
     def mediatorState: MediatorState = {

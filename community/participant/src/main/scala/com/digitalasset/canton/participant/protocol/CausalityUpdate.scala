@@ -84,7 +84,7 @@ case class TransferOutUpdate(
     rc: RequestCounter,
 ) extends CausalityUpdate {
 
-  override val domain: DomainId = transferId.originDomain
+  override val domain: DomainId = transferId.sourceDomain
 
   override def pretty: Pretty[TransferOutUpdate] =
     prettyOfClass(

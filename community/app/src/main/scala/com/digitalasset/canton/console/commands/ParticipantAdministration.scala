@@ -1387,26 +1387,26 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   @Help.Group("Transfer")
   object transfer extends Helpful {
     @Help.Summary(
-      "Transfer-out a contract from the origin domain with destination target domain",
+      "Transfer-out a contract from the source domain with destination target domain",
       FeatureFlag.Preview,
     )
     @Help.Description(
-      """Transfers the given contract out of the origin domain with destination target domain.
+      """Transfers the given contract out of the source domain with destination target domain.
        The command returns the ID of the transfer when the transfer-out has completed successfully.
        The contract is in transit until the transfer-in has completed on the target domain.
        The submitting party must be a stakeholder of the contract and the participant must have submission rights
-       for the submitting party on the origin domain. It must also be connected to the target domain."""
+       for the submitting party on the source domain. It must also be connected to the target domain."""
     )
     def out(
         submittingParty: PartyId,
         contractId: LfContractId,
-        originDomain: DomainAlias,
+        sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
     ): TransferId =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
           ParticipantAdminCommands.Transfer
-            .TransferOut(submittingParty, contractId, originDomain, targetDomain)
+            .TransferOut(submittingParty, contractId, sourceDomain, targetDomain)
         )
       })
 
@@ -1430,7 +1430,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     )
     def search(
         targetDomain: DomainAlias,
-        filterOriginDomain: Option[DomainAlias],
+        filterSourceDomain: Option[DomainAlias],
         filterTimestamp: Option[Instant],
         filterSubmittingParty: Option[PartyId],
         limit: Int = 100,
@@ -1440,7 +1440,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           ParticipantAdminCommands.Transfer
             .TransferSearch(
               targetDomain,
-              filterOriginDomain,
+              filterSourceDomain,
               filterTimestamp,
               filterSubmittingParty,
               limit,
@@ -1458,10 +1458,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def execute(
         submittingParty: PartyId,
         contractId: LfContractId,
-        originDomain: DomainAlias,
+        sourceDomain: DomainAlias,
         targetDomain: DomainAlias,
     ): Unit = {
-      val transferId = out(submittingParty, contractId, originDomain, targetDomain)
+      val transferId = out(submittingParty, contractId, sourceDomain, targetDomain)
       in(submittingParty, transferId, targetDomain)
     }
 

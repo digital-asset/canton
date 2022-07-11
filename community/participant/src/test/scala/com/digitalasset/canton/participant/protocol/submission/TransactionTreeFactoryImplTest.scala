@@ -44,7 +44,6 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     EitherT.leftT[Future, SerializableContract](ContractLookupError(id, testErrorMessage))
   }
 
-  // TODO(#9386) Add tests for V2
   def createTransactionTreeFactory(version: ProtocolVersion): TransactionTreeFactoryImpl =
     TransactionTreeFactoryImpl(
       ExampleTransactionFactory.submitterParticipant,
@@ -114,7 +113,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             example.keyResolver,
           ).value.flatMap(
             _ shouldEqual Left(
-              ContractLookupError(example.contractId.asInstanceOf[LfContractId], errorMessage)
+              ContractLookupError(example.contractId, errorMessage)
             )
           )
         }
@@ -206,11 +205,11 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     }
   }
 
-  "TransactionTreeFactoryImplV2" should {
-    behave like transactionTreeFactory(ProtocolVersion.v2_0_0)
+  "TransactionTreeFactoryImpl@testedVersion" should {
+    behave like transactionTreeFactory(testedProtocolVersion)
   }
 
-  "TransactionTreeFactoryImplV3" should {
-    behave like transactionTreeFactory(defaultProtocolVersion)
+  "TransactionTreeFactoryImpl@V2" should {
+    behave like transactionTreeFactory(ProtocolVersion.v2_0_0)
   }
 }

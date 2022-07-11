@@ -36,7 +36,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
         TopologyElementId.tryCreate("submissionId"),
         OwnerToKeyMapping(participantId, SymbolicCrypto.signingPublicKey("keyId")),
       ),
-    )(defaultProtocolVersion),
+    )(testedProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
   )(signedTransactionProtocolVersionRepresentative, None)
@@ -47,7 +47,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       requestId,
       List(signedIdentityTransaction),
       domainId,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
     .headOption
     .value
@@ -63,7 +63,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       requestId,
       List(domainIdentityServiceResult),
       domainId,
-    )(RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(defaultProtocolVersion))
+    )(RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(testedProtocolVersion))
 
   "DomainTopologyManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
@@ -91,7 +91,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
         when(
           sequencerSendResponse.apply(
             eqTo(
-              OpenEnvelope(response, Recipients.cc(response.requestedBy), defaultProtocolVersion)
+              OpenEnvelope(response, Recipients.cc(response.requestedBy), testedProtocolVersion)
             ),
             any[SendCallback],
           )
@@ -107,7 +107,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
           store,
           requestHandler,
           sequencerSendResponse,
-          defaultProtocolVersion,
+          testedProtocolVersion,
           timeouts,
           loggerFactory,
         )
@@ -120,10 +120,10 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
               OpenEnvelope(
                 request,
                 Recipients.cc(DomainTopologyManagerId(response.domainId)),
-                defaultProtocolVersion,
+                testedProtocolVersion,
               )
             ),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         sut.apply(
           Traced(
@@ -135,7 +135,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
                   domainId,
                   Some(MessageId.tryCreate("messageId")),
                   batch,
-                  defaultProtocolVersion,
+                  testedProtocolVersion,
                 )
               )
             )

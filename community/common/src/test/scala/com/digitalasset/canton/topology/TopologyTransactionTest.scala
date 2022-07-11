@@ -32,8 +32,8 @@ class TopologyTransactionTest extends AnyWordSpec with BaseTest with HasCryptogr
       mapping2: Option[M] = None,
       hint: String = "",
   ): Unit = {
-    val transaction = builder(mapping, defaultProtocolVersion)
-    val transaction2 = builder(mapping2.getOrElse(mapping), defaultProtocolVersion)
+    val transaction = builder(mapping, testedProtocolVersion)
+    val transaction2 = builder(mapping2.getOrElse(mapping), testedProtocolVersion)
     val serialized = transaction.getCryptographicEvidence
 
     val deserializer = fromByteString andThen ({

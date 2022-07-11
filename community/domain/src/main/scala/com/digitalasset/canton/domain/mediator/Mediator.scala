@@ -75,11 +75,14 @@ class Mediator(
 
   val timeTracker = DomainTimeTracker(timeTrackerConfig, clock, sequencerClient, loggerFactory)
 
+  private val verdictSender =
+    VerdictSender(sequencerClient, syncCrypto, protocolVersion, loggerFactory)
+
   private val processor = new ConfirmationResponseProcessor(
     domain,
     mediatorId,
+    verdictSender,
     syncCrypto,
-    sequencerClient,
     timeTracker,
     state,
     new LoggingAlarmStreamer(logger),

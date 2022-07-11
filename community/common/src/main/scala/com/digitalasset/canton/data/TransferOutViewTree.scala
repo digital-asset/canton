@@ -106,7 +106,7 @@ object TransferOutViewTree
   *
   * @param salt Salt for blinding the Merkle hash
   * @param sourceDomain The domain to which the transfer-out request is sent
-  * @param sourceMediator The mediator that coordinates the transfer-out request on the origin domain
+  * @param sourceMediator The mediator that coordinates the transfer-out request on the source domain
   * @param stakeholders The stakeholders of the contract to be transferred
   * @param adminParties The admin parties of transferring transfer-out participants
   * @param uuid The request UUID of the transfer-out
@@ -161,8 +161,8 @@ sealed abstract case class TransferOutCommonData private (
   def confirmingParties: Set[Informee] = (stakeholders ++ adminParties).map(ConfirmingParty(_, 1))
 
   override def pretty: Pretty[TransferOutCommonData] = prettyOfClass(
-    param("origin domain", _.sourceDomain),
-    param("origin mediator", _.sourceMediator),
+    param("source domain", _.sourceDomain),
+    param("source mediator", _.sourceMediator),
     param("stakeholders", _.stakeholders),
     param("admin parties", _.adminParties),
     param("uuid", _.uuid),
@@ -193,8 +193,8 @@ object TransferOutCommonData
 
   def create(hashOps: HashOps)(
       salt: Salt,
-      originDomain: DomainId,
-      originMediator: MediatorId,
+      sourceDomain: DomainId,
+      sourceMediator: MediatorId,
       stakeholders: Set[LfPartyId],
       adminParties: Set[LfPartyId],
       uuid: UUID,
@@ -202,8 +202,8 @@ object TransferOutCommonData
   ): TransferOutCommonData =
     new TransferOutCommonData(
       salt,
-      originDomain,
-      originMediator,
+      sourceDomain,
+      sourceMediator,
       stakeholders,
       adminParties,
       uuid,
@@ -214,7 +214,7 @@ object TransferOutCommonData
   ): ParsingResult[TransferOutCommonData] = {
     val v0.TransferOutCommonData(
       saltP,
-      originDomainP,
+      sourceDomainP,
       stakeholdersP,
       adminPartiesP,
       uuidP,
@@ -222,15 +222,15 @@ object TransferOutCommonData
     ) = transferOutCommonDataP
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
-      originDomain <- DomainId.fromProtoPrimitive(originDomainP, "origin_domain")
-      originMediator <- MediatorId.fromProtoPrimitive(mediatorIdP, "origin_mediator")
+      sourceDomain <- DomainId.fromProtoPrimitive(sourceDomainP, "origin_domain")
+      sourceMediator <- MediatorId.fromProtoPrimitive(mediatorIdP, "origin_mediator")
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       adminParties <- adminPartiesP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
     } yield new TransferOutCommonData(
       salt,
-      originDomain,
-      originMediator,
+      sourceDomain,
+      sourceMediator,
       stakeholders.toSet,
       adminParties.toSet,
       uuid,
@@ -248,7 +248,7 @@ object TransferOutCommonData
   ): ParsingResult[TransferOutCommonData] = {
     val v1.TransferOutCommonData(
       saltP,
-      originDomainP,
+      sourceDomainP,
       stakeholdersP,
       adminPartiesP,
       uuidP,
@@ -257,16 +257,16 @@ object TransferOutCommonData
     ) = transferOutCommonDataP
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
-      originDomain <- DomainId.fromProtoPrimitive(originDomainP, "origin_domain")
-      originMediator <- MediatorId.fromProtoPrimitive(mediatorIdP, "origin_mediator")
+      sourceDomain <- DomainId.fromProtoPrimitive(sourceDomainP, "source_domain")
+      sourceMediator <- MediatorId.fromProtoPrimitive(mediatorIdP, "source_mediator")
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       adminParties <- adminPartiesP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
       protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
     } yield new TransferOutCommonData(
       salt,
-      originDomain,
-      originMediator,
+      sourceDomain,
+      sourceMediator,
       stakeholders.toSet,
       adminParties.toSet,
       uuid,
@@ -393,7 +393,7 @@ case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def contractId: LfContractId = view.contractId
 
-  def originDomain: DomainId = commonData.sourceDomain
+  def sourceDomain: DomainId = commonData.sourceDomain
 
   def targetDomain: DomainId = view.targetDomain
 
@@ -401,7 +401,7 @@ case class FullTransferOutTree(tree: TransferOutViewTree)
 
   def mediatorMessage: TransferOutMediatorMessage = tree.mediatorMessage
 
-  override def domainId: DomainId = originDomain
+  override def domainId: DomainId = sourceDomain
 
   override def mediatorId: MediatorId = commonData.sourceMediator
 

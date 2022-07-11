@@ -138,7 +138,7 @@ class InMemoryTransferStore(
     })
 
   override def find(
-      filterOrigin: Option[DomainId],
+      filterSource: Option[DomainId],
       filterTimestamp: Option[CantonTimestamp],
       filterSubmitter: Option[LfPartyId],
       limit: Int,
@@ -146,7 +146,7 @@ class InMemoryTransferStore(
     Future.successful {
       def filter(entry: TransferEntry): Boolean =
         entry.timeOfCompletion.isEmpty && // Always filter out completed transfers
-          filterOrigin.forall(origin => entry.transferData.originDomain == origin) &&
+          filterSource.forall(source => entry.transferData.sourceDomain == source) &&
           filterTimestamp.forall(ts => entry.transferData.transferId.requestTimestamp == ts) &&
           filterSubmitter.forall(party => entry.transferData.transferOutRequest.submitter == party)
 
@@ -166,7 +166,7 @@ class InMemoryTransferStore(
     def filter(entry: TransferEntry): Boolean =
       entry.timeOfCompletion.isEmpty && // Always filter out completed transfers
         requestAfter.forall(ts =>
-          (entry.transferData.transferId.requestTimestamp, entry.transferData.originDomain) > ts
+          (entry.transferData.transferId.requestTimestamp, entry.transferData.sourceDomain) > ts
         )
 
     transferDataMap.values
@@ -174,7 +174,7 @@ class InMemoryTransferStore(
       .filter(filter)
       .take(limit)
       .map(_.transferData)
-      .sortBy(t => (t.transferId.requestTimestamp, t.transferId.originDomain))(
+      .sortBy(t => (t.transferId.requestTimestamp, t.transferId.sourceDomain))(
         // Explicitly use the standard ordering on two-tuples here
         // As Scala does not seem to infer the right implicits to use here
         Ordering.Tuple2(

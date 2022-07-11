@@ -609,7 +609,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       for {
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.changeTransport(secondTransport)
-        _ <- env.sendAsync(Batch.empty(defaultProtocolVersion))
+        _ <- env.sendAsync(Batch.empty(testedProtocolVersion))
       } yield {
         env.transport.lastSend.get() shouldBe None
         secondTransport.lastSend.get() should not be None
@@ -626,7 +626,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         env <- Env.create(useParallelExecutionContext = true)
         _ <- env.subscribeAfter()
         _ <- env.changeTransport(secondTransport)
-        _ <- env.sendAsync(Batch.empty(defaultProtocolVersion))
+        _ <- env.sendAsync(Batch.empty(testedProtocolVersion))
       } yield {
         env.transport.lastSend.get() shouldBe None
         secondTransport.lastSend.get() should not be None

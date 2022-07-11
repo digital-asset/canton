@@ -33,12 +33,11 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     manager: TopologyManager[T],
     store: TopologyStore[TopologyStoreId.AuthorizedStore],
     cryptoPublicStore: CryptoPublicStore,
+    protocolVersion: ProtocolVersion,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends TopologyManagerWriteServiceGrpc.TopologyManagerWriteService
     with NamedLogging {
-
-  private val protocolVersion = ProtocolVersion.v2_0_0
 
   import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
 

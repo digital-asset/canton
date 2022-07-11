@@ -65,7 +65,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
           val seen = globalStore.awaitTransferOutRegistered(txOutId, Set(alice, bob)).futureValue
 
           seen shouldBe deps.map { case (id, value) =>
-            id -> VectorClock(txOutId.originDomain, txOutTs, id, value)
+            id -> VectorClock(txOutId.sourceDomain, txOutTs, id, value)
           }
         }
 
@@ -77,8 +77,8 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
           val () = store.initialize(None).futureValue
 
           val clock =
-            VectorClock(txOutId.originDomain, txOutTs, alice, Map(writeToDomain -> txOutTs))
-          val cmsg = CausalityMessage(txOutId.originDomain, defaultProtocolVersion, txOutId, clock)
+            VectorClock(txOutId.sourceDomain, txOutTs, alice, Map(writeToDomain -> txOutTs))
+          val cmsg = CausalityMessage(txOutId.sourceDomain, testedProtocolVersion, txOutId, clock)
           val written = globalStoore.registerCausalityMessages(List(cmsg))
 
           val () = written.futureValue
@@ -111,7 +111,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
               Map(alice -> Map(writeToDomain -> ts), bob -> Map(writeToDomain -> ts))
 
             val clocks = dependencies.map { case (id, value) =>
-              id -> VectorClock(transferId.originDomain, ts, id, value)
+              id -> VectorClock(transferId.sourceDomain, ts, id, value)
             }
 
             singleDomainCausalDependencyStore

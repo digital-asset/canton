@@ -137,7 +137,7 @@ trait ActiveContractStore
 
   /** Marks the given contracts as transferred in from `toc`'s timestamp (inclusive) onwards.
     *
-    * @param transferIns The contract IDs to transfer in and their origin domains.
+    * @param transferIns The contract IDs to transfer in and their source domains.
     * @param toc The time of change consisting of
     *            <ul>
     *              <li>The request counter of the transfer-in request.</li>
@@ -156,10 +156,10 @@ trait ActiveContractStore
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit]
 
-  def transferInContract(contractId: LfContractId, toc: TimeOfChange, originDomain: DomainId)(
+  def transferInContract(contractId: LfContractId, toc: TimeOfChange, sourceDomain: DomainId)(
       implicit traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    transferInContracts(Seq((contractId, originDomain)), toc)
+    transferInContracts(Seq((contractId, sourceDomain)), toc)
 
   /** Marks the given contracts as [[ActiveContractStore.TransferredAway]] from `toc`'s timestamp (inclusive) onwards.
     *
@@ -254,7 +254,7 @@ object ActiveContractStore {
   /** Error cases returned by the operations on the [[ActiveContractStore!]] */
   trait AcsError extends AcsBaseError
 
-  /** A contract is simultaneously created and/or transferred from possibly several origin domains */
+  /** A contract is simultaneously created and/or transferred from possibly several source domains */
   case class SimultaneousActivation(
       contractId: LfContractId,
       toc: TimeOfChange,
@@ -262,7 +262,7 @@ object ActiveContractStore {
       detail2: ActivenessChangeDetail,
   ) extends AcsWarning
 
-  /** A contract is simultaneously archived and/or transferred out to possibly several origin domains */
+  /** A contract is simultaneously archived and/or transferred out to possibly several source domains */
   case class SimultaneousDeactivation(
       contractId: LfContractId,
       toc: TimeOfChange,

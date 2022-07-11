@@ -601,6 +601,7 @@ class SyncDomain(
             registerIdentityTransactionHandle,
             domainHandle.topologyClient,
             domainHandle.topologyStore,
+            domainCrypto.crypto,
           )(initializationTraceContext)
           .onShutdown(Right(()))
           .leftMap[SyncDomainInitializationError](ParticipantTopologyHandshakeError)
@@ -655,15 +656,15 @@ class SyncDomain(
           case Right(()) => ()
         })
 
-        pendingTransfers.lastOption.map(t => t.transferId.requestTimestamp -> t.originDomain)
+        pendingTransfers.lastOption.map(t => t.transferId.requestTimestamp -> t.sourceDomain)
       }
 
-      resF.map({
+      resF.map {
         // Continue completing transfers that are after the last completed transfer
         case Some(value) => Left(Some(value))
         // We didn't find any uncompleted transfers, so stop
         case None => Right(())
-      })
+      }
     }
 
     logger.debug(s"Wait for replay to complete")
@@ -755,12 +756,12 @@ class SyncDomain(
     }
 
   def searchTransfers(
-      originDomain: Option[DomainId],
+      sourceDomain: Option[DomainId],
       requestTimestamp: Option[CantonTimestamp],
       submitter: Option[LfPartyId],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = {
-    persistent.transferStore.find(originDomain, requestTimestamp, submitter, limit)
+    persistent.transferStore.find(sourceDomain, requestTimestamp, submitter, limit)
   }
 
   def numberOfDirtyRequests(): Int = ephemeral.requestJournal.numberOfDirtyRequests

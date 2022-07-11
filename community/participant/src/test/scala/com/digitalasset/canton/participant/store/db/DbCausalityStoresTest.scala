@@ -58,9 +58,9 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
     import theStorage.converters._
 
     @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
-      TraceContext.getVersionedSetParameter(defaultProtocolVersion)
+      TraceContext.getVersionedSetParameter(testedProtocolVersion)
     @nowarn("cat=unused") implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
-      ParticipantStorageImplicits.setLedgerSyncEvent(defaultProtocolVersion)
+      ParticipantStorageImplicits.setLedgerSyncEvent(testedProtocolVersion)
 
     val queries = events.flatMap {
       case (

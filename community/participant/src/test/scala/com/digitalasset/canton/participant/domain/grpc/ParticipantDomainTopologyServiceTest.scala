@@ -45,7 +45,7 @@ class ParticipantDomainTopologyServiceTest
         TopologyElementId.tryCreate("submissionId"),
         OwnerToKeyMapping(participantId, SymbolicCrypto.signingPublicKey("keyId")),
       ),
-    )(defaultProtocolVersion),
+    )(testedProtocolVersion),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
   )(signedTransactionProtocolVersionRepresentative, None)
@@ -56,7 +56,7 @@ class ParticipantDomainTopologyServiceTest
       requestId,
       List(signedIdentityTransaction),
       domainId,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
     .headOption
     .value
@@ -73,7 +73,7 @@ class ParticipantDomainTopologyServiceTest
         )
       ),
       domainId,
-      defaultProtocolVersion,
+      testedProtocolVersion,
     )
 
   "ParticipantDomainTopologyService" should {
@@ -92,7 +92,7 @@ class ParticipantDomainTopologyServiceTest
           OpenEnvelope(
             request,
             Recipients.cc(DomainTopologyManagerId(domainId)),
-            defaultProtocolVersion,
+            testedProtocolVersion,
           )
         ),
       )
@@ -103,7 +103,7 @@ class ParticipantDomainTopologyServiceTest
       val sut = new ParticipantDomainTopologyService(
         domainId,
         sendRequest,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         ProcessingTimeout(),
         loggerFactory,
       )
@@ -113,7 +113,7 @@ class ParticipantDomainTopologyServiceTest
       // after response is processed, the future will be completed
       sut.processor.apply(
         Traced(
-          List(OpenEnvelope(response, Recipients.cc(response.requestedBy), defaultProtocolVersion))
+          List(OpenEnvelope(response, Recipients.cc(response.requestedBy), testedProtocolVersion))
         )
       )
 
@@ -123,7 +123,7 @@ class ParticipantDomainTopologyServiceTest
       val sut = new ParticipantDomainTopologyService(
         domainId,
         sendRequest,
-        defaultProtocolVersion,
+        testedProtocolVersion,
         ProcessingTimeout(),
         loggerFactory,
       )

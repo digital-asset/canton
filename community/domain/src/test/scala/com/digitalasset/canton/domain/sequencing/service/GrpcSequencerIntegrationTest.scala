@@ -26,8 +26,12 @@ import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncC
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.protocol.messages.{ProtocolMessage, ProtocolMessageV0}
-import com.digitalasset.canton.protocol.{TestDomainParameters, v0 => protocolV0}
+import com.digitalasset.canton.protocol.messages.{
+  ProtocolMessage,
+  ProtocolMessageV0,
+  ProtocolMessageV1,
+}
+import com.digitalasset.canton.protocol.{TestDomainParameters, v0 => protocolV0, v1 => protocolV1}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
@@ -280,7 +284,7 @@ class GrpcSequencerIntegrationTest
         response <- env.client
           .sendAsync(
             Batch
-              .of(defaultProtocolVersion, (MockProtocolMessage, Recipients.cc(anotherParticipant))),
+              .of(testedProtocolVersion, (MockProtocolMessage, Recipients.cc(anotherParticipant))),
             SendType.Other,
             None,
           )
@@ -293,7 +297,10 @@ class GrpcSequencerIntegrationTest
     }
   }
 
-  private case object MockProtocolMessage extends ProtocolMessage with ProtocolMessageV0 {
+  private case object MockProtocolMessage
+      extends ProtocolMessage
+      with ProtocolMessageV0
+      with ProtocolMessageV1 {
     // no significance to this payload, just need anything valid and this was the easiest to construct
     private val payload =
       protocolV0.SignedProtocolMessage(
@@ -308,6 +315,11 @@ class GrpcSequencerIntegrationTest
     override def toProtoEnvelopeContentV0: protocolV0.EnvelopeContent =
       protocolV0.EnvelopeContent(
         protocolV0.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
+      )
+
+    override def toProtoEnvelopeContentV1: protocolV1.EnvelopeContent =
+      protocolV1.EnvelopeContent(
+        protocolV1.EnvelopeContent.SomeEnvelopeContent.SignedMessage(payload)
       )
   }
 }
