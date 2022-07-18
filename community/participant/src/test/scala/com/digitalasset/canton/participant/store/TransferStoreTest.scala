@@ -23,7 +23,11 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
-import com.digitalasset.canton.version.SourceProtocolVersion
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  SourceProtocolVersion,
+  TargetProtocolVersion,
+}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -613,6 +617,16 @@ object TransferStoreTest {
       submittingParty: LfPartyId = LfPartyId.assertFromString("submitter"),
       targetDomainId: DomainId,
   ): Future[TransferData] = {
+
+    /*
+      Method TransferOutView.fromProtoV0 set protocol version to v2 (not present in Protobuf v0).
+     */
+    val targetProtocolVersion =
+      if (protocolVersion <= ProtocolVersion.v3_0_0)
+        TargetProtocolVersion(ProtocolVersion.v2_0_0)
+      else
+        TargetProtocolVersion(protocolVersion)
+
     val transferOutRequest = TransferOutRequest(
       submittingParty,
       Set(submittingParty),
@@ -622,6 +636,7 @@ object TransferStoreTest {
       SourceProtocolVersion(protocolVersion),
       sourceMediator,
       targetDomainId,
+      targetProtocolVersion,
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomainId),
     )
     val uuid = new UUID(10L, 0L)
@@ -635,6 +650,7 @@ object TransferStoreTest {
       )
     Future.successful(
       TransferData(
+        SourceProtocolVersion(protocolVersion),
         transferId.requestTimestamp,
         0L,
         fullTransferOutViewTree,

@@ -221,11 +221,9 @@ final class TransactionTreeFactoryImplV2(
                   checked(trySuffixNode(state)(nodeId -> lfNode))
                 ) match {
                   case None => // LookupByKey node
-                    val _ =
-                      resolvedKeysInCore.getOrElseUpdate(
-                        gk,
-                        FreeKey(maintainers, rolledBack = false)(lfNode.version),
-                      )
+                    resolvedKeysInCore
+                      .getOrElseUpdate(gk, FreeKey(maintainers)(lfNode.version))
+                      .discard
                     val previous = resolvedKeysInView.getOrElseUpdate(gk, None)
                     previous.foreach { coid =>
                       // TODO(M40) This check does not detect when an earlier create node has assigned the key
@@ -239,7 +237,7 @@ final class TransactionTreeFactoryImplV2(
                     if (!createdInView.contains(cid)) {
                       val _ = resolvedKeysInCore.getOrElseUpdate(
                         gk,
-                        AssignedKey(cid, rolledBack = false)(lfNode.version),
+                        AssignedKey(cid)(lfNode.version),
                       )
                       val previous = resolvedKeysInView.getOrElseUpdate(gk, someCid)
                       if (!previous.contains(cid)) {

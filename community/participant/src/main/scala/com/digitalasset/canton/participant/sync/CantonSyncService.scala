@@ -15,7 +15,10 @@ import com.daml.ledger.api.health.HealthStatus
 import com.daml.ledger.configuration._
 import com.daml.ledger.participant.state
 import com.daml.ledger.participant.state.v2._
+import com.daml.lf.command.DisclosedContract
+import com.daml.lf.data.ImmArray
 import com.daml.lf.engine.Engine
+import com.daml.lf.transaction.Versioned
 import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
 import com.daml.telemetry.TelemetryContext
@@ -73,6 +76,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util._
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
@@ -234,10 +238,18 @@ class CantonSyncService(
       loggerFactory,
     )(ec, TraceContext.empty)
 
+  val protocolVersionGetter: Traced[DomainId] => Future[Option[ProtocolVersion]] =
+    (tracedDomainId: Traced[DomainId]) =>
+      tracedDomainId.withTraceContext { implicit traceContext => domainId =>
+        syncDomainPersistentStateManager.protocolVersionFor(domainId)
+      }
+
   val transferService: TransferService = new TransferService(
-    aliasManager.domainIdForAlias,
-    readySyncDomainById,
-    domainId => syncDomainPersistentStateManager.get(domainId).map(_.transferStore),
+    domainIdOfAlias = aliasManager.domainIdForAlias,
+    submissionHandles = readySyncDomainById,
+    transferLookups = domainId =>
+      syncDomainPersistentStateManager.get(domainId).map(_.transferStore),
+    protocolVersionFor = protocolVersionGetter,
   )
 
   private val commandDeduplicator = new CommandDeduplicatorImpl(
@@ -317,6 +329,7 @@ class CantonSyncService(
       transaction: LfSubmittedTransaction,
       _estimatedInterpretationCost: Long,
       keyResolver: LfKeyResolver,
+      explicitlyDisclosedContracts: ImmArray[Versioned[DisclosedContract]],
   )(implicit
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
@@ -482,7 +495,6 @@ class CantonSyncService(
   )(implicit loggingContext: LoggingContext): Source[(LedgerSyncOffset, LedgerSyncEvent), NotUsed] =
     TraceContext.withNewTraceContext { implicit traceContext =>
       logger.debug(s"Subscribing to stateUpdates from $beginAfterOffset")
-
       // Plus one since dispatchers use inclusive offsets.
       beginAfterOffset
         .traverse(after => UpstreamOffsetConvert.toGlobalOffset(after).map(_ + 1L))
@@ -512,6 +524,7 @@ class CantonSyncService(
           _recordTime,
           _divulgedContracts,
           _blindingInfo,
+          _contractMetadata,
         ) =>
       ta.copy(optCompletionInfo =
         Some(completionInfo.copy(statistics = Some(LedgerTransactionNodeStatistics(transaction))))
@@ -903,23 +916,26 @@ class CantonSyncService(
     */
   def connectDomain(domainAlias: DomainAlias, keepRetrying: Boolean)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, SyncServiceError, Boolean] = {
-    val initial = if (keepRetrying) {
-      // we're remembering that we have been trying to reconnect here
-      attemptReconnect
-        .put(
-          domainAlias,
-          AttemptReconnect(
-            domainAlias,
-            clock.now,
-            parameters.sequencerClient.startupConnectionRetryDelay.toScala,
-            traceContext,
-          ),
-        )
-        .isEmpty
-    } else true
-    attemptDomainConnection(domainAlias, keepRetrying = keepRetrying, initial = initial)
-  }
+  ): EitherT[Future, SyncServiceError, Boolean] =
+    domainConnectionConfigByAlias(domainAlias)
+      .leftMap(_ => SyncServiceError.SyncServiceUnknownDomain.Error(domainAlias))
+      .flatMap { _ =>
+        val initial = if (keepRetrying) {
+          // we're remembering that we have been trying to reconnect here
+          attemptReconnect
+            .put(
+              domainAlias,
+              AttemptReconnect(
+                domainAlias,
+                clock.now,
+                parameters.sequencerClient.startupConnectionRetryDelay.toScala,
+                traceContext,
+              ),
+            )
+            .isEmpty
+        } else true
+        attemptDomainConnection(domainAlias, keepRetrying = keepRetrying, initial = initial)
+      }
 
   private def attemptDomainConnection(
       domainAlias: DomainAlias,

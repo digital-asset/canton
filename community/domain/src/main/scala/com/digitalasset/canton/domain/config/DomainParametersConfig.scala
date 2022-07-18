@@ -14,7 +14,7 @@ import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
 /** Configuration of domain parameters that all members connecting to a domain must adhere to.
   *
   * To set these parameters, you need to be familiar with the Canton architecture.
-  * See <a href="https://www.canton.io/docs/stable/user-manual/architecture/overview.html">the Canton architecture overview</a>
+  * See <a href="https://docs.daml.com/canton/architecture/overview.html">the Canton architecture overview</a>
   * for further information.
   *
   * @param reconciliationInterval determines the time between sending two successive ACS commitments.

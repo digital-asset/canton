@@ -53,7 +53,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.TargetProtocolVersion
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
@@ -111,7 +111,7 @@ private[transfer] class TransferInProcessingSteps(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
 
-    val SubmissionParam(submitterLf, transferId) = param
+    val SubmissionParam(submitterLf, transferId, sourceProtocolVersion) = param
     val ipsSnapshot = recentSnapshot.ipsSnapshot
     val pureCrypto = recentSnapshot.pureCrypto
 
@@ -170,6 +170,7 @@ private[transfer] class TransferInProcessingSteps(
         mediatorId,
         transferOutResult,
         transferInUuid,
+        sourceProtocolVersion,
         targetProtocolVersion,
       )
       rootHash = fullTree.rootHash
@@ -728,7 +729,11 @@ private[transfer] class TransferInProcessingSteps(
 
 object TransferInProcessingSteps {
 
-  case class SubmissionParam(submitterLf: LfPartyId, transferId: TransferId)
+  case class SubmissionParam(
+      submitterLf: LfPartyId,
+      transferId: TransferId,
+      sourceProtocolVersion: SourceProtocolVersion,
+  )
 
   case class SubmissionResult(transferInCompletionF: Future[com.google.rpc.status.Status])
 
@@ -798,6 +803,7 @@ object TransferInProcessingSteps {
       recordTime = recordTime.toLf,
       divulgedContracts = List.empty,
       blindingInfo = None,
+      contractMetadata = Map(), // TODO(#9795) wire proper value
     )
   }
 
@@ -812,6 +818,7 @@ object TransferInProcessingSteps {
       targetMediator: MediatorId,
       transferOutResult: DeliveredTransferOutResult,
       transferInUuid: UUID,
+      sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
   ): FullTransferInTree = {
     val commonDataSalt = Salt.tryDeriveSalt(seed, 0, pureCrypto)
@@ -824,15 +831,15 @@ object TransferInProcessingSteps {
       transferInUuid,
       targetProtocolVersion,
     )
-    val view =
-      TransferInView.create(pureCrypto)(
-        viewSalt,
-        submitter,
-        contract,
-        creatingTransactionId,
-        transferOutResult,
-        targetProtocolVersion.v,
-      )
+    val view = TransferInView.create(pureCrypto)(
+      viewSalt,
+      submitter,
+      contract,
+      creatingTransactionId,
+      transferOutResult,
+      sourceProtocolVersion,
+      targetProtocolVersion,
+    )
     val tree = TransferInViewTree(commonData, view)(pureCrypto)
     FullTransferInTree(tree)
   }

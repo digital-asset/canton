@@ -7,7 +7,11 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.domain.mediator.store.{InMemoryFinalizedResponseStore, MediatorState}
+import com.digitalasset.canton.domain.mediator.store.{
+  InMemoryFinalizedResponseStore,
+  InMemoryMediatorDeduplicationStore,
+  MediatorState,
+}
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.InformeeMessage
@@ -64,6 +68,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       val sut =
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
+          new InMemoryMediatorDeduplicationStore(loggerFactory),
           DomainTestMetrics.mediator,
           timeouts,
           loggerFactory,

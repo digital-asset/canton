@@ -15,6 +15,7 @@ import com.daml.ledger.participant.state.v2.{ChangeId, Update}
 import com.daml.ledger.{configuration, offset}
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
+import com.daml.lf.transaction.ContractStateMachine.ActiveLedgerState
 import com.daml.lf.transaction.Transaction.{
   DuplicateContractKey,
   InconsistentContractKey,
@@ -66,6 +67,8 @@ trait PrettyInstances {
   implicit def prettyLong: Pretty[Long] = prettyOfString(_.toString)
 
   implicit def prettyBoolean: Pretty[Boolean] = prettyOfString(_.toString)
+
+  implicit val prettyUnit: Pretty[Unit] = prettyOfString(_ => "()")
 
   implicit def prettySeq[T: Pretty]: Pretty[Seq[T]] = treeOfIterable("Seq", _)
 
@@ -394,6 +397,12 @@ trait PrettyInstances {
       prettyOfClass[DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
   }
 
+  implicit def prettyActiveLedgerState[T: Pretty]: Pretty[ActiveLedgerState[T]] =
+    prettyOfClass[ActiveLedgerState[T]](
+      param("locallyCreatedThisTimeline", _.locallyCreatedThisTimeline),
+      param("consumedBy", _.consumedBy),
+      param("localActiveKeys", _.localActiveKeys),
+    )
 }
 
 object PrettyInstances extends PrettyInstances

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
+import cats.syntax.traverse._
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -12,9 +13,12 @@ import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
 }
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Read-only interface to the [[SyncDomainPersistentStateManager]] */
 trait SyncDomainPersistentStateLookup {
@@ -29,6 +33,32 @@ class SyncDomainPersistentStateManager(
 ) extends SyncDomainPersistentStateLookup
     with NamedLogging
     with AutoCloseable {
+  private val protocolVersionCache: TrieMap[DomainId, ProtocolVersion] = TrieMap()
+
+  def protocolVersionFor(
+      domainId: DomainId
+  )(implicit
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
+  ): Future[Option[ProtocolVersion]] = {
+    protocolVersionCache.get(domainId) match {
+      case Some(protocolVersion) => Future.successful(Some(protocolVersion))
+      case None =>
+        get(domainId)
+          .map(_.parameterStore)
+          .traverse(_.lastParameters)
+          .map(_.flatten)
+          .map {
+            case Some(staticDomainParameters) =>
+              protocolVersionCache
+                .put(domainId, staticDomainParameters.protocolVersion)
+                .discard[Option[ProtocolVersion]]
+              Some(staticDomainParameters.protocolVersion)
+
+            case None => None
+          }
+    }
+  }
 
   private val domainStates: concurrent.Map[DomainId, SyncDomainPersistentState] =
     TrieMap[DomainId, SyncDomainPersistentState]()

@@ -11,6 +11,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   NotImplementedYet,
   ValueDeserializationError,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.MediatorRejectionGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -19,16 +20,12 @@ import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.MediatorRejection.Code
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
-  ProtocolVersion,
-  VersionedMessage,
-}
+import com.digitalasset.canton.version._
 import com.google.protobuf.empty
 import org.slf4j.event.Level
 import pprint.Tree
+
+import java.util.UUID
 
 sealed trait Verdict
     extends Product
@@ -101,6 +98,8 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
         case Code.InvalidRootHashMessage => Right(Topology.InvalidRootHashMessages.Reject)
         case Code.Timeout => Right(Timeout.Reject)
         case Code.WrongDeclaredMediator => Right(MaliciousSubmitter.WrongDeclaredMediator.Reject)
+        case Code.NonUniqueRequestUuid =>
+          Right(MaliciousSubmitter.NonUniqueRequestUuid.Reject(_: String))
         case Code.Unrecognized(code) =>
           Left(
             ValueDeserializationError(
@@ -240,8 +239,36 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
             with MediatorReject
 
       }
-    }
 
+      @Explanation(
+        """This rejection indicates that the mediator has received several requests within the ``mediatorDeduplicationTimeout`` that use the same uuid.
+          |This may occur because the submitting participant creates insecure uuids with low entropy due to a misconfiguration.
+          |It may also occur because a malicious participant is replaying previous requests or it is reusing previous uuids.
+          |
+          |Note that a participant may reuse the uuid from a previous request, 
+          |if the previous request has been sequenced by more than ``mediatorDeduplicationTimeout`` before the new request or
+          |if the previous request and the new request are sent to different mediators.
+          |A participant may in general not reuse uuids from other participants."""
+      )
+      @Resolution("Investigate whether the submitter is faulty or malicious.")
+      object NonUniqueRequestUuid
+          extends MediatorRejectErrorCode(
+            id = "MEDIATOR_SAYS_UUID_NOT_UNIQUE",
+            ErrorCategory.MaliciousOrFaultyBehaviour,
+            v0.MediatorRejection.Code.NonUniqueRequestUuid,
+          ) {
+
+        case class Reject(override val reason: String)
+            extends MediatorRejectError(cause = reason)
+            with MediatorReject
+
+        object Reject {
+          def apply(uuid: UUID, expireAfter: CantonTimestamp): Reject = Reject(
+            s"The request uuid ($uuid) must not be used until $expireAfter."
+          )
+        }
+      }
+    }
   }
 
   /** @param reasons Mapping from the parties of a [[com.digitalasset.canton.protocol.messages.MediatorResponse]]

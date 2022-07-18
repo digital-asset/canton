@@ -24,23 +24,22 @@ trait RegisterTopologyTransactionResponseStoreTest {
   private val requestId1 = String255.tryCreate("requestId1")
   private val requestId2 = String255.tryCreate("requestId2")
 
-  private lazy val representativeProtocolVersion =
-    RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(testedProtocolVersion)
-
   private val response1 = RegisterTopologyTransactionResponse(
     p1,
     p1,
     requestId1,
     List(),
     da,
-  )(representativeProtocolVersion)
+    testedProtocolVersion,
+  )
   private val response2 = RegisterTopologyTransactionResponse(
     p1,
     p1,
     requestId2,
     List(),
     da,
-  )(representativeProtocolVersion)
+    testedProtocolVersion,
+  )
 
   def registerTopologyTransactionResponseStore(
       mk: () => RegisterTopologyTransactionResponseStore

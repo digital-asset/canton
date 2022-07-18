@@ -5,14 +5,12 @@ package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   PackageInUse,
   PackageVetted,
 }
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
@@ -23,6 +21,7 @@ import com.digitalasset.canton.topology.transaction.{
   VettedPackages,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, LfPackageId}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -56,7 +55,7 @@ class PackageInspectionOpsForTesting(
     val tx: TopologyTransaction[TopologyChangeOp] = TopologyStateUpdate(
       TopologyChangeOp.Remove,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )(TestDomainParameters.defaultStatic.protocolVersion)
+    )(BaseTest.testedProtocolVersion)
 
     EitherT.rightT(tx)
   }

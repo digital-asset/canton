@@ -174,7 +174,7 @@ class PackageInspectionOpsImpl(
       _signedTx <- topologyManager.authorize(
         tx,
         signingKey = None,
-        tx.representativeProtocolVersion.representative, // TODO(#9688) remove this lift
+        protocolVersion,
         force,
       )
     } yield ()

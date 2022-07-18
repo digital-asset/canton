@@ -38,3 +38,33 @@ message TopologyTransaction {
         DomainGovernanceTransaction domain_governance = 2;
     }
 }
+
+/*
+  Differences with v0.RegisterTopologyTransactionResponse
+    - Removed deprecated Result.State.REQUESTED
+    - Removed Result.unique_path
+*/
+message RegisterTopologyTransactionResponse {
+    message Result {
+        enum State {
+            MISSING_STATE = 0;
+            // the request failed with an error message
+            FAILED = 2;
+            // the request has been automatically rejected.
+            REJECTED = 3;
+            // the request has been accepted by the domain topology manager
+            ACCEPTED = 4;
+            // the request is a duplicate (i.e. yields an topology state element that already exists)
+            DUPLICATE = 5;
+            // the request is obsolete (i.e. a Remove to a topology mapping that does not exist on the server)
+            OBSOLETE = 6;
+        }
+        State state = 1;
+        string error_message = 2;
+    }
+    string requested_by = 1;
+    string participant = 2;
+    string request_id = 3;
+    repeated Result results = 4;
+    string domain_id = 5;
+}

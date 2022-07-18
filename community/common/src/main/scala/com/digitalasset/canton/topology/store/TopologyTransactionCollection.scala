@@ -209,7 +209,7 @@ final case class PositiveStoredTopologyTransactions(
     adds.result ++ replaces.result
   )
 
-  def signedTransactions = PositiveSignedTopologyTransactions(
+  def signedTransactions: PositiveSignedTopologyTransactions = PositiveSignedTopologyTransactions(
     SignedTopologyTransactions(adds.toDomainTopologyTransactions),
     SignedTopologyTransactions(replaces.toDomainTopologyTransactions),
   )

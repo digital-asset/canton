@@ -23,14 +23,20 @@ import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, TimeProof}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  SourceProtocolVersion,
+  TargetProtocolVersion,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 class TransferCoordination(
     domainDataById: DomainId => Option[DomainData],
     inSubmissionById: DomainId => Option[TransferSubmissionHandle],
+    val protocolVersion: Traced[DomainId] => Future[Option[ProtocolVersion]],
     syncCryptoApi: SyncCryptoApiProvider,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -77,14 +83,19 @@ class TransferCoordination(
   /** Submits a transfer in. Used by the [[TransferOutProcessingSteps]] to automatically trigger the submission of a
     * transfer in after the exclusivity timeout.
     */
-  def transferIn(id: DomainId, partyId: LfPartyId, transferId: TransferId)(implicit
+  def transferIn(
+      id: DomainId,
+      partyId: LfPartyId,
+      transferId: TransferId,
+      sourceProtocolVersion: SourceProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] = {
     for {
       inSubmission <- EitherT.fromEither[Future](
         inSubmissionById(id).toRight(UnknownDomain(id, "When transfering in"))
       )
-      submissionResult <- inSubmission.submitTransferIn(partyId, transferId)
+      submissionResult <- inSubmission.submitTransferIn(partyId, transferId, sourceProtocolVersion)
     } yield submissionResult
   }
 
@@ -233,7 +244,19 @@ object TransferCoordination {
       }
     }
 
-    new TransferCoordination(domainDataFor, submissionHandles, syncCryptoApi, loggerFactory)
+    val domainProtocolVersionGetter: Traced[DomainId] => Future[Option[ProtocolVersion]] =
+      (tracedDomainId: Traced[DomainId]) =>
+        tracedDomainId.withTraceContext { implicit traceContext => domainId =>
+          syncDomainPersistentStateManager.protocolVersionFor(domainId)
+        }
+
+    new TransferCoordination(
+      domainDataFor,
+      submissionHandles,
+      domainProtocolVersionGetter,
+      syncCryptoApi,
+      loggerFactory,
+    )
   }
 }
 
@@ -244,11 +267,16 @@ trait TransferSubmissionHandle {
       submittingParty: LfPartyId,
       contractId: LfContractId,
       targetDomain: DomainId,
+      targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferOutProcessingSteps.SubmissionResult]
 
-  def submitTransferIn(submittingParty: LfPartyId, transferId: TransferId)(implicit
+  def submitTransferIn(
+      submittingParty: LfPartyId,
+      transferId: TransferId,
+      sourceProtocolVersion: SourceProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult]
 }

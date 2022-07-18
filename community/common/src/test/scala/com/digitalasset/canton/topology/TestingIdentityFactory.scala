@@ -6,7 +6,6 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.{
   DirectExecutionContext,
   FutureSupervisor,
@@ -34,6 +33,7 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Add
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.mockito.MockitoSugar.mock
 
 import scala.concurrent.duration._
@@ -171,7 +171,7 @@ class TestingIdentityFactory(
 ) extends NamedLogging {
 
   private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
-  private val defaultProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+  private val defaultProtocolVersion = BaseTest.testedProtocolVersion
 
   def forOwner(owner: KeyOwner): SyncCryptoApiProvider = {
     new SyncCryptoApiProvider(
@@ -439,7 +439,7 @@ class TestingOwnerWithKeys(
 ) extends NoTracing {
 
   val cryptoApi = TestingIdentityFactory(loggerFactory).forOwnerAndDomain(keyOwner)
-  private val defaultProtocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+  private val defaultProtocolVersion = BaseTest.testedProtocolVersion
 
   object SigningKeys {
 

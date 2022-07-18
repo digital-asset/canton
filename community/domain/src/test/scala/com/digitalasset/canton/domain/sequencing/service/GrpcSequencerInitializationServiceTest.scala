@@ -8,7 +8,6 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingTopology}
 import com.digitalasset.canton.tracing.Traced
 import org.scalatest.wordspec.AsyncWordSpec
@@ -23,7 +22,7 @@ class GrpcSequencerInitializationServiceTest extends AsyncWordSpec with BaseTest
     v0.InitRequest(
       domainId.toProtoPrimitive,
       None,
-      Some(TestDomainParameters.defaultStatic.toProtoV0),
+      Some(defaultStaticDomainParameters.toProtoV0),
       None,
     )
 

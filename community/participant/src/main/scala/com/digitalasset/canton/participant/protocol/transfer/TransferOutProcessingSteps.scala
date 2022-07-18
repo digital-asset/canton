@@ -62,11 +62,15 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.SourceProtocolVersion
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  SourceProtocolVersion,
+  TargetProtocolVersion,
+}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import org.slf4j.event.Level
 
@@ -120,7 +124,7 @@ class TransferOutProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransferProcessorError, Submission] = {
-    val SubmissionParam(submittingParty, contractId, targetDomain) = param
+    val SubmissionParam(submittingParty, contractId, targetDomain, targetProtocolVersion) = param
     val pureCrypto = sourceRecentSnapshot.pureCrypto
 
     def withDetails(message: String) = s"Transfer-out $contractId to $targetDomain: $message"
@@ -132,6 +136,20 @@ class TransferOutProcessingSteps(
       )
       stakeholders <- stakeholdersOfContractId(ephemeralState.contractLookup, contractId).mapK(
         FutureUnlessShutdown.outcomeK
+      )
+
+      // TODO(#9423) change DEV to stable protocol version when released and check PVs
+      /*
+        In DEV, we introduced the sourceProtocolVersion in TransferInView, which is needed for
+        proper deserialization. Hence, we disallow some transfers
+       */
+      missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3_0_0
+      isSourceProtocolVersionRequired =
+        sourceDomainProtocolVersion.v == ProtocolVersion.unstable_development
+
+      _ <- condUnitET[FutureUnlessShutdown](
+        !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),
+        IncompatibleProtocolVersions(sourceDomainProtocolVersion, targetProtocolVersion),
       )
 
       timeProofAndSnapshot <- transferCoordination.getTimeProofAndSnapshot(targetDomain)
@@ -149,6 +167,7 @@ class TransferOutProcessingSteps(
           sourceDomainProtocolVersion,
           mediatorId,
           targetDomain,
+          targetProtocolVersion,
           sourceRecentSnapshot.ipsSnapshot,
           targetCrypto.ipsSnapshot,
           logger,
@@ -357,13 +376,14 @@ class TransferOutProcessingSteps(
       sourceDomainParameters <- EitherT.right(sourceIps.findDynamicDomainParametersOrDefault())
 
       transferData = TransferData(
-        ts,
-        rc,
-        fullTree,
-        sourceDomainParameters.decisionTimeFor(ts),
-        storedContract.contract,
-        creatingTransactionId,
-        None,
+        sourceProtocolVersion = sourceDomainProtocolVersion,
+        transferOutTimestamp = ts,
+        transferOutRequestCounter = rc,
+        transferOutRequest = fullTree,
+        transferOutDecisionTime = sourceDomainParameters.decisionTimeFor(ts),
+        contract = storedContract.contract,
+        creatingTransactionId = creatingTransactionId,
+        transferOutResult = None,
       )
       _ <- ifThenET(transferringParticipant) {
         transferCoordination.addTransferOutRequest(transferData)
@@ -691,6 +711,7 @@ object TransferOutProcessingSteps {
       submittingParty: LfPartyId,
       contractId: LfContractId,
       targetDomain: DomainId,
+      targetProtocolVersion: TargetProtocolVersion,
   )
 
   case class SubmissionResult(
@@ -725,6 +746,7 @@ object TransferOutProcessingSteps {
       sourceProtocolVersion: SourceProtocolVersion,
       sourceMediator: MediatorId,
       targetDomain: DomainId,
+      targetProtocolVersion: TargetProtocolVersion,
       sourceIps: TopologySnapshot,
       targetIps: TopologySnapshot,
       logger: TracedLogger,
@@ -753,6 +775,7 @@ object TransferOutProcessingSteps {
         sourceProtocolVersion,
         sourceMediator,
         targetDomain,
+        targetProtocolVersion,
         timeProof,
       )
 
@@ -1025,8 +1048,19 @@ object TransferOutProcessingSteps {
           possibleSubmittingParties.headOption,
           AutomaticTransferInError("No possible submitting party for automatic transfer-in"),
         )
+        sourceProtocolVersion <- EitherT(
+          transferCoordination
+            .protocolVersion(Traced(id.sourceDomain))
+            .map(
+              _.toRight(
+                AutomaticTransferInError(
+                  s"Unable to get protocol version of source domain ${id.sourceDomain}"
+                )
+              )
+            )
+        ).map(SourceProtocolVersion(_))
         submissionResult <- transferCoordination
-          .transferIn(targetDomain, inParty, id)(TraceContext.empty)
+          .transferIn(targetDomain, inParty, id, sourceProtocolVersion)(TraceContext.empty)
         TransferInProcessingSteps.SubmissionResult(completionF) = submissionResult
         status <- EitherT.liftF(completionF)
       } yield status

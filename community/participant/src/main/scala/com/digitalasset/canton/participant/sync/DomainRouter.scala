@@ -46,6 +46,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId, LfWorkflowId}
 
 import scala.collection.mutable
@@ -832,7 +833,12 @@ object DomainRouter {
         .cond[Future](sourceSyncDomain.ready, (), "The source domain is not ready for submissions")
 
       outResult <- sourceSyncDomain
-        .submitTransferOut(submittingParty, contractId, targetDomain)
+        .submitTransferOut(
+          submittingParty,
+          contractId,
+          targetDomain,
+          TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
+        )
         .leftMap(_.toString)
       outStatus <- EitherT.right[String](outResult.transferOutCompletionF)
       _outApprove <- EitherT.cond[Future](
@@ -845,7 +851,11 @@ object DomainRouter {
         .cond[Future](targetSyncDomain.ready, (), "The target domain is not ready for submission")
 
       inResult <- targetSyncDomain
-        .submitTransferIn(submittingParty, outResult.transferId)
+        .submitTransferIn(
+          submittingParty,
+          outResult.transferId,
+          SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
+        )
         .leftMap[String](err => s"Transfer in failed with error ${err}")
 
       inStatus <- EitherT.right[String](inResult.transferInCompletionF)

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -22,7 +23,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, TestingTopology}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -45,13 +46,14 @@ object TestTransferCoordination {
     }
 
     val domainDataMap = domains.map(domain => domain -> mkDomainData(domain)).toMap
-    val transferInBySubmission = { _: DomainId =>
-      None
-    }
+    val transferInBySubmission = { _: DomainId => None }
+    val protocolVersionGetter = (_: Traced[DomainId]) =>
+      Future.successful(Some(BaseTest.testedProtocolVersion))
 
     new TransferCoordination(
       domainDataMap.get,
       transferInBySubmission,
+      protocolVersion = protocolVersionGetter,
       defaultSyncCryptoApi(domains.toSeq, loggerFactory),
       loggerFactory,
     ) {

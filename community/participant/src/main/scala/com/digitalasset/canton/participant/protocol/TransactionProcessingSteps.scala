@@ -816,9 +816,9 @@ class TransactionProcessingSteps(
             }
           val freeResolvedKeysWithMaintainers =
             viewParticipantData.resolvedKeys.to(LazyList).mapFilter {
-              case (key, FreeKey(maintainers, _)) =>
+              case (key, FreeKey(maintainers)) =>
                 Some(LfGlobalKeyWithMaintainers(key, maintainers))
-              case (key, AssignedKey(cid, _)) => None
+              case (key, AssignedKey(cid)) => None
             }
           val createdKeysWithMaintainers =
             viewParticipantData.createdCore
@@ -1137,6 +1137,7 @@ class TransactionProcessingSteps(
               DivulgedContract(divulgedCid, divulgedContract.contractInstance)
           }.toList,
         blindingInfo = None,
+        contractMetadata = Map(), // TODO(#9795) wire proper value
       )
 
       timestampedEvent = TimestampedEvent(
@@ -1428,11 +1429,11 @@ class TransactionProcessingSteps(
         viewParticipantData.resolvedKeys.foreach { case (key, resolved) =>
           val _ = resolvedKeysInView.getOrElseUpdate(key, resolved.resolution)
           resolved match {
-            case FreeKey(maintainers, _) =>
+            case FreeKey(maintainers) =>
               if (partyPrefetch.hostsAny(maintainers)) {
                 keyMustBeFree(key)
               }
-            case AssignedKey(_, _) =>
+            case AssignedKey(_) =>
             // AssignedKeys are part of the coreInputs and thus will be dealt with below.
           }
         }
@@ -1586,9 +1587,7 @@ class TransactionProcessingSteps(
       // This gives the final resolution for the key.
       // TODO(M40,#713) validate internal key consistency
       val mergedKeys = rootViewTrees.foldLeft(Map.empty[LfGlobalKey, KeyMapping]) {
-        (accKeys, rootView) =>
-          val activeLedgerState = rootView.view.activeLedgerState
-          accKeys ++ activeLedgerState.keys
+        (accKeys, rootView) => accKeys ++ rootView.view.updatedKeyValues
       }
 
       val updatedKeys = mergedKeys.collect {
@@ -1634,7 +1633,7 @@ class TransactionProcessingSteps(
         val viewParticipantData = subview.viewParticipantData.tryUnwrap
         prefetchParties ++= subview.viewCommonData.tryUnwrap.informees.map(_.party)
         viewParticipantData.resolvedKeys.foreach {
-          case (_, FreeKey(maintainers, _)) => prefetchParties ++= maintainers
+          case (_, FreeKey(maintainers)) => prefetchParties ++= maintainers
           case _ => ()
         }
         viewParticipantData.coreInputs.values.foreach { x =>

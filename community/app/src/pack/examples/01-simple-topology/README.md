@@ -4,7 +4,7 @@ The simple topology example features a simple setup, starting two participants n
 and `participant2`, and a domain named `mydomain` in a single process.
 
 How to run the example is featured in the [getting started tutorial](
-https://www.canton.io/docs/stable/user-manual/tutorials/getting_started.html#starting-canton).
+https://docs.daml.com/canton/tutorials/getting_started.html#starting-canton).
 
 The second file contains a set of Canton console commands that are run in order to connect the participants together
 and test the connection.

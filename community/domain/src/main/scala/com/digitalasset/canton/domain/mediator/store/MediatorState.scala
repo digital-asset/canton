@@ -33,6 +33,7 @@ import scala.jdk.CollectionConverters._
   */
 class MediatorState(
     val finalizedResponseStore: FinalizedResponseStore,
+    val deduplicationStore: MediatorDeduplicationStore,
     metrics: MediatorMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,

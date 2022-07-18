@@ -5,9 +5,9 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.syntax.functorFilter._
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -30,10 +30,7 @@ object DomainSequencingTestUtils {
   def payloadsForEvents(events: Seq[Sequenced[PayloadId]]): List[Payload] = {
     val payloadIds = events.mapFilter(_.event.payloadO)
     payloadIds
-      .map(pid =>
-        Payload(pid, Batch.empty(TestDomainParameters.defaultStatic.protocolVersion).toByteString)
-      )
+      .map(pid => Payload(pid, Batch.empty(BaseTest.testedProtocolVersion).toByteString))
       .toList
   }
-
 }

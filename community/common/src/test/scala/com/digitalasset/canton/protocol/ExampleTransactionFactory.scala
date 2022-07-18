@@ -371,7 +371,7 @@ class ExampleTransactionFactory(
 )(implicit ec: ExecutionContext)
     extends EitherValues {
 
-  private val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+  private val protocolVersion = BaseTest.testedProtocolVersion
 
   private def awaitCreateWithConfirmationPolicy(
       confirmationPolicy: ConfirmationPolicy,

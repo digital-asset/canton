@@ -20,7 +20,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.GapInSequencerCounter
@@ -787,7 +786,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           timeouts,
           loggerFactory,
         )
-      val domainParameters = TestDomainParameters.defaultStatic
+      val domainParameters = BaseTest.defaultStaticDomainParameters
 
       val client = new SequencerClient(
         DefaultTestIdentities.domainId,

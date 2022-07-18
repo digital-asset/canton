@@ -226,6 +226,13 @@ sealed trait TopologyTransaction[+Op <: TopologyChangeOp]
   def toProtoV0: v0.TopologyTransaction
 
   def toProtoV1: v1.TopologyTransaction
+
+  def asVersion(protocolVersion: ProtocolVersion): TopologyTransaction[Op]
+
+  def hasEquivalentVersion(protocolVersion: ProtocolVersion): Boolean =
+    representativeProtocolVersion == TopologyTransaction.protocolVersionRepresentativeFor(
+      protocolVersion
+    )
 }
 
 object TopologyTransaction
@@ -380,6 +387,14 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
 
   override def pretty: Pretty[TopologyStateUpdate.this.type] =
     prettyOfClass(param("op", _.op), param("element", _.element))
+
+  override def asVersion(
+      protocolVersion: ProtocolVersion
+  ): TopologyTransaction[Op] = {
+    new TopologyStateUpdate[Op](op, element)(
+      TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+    ) {}
+  }
 }
 
 object TopologyStateUpdate {
@@ -560,6 +575,11 @@ sealed abstract case class DomainGovernanceTransaction(
   )
 
   def reverse: TopologyTransaction[TopologyChangeOp.Replace] = this
+
+  override def asVersion(protocolVersion: ProtocolVersion): DomainGovernanceTransaction =
+    new DomainGovernanceTransaction(element)(
+      TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+    ) {}
 }
 
 object DomainGovernanceTransaction {

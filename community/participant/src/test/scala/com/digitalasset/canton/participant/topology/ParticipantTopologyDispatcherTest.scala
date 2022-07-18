@@ -8,8 +8,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
@@ -95,7 +95,7 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
     val expect = new AtomicInteger(expectI)
     override def submit(
         transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
-    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponse.Result]] =
+    ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult]] =
       FutureUnlessShutdown.outcomeF {
         logger.debug(s"Observed ${transactions.length} transactions")
         buffer ++= transactions
@@ -115,9 +115,10 @@ class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
         } yield {
           logger.debug(s"Done with observed ${transactions.length} transactions")
           transactions.map(transaction =>
-            RegisterTopologyTransactionResponse.Result(
+            RegisterTopologyTransactionResponseResult.create(
               state = response,
               uniquePathProtoPrimitive = transaction.uniquePath.toProtoPrimitive,
+              protocolVersion = testedProtocolVersion,
             )
           )
         }

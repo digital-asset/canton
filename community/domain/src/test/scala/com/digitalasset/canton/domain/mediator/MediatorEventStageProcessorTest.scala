@@ -7,7 +7,11 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.mediator.store.{InMemoryFinalizedResponseStore, MediatorState}
+import com.digitalasset.canton.domain.mediator.store.{
+  InMemoryFinalizedResponseStore,
+  InMemoryMediatorDeduplicationStore,
+  MediatorState,
+}
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
@@ -37,7 +41,7 @@ import com.digitalasset.canton.topology.{
   TestingTopology,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -74,6 +78,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
     val state = new MediatorState(
       new InMemoryFinalizedResponseStore(loggerFactory),
+      new InMemoryMediatorDeduplicationStore(loggerFactory),
       mediatorMetrics,
       timeouts,
       loggerFactory,
@@ -88,6 +93,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       domainId,
     )
 
+    lazy val noopDeduplicator: MediatorEventDeduplicator = new MediatorEventDeduplicator {
+      override def rejectDuplicates(
+          requestTimestamp: CantonTimestamp,
+          envelopes: Seq[DefaultOpenEnvelope],
+      )(implicit traceContext: TraceContext): Future[(Seq[DefaultOpenEnvelope], Future[Unit])] =
+        Future.successful(envelopes -> Future.unit)
+    }
+
     val processor = new MediatorEventsProcessor(
       state,
       domainSyncCryptoApi,
@@ -96,6 +109,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         receivedEvents.append((requestId, events))
         HandlerResult.done
       },
+      noopDeduplicator,
       alwaysReadyCheck,
       loggerFactory,
     )

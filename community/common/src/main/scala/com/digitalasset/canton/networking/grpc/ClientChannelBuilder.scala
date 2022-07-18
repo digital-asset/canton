@@ -35,6 +35,7 @@ trait ClientChannelBuilder {
 
     // the builder calls mutate this instance so is fine to assign to a val
     val builder = createNettyChannelBuilder(endpoints)
+    additionalChannelBuilderSettings(builder, endpoints)
 
     builder.executor(executor)
     maxInboundMessageSize.foreach(s => builder.maxInboundMessageSize(s.unwrap))

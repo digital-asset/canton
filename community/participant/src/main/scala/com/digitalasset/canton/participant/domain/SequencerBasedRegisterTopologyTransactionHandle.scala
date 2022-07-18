@@ -16,6 +16,7 @@ import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
+  RegisterTopologyTransactionResponseResult,
 }
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
@@ -60,7 +61,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
 
   override def submit(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]]
-  ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponse.Result]] =
+  ): FutureUnlessShutdown[Seq[RegisterTopologyTransactionResponseResult]] =
     RegisterTopologyTransactionRequest
       .create(
         requestedBy = requestedBy,
@@ -92,15 +93,17 @@ private[domain] class ParticipantDomainTopologyService(
     with FlagCloseable {
 
   private val responsePromiseMap: concurrent.Map[(ParticipantId, TopologyRequestId), Promise[
-    UnlessShutdown[RegisterTopologyTransactionResponse]
+    UnlessShutdown[RegisterTopologyTransactionResponse.Result]
   ]] =
     new ConcurrentHashMap[(ParticipantId, TopologyRequestId), Promise[
-      UnlessShutdown[RegisterTopologyTransactionResponse]
+      UnlessShutdown[RegisterTopologyTransactionResponse.Result]
     ]]().asScala
 
   def registerTopologyTransaction(
       request: RegisterTopologyTransactionRequest
-  ): FutureUnlessShutdown[RegisterTopologyTransactionResponse] =
+  ): FutureUnlessShutdown[
+    RegisterTopologyTransactionResponse.Result
+  ] =
     fromGrpcContext { implicit traceContext =>
       val responseF = getResponse(request)
       for {
@@ -126,9 +129,13 @@ private[domain] class ParticipantDomainTopologyService(
 
   private def getResponse(request: RegisterTopologyTransactionRequest)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[RegisterTopologyTransactionResponse] =
+  ): FutureUnlessShutdown[
+    RegisterTopologyTransactionResponse.Result
+  ] =
     FutureUnlessShutdown {
-      val promise = Promise[UnlessShutdown[RegisterTopologyTransactionResponse]]()
+      val promise = Promise[UnlessShutdown[
+        RegisterTopologyTransactionResponse.Result
+      ]]()
       responsePromiseMap.put((request.participant, request.requestId), promise)
       FutureUtil.logOnFailure(
         promise.future.map { result =>
@@ -159,7 +166,7 @@ private[domain] class ParticipantDomainTopologyService(
         Future {
           envs.foreach { env =>
             env.protocolMessage match {
-              case response: RegisterTopologyTransactionResponse =>
+              case response: RegisterTopologyTransactionResponse[_] =>
                 responsePromiseMap
                   .get((response.participant, response.requestId))
                   .foreach(_.trySuccess(UnlessShutdown.Outcome(response)))

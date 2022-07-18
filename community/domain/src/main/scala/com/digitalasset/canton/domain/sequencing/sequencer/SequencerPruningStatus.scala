@@ -11,8 +11,6 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.version.HasProtoV0
 
-import scala.Ordering.Implicits._
-
 case class SequencerMemberStatus(
     member: Member,
     registeredAt: CantonTimestamp,
@@ -40,34 +38,67 @@ case class SequencerClients(
     members: Set[Member] = Set.empty
 )
 
-/** Pruning status of a Sequencer.
-  * @param lowerBound the earliest timestamp that can be read
-  * @param now the current time of the sequencer clock
-  * @param members details of registered members
-  */
-case class SequencerPruningStatus(
-    lowerBound: CantonTimestamp,
-    now: CantonTimestamp,
-    members: Seq[SequencerMemberStatus],
-) extends HasProtoV0[v0.SequencerPruningStatus] {
+trait AbstractSequencerPruningStatus {
 
-  /** Using the member details, calculate based on their acknowledgements when is the latest point we can
-    * safely prune without losing any data that may still be read.
-    */
-  lazy val safePruningTimestamp: CantonTimestamp = {
-    val earliestMemberTs = members
-      .filter(_.enabled)
-      .map(_.safePruningTimestamp)
-      .reduceLeftOption(_ min _)
+  /** the earliest timestamp that can be read */
+  def lowerBound: CantonTimestamp
 
-    // if there are no members (or they've all been ignored), we can technically prune everything.
-    // as in practice a domain will register a IDM, Sequencer and Mediator, this will most likely never occur.
-    earliestMemberTs.getOrElse(now)
-  }
+  /** details of registered members */
+  def members: Seq[SequencerMemberStatus]
 
   lazy val disabledClients: SequencerClients = SequencerClients(
     members = members.filterNot(_.enabled).map(_.member).toSet
   )
+
+  /** Using the member details, calculate based on their acknowledgements when is the latest point we can
+    * safely prune without losing any data that may still be read.
+    *
+    * @param timestampForNoMembers The timestamp to return if there are no unignored members
+    */
+  def safePruningTimestampFor(timestampForNoMembers: CantonTimestamp): CantonTimestamp = {
+    val earliestMemberTs = members.filter(_.enabled).map(_.safePruningTimestamp).minOption
+    earliestMemberTs.getOrElse(timestampForNoMembers)
+  }
+}
+
+private[canton] case class InternalSequencerPruningStatus(
+    override val lowerBound: CantonTimestamp,
+    override val members: Seq[SequencerMemberStatus],
+) extends AbstractSequencerPruningStatus {
+  def toSequencerPruningStatus(now: CantonTimestamp): SequencerPruningStatus =
+    SequencerPruningStatus(lowerBound, now, members)
+}
+
+private[canton] object InternalSequencerPruningStatus {
+
+  /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
+  val Unimplemented =
+    InternalSequencerPruningStatus(CantonTimestamp.MinValue, members = Seq.empty)
+
+}
+
+/** Pruning status of a Sequencer.
+  *
+  * @param now the current time of the sequencer clock
+  */
+case class SequencerPruningStatus(
+    override val lowerBound: CantonTimestamp,
+    now: CantonTimestamp,
+    override val members: Seq[SequencerMemberStatus],
+) extends AbstractSequencerPruningStatus
+    with HasProtoV0[v0.SequencerPruningStatus] {
+
+  def toInternal: InternalSequencerPruningStatus =
+    InternalSequencerPruningStatus(lowerBound, members)
+
+  /** Using the member details, calculate based on their acknowledgements when is the latest point we can
+    * safely prune without losing any data that may still be read.
+    *
+    * if there are no members (or they've all been ignored), we can technically prune everything.
+    * as in practice a domain will register a IDM, Sequencer and Mediator, this will most likely never occur.
+    */
+
+  lazy val safePruningTimestamp: CantonTimestamp = safePruningTimestampFor(now)
 
   def unauthenticatedMembersToDisable(retentionPeriod: NonNegativeFiniteDuration): Set[Member] =
     members.foldLeft(Set.empty[Member]) { (toDisable, memberStatus) =>

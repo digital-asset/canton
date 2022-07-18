@@ -12,6 +12,7 @@ import com.digitalasset.canton.domain.topology.store.InMemoryRegisterTopologyTra
 import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
+  RegisterTopologyTransactionResponseResult,
 }
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCallback, SendResult}
 import com.digitalasset.canton.sequencing.protocol._
@@ -52,9 +53,10 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
     .headOption
     .value
   private val domainIdentityServiceResult =
-    RegisterTopologyTransactionResponse.Result(
+    RegisterTopologyTransactionResponseResult.create(
       signedIdentityTransaction.uniquePath.toProtoPrimitive,
-      RegisterTopologyTransactionResponse.State.Accepted,
+      RegisterTopologyTransactionResponseResult.State.Accepted,
+      testedProtocolVersion,
     )
   private val response =
     RegisterTopologyTransactionResponse(
@@ -63,7 +65,8 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
       requestId,
       List(domainIdentityServiceResult),
       domainId,
-    )(RegisterTopologyTransactionResponse.protocolVersionRepresentativeFor(testedProtocolVersion))
+      testedProtocolVersion,
+    )
 
   "DomainTopologyManagerEventHandler" should {
     "handle RegisterTopologyTransactionRequests and send resulting RegisterTopologyTransactionResponse back" in {
@@ -84,7 +87,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
 
         val sequencerSendResponse = mock[
           (
-              OpenEnvelope[RegisterTopologyTransactionResponse],
+              OpenEnvelope[RegisterTopologyTransactionResponse.Result],
               SendCallback,
           ) => EitherT[Future, SendAsyncClientError, Unit]
         ]
@@ -97,10 +100,11 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
           )
         )
           .thenAnswer(
-            (_: OpenEnvelope[RegisterTopologyTransactionResponse], callback: SendCallback) => {
-              callback.apply(SendResult.Success(null))
-              EitherT.rightT[Future, SendAsyncClientError](())
-            }
+            (_: OpenEnvelope[RegisterTopologyTransactionResponse.Result], callback: SendCallback) =>
+              {
+                callback.apply(SendResult.Success(null))
+                EitherT.rightT[Future, SendAsyncClientError](())
+              }
           )
 
         new DomainTopologyManagerEventHandler(

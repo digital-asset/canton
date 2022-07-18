@@ -14,15 +14,21 @@
       <then><encoder class="com.digitalasset.canton.logging.CantonJsonEncoder"/></then>
       <else>
         <encoder>
-            <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
-            <pattern>%highlight(%-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;)</pattern>
+          <!-- show nice colors and omit date on log output if we are running interactively -->
+          <if condition='isDefined("INTERACTIVE_STDOUT")'>
+            <then>
+              <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
+              <pattern>%highlight(%-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;)</pattern>
+            </then>
+            <else><pattern>%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;</pattern></else>
+          </if>
         </encoder>
       </else>
     </if>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>${LOG_LEVEL_STDOUT:-WARN}</level>
     </filter>
-    <if condition='isDefined("THROTTLE_STDOUT")'>
+    <if condition='isDefined("INTERACTIVE_STDOUT")'>
       <then>
         <filter class="com.digitalasset.canton.logging.ThrottleFilterEvaluator" />
       </then>

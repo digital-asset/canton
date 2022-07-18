@@ -40,7 +40,7 @@ object AuthorizedTopologyTransaction {
 
   /** Returns true if the namespace delegation is a root certificate
     *
-    * A root certificate is defined by the namespace delegation that autorizes the
+    * A root certificate is defined by the namespace delegation that authorizes the
     * key f to act on namespace spanned by f, authorized by f.
     */
   def isRootCertificate(namespaceDelegation: AuthorizedNamespaceDelegation): Boolean = {
@@ -172,11 +172,17 @@ class AuthorizationGraph(
       true
     } else false
 
+  def unauthorizedRemove(
+      items: Seq[AuthorizedNamespaceDelegation]
+  )(implicit traceContext: TraceContext): Unit = {
+    items.foreach(doRemove)
+  }
+
   /** remove a namespace delegation
     *
     * note that this one is a bit tricky as the removal might have been authorized
     * by a different key than the addition. this is fine but it complicates the book-keeping,
-    * as we need to track for each target key what the "incoming authorizations" were soley for the
+    * as we need to track for each target key what the "incoming authorizations" were solely for the
     * purpose of being able to clean them up
     */
   private def doRemove(
@@ -277,7 +283,7 @@ class AuthorizationGraph(
     if (nodes.get(namespace.fingerprint).flatMap(_.root.headOption).isDefined) {
       val dangling = nodes.keySet.diff(cache.keySet)
       if (dangling.nonEmpty) {
-        logger.warn(s"The following target keys of namespace $namespace are dangling: ${dangling}")
+        logger.warn(s"The following target keys of namespace $namespace are dangling: $dangling")
       }
       if (extraDebugInfo && logger.underlying.isDebugEnabled) {
         val str =

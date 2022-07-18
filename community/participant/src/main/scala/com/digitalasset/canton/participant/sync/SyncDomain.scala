@@ -635,7 +635,7 @@ class SyncDomain(
         // TODO(i9500): Here, transfer-ins are completed sequentially. Consider running several in parallel to speed
         // this up. It may be helpful to use the `RateLimiter`
         eithers <- MonadUtil
-          .sequentialTraverse(pendingTransfers)({ data =>
+          .sequentialTraverse(pendingTransfers) { data =>
             logger.debug(s"Complete ${data.transferId} after startup")
             val eitherF = TransferOutProcessingSteps.autoTransferIn(
               data.transferId,
@@ -646,7 +646,7 @@ class SyncDomain(
               data.transferOutRequest.targetTimeProof.timestamp,
             )
             eitherF.value.map(_.left.map(err => data.transferId -> err))
-          })
+          }
 
       } yield {
         // Log any errors, then discard the errors and continue to complete pending transfers
@@ -718,6 +718,7 @@ class SyncDomain(
       submittingParty: LfPartyId,
       contractId: LfContractId,
       targetDomain: DomainId,
+      targetProtocolVersion: TargetProtocolVersion,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferOutProcessingSteps.SubmissionResult] =
@@ -731,13 +732,18 @@ class SyncDomain(
         )
       transferOutProcessor
         .submit(
-          TransferOutProcessingSteps.SubmissionParam(submittingParty, contractId, targetDomain)
+          TransferOutProcessingSteps
+            .SubmissionParam(submittingParty, contractId, targetDomain, targetProtocolVersion)
         )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
         .semiflatMap(Predef.identity)
     }
 
-  def submitTransferIn(submittingParty: LfPartyId, transferId: TransferId)(implicit
+  def submitTransferIn(
+      submittingParty: LfPartyId,
+      transferId: TransferId,
+      sourceProtocolVersion: SourceProtocolVersion,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferProcessorError, TransferInProcessingSteps.SubmissionResult] =
     performUnlessClosingEitherT[TransferProcessorError, TransferInProcessingSteps.SubmissionResult](
@@ -750,19 +756,13 @@ class SyncDomain(
           DomainNotReady(domainId, "Cannot submit transfer-out before recovery")
         )
       transferInProcessor
-        .submit(TransferInProcessingSteps.SubmissionParam(submittingParty, transferId))
+        .submit(
+          TransferInProcessingSteps
+            .SubmissionParam(submittingParty, transferId, sourceProtocolVersion)
+        )
         .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
         .semiflatMap(Predef.identity)
     }
-
-  def searchTransfers(
-      sourceDomain: Option[DomainId],
-      requestTimestamp: Option[CantonTimestamp],
-      submitter: Option[LfPartyId],
-      limit: Int,
-  )(implicit traceContext: TraceContext): Future[Seq[TransferData]] = {
-    persistent.transferStore.find(sourceDomain, requestTimestamp, submitter, limit)
-  }
 
   def numberOfDirtyRequests(): Int = ephemeral.requestJournal.numberOfDirtyRequests
 

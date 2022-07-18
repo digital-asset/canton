@@ -12,6 +12,7 @@ import com.digitalasset.canton.participant.domain.ParticipantDomainTopologyServi
 import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
+  RegisterTopologyTransactionResponseResult,
 }
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
@@ -67,9 +68,10 @@ class ParticipantDomainTopologyServiceTest
       participantId,
       requestId,
       List(
-        RegisterTopologyTransactionResponse.Result(
+        RegisterTopologyTransactionResponseResult.create(
           signedIdentityTransaction.uniquePath.toProtoPrimitive,
-          RegisterTopologyTransactionResponse.State.Accepted,
+          RegisterTopologyTransactionResponseResult.State.Accepted,
+          testedProtocolVersion,
         )
       ),
       domainId,

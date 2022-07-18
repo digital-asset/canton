@@ -3,7 +3,7 @@
 The repair example features multiple topologies for repair-based tutorials, each with different sets of participants
 and domains depending on the demonstrated capability.
 
-## 1. [Recovering from a broken Domain](https://www.canton.io/docs/stable/user-manual/usermanual/operational_processes.html#recovering-from-a-lost-domain)
+## 1. [Recovering from a broken Domain](https://docs.daml.com/canton/usermanual/repairing.html#recovering-from-a-lost-domain)
 
 depends on files:
 - Participant configurations: participant1.conf and participant2.conf
@@ -20,7 +20,7 @@ To set up this scenario, run
       --bootstrap domain-repair-init.canton
 ```
 
-## 2. [Importing contracts to Canton](https://www.canton.io/docs/stable/user-manual/usermanual/operational_processes.html#recovering-from-a-lost-domain#importing-existing-contracts)
+## 2. [Importing contracts to Canton](https://docs.daml.com/canton/usermanual/repairing.html#importing-existing-contracts)
 
 depends on files:
 - Participant configurations: participant1.conf, participant2.conf, participant3.conf for the "import ledger", and participant4.conf for the "export ledger"

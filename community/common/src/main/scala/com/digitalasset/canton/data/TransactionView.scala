@@ -5,15 +5,8 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either._
 import cats.syntax.functor._
-import cats.syntax.functorFilter._
 import cats.syntax.traverse._
-import com.daml.lf.transaction.ContractStateMachine.{
-  ActiveLedgerState,
-  KeyActive,
-  KeyInactive,
-  KeyMapping,
-}
-import com.daml.nonempty.NonEmptyUtil
+import com.daml.lf.transaction.ContractStateMachine.{ActiveLedgerState, KeyMapping}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ActionDescription.{
@@ -205,15 +198,8 @@ case class TransactionView private (
 
       subviews.foldLeft(viewParticipantData.resolvedKeysWithMaintainers) { (acc, subview) =>
         val unblindedSubview = tryUnblindSubview(subview, "Global key inputs")
-        val subviewVpd = unblindedSubview.tryUnblindViewParticipantData("Global key inputs")
-        val subviewRolledBack =
-          subviewVpd.rollbackContext.rollbackScope != viewParticipantData.rollbackContext.rollbackScope
-        val subviewGki =
-          if (subviewRolledBack) unblindedSubview.globalKeyInputs.fmap(_.withRolledBack(true))
-          else unblindedSubview.globalKeyInputs
-        MapsUtil.mergeWith(acc, subviewGki) { (accRes, subviewRes) =>
-          accRes.withRolledBack(accRes.rolledBack && subviewRes.rolledBack)
-        }
+        val subviewGki = unblindedSubview.globalKeyInputs
+        MapsUtil.mergeWith(acc, subviewGki) { (accRes, _subviewRes) => accRes }
       }
     }
 
@@ -318,29 +304,52 @@ case class TransactionView private (
   ): ActiveLedgerState[Unit] =
     _activeLedgerStateAndUpdatedKeys.get._1
 
-  /** The keys that this view updates (including reassigning the key), along with the maintainers of the key. */
+  /** The keys that this view updates (including reassigning the key), along with the maintainers of the key.
+    *
+    * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
+    *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
+    */
   def updatedKeys(implicit loggingContext: ErrorLoggingContext): Map[LfGlobalKey, Set[LfPartyId]] =
     _activeLedgerStateAndUpdatedKeys.get._2
+
+  /** The keys that this view updates (including reassigning the key), along with the assignment of that key at the end of the transaction.
+    *
+    * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
+    *
+    * @throws java.lang.UnsupportedOperationException
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
+    */
+  def updatedKeyValues(implicit
+      loggingContext: ErrorLoggingContext
+  ): Map[LfGlobalKey, KeyMapping] = {
+    val localActiveKeys = activeLedgerState.localActiveKeys
+    def resolveKey(key: LfGlobalKey): KeyMapping =
+      localActiveKeys.get(key) match {
+        case None =>
+          globalKeyInputs.get(key).map(_.resolution).flatten.filterNot(consumed.contains(_))
+        case Some(mapping) => mapping
+      }
+    (localActiveKeys.keys ++ globalKeyInputs.keys).map(k => k -> resolveKey(k)).toMap
+  }
 
   private[this] val _activeLedgerStateAndUpdatedKeys
       : ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] =
     ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] {
       implicit loggingContext =>
-        val affectedKeysB = Seq.newBuilder[(LfGlobalKey, AffectedKey)]
         val updatedKeysB = Map.newBuilder[LfGlobalKey, Set[LfPartyId]]
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var localKeys: Map[LfGlobalKey, LfContractId] = Map.empty
 
-        globalKeyInputs.foreach { case (key, resolution) =>
-          if (!resolution.rolledBack) {
-            affectedKeysB += (key -> AffectedByInput(resolution.resolution))
-          }
-        }
         inputContracts.foreach { case (cid, inputContract) =>
           // Consuming exercises under a rollback node are rewritten to non-consuming exercises in the view inputs.
           // So here we are looking only at key usages that are outside of rollback nodes (inside the view).
           if (inputContract.consumed) {
             inputContract.contract.metadata.maybeKeyWithMaintainers.foreach { kWithM =>
               val key = kWithM.globalKey
-              affectedKeysB += (key -> AffectedByConsumption(cid))
               updatedKeysB += (key -> kWithM.maintainers)
             }
           }
@@ -349,62 +358,21 @@ case class TransactionView private (
           if (!createdContract.rolledBack) {
             createdContract.contract.metadata.maybeKeyWithMaintainers.foreach { kWithM =>
               val key = kWithM.globalKey
-              affectedKeysB += (key -> AffectedByCreation(cid))
               updatedKeysB += (key -> kWithM.maintainers)
-              if (createdContract.consumedInView) {
-                affectedKeysB += (key -> AffectedByConsumption(cid))
-              }
-            }
-          }
-        }
-        val keys = affectedKeysB.result().groupBy { case (key, _) => key }.fmap { affects =>
-          val withoutTransients =
-            affects.groupBy { case (_, affected) => affected.contractIdO }.mapFilter {
-              affectsForCidWithKey =>
-                val affectsForCid = affectsForCidWithKey.map { case (_, affected) => affected }
-                val cidO = NonEmptyUtil.fromUnsafe(affectsForCid).head1.contractIdO
-                cidO match {
-                  case Some(cid) =>
-                    // The following combinations are possible (as `viewCreates` is disjoint from `viewInputs`)
-                    // - {Input}: the input contract is still active at the end
-                    // - {Input, Consumption}: the input contract is no longer active at the end
-                    // - {Creation}: the created contract is active at the end
-                    // - {Creation, Consumption}: the created contract is not active at the end
-                    val affectsS = affectsForCid.toSet
-                    val input = AffectedByInput(KeyActive(cid))
-                    val consumption = AffectedByConsumption(cid)
-                    val creation = AffectedByCreation(cid)
-                    if (affectsS == Set(input)) Some(KeyActive(cid))
-                    else if (affectsS == Set(input, consumption)) Some(KeyInactive)
-                    else if (affectsS == Set(creation)) Some(KeyActive(cid))
-                    else if (affectsS == Set(creation, consumption)) None
-                    else
-                      ErrorUtil.internalError(
-                        new IllegalStateException(
-                          s"Contract $cid is modified in unexpected ways in view $viewHash: $affectsS"
-                        )
-                      )
-                  case None => None
+              if (!createdContract.consumedInView) {
+                // If we have an active contract, we use that mapping.
+                localKeys += key -> cid
+              } else {
+                if (!localKeys.contains(key)) {
+                  // If all contracts are inactive, we arbitrarily use the first in createdContracts
+                  // (createdContracts is not ordered)
+                  localKeys += key -> cid
                 }
-            }
-          // If the view participant data was derived from an action that adheres to `ContractKeyUniquenessMode.Strict`,
-          // then withoutTransients can be of the following shapes:
-          // 1. Map(_ -> KeyActive(cid0)): The contract cid0 remains active
-          // 2. Map(_ -> KeyInactive(cid0)): The contract cid0 was consumed and the key is free afterwards
-          // 3. Map(_ -> KeyInactive, _ -> KeyActive(cid1)): The input contract cid0 was archived and cid1 was created and is active
-          // 4. Map(): The key remains free (but may be assigned in between)
-          // TODO(M40) Report a contract key inconsistency if these shapes are violated
-          if (withoutTransients.isEmpty) KeyInactive
-          else {
-            withoutTransients.collectFirst { case (_, active @ KeyActive(_)) => active }.getOrElse {
-              withoutTransients.collectFirst { case (_, KeyInactive) => KeyInactive }.getOrElse {
-                ErrorUtil.internalError(
-                  new IllegalArgumentException(s"View $viewHash is internally key-inconsistent")
-                )
               }
             }
           }
         }
+
         val locallyCreatedThisTimeline = createdContracts.collect {
           case (contractId, createdContract) if !createdContract.rolledBack => contractId
         }.toSet
@@ -412,7 +380,7 @@ case class TransactionView private (
         ActiveLedgerState(
           locallyCreatedThisTimeline = locallyCreatedThisTimeline,
           consumedBy = consumed,
-          keys = keys,
+          localKeys = localKeys,
         ) ->
           updatedKeysB.result()
     }
@@ -899,8 +867,8 @@ sealed abstract case class ViewParticipantData(
           ),
         )
         val maintainers = keyResolution match {
-          case AssignedKey(contractId, _) => checked(coreInputs(contractId)).maintainers
-          case FreeKey(maintainers, _) => maintainers
+          case AssignedKey(contractId) => checked(coreInputs(contractId)).maintainers
+          case FreeKey(maintainers) => maintainers
         }
 
         RootAction(
@@ -923,16 +891,7 @@ sealed abstract case class ViewParticipantData(
       salt = Some(salt.toProtoV0),
     )
 
-  private[ViewParticipantData] def toProtoV1: v1.ViewParticipantData =
-    v1.ViewParticipantData(
-      coreInputs = coreInputs.values.map(_.toProtoV0).toSeq,
-      createdCore = createdCore.map(_.toProtoV0),
-      createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
-      resolvedKeys = resolvedKeys.toList.map { case (k, res) => ResolvedKey(k, res).toProtoV1 },
-      actionDescription = Some(actionDescription.toProtoV0),
-      rollbackContext = if (rollbackContext.isEmpty) None else Some(rollbackContext.toProtoV0),
-      salt = Some(salt.toProtoV0),
-    )
+  private[ViewParticipantData] def toProtoV1: v0.ViewParticipantData = toProtoV0
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -952,7 +911,7 @@ sealed abstract case class ViewParticipantData(
   /** Extends [[resolvedKeys]] with the maintainers of assigned keys */
   val resolvedKeysWithMaintainers: Map[LfGlobalKey, KeyResolutionWithMaintainers] =
     resolvedKeys.fmap {
-      case assigned @ AssignedKey(contractId, rolledBack) =>
+      case assigned @ AssignedKey(contractId) =>
         val maintainers =
           // checked by `inconsistentAssignedKey` above
           checked(
@@ -963,8 +922,8 @@ sealed abstract case class ViewParticipantData(
               ),
             )
           ).maintainers
-        AssignedKeyWithMaintainers(contractId, maintainers, rolledBack)(assigned.version)
-      case free @ FreeKey(_, _) => free
+        AssignedKeyWithMaintainers(contractId, maintainers)(assigned.version)
+      case free @ FreeKey(_) => free
     }
 }
 
@@ -978,9 +937,11 @@ object ViewParticipantData
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
+    // Protobuf version 1 uses the same message format as version 0,
+    // but interprets resolvedKeys differently. See ViewParticipantData's scaladoc for details
     ProtobufVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v3_0_0,
-      supportedProtoVersionMemoized(v1.ViewParticipantData)(fromProtoV1),
+      supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
   )
@@ -1071,7 +1032,19 @@ object ViewParticipantData
 
   private def fromProtoV0(hashOps: HashOps, dataP: v0.ViewParticipantData)(
       bytes: ByteString
-  ): ParsingResult[ViewParticipantData] = {
+  ): ParsingResult[ViewParticipantData] =
+    fromProtoV0V1(hashOps, dataP, ProtobufVersion(0))(bytes)
+
+  private def fromProtoV1(hashOps: HashOps, dataP: v0.ViewParticipantData)(
+      bytes: ByteString
+  ): ParsingResult[ViewParticipantData] =
+    fromProtoV0V1(hashOps, dataP, ProtobufVersion(1))(bytes)
+
+  private def fromProtoV0V1(
+      hashOps: HashOps,
+      dataP: v0.ViewParticipantData,
+      protobufVersion: ProtobufVersion,
+  )(bytes: ByteString): ParsingResult[ViewParticipantData] = {
     val v0.ViewParticipantData(
       saltP,
       coreInputsP,
@@ -1112,55 +1085,7 @@ object ViewParticipantData
           actionDescription = actionDescription,
           rollbackContext = rollbackContext,
           salt = salt,
-        )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
-      ).leftMap(ProtoDeserializationError.OtherError)
-    } yield viewParticipantData
-  }
-
-  private def fromProtoV1(hashOps: HashOps, dataP: v1.ViewParticipantData)(
-      bytes: ByteString
-  ): ParsingResult[ViewParticipantData] = {
-    val v1.ViewParticipantData(
-      saltP,
-      coreInputsP,
-      createdCoreP,
-      createdInSubviewArchivedInCoreP,
-      resolvedKeysP,
-      actionDescriptionP,
-      rbContextP,
-    ) = dataP
-    for {
-      coreInputsSeq <- coreInputsP.traverse(InputContract.fromProtoV0)
-      coreInputs = coreInputsSeq.map(x => x.contractId -> x).toMap
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV0)
-      createdInSubviewArchivedInCore <- createdInSubviewArchivedInCoreP
-        .traverse(LfContractId.fromProtoPrimitive)
-      resolvedKeys <- resolvedKeysP.traverse(
-        ResolvedKey.fromProtoV1(_).map(rk => rk.key -> rk.resolution)
-      )
-      resolvedKeysMap = resolvedKeys.toMap
-      actionDescription <- ProtoConverter
-        .required("action_description", actionDescriptionP)
-        .flatMap(ActionDescription.fromProtoV0)
-
-      salt <- ProtoConverter
-        .parseRequired(Salt.fromProtoV0, "salt", saltP)
-        .leftMap(_.inField("salt"))
-
-      rollbackContext <- RollbackContext
-        .fromProtoV0(rbContextP)
-        .leftMap(_.inField("rollbackContext"))
-
-      viewParticipantData <- returnLeftWhenInitializationFails(
-        new ViewParticipantData(
-          coreInputs = coreInputs,
-          createdCore = createdCore,
-          createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSet,
-          resolvedKeys = resolvedKeysMap,
-          actionDescription = actionDescription,
-          rollbackContext = rollbackContext,
-          salt = salt,
-        )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(1)), Some(bytes)) {}
+        )(hashOps, protocolVersionRepresentativeFor(protobufVersion), Some(bytes)) {}
       ).leftMap(ProtoDeserializationError.OtherError)
     } yield viewParticipantData
   }

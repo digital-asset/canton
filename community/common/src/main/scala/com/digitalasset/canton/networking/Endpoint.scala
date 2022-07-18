@@ -9,6 +9,7 @@ import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.digitalasset.canton.config.RequireTypes.Port
+import io.grpc.Attributes
 
 import java.net.URI
 
@@ -20,6 +21,9 @@ case class Endpoint(host: String, port: Port) {
 }
 
 object Endpoint {
+  val ATTR_ENDPOINT: Attributes.Key[Endpoint] =
+    Attributes.Key.create("com.digitalasset.canton.networking.Endpoint")
+
   private val defaultHttpPort = 80
   private val defaultHttpsPort = 443
   private def defaultPort(useTls: Boolean): Int = if (useTls) defaultHttpsPort else defaultHttpPort

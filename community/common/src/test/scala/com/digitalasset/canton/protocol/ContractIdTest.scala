@@ -5,6 +5,7 @@ package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.examples.Iou.Iou
 import org.scalatest.wordspec.AnyWordSpec
 
 class ContractIdTest extends AnyWordSpec with BaseTest {
@@ -21,6 +22,21 @@ class ContractIdTest extends AnyWordSpec with BaseTest {
           ContractId.suffixPrefixHex +
           unicum.unwrap.toHexString
       )
+    }
+  }
+
+  "Conversion between API and LF types" should {
+    import ContractIdSyntax._
+    "work both ways" in {
+      val discriminator = ExampleTransactionFactory.lfHash(1)
+      val hash = Hash.build(HashPurposeTest.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()
+      val unicum = Unicum(hash)
+      val lfCid = ContractId.fromDiscriminator(discriminator, unicum)
+
+      val apiCid = lfCid.toPrimUnchecked[Iou]
+      val lfCid2 = apiCid.toLf
+
+      lfCid2 shouldBe lfCid
     }
   }
 }

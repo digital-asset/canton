@@ -110,6 +110,32 @@ object SignedTopologyTransaction
       None,
     )
 
+  def asVersion[Op <: TopologyChangeOp](
+      signedTx: SignedTopologyTransaction[Op],
+      protocolVersion: ProtocolVersion,
+  )(
+      crypto: Crypto
+  )(implicit ec: ExecutionContext): EitherT[Future, String, SignedTopologyTransaction[Op]] = {
+    val originTx = signedTx.transaction
+
+    // Convert and resign the transaction if the topology transaction version does not match the expected version
+    if (!originTx.hasEquivalentVersion(protocolVersion)) {
+      val convertedTx = originTx.asVersion(protocolVersion)
+      SignedTopologyTransaction
+        .create(
+          convertedTx,
+          signedTx.key,
+          crypto.pureCrypto,
+          crypto.privateCrypto,
+          protocolVersion,
+        )
+        .leftMap { err =>
+          s"Failed to resign topology transaction $originTx (${originTx.representativeProtocolVersion}) for domain version $protocolVersion: $err"
+        }
+    } else
+      EitherT.rightT(signedTx)
+  }
+
   private def fromProtoV0(transactionP: v0.SignedTopologyTransaction)(
       bytes: ByteString
   ): ParsingResult[SignedTopologyTransaction[TopologyChangeOp]] =

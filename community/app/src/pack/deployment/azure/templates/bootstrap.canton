@@ -1,4 +1,4 @@
-nodes.local start
+nodes.local.start()
 
 println("""
     |        ________

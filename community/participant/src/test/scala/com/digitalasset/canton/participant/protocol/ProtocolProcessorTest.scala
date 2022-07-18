@@ -46,7 +46,6 @@ import com.digitalasset.canton.protocol.{
   RequestAndRootHashMessage,
   RequestId,
   RootHash,
-  TestDomainParameters,
   ViewHash,
 }
 import com.digitalasset.canton.resource.MemoryStorage
@@ -575,7 +574,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     ): Unit = {
 
       val setupF = for {
-        _ <- persistent.parameterStore.setParameters(TestDomainParameters.defaultStatic)
+        _ <- persistent.parameterStore.setParameters(defaultStaticDomainParameters)
 
         _ <- ephemeral.requestJournal.insert(rc, CantonTimestamp.Epoch)
         _ <- ephemeral.requestJournal.transit(rc, CantonTimestamp.Epoch, Pending, Confirmed)

@@ -41,6 +41,8 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
 
   object writeQueue extends DbQueueMetrics(prefix :+ "write", registry)
 
+  object locks extends DbQueueMetrics(prefix :+ "locks", registry)
+
 }
 
 class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegistry)

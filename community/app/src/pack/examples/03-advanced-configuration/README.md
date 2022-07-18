@@ -12,7 +12,7 @@ participants for various purposes. The directory contains a set of sub-folders:
 ## Persistence 
 
 For every setup, you need to decide which persistence layer you want to use. Supported are [memory.conf](storage/memory.conf),
-[postgres.conf](storage/postgres.conf) or Oracle (Enterprise). Please [consult the manual](https://www.canton.io/docs/stable/user-manual/usermanual/installation.html#persistence-using-postgres)
+[postgres.conf](storage/postgres.conf) or Oracle (Enterprise). Please [consult the manual](https://docs.daml.com/canton/usermanual/installation.html#persistence-using-postgres)
 for further instructions. The examples here will illustrate the usage using the in-memory configuration.
 
 There is a small helper script in [dbinit.py](storage/dbinit.py) which you can use to create the appropriate SQL commands

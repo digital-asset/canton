@@ -26,14 +26,16 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
 trait RegisterTopologyTransactionResponseStore extends AutoCloseable {
-  def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
+  def savePendingResponse(
+      response: RegisterTopologyTransactionResponse.Result
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
   @VisibleForTesting
   def pendingResponses()(implicit
       traceContext: TraceContext
-  ): Future[Seq[RegisterTopologyTransactionResponse]]
+  ): Future[Seq[RegisterTopologyTransactionResponse.Result]]
 
   def completeResponse(requestId: TopologyRequestId)(implicit
       traceContext: TraceContext
@@ -47,7 +49,10 @@ trait RegisterTopologyTransactionResponseStore extends AutoCloseable {
 }
 
 object RegisterTopologyTransactionResponseStore {
-  case class Response(response: RegisterTopologyTransactionResponse, isCompleted: Boolean)
+  case class Response(
+      response: RegisterTopologyTransactionResponse.Result,
+      isCompleted: Boolean,
+  )
 
   def apply(
       storage: Storage,
@@ -82,7 +87,7 @@ class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionCon
     ].asScala
 
   override def savePendingResponse(
-      response: RegisterTopologyTransactionResponse
+      response: RegisterTopologyTransactionResponse.Result
   )(implicit traceContext: TraceContext): Future[Unit] = {
     responseMap.put(
       response.requestId,
@@ -93,7 +98,7 @@ class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionCon
 
   override def pendingResponses()(implicit
       traceContext: TraceContext
-  ): Future[Seq[RegisterTopologyTransactionResponse]] =
+  ): Future[Seq[RegisterTopologyTransactionResponse.Result]] =
     Future.successful(responseMap.values.filterNot(_.isCompleted).map(_.response).toSeq)
 
   override def completeResponse(
@@ -159,25 +164,26 @@ class DbRegisterTopologyTransactionResponseStore(
       pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
 
   implicit val getRegisterTopologyTransactionResponse
-      : GetResult[RegisterTopologyTransactionResponse] = GetResult(r =>
-    EnvelopeContent
-      .messageFromByteString(protocolVersion, cryptoApi)(
-        ByteString.copyFrom(r.<<[Array[Byte]])
-      )
-      .fold[RegisterTopologyTransactionResponse](
-        error =>
-          throw new DbDeserializationException(
-            s"Error deserializing register topology transaction response $error"
-          ),
-        {
-          case request: RegisterTopologyTransactionResponse => request
-          case _ =>
-            sys.error(
-              "Deserialized response was not a RegisterTopologyTransactionResponse!"
-            ) // should never happen
-        },
-      )
-  )
+      : GetResult[RegisterTopologyTransactionResponse.Result] =
+    GetResult(r =>
+      EnvelopeContent
+        .messageFromByteString(protocolVersion, cryptoApi)(
+          ByteString.copyFrom(r.<<[Array[Byte]])
+        )
+        .fold[RegisterTopologyTransactionResponse.Result](
+          error =>
+            throw new DbDeserializationException(
+              s"Error deserializing register topology transaction response $error"
+            ),
+          {
+            case request: RegisterTopologyTransactionResponse[_] => request
+            case _ =>
+              sys.error(
+                "Deserialized response was not a RegisterTopologyTransactionResponse!"
+              ) // should never happen
+          },
+        )
+    )
   implicit val getPendingRegisterTopologyTransactionRequestStoreResponse
       : GetResult[RegisterTopologyTransactionResponseStore.Response] = GetResult(r =>
     RegisterTopologyTransactionResponseStore.Response(
@@ -185,12 +191,17 @@ class DbRegisterTopologyTransactionResponseStore(
       r.nextBoolean(),
     )
   )
-  implicit val setRegisterTopologyTransactionResponse
-      : SetParameter[RegisterTopologyTransactionResponse] =
-    (r: RegisterTopologyTransactionResponse, pp: PositionedParameters) =>
-      pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
+  implicit val setRegisterTopologyTransactionResponse: SetParameter[
+    RegisterTopologyTransactionResponse.Result
+  ] =
+    (
+        r: RegisterTopologyTransactionResponse.Result,
+        pp: PositionedParameters,
+    ) => pp >> EnvelopeContent(r, protocolVersion).toByteString.toByteArray
 
-  override def savePendingResponse(response: RegisterTopologyTransactionResponse)(implicit
+  override def savePendingResponse(
+      response: RegisterTopologyTransactionResponse.Result
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     storage.update_(
@@ -206,10 +217,10 @@ class DbRegisterTopologyTransactionResponseStore(
 
   override def pendingResponses()(implicit
       traceContext: TraceContext
-  ): Future[Seq[RegisterTopologyTransactionResponse]] =
+  ): Future[Seq[RegisterTopologyTransactionResponse.Result]] =
     storage.query(
       sql""" select response from register_topology_transaction_responses where completed = ${false}"""
-        .as[RegisterTopologyTransactionResponse],
+        .as[RegisterTopologyTransactionResponse.Result],
       functionFullName,
     )
 

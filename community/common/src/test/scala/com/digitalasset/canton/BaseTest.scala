@@ -8,9 +8,10 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
-import com.digitalasset.canton.protocol.TestDomainParameters
+import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
@@ -66,10 +67,11 @@ trait BaseTest
 
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
-  protected def testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
+  protected lazy val testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
+  protected lazy val defaultStaticDomainParameters: StaticDomainParameters =
+    BaseTest.defaultStaticDomainParameters
 
-  protected def isTestedProtocolVersionDev: Boolean =
-    testedProtocolVersion == ProtocolVersion.unstable_development
+  protected def isTestedProtocolVersionDev: Boolean = BaseTest.isTestedProtocolVersionDev
 
   protected def signedTransactionProtocolVersionRepresentative
       : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
@@ -322,8 +324,26 @@ trait BaseTest
 }
 
 object BaseTest {
-  def testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
-    .getOrElse(TestDomainParameters.defaultStatic.protocolVersion)
+
+  // Uses SymbolicCrypto for the configured crypto schemes
+  lazy val defaultStaticDomainParameters: StaticDomainParameters = StaticDomainParameters(
+    reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
+    maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
+    maxInboundMessageSize = StaticDomainParameters.defaultMaxInboundMessageSize,
+    uniqueContractKeys = false,
+    requiredSigningKeySchemes = SymbolicCryptoProvider.supportedSigningKeySchemes,
+    requiredEncryptionKeySchemes = SymbolicCryptoProvider.supportedEncryptionKeySchemes,
+    requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
+    requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
+    requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
+    protocolVersion = testedProtocolVersion,
+  )
+
+  lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
+    .getOrElse(ProtocolVersion.latest)
+
+  lazy val isTestedProtocolVersionDev: Boolean =
+    testedProtocolVersion == ProtocolVersion.unstable_development
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")

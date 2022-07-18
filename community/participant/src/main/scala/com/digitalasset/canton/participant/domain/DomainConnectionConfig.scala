@@ -69,10 +69,6 @@ case class DomainConnectionConfig(
     copy(sequencerConnection =
       sequencerConnection
         .addConnection(connection, additionalConnections: _*)
-        .fold(
-          err => throw new IllegalArgumentException(s"invalid connection $connection : $err"),
-          identity[SequencerConnection],
-        )
     )
 
   def certificates: Option[ByteString] = sequencerConnection match {

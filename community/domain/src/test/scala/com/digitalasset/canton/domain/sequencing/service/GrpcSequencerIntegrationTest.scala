@@ -31,7 +31,7 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessageV0,
   ProtocolMessageV1,
 }
-import com.digitalasset.canton.protocol.{TestDomainParameters, v0 => protocolV0, v1 => protocolV1}
+import com.digitalasset.canton.protocol.{v0 => protocolV0, v1 => protocolV1}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
@@ -104,7 +104,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
     )
   private val connectService = new GrpcSequencerConnectService(
     domainId = domainId,
-    staticDomainParameters = TestDomainParameters.defaultStatic,
+    staticDomainParameters = BaseTest.defaultStaticDomainParameters,
     cryptoApi = cryptoApi,
     agreementManager = None,
     loggerFactory = loggerFactory,
@@ -168,7 +168,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         SequencerClientConfig(),
         TracingConfig.Propagation.Disabled,
         TestingConfigInternal(),
-        TestDomainParameters.defaultStatic,
+        BaseTest.defaultStaticDomainParameters,
         DefaultProcessingTimeouts.testing,
         clock,
         _ => None,
@@ -176,8 +176,10 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         CommonMockMetrics.sequencerClient,
         LoggingConfig(),
         loggerFactory,
-        ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions = false),
-        Some(TestDomainParameters.defaultStatic.protocolVersion),
+        ProtocolVersion.supportedProtocolsParticipant(
+          includeDevelopmentVersions = BaseTest.isTestedProtocolVersionDev
+        ),
+        Some(BaseTest.testedProtocolVersion),
       ).create(
         participant,
         sequencedEventStore,

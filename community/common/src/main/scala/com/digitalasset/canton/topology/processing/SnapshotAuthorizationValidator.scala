@@ -6,12 +6,19 @@ package com.digitalasset.canton.topology.processing
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactions,
+  TopologyStore,
+  TopologyStoreId,
+}
 import com.digitalasset.canton.topology.transaction.{
+  IdentifierDelegation,
+  NamespaceDelegation,
   RequiredAuth,
   SignedTopologyTransaction,
   TopologyChangeOp,
 }
+import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SimpleExecutionQueue
 import io.functionmeta.functionFullName
@@ -39,7 +46,10 @@ class SnapshotAuthorizationValidator(
     val preloadF = transaction.transaction.element.mapping.requiredAuth match {
       case RequiredAuth.Ns(namespace, _) =>
         sequential.execute(
-          loadAuthorizationGraphs(asOf, Set(namespace)),
+          loadAuthorizationGraphs(
+            asOf,
+            Set(namespace),
+          ),
           functionFullName,
         )
       case RequiredAuth.Uid(uids) =>
@@ -52,14 +62,50 @@ class SnapshotAuthorizationValidator(
           functionFullName,
         )
     }
+
     preloadF.map { _ =>
       authorizationChainFor(transaction)
     }
   }
 
+  def removeNamespaceDelegationFromCache(
+      namespace: Namespace,
+      nsd: StoredTopologyTransactions[TopologyChangeOp],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    sequential.execute(
+      Future {
+        namespaceCache
+          .get(namespace)
+          .fold(())(ag =>
+            ag.unauthorizedRemove(nsd.toAuthorizedTopologyTransactions {
+              case x: NamespaceDelegation => x
+            })
+          )
+      },
+      functionFullName,
+    )
+
+  def removeIdentifierDelegationFromCache(
+      uid: UniqueIdentifier,
+      nsd: StoredTopologyTransactions[TopologyChangeOp],
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    sequential.execute(
+      Future {
+        val authorizedNsd = nsd.toAuthorizedTopologyTransactions { case x: IdentifierDelegation =>
+          x
+        }
+        updateIdentifierDelegationCache(uid, { _.filterNot(Seq(_) == authorizedNsd) })
+      },
+      functionFullName,
+    )
+
   def reset()(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): Future[Unit] =
     sequential.execute(
       Future {
         identifierDelegationCache.clear()
@@ -67,6 +113,5 @@ class SnapshotAuthorizationValidator(
       },
       functionFullName,
     )
-  }
 
 }

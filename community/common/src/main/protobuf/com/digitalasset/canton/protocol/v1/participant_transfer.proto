@@ -1,0 +1,49 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.v1;
+
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/time/v0/time_proof.proto";
+import "com/digitalasset/canton/protocol/v0/common.proto";
+import "com/digitalasset/canton/protocol/v0/sequencing.proto";
+
+// Messages sent by a participant as part of the transfer protocol
+
+message TransferOutCommonData {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string source_domain = 2;
+    repeated string stakeholders = 3;
+    repeated string admin_parties = 4;
+    string uuid = 5;
+    string source_mediator = 6;
+    string source_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+}
+
+message TransferOutView {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string submitter = 2;
+    string contract_id = 3;
+    string target_domain = 4;
+    com.digitalasset.canton.time.v0.TimeProof target_time_proof = 5;
+    string target_protocol_version = 6; // added in v1 // TODO(#9312) change to int
+}
+
+message TransferInCommonData {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string target_domain = 2;
+    repeated string stakeholders = 3;
+    string uuid = 4;
+    string target_mediator = 6;
+    string target_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+}
+
+message TransferInView {
+    com.digitalasset.canton.crypto.v0.Salt salt = 1;
+    string submitter = 2;
+    v0.SerializableContract contract = 3;
+    v0.SignedContent transfer_out_result_event = 4;
+    bytes creating_transaction_id = 5;
+    string source_protocol_version = 6; // added in v1 // TODO(#9312) change to int
+}
