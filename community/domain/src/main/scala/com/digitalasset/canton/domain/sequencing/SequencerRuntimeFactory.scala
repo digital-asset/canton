@@ -109,7 +109,7 @@ object SequencerRuntimeFactory {
         storage,
         clock,
         auditLogger,
-        None,
+        initialState = None,
         SequencerAuthenticationConfig(
           agreementManager,
           domainConfig.publicApi.nonceExpirationTime,

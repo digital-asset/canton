@@ -93,6 +93,7 @@ class MediatorEventsProcessor(
         Seq[Traced[MediatorEvent]],
         TraceContext,
     ) => HandlerResult,
+    deduplicator: MediatorEventDeduplicator,
     readyCheck: MediatorReadyCheck,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -111,7 +112,12 @@ class MediatorEventsProcessor(
     val envelopesByEvent = envelopesGroupedByEvent(events)
 
     for {
-      determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(envelopesByEvent))
+      deduplicatorResult <- FutureUnlessShutdown.outcomeF(
+        deduplicator.rejectDuplicates(envelopesByEvent)
+      )
+      (uniqueEnvelopesByEvent, storeF) = deduplicatorResult
+
+      determinedStages <- FutureUnlessShutdown.outcomeF(determineStages(uniqueEnvelopesByEvent))
       (hasIdentityUpdates, stages) = determinedStages
       _ <- MonadUtil.sequentialTraverseMonoid(stages)(executeStage(traceContext))
 
@@ -120,7 +126,7 @@ class MediatorEventsProcessor(
       // reset the ready check if there was an identity update.
       if (hasIdentityUpdates)
         readyCheck.reset()
-      resI
+      resI.andThenF(_ => FutureUnlessShutdown.outcomeF(storeF))
     }
   }
 
@@ -316,6 +322,7 @@ object MediatorEventsProcessor {
       crypto: DomainSyncCryptoClient,
       identityClientEventHandler: UnsignedProtocolEventHandler,
       confirmationResponseProcessor: ConfirmationResponseProcessor,
+      mediatorEventDeduplicator: MediatorEventDeduplicator,
       readyCheck: MediatorReadyCheck,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): MediatorEventsProcessor = {
@@ -324,6 +331,7 @@ object MediatorEventsProcessor {
       crypto,
       identityClientEventHandler,
       confirmationResponseProcessor.handleRequestEvents,
+      mediatorEventDeduplicator,
       readyCheck,
       loggerFactory,
     )

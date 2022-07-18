@@ -4,54 +4,16 @@
 syntax = "proto3";
 package com.digitalasset.canton.protocol.v1;
 
-import "com/digitalasset/canton/crypto/v0/crypto.proto";
+import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v1/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v0/participant_transfer.proto";
+import "com/digitalasset/canton/protocol/v0/topology.proto";
+import "com/digitalasset/canton/protocol/v1/topology.proto";
+import "com/digitalasset/canton/protocol/v0/causality.proto";
 import "com/digitalasset/canton/protocol/v0/synchronization.proto";
+import "com/digitalasset/canton/protocol/v0/sequencing.proto";
 
-message ParticipantRandomnessLookup {
-    // An encrypted random bytestring. After decryption, used in HKDF to derive the encryption keys for the view and
-    // its subviews
-    bytes randomness = 1;
-
-    // The fingerprint of the public key that was used to encrypt the randomness for the participant
-    string fingerprint = 2;
-}
-
-message EncryptedViewMessage {
-    bytes view_tree = 1;
-
-    // The symmetric encryption scheme used to encrypt the view tree
-    com.digitalasset.canton.crypto.v0.SymmetricKeyScheme encryption_scheme = 2;
-
-    com.digitalasset.canton.crypto.v0.Signature submitter_participant_signature = 3; // optional
-    bytes view_hash = 4;
-    repeated ParticipantRandomnessLookup randomness = 5;
-    string domain_id = 6;
-    v0.ViewType view_type = 7;
-}
-
-message TransferOutCommonData {
-    com.digitalasset.canton.crypto.v0.Salt salt = 1;
-    string source_domain = 2;
-    repeated string stakeholders = 3;
-    repeated string admin_parties = 4;
-    string uuid = 5;
-    string source_mediator = 6;
-    string source_protocol_version = 7; // added in v1 // TODO(#9312) change to int
-}
-
-message TransferInCommonData {
-    com.digitalasset.canton.crypto.v0.Salt salt = 1;
-    string target_domain = 2;
-    repeated string stakeholders = 3;
-    string uuid = 4;
-    string target_mediator = 6;
-    string target_protocol_version = 7; // added in v1 // TODO(#9312) change to int
-}
-
-message InformeeMessage {
-    v0.FullInformeeTree full_informee_tree = 1;
-    string protocol_version = 2; // added in v1 // TODO(#9312) change to int
-}
+// Messages depending on both participant_transaction.proto and participant_transfer.proto.
 
 message EnvelopeContent {
     oneof some_envelope_content {
@@ -63,26 +25,7 @@ message EnvelopeContent {
         v0.TransferInMediatorMessage transfer_in_mediator_message = 7;
         v0.RootHashMessage root_hash_message = 8;
         v0.RegisterTopologyTransactionRequest register_topology_transaction_request = 9;
-        v0.RegisterTopologyTransactionResponse register_topology_transaction_response = 10;
+        v1.RegisterTopologyTransactionResponse register_topology_transaction_response = 10;
         v0.CausalityMessage causality_message = 11;
     }
-}
-
-message ViewParticipantData {
-    com.digitalasset.canton.crypto.v0.Salt salt = 1;
-    repeated v0.ViewParticipantData.InputContract core_inputs = 2;
-    repeated v0.ViewParticipantData.CreatedContract created_core = 3;
-    repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
-    repeated ResolvedKey resolved_keys = 5;
-    v0.ActionDescription action_description = 6;
-    v0.ViewParticipantData.RollbackContext rollback_context = 7; // optional; defaults to the empty RollbackContext if omitted.
-}
-
-message ResolvedKey {
-    v0.GlobalKey key = 1;
-    oneof resolution {
-        string contract_id = 2; // the key resolves to a contract
-        v0.ViewParticipantData.FreeKey free = 3; // the key is free and these are the maintainers
-    }
-    bool rolledBack = 4;
 }

@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
@@ -50,7 +49,7 @@ object SequencerTestUtils extends BaseTest {
       domainId,
       messageId,
       batch,
-      TestDomainParameters.defaultStatic.protocolVersion,
+      BaseTest.testedProtocolVersion,
     )
 
     deserializedFrom match {
@@ -78,7 +77,7 @@ object SequencerTestUtils extends BaseTest {
       domainId,
       messageId,
       batch,
-      TestDomainParameters.defaultStatic.protocolVersion,
+      BaseTest.testedProtocolVersion,
     )
   }
 

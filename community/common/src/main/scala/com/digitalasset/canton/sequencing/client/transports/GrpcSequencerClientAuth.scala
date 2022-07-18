@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.sequencing.client.transports
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationServiceStub
-import com.digitalasset.canton.lifecycle.FlagCloseable
+import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
+import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.sequencing.authentication.grpc.{
   SequencerClientNoAuthentication,
   SequencerClientTokenAuthentication,
@@ -36,7 +39,7 @@ class GrpcSequencerClientAuth(
     member: Member,
     crypto: Crypto,
     agreementId: Option[ServiceAgreementId],
-    channel: ManagedChannel,
+    channelPerEndpoint: NonEmpty[Map[Endpoint, ManagedChannel]],
     supportedProtocolVersions: Seq[ProtocolVersion],
     tokenManagerConfig: AuthenticationTokenManagerConfig,
     clock: Clock,
@@ -60,7 +63,10 @@ class GrpcSequencerClientAuth(
 
   /** Wrap a grpc client with components to appropriately perform authentication */
   def apply[S <: AbstractStub[S]](client: S): S = {
-    val authenticationClient = new SequencerAuthenticationServiceStub(channel)
+    val obtainTokenPerEndpoint = channelPerEndpoint.transform { case (_, channel) =>
+      val authenticationClient = new SequencerAuthenticationServiceStub(channel)
+      () => tokenProvider.generateToken(authenticationClient)
+    }
     val clientAuthentication = member match {
       case unauthenticatedMember: UnauthenticatedMemberId =>
         new SequencerClientNoAuthentication(domainId, unauthenticatedMember)
@@ -68,7 +74,7 @@ class GrpcSequencerClientAuth(
         SequencerClientTokenAuthentication(
           domainId,
           authenticatedMember,
-          () => tokenProvider.generateToken(authenticationClient),
+          obtainTokenPerEndpoint,
           tokenProvider.isClosing,
           tokenManagerConfig,
           clock,
@@ -78,5 +84,12 @@ class GrpcSequencerClientAuth(
     clientAuthentication(client)
   }
 
-  override protected def onClosed(): Unit = tokenProvider.close()
+  override protected def onClosed(): Unit = {
+    Lifecycle.close(
+      tokenProvider +:
+        channelPerEndpoint.toList.map { case (endpoint, channel) =>
+          new CloseableChannel(channel, logger, s"grpc-client-auth-$endpoint")
+        }: _*
+    )(logger)
+  }
 }

@@ -276,6 +276,13 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
     allTransactions.map(_.result.find(_.transaction == transaction))
 
+  override def findStoredNoSignature(transaction: TopologyTransaction[TopologyChangeOp])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+    allTransactions.map(
+      _.result.filter(_.transaction.transaction.element.mapping == transaction.element.mapping)
+    )
+
   override def findPositiveTransactions(
       asOf: CantonTimestamp,
       asOfInclusive: Boolean,

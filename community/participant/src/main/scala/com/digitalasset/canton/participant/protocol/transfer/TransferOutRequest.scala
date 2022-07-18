@@ -9,7 +9,7 @@ import com.digitalasset.canton.data._
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.version.SourceProtocolVersion
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 
 import java.util.UUID
 
@@ -29,6 +29,7 @@ case class TransferOutRequest(
     sourceProtocolVersion: SourceProtocolVersion,
     sourceMediator: MediatorId,
     targetDomain: DomainId,
+    targetProtocolVersion: TargetProtocolVersion,
     targetTimeProof: TimeProof,
 ) {
 
@@ -56,7 +57,8 @@ case class TransferOutRequest(
       contractId,
       targetDomain,
       targetTimeProof,
-      sourceProtocolVersion.v,
+      sourceProtocolVersion,
+      targetProtocolVersion,
     )
     val tree = TransferOutViewTree(commonData, view)(sourceProtocolVersion.v, hashOps)
     FullTransferOutTree(tree)

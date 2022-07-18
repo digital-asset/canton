@@ -168,10 +168,16 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       implicit val ledgerApiEncoder: Encoder[LedgerApi] = deriveEncoder[LedgerApi]
       implicit val participantsEncoder: Encoder[Participants] = deriveEncoder[Participants]
 
-      private def partyIdToParticipants(implicit env: ConsoleEnvironment): Map[String, String] = {
+      private def partyIdToParticipants(
+          useParticipantAlias: Boolean,
+          uidToAlias: Map[ParticipantId, String],
+      )(implicit env: ConsoleEnvironment): Map[String, String] = {
+        def participantReference(p: ParticipantId) = if (useParticipantAlias)
+          uidToAlias.getOrElse(p, p.uid.toProtoPrimitive)
+        else p.uid.toProtoPrimitive
         def partyIdToParticipant(p: ListPartiesResult) = p.participants.headOption.map {
           participantDomains =>
-            (p.party.filterString, participantDomains.participant.uid.toProtoPrimitive)
+            (p.party.filterString, participantReference(participantDomains.participant))
         }
 
         val partyAndParticipants =
@@ -192,6 +198,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       def apply(
           file: Option[String] = None,
+          useParticipantAlias: Boolean = true,
           defaultParticipant: Option[ParticipantReference] = None,
       )(implicit env: ConsoleEnvironment): JFile = {
 
@@ -201,17 +208,21 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
             participantConfig.clientLedgerApi.port.unwrap,
           )
 
-        val participantsData =
-          env.participants.all.map(p => (p.uid.toProtoPrimitive, toLedgerApi(p.config))).toMap
+        def participantValue(p: ParticipantReference): String =
+          if (useParticipantAlias) p.name else p.uid.toProtoPrimitive
 
-        val default_participant = defaultParticipant
-          .map(participantReference => toLedgerApi(participantReference.config))
-          .orElse(participantsData.headOption.map { case (_, ledgerApi) => ledgerApi })
+        val allParticipants = env.participants.all
+        val participantsData =
+          allParticipants.map(p => (participantValue(p), toLedgerApi(p.config))).toMap
+        val uidToAlias = allParticipants.map(p => (p.id, p.name)).toMap
+
+        val default_participant =
+          defaultParticipant.map(participantReference => toLedgerApi(participantReference.config))
 
         val participantJson = Participants(
           default_participant,
           participantsData,
-          partyIdToParticipants,
+          partyIdToParticipants(useParticipantAlias, uidToAlias),
         ).asJson.spaces2
 
         val targetFile = file.map(File(_)).getOrElse(File(filename))
@@ -224,13 +235,23 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     @Help.Summary("Create a participants config for Daml script")
     @Help.Description(
       """The generated config can be passed to `daml script` via the `participant-config` parameter.
-        |More information about the file format can be found in the `documentation <https://docs.daml.com/daml-script/index.html#using-daml-script-in-distributed-topologies>`_:"""
+        |More information about the file format can be found in the `documentation <https://docs.daml.com/daml-script/index.html#using-daml-script-in-distributed-topologies>`_:
+        |It takes three arguments:
+        |- file (default to "participant-config.json")
+        |- useParticipantAlias (default to true): participant aliases are used instead of UIDs
+        |- defaultParticipant (default to None): adds a default participant if provided
+        |"""
     )
     def generate_daml_script_participants_conf(
         file: Option[String] = None,
+        useParticipantAlias: Boolean = true,
         defaultParticipant: Option[ParticipantReference] = None,
     )(implicit env: ConsoleEnvironment): JFile =
-      GenerateDamlScriptParticipantsConf(file, defaultParticipant)
+      GenerateDamlScriptParticipantsConf(
+        file,
+        useParticipantAlias,
+        defaultParticipant,
+      )
 
     // TODO(i7387): add check that flag is set
     @Help.Summary(

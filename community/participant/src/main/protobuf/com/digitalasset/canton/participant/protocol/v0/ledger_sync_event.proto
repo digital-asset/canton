@@ -8,7 +8,7 @@ package com.digitalasset.canton.participant.protocol.v0;
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/wrappers.proto";
-import "com/digitalasset/canton/protocol/v0/synchronization.proto";
+import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
 
 // LedgerSyncEvent is a canton type alias for the daml-on-x com.daml.ledger.participant.state.v2.Update
 message LedgerSyncEvent {

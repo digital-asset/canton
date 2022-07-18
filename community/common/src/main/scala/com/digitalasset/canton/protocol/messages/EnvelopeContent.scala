@@ -9,7 +9,6 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
@@ -115,7 +114,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.RegisterTopologyTransactionRequest(messageP) =>
         RegisterTopologyTransactionRequest.fromProtoV0(messageP)
       case Content.RegisterTopologyTransactionResponse(messageP) =>
-        RegisterTopologyTransactionResponse.fromProtoV0(messageP)
+        RegisterTopologyTransactionResponse.fromProtoV1(messageP)
       case Content.CausalityMessage(messageP) => CausalityMessage.fromProtoV0(messageP)
       case Content.Empty => Left(OtherError("Cannot deserialize an empty message content"))
     }
@@ -146,9 +145,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
     protocolVersion match {
       // TODO(i9423): Migrate to next protocol version
       case ProtocolVersion.unstable_development =>
-        fromByteString(hashOps)(bytes)
-          .map(_.message)
-          .tapLeft(err => println(s"Failed to parse $err: $bytes"))
+        fromByteString(hashOps)(bytes).map(_.message)
       case _ =>
         messageFromByteStringV0(hashOps)(bytes)
     }

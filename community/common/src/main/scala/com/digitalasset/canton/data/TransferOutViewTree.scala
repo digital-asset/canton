@@ -26,6 +26,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   RepresentativeProtocolVersion,
   SourceProtocolVersion,
+  TargetProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -289,6 +290,7 @@ sealed abstract case class TransferOutView private (
     contractId: LfContractId,
     targetDomain: DomainId,
     targetTimeProof: TimeProof,
+    targetProtocolVersion: TargetProtocolVersion,
 )(
     hashOps: HashOps,
     val representativeProtocolVersion: RepresentativeProtocolVersion[TransferOutView],
@@ -309,6 +311,16 @@ sealed abstract case class TransferOutView private (
       contractId = contractId.toProtoPrimitive,
       targetDomain = targetDomain.toProtoPrimitive,
       targetTimeProof = Some(targetTimeProof.toProtoV0),
+    )
+
+  protected def toProtoV1: v1.TransferOutView =
+    v1.TransferOutView(
+      salt = Some(salt.toProtoV0),
+      submitter = submitter,
+      contractId = contractId.toProtoPrimitive,
+      targetDomain = targetDomain.toProtoPrimitive,
+      targetTimeProof = Some(targetTimeProof.toProtoV0),
+      targetProtocolVersion = targetProtocolVersion.v.toProtoPrimitive,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -332,7 +344,13 @@ object TransferOutView
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(i9423): Migrate to next protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersionMemoized(v1.TransferOutView)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -341,11 +359,19 @@ object TransferOutView
       contractId: LfContractId,
       targetDomain: DomainId,
       targetTimeProof: TimeProof,
-      protocolVersion: ProtocolVersion,
+      sourceProtocolVersion: SourceProtocolVersion,
+      targetProtocolVersion: TargetProtocolVersion,
   ): TransferOutView =
-    new TransferOutView(salt, submitter, contractId, targetDomain, targetTimeProof)(
+    new TransferOutView(
+      salt,
+      submitter,
+      contractId,
+      targetDomain,
+      targetTimeProof,
+      targetProtocolVersion,
+    )(
       hashOps,
-      protocolVersionRepresentativeFor(protocolVersion),
+      protocolVersionRepresentativeFor(sourceProtocolVersion.v),
       None,
     ) {}
 
@@ -359,14 +385,58 @@ object TransferOutView
       submitter <- ProtoConverter.parseLfPartyId(submitterP)
       contractId <- LfContractId.fromProtoPrimitive(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
-      // TODO(i9626): Requires protocol version of the target domain
-      targetDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
+
+      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+      targetDomainPV = protocolVersionRepresentative.representative
+
       targetTimeProof <- ProtoConverter
         .required("targetTimeProof", targetTimeProofP)
         .flatMap(TimeProof.fromProtoV0(targetDomainPV, hashOps))
-    } yield new TransferOutView(salt, submitter, contractId, targetDomain, targetTimeProof)(
+    } yield new TransferOutView(
+      salt,
+      submitter,
+      contractId,
+      targetDomain,
+      targetTimeProof,
+      TargetProtocolVersion(targetDomainPV),
+    )(hashOps, protocolVersionRepresentative, Some(bytes)) {}
+  }
+
+  private[this] def fromProtoV1(hashOps: HashOps, transferOutViewP: v1.TransferOutView)(
+      bytes: ByteString
+  ): ParsingResult[TransferOutView] = {
+    val v1.TransferOutView(
+      saltP,
+      submitterP,
+      contractIdP,
+      targetDomainP,
+      targetTimeProofP,
+      targetProtocolVersionP,
+    ) = transferOutViewP
+
+    for {
+      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
+      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      contractId <- LfContractId.fromProtoPrimitive(contractIdP)
+      targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
+
+      targetProtocolVersion <- ProtocolVersion
+        .fromProtoPrimitive(targetProtocolVersionP)
+        .map(TargetProtocolVersion(_))
+
+      targetTimeProof <- ProtoConverter
+        .required("targetTimeProof", targetTimeProofP)
+        .flatMap(TimeProof.fromProtoV0(targetProtocolVersion.v, hashOps))
+    } yield new TransferOutView(
+      salt,
+      submitter,
+      contractId,
+      targetDomain,
+      targetTimeProof,
+      targetProtocolVersion,
+    )(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtobufVersion(1)),
       Some(bytes),
     ) {}
   }

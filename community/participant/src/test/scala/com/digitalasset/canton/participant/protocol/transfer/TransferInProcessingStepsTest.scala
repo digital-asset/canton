@@ -95,8 +95,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     UniqueIdentifier.tryFromProtoPrimitive("bothdomains::participant")
   )
 
-  private val staticDomainParameters = TestDomainParameters.defaultStatic
-
   private val identityFactory = TestingTopology()
     .withDomains(sourceDomain)
     .withReversedTopology(
@@ -111,8 +109,6 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       .currentSnapshotApproximation
 
   private val pureCrypto = TestingIdentityFactory.pureCrypto()
-  private val crypto = identityFactory.newCrypto(submitterParticipant)
-  private val vault = crypto.privateCrypto
 
   val hash = TestHash.digest("123")
   private val seedGenerator = new SeedGenerator(pureCrypto)
@@ -138,7 +134,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         loggerFactory,
       )
     for {
-      _ <- persistentState.parameterStore.setParameters(staticDomainParameters)
+      _ <- persistentState.parameterStore.setParameters(defaultStaticDomainParameters)
     } yield {
       val state = new SyncDomainEphemeralState(
         persistentState,
@@ -179,7 +175,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferDataF =
       TransferStoreTest.mkTransferDataForDomain(transferId, sourceMediator, party1, targetDomain)
-    val submissionParam = SubmissionParam(party1, transferId)
+    val submissionParam =
+      SubmissionParam(party1, transferId, SourceProtocolVersion(testedProtocolVersion))
     val transferOutResult =
       TransferInProcessingStepsTest.transferOutResult(
         sourceDomain,
@@ -216,6 +213,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         SourceProtocolVersion(testedProtocolVersion),
         sourceMediator,
         targetDomain,
+        TargetProtocolVersion(testedProtocolVersion),
         TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
       )
       val uuid = new UUID(1L, 2L)
@@ -229,6 +227,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
             uuid,
           )
         TransferData(
+          SourceProtocolVersion(testedProtocolVersion),
           transferId.requestTimestamp,
           0L,
           fullTransferOutTree,
@@ -280,7 +279,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     }
 
     "fail when submitting party is not a stakeholder" in {
-      val submissionParam2 = SubmissionParam(party2, transferId)
+      val submissionParam2 =
+        SubmissionParam(party2, transferId, SourceProtocolVersion(testedProtocolVersion))
 
       for {
         transferData <- transferDataF
@@ -332,7 +332,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
 
     "fail when submitting party not hosted on the participant" in {
 
-      val submissionParam2 = SubmissionParam(party2, transferId)
+      val submissionParam2 =
+        SubmissionParam(party2, transferId, SourceProtocolVersion(testedProtocolVersion))
 
       for {
         transferData2 <- TransferStoreTest.mkTransferDataForDomain(
@@ -658,6 +659,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       SourceProtocolVersion(testedProtocolVersion),
       sourceMediator,
       targetDomain,
+      TargetProtocolVersion(testedProtocolVersion),
       TimeProofTestUtil.mkTimeProof(timestamp = CantonTimestamp.Epoch, domainId = targetDomain),
     )
     val uuid = new UUID(3L, 4L)
@@ -671,6 +673,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       )
     val transferData =
       TransferData(
+        SourceProtocolVersion(testedProtocolVersion),
         CantonTimestamp.Epoch,
         1L,
         fullTransferOutTree,
@@ -852,6 +855,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       targetMediator,
       transferOutResult,
       uuid,
+      SourceProtocolVersion(testedProtocolVersion),
       TargetProtocolVersion(testedProtocolVersion),
     )
   }
@@ -910,7 +914,7 @@ object TransferInProcessingStepsTest {
       hashOps: HashOps,
       participantId: ParticipantId,
   )(implicit traceContext: TraceContext): DeliveredTransferOutResult = {
-    val protocolVersion = TestDomainParameters.defaultStatic.protocolVersion
+    val protocolVersion = BaseTest.testedProtocolVersion
 
     implicit val ec: ExecutionContext = DirectExecutionContext(
       TracedLogger(
@@ -963,6 +967,6 @@ object TransferInProcessingStepsTest {
     Set(),
     TransferInDomainId(targetDomain),
     Verdict.Approve,
-    TestDomainParameters.defaultStatic.protocolVersion,
+    BaseTest.testedProtocolVersion,
   )
 }

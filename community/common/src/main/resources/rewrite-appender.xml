@@ -285,13 +285,6 @@
             <contains>DEPRECATED_PROTOCOL_VERSION</contains>
             <testing>true</testing>
         </rewrite>
-
-        <!-- TODO(i9577): remove as soon as it has been fixed upstream -->
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.daml.lf</logger>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
     </appender>
 
     <!-- using an async appender to move rendering and filtering of log messages to background thread -->

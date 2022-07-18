@@ -35,6 +35,7 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
+  SourceProtocolVersion,
   TargetProtocolVersion,
 }
 import com.google.protobuf.ByteString
@@ -242,6 +243,7 @@ sealed abstract case class TransferInView private (
     contract: SerializableContract,
     creatingTransactionId: TransactionId,
     transferOutResultEvent: DeliveredTransferOutResult,
+    sourceProtocolVersion: SourceProtocolVersion,
 )(
     hashOps: HashOps,
     val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInView],
@@ -262,6 +264,16 @@ sealed abstract case class TransferInView private (
       contract = Some(contract.toProtoV0),
       creatingTransactionId = creatingTransactionId.toProtoPrimitive,
       transferOutResultEvent = Some(transferOutResultEvent.result.toProtoV0),
+    )
+
+  protected def toProtoV1: v1.TransferInView =
+    v1.TransferInView(
+      salt = Some(salt.toProtoV0),
+      submitter = submitter,
+      contract = Some(contract.toProtoV0),
+      creatingTransactionId = creatingTransactionId.toProtoPrimitive,
+      transferOutResultEvent = Some(transferOutResultEvent.result.toProtoV0),
+      sourceProtocolVersion = sourceProtocolVersion.v.toProtoPrimitive,
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -285,7 +297,13 @@ object TransferInView
       ProtocolVersion.v2_0_0,
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    // TODO(i9423): Migrate to next protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersionMemoized(v1.TransferInView)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def create(hashOps: HashOps)(
@@ -294,11 +312,19 @@ object TransferInView
       contract: SerializableContract,
       creatingTransactionId: TransactionId,
       transferOutResultEvent: DeliveredTransferOutResult,
-      protocolVersion: ProtocolVersion,
+      sourceProtocolVersion: SourceProtocolVersion,
+      targetProtocolVersion: TargetProtocolVersion,
   ): TransferInView =
-    new TransferInView(salt, submitter, contract, creatingTransactionId, transferOutResultEvent)(
+    new TransferInView(
+      salt,
+      submitter,
+      contract,
+      creatingTransactionId,
+      transferOutResultEvent,
+      sourceProtocolVersion,
+    )(
       hashOps,
-      protocolVersionRepresentativeFor(protocolVersion),
+      protocolVersionRepresentativeFor(targetProtocolVersion.v),
       None,
     ) {}
 
@@ -324,8 +350,9 @@ object TransferInView
       transferOutResultEventP <- ProtoConverter
         .required("TransferInView.transferOutResultEvent", transferOutResultEventPO)
 
-      // TODO(i9626): Requires protocol version of the source domain
-      sourceDomainPV = ProtocolVersion.v2_0_0_Todo_i8793
+      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+      sourceDomainPV = protocolVersionRepresentative.representative
+
       envelopeDeserializer = (envelopeP: v0.Envelope) =>
         OpenEnvelope.fromProtoV0(
           EnvelopeContent.messageFromByteString(sourceDomainPV, hashOps)(
@@ -349,7 +376,62 @@ object TransferInView
       contract,
       creatingTransactionId,
       transferOutResultEvent,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
+      SourceProtocolVersion(sourceDomainPV),
+    )(hashOps, protocolVersionRepresentative, Some(bytes)) {}
+  }
+
+  private[this] def fromProtoV1(hashOps: HashOps, transferInViewP: v1.TransferInView)(
+      bytes: ByteString
+  ): ParsingResult[TransferInView] = {
+    val v1.TransferInView(
+      saltP,
+      submitterP,
+      contractP,
+      transferOutResultEventPO,
+      creatingTransactionIdP,
+      sourceProtocolVersionP,
+    ) =
+      transferInViewP
+    for {
+      salt <- ProtoConverter.parseRequired(Salt.fromProtoV0, "salt", saltP)
+      submitter <- ProtoConverter.parseLfPartyId(submitterP)
+      contract <- ProtoConverter
+        .required("contract", contractP)
+        .flatMap(SerializableContract.fromProtoV0)
+
+      sourceProtocolVersion <- ProtocolVersion
+        .fromProtoPrimitive(sourceProtocolVersionP)
+        .map(SourceProtocolVersion(_))
+
+      // TransferOutResultEvent deserialization
+      transferOutResultEventP <- ProtoConverter
+        .required("TransferInView.transferOutResultEvent", transferOutResultEventPO)
+
+      envelopeDeserializer = (envelopeP: v0.Envelope) =>
+        OpenEnvelope.fromProtoV0(
+          EnvelopeContent.messageFromByteString(sourceProtocolVersion.v, hashOps)(
+            _
+          ),
+          sourceProtocolVersion.v,
+        )(envelopeP)
+
+      transferOutResultEventMC <- SignedContent.fromProtoV0(
+        contentDeserializer = SequencedEvent.fromByteString(envelopeDeserializer),
+        transferOutResultEventP,
+      )
+
+      transferOutResultEvent <- DeliveredTransferOutResult
+        .create(transferOutResultEventMC)
+        .leftMap(err => OtherError(err.toString))
+      creatingTransactionId <- TransactionId.fromProtoPrimitive(creatingTransactionIdP)
+    } yield new TransferInView(
+      salt,
+      submitter,
+      contract,
+      creatingTransactionId,
+      transferOutResultEvent,
+      sourceProtocolVersion,
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(1)), Some(bytes)) {}
   }
 }
 

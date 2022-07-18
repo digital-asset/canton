@@ -391,6 +391,8 @@ object BuildCommon {
     "LICENSE.txt",
     "-c",
     "canton.lnav.json",
+    "-c",
+    "canton-json.lnav.json",
   )
 
   /** By default, sbt-header (github.com/sbt/sbt-header) will not check the /protobuf directories, so we manually need to add them here.

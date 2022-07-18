@@ -6,7 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.participant.admin.v0;
 
 import "google/protobuf/timestamp.proto";
-import "com/digitalasset/canton/protocol/v0/synchronization.proto";
+import "com/digitalasset/canton/protocol/v0/participant_transfer.proto";
 
 // Supports transferring contracts from one domain to another
 service TransferService {

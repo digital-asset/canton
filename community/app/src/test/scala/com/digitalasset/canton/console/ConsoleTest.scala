@@ -208,7 +208,7 @@ class ConsoleTest extends AnyWordSpec with BaseTest {
       verify(domains).start("d-3")
     }
     "start all" in new TestEnvironment {
-      runOrFail("nodes.local start")
+      runOrFail("nodes.local.start()")
 
       verify(participants).start("p1")
       verify(participants).start("p2")

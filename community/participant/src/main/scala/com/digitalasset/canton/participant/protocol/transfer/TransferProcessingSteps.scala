@@ -47,6 +47,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter}
 
 import scala.collection.concurrent
@@ -320,4 +321,8 @@ object TransferProcessingSteps {
 
   case class CausalityInformationMissing(missingFor: Set[LfPartyId]) extends TransferProcessorError
 
+  case class IncompatibleProtocolVersions(
+      source: SourceProtocolVersion,
+      target: TargetProtocolVersion,
+  ) extends TransferProcessorError
 }

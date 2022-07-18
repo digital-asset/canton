@@ -49,4 +49,7 @@ object BinaryFileUtil {
     }
   }
 
+  def tryReadByteStringFromFile(inputFile: String): ByteString = readByteStringFromFile(inputFile)
+    .fold(err => throw new IllegalArgumentException(s"Can not load ${inputFile}: $err"), identity)
+
 }

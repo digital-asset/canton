@@ -319,6 +319,10 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: Execution
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]]
 
+  def findStoredNoSignature(transaction: TopologyTransaction[TopologyChangeOp])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]]
+
   /** Bootstrap a node state from a topology transaction collection */
   def bootstrap(
       collection: StoredTopologyTransactions[TopologyChangeOp.Positive]

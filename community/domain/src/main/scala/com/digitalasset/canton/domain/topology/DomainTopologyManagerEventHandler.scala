@@ -37,7 +37,7 @@ class DomainTopologyManagerEventHandler(
     store: RegisterTopologyTransactionResponseStore,
     requestHandler: DomainTopologyManagerRequestService.Handler,
     sequencerSendResponse: (
-        OpenEnvelope[RegisterTopologyTransactionResponse],
+        OpenEnvelope[RegisterTopologyTransactionResponse.Result],
         SendCallback,
     ) => EitherT[Future, SendAsyncClientError, Unit],
     protocolVersion: ProtocolVersion,
@@ -107,10 +107,16 @@ class DomainTopologyManagerEventHandler(
         request.participant,
         request.transactions,
       )
-      pendingResponse = RegisterTopologyTransactionResponse.create(
+      pendingResponseE = RegisterTopologyTransactionResponse.create(
         request,
         responseResults,
         protocolVersion,
+      )
+      pendingResponse <- pendingResponseE.fold(
+        { case e @ RegisterTopologyTransactionResponse.ResultVersionsMixture =>
+          Future.failed(new IllegalStateException(e.message))
+        },
+        Future.successful,
       )
       _ <- store.savePendingResponse(pendingResponse)
       result <- sendResponse(pendingResponse)
@@ -118,7 +124,7 @@ class DomainTopologyManagerEventHandler(
   }
 
   private def sendResponse(
-      response: RegisterTopologyTransactionResponse
+      response: RegisterTopologyTransactionResponse.Result
   )(implicit traceContext: TraceContext): Future[Unit] = {
     val batch = OpenEnvelope(
       response,

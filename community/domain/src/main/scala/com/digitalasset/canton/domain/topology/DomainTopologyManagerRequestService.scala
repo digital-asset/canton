@@ -13,7 +13,8 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Partic
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
+import com.digitalasset.canton.protocol.messages
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, StoreBasedTopologySnapshot}
 import com.digitalasset.canton.topology.processing.{
@@ -45,13 +46,13 @@ trait RequestProcessingStrategy {
       transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit
       traceContext: TraceContext
-  ): Future[List[RegisterTopologyTransactionResponse.State]]
+  ): Future[List[messages.RegisterTopologyTransactionResponseResult.State]]
 
 }
 
 object RequestProcessingStrategy {
 
-  import RegisterTopologyTransactionResponse.State._
+  import RegisterTopologyTransactionResponseResult.State._
 
   trait ManagerHooks {
     def addFromRequest(
@@ -98,7 +99,7 @@ object RequestProcessingStrategy {
 
     private def toResult[T](
         eitherT: EitherT[Future, DomainTopologyManagerError, T]
-    ): Future[RegisterTopologyTransactionResponse.State] =
+    ): Future[RegisterTopologyTransactionResponseResult.State] =
       eitherT
         .leftMap {
           case DomainTopologyManagerError.TopologyManagerParentError(
@@ -119,7 +120,7 @@ object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]]
     )(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
+    ): Future[List[RegisterTopologyTransactionResponseResult.State]] = {
       def process(transaction: SignedTopologyTransaction[TopologyChangeOp]) =
         authorizedStore.exists(transaction).flatMap {
           case false => toResult(hooks.addFromRequest(transaction))
@@ -135,7 +136,7 @@ object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
+    ): Future[List[RegisterTopologyTransactionResponseResult.State]] = {
       // TODO(i4933) enforce limits with respect to parties, packages, keys, certificates etc.
       for {
         isActive <- authorizedSnapshot.isParticipantActive(participant)
@@ -152,13 +153,13 @@ object RequestProcessingStrategy {
 
     private def rejectAll(
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]]
-    ): List[RegisterTopologyTransactionResponse.State] =
-      transactions.map(_ => RegisterTopologyTransactionResponse.State.Rejected)
+    ): List[RegisterTopologyTransactionResponseResult.State] =
+      transactions.map(_ => RegisterTopologyTransactionResponseResult.State.Rejected)
 
     private def failAll(
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]]
-    ): List[RegisterTopologyTransactionResponse.State] =
-      transactions.map(_ => RegisterTopologyTransactionResponse.State.Failed)
+    ): List[RegisterTopologyTransactionResponseResult.State] =
+      transactions.map(_ => RegisterTopologyTransactionResponseResult.State.Failed)
 
     private def validateOnlyOnboardingTransactions(
         participantId: ParticipantId,
@@ -255,7 +256,7 @@ object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
+    ): Future[List[RegisterTopologyTransactionResponseResult.State]] = {
       // create a temporary store so we can use some convenience functions
       val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
       val ts = CantonTimestamp.Epoch
@@ -394,7 +395,7 @@ object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit
         traceContext: TraceContext
-    ): Future[List[RegisterTopologyTransactionResponse.State]] = {
+    ): Future[List[RegisterTopologyTransactionResponseResult.State]] = {
       requestedBy match {
         case UnauthenticatedMemberId(uid) =>
           // check that we have:
@@ -419,12 +420,13 @@ object RequestProcessingStrategy {
 private[domain] class DomainTopologyManagerRequestService(
     strategy: RequestProcessingStrategy,
     crypto: CryptoPureApi,
+    protocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with DomainTopologyManagerRequestService.Handler {
 
-  import RegisterTopologyTransactionResponse.State._
+  import RegisterTopologyTransactionResponseResult.State._
 
   override def newRequest(
       requestedBy: Member,
@@ -432,7 +434,7 @@ private[domain] class DomainTopologyManagerRequestService(
       res: List[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit
       traceContext: TraceContext
-  ): Future[List[RegisterTopologyTransactionResponse.Result]] = {
+  ): Future[List[RegisterTopologyTransactionResponseResult]] = {
     for {
       // run pre-checks first
       preChecked <- res.traverse(preCheck)
@@ -444,21 +446,23 @@ private[domain] class DomainTopologyManagerRequestService(
       outcome <- strategy.decide(requestedBy, participant, valid)
     } yield {
       val (rest, result) =
-        preCheckedTx.foldLeft((outcome, List.empty[RegisterTopologyTransactionResponse.Result])) {
+        preCheckedTx.foldLeft((outcome, List.empty[RegisterTopologyTransactionResponseResult])) {
           case ((result :: rest, acc), (tx, Accepted)) =>
             (
               rest,
-              acc :+ RegisterTopologyTransactionResponse.Result(
+              acc :+ RegisterTopologyTransactionResponseResult.create(
                 tx.uniquePath.toProtoPrimitive,
                 result,
+                protocolVersion,
               ),
             )
           case ((rest, acc), (tx, failed)) =>
             (
               rest,
-              acc :+ RegisterTopologyTransactionResponse.Result(
+              acc :+ RegisterTopologyTransactionResponseResult.create(
                 tx.uniquePath.toProtoPrimitive,
                 failed,
+                protocolVersion,
               ),
             )
         }
@@ -482,7 +486,7 @@ private[domain] class DomainTopologyManagerRequestService(
 
   private def preCheck(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
-  ): Future[RegisterTopologyTransactionResponse.State] = {
+  ): Future[RegisterTopologyTransactionResponseResult.State] = {
     (for {
       // check validity of signature
       _ <- EitherT
@@ -500,7 +504,7 @@ object DomainTopologyManagerRequestService {
         requestedBy: Member,
         participant: ParticipantId,
         res: List[SignedTopologyTransaction[TopologyChangeOp]],
-    )(implicit traceContext: TraceContext): Future[List[RegisterTopologyTransactionResponse.Result]]
+    )(implicit traceContext: TraceContext): Future[List[RegisterTopologyTransactionResponseResult]]
   }
 
   def create(
@@ -523,6 +527,7 @@ object DomainTopologyManagerRequestService {
         loggerFactory,
       ),
       manager.crypto.pureCrypto,
+      manager.protocolVersion,
       loggerFactory,
     )
   }

@@ -987,6 +987,7 @@ class RepairService(
             recordTime = repair.ts.toLf,
             divulgedContracts = List.empty, // create and plain archive don't involve divulgence
             blindingInfo = None,
+            contractMetadata = Map(), // TODO(#9795) wire proper value
           ),
           repair.rc,
           None,

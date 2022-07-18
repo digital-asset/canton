@@ -445,6 +445,7 @@ case class SerializableTransactionAccepted(transactionAccepted: LedgerSyncEvent.
       recordTime,
       divulgedContracts,
       blindingInfo,
+      _contractMetadata,
     ) = transactionAccepted
     v0.TransactionAccepted(
       optCompletionInfo.map(SerializableCompletionInfo(_).toProtoV0),
@@ -508,6 +509,7 @@ object SerializableTransactionAccepted {
       recordTime,
       divulgedContracts,
       blindingInfo,
+      contractMetadata = Map(), // TODO(#9795) wire proper value
     )
   }
 }

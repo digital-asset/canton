@@ -3,7 +3,7 @@
 The composability example features a workflow that spans across two domains.
 It starts two domains and five participants in a single process.
 The details are described in the [composability tutorial](
-https://www.canton.io/docs/stable/user-manual/tutorials/composability.html).
+https://docs.daml.com/canton/tutorials/composability.html).
 
 The composability examples can be invoked from the root directory of the Canton release using
 

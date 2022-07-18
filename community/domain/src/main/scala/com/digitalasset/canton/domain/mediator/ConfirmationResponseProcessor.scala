@@ -129,7 +129,6 @@ class ConfirmationResponseProcessor(
     * Sends a result message if no responses need to be received or if the request is malformed,
     * including if it declares a different mediator.
     */
-  //TODO (i749) duplication check
   @VisibleForTesting
   private[mediator] def processRequest(
       requestId: RequestId,

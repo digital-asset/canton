@@ -43,7 +43,7 @@ object AuthServiceConfig {
       .valueOr(err => throw new IllegalArgumentException(s"Failed to create RSA256 verifier: $err"))
     override def create(): AuthService = AuthServiceJWT(verifier)
 
-    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtRs256Crt(certificate)
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtRs256(certificate)
   }
 
   /** "Enables JWT-based authorization, where the JWT is signed by ECDSA256 with a public key loaded from the given X509 certificate file (.crt)" */
@@ -56,7 +56,7 @@ object AuthServiceConfig {
       )
     override def create(): AuthService = AuthServiceJWT(verifier)
 
-    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs256Crt(certificate)
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs256(certificate)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by ECDSA512 with a public key loaded from the given X509 certificate file (.crt) */
@@ -69,7 +69,7 @@ object AuthServiceConfig {
       )
     override def create(): AuthService = AuthServiceJWT(verifier)
 
-    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs512Crt(certificate)
+    override def damlConfig: DamlAuthServiceConfig = DamlAuthServiceConfig.JwtEs512(certificate)
   }
 
   /** Enables JWT-based authorization, where the JWT is signed by RSA256 with a public key loaded from the given JWKS URL */

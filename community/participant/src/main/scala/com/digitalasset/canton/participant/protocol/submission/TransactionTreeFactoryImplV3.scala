@@ -6,14 +6,15 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.functor._
-import cats.syntax.functorFilter._
 import cats.syntax.traverse._
+import com.daml.lf.transaction.ContractStateMachine.KeyInactive
 import com.daml.lf.transaction.Transaction.{KeyActive, KeyCreate, KeyInput, NegativeKeyLookup}
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, ContractStateMachine}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data._
+import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractKeyResolutionError,
@@ -212,16 +213,9 @@ class TransactionTreeFactoryImplV3(
               subviewCount += 1
               val createdInSubview = state.createdContractsInView
               createdInView ++= createdInSubview
-
-              val subviewRolledBack =
-                childView.rbContext.rollbackScope != view.rbContext.rollbackScope
-              val keyResolutionsInSubview = v.globalKeyInputs.fmap { resolution =>
-                val serRes = resolution.asSerializable
-                if (subviewRolledBack) serRes.withRolledBack(true) else serRes
-              }
+              val keyResolutionsInSubview = v.globalKeyInputs.fmap(_.asSerializable)
               MapsUtil.extendMapWith(subViewKeyResolutions, keyResolutionsInSubview) {
-                (accRes, newRes) =>
-                  accRes.withRolledBack(accRes.rolledBack && newRes.rolledBack)
+                (accRes, _newRes) => accRes
               }
             }
 
@@ -252,30 +246,25 @@ class TransactionTreeFactoryImplV3(
               val gkey = globalKey(suffixedNode, key)
               state.keyVersionAndMaintainers += (gkey -> (suffixedNode.version -> maintainers))
           }
+
           state.signalRollbackScope(rbScope)
-          val nextStateE = suffixedNode match { // TODO(i9720): call state.handleNode instead
-            case create: LfNodeCreate =>
-              state.csmState.handleCreate(create).leftMap(ContractKeyResolutionError)
-            case exercise: LfNodeExercises =>
-              state.csmState.handleExercise((), exercise).leftMap(ContractKeyResolutionError)
-            case fetch: LfNodeFetch =>
-              state.csmState.handleFetch(fetch).leftMap(ContractKeyResolutionError)
-            case lookupByKey: LfNodeLookupByKey =>
-              if (state.csmState.mode == ContractKeyUniquenessMode.Off) {
-                val gkey = globalKey(lookupByKey, lookupByKey.key.key)
-                for {
-                  resolution <- state.currentResolver
-                    .get(gkey)
-                    .toRight(MissingContractKeyLookupError(gkey))
-                  nextState <- state.csmState
-                    .handleLookupWith(lookupByKey, resolution)
-                    .leftMap(ContractKeyResolutionError)
-                } yield nextState
-              } else {
-                state.csmState.handleLookup(lookupByKey).leftMap(ContractKeyResolutionError)
+
+          EitherT.fromEither[Future]({
+            for {
+              resolutionForModeOff <- suffixedNode match {
+                case lookupByKey: LfNodeLookupByKey
+                    if state.csmState.mode == ContractKeyUniquenessMode.Off =>
+                  val gkey = globalKey(suffixedNode, lookupByKey.key.key)
+                  state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
+                case _ => Right(KeyInactive) // dummy value, as resolution is not used
               }
-          }
-          EitherT.fromEither[Future](nextStateE.map(nextState => state.csmState = nextState))
+              nextState <- state.csmState
+                .handleNode((), suffixedNode, resolutionForModeOff)
+                .leftMap(ContractKeyResolutionError)
+            } yield {
+              state.csmState = nextState
+            }
+          })
       }
       _ = state.signalRollbackScope(view.rbContext.rollbackScope)
 
@@ -302,17 +291,9 @@ class TransactionTreeFactoryImplV3(
       actionDescription = createActionDescription(suffixedRootNode, seed)
       viewCommonData = createViewCommonData(view, viewCommonDataSalt)
       viewKeyInputs = state.csmState.globalKeyInputs
-      coreUsedKeysOutsideRollback = coreOtherNodes.mapFilter { case (an, rbScopeOther) =>
-        LfTransactionUtil.keyWithMaintainers(an).flatMap { kWithM =>
-          if (rbScopeOther == view.rbContext.rollbackScope)
-            Some(LfGlobalKey.assertBuild(an.templateId, kWithM.key))
-          else None
-        }
-      }.toSet
       resolvedK <- EitherT.fromEither[Future](
         resolvedKeys(
           viewKeyInputs,
-          coreUsedKeysOutsideRollback,
           state.keyVersionAndMaintainers,
           subViewKeyResolutions,
         )
@@ -383,22 +364,9 @@ class TransactionTreeFactoryImplV3(
       // The locally created contracts should also be computable in non-UCK mode from the view data.
       // However, `activeLedgerState` as a whole can be reconstructed only in UCK mode,
       // and therefore we check this only in UCK mode.
-      val viewLocallyCreatedThisTimeline =
-        transactionView.activeLedgerState.locallyCreatedThisTimeline
-      val stateLocallyCreatedThisTimeline = csmState.activeState.locallyCreatedThisTimeline
       ErrorUtil.requireState(
-        viewLocallyCreatedThisTimeline == stateLocallyCreatedThisTimeline,
-        show"Failed to reconstruct non-rolled back created contracts for the view at position $viewPosition.\n  Reconstructed: $viewLocallyCreatedThisTimeline\n  Expected: $stateLocallyCreatedThisTimeline",
-      )
-      val viewConsumed = transactionView.activeLedgerState.consumedBy.keySet
-      val stateConsumed = csmState.activeState.consumedBy.keySet
-      ErrorUtil.requireState(
-        viewConsumed == stateConsumed,
-        show"Failed to reconstruct the consumed contracts for the view at position $viewPosition.\n  Reconstructed: $viewConsumed\n  Expected: $stateConsumed",
-      )
-      ErrorUtil.requireState(
-        transactionView.activeLedgerState.keys == csmState.activeState.keys,
-        show"Failed to reconstruct active key state for the view at position $viewPosition.\n  Reconstructed: ${transactionView.activeLedgerState.keys}\n  Expected: ${csmState.activeState.keys}",
+        transactionView.activeLedgerState.isEquivalent(csmState.activeState),
+        show"Failed to reconstruct ActiveLedgerState $viewPosition.\n  Reconstructed: ${transactionView.activeLedgerState}\n  Expected: ${csmState.activeState}",
       )
     }
   }
@@ -406,10 +374,8 @@ class TransactionTreeFactoryImplV3(
   /** The difference between `viewKeyInputs: Map[LfGlobalKey, KeyInput]` and
     * `subviewKeyResolutions: Map[LfGlobalKey, SerializableKeyResolution]`, computed as follows:
     * <ul>
-    * <li>First, `keyVersionAndMaintainers` and `coreUsedOutsideRollback` are used to compute
-    *     `viewKeyResolutions: Map[LfGlobalKey, SerializableKeyResolution]` from `viewKeyInputs`.
-    *     A key `k` is considered rolled back, if it is rolled back everywhere, i.e.,
-    *     `subviewKeyResolutions.get(k).forall(_.rolledBack)` and `k` is not contained in `coreUsedOutsideRollback`.</li>
+    * <li>First, `keyVersionAndMaintainers` is used to compute
+    *     `viewKeyResolutions: Map[LfGlobalKey, SerializableKeyResolution]` from `viewKeyInputs`.</li>
     * <li>Second, the result consists of all key-resolution pairs that are in `viewKeyResolutions`,
     *     but not in `subviewKeyResolutions`.</li>
     * </ul>
@@ -433,13 +399,11 @@ class TransactionTreeFactoryImplV3(
     * of the subviews resolve `k` to `cid` (as resolutions from earlier subviews are preferred)
     * and therefore the map difference does not resolve `k` at all.
     *
-    * @param coreUsedOutsideRollback The set of keys that are used by core nodes that are not under a rollback within the view.
     * @return `Left(...)` if `viewKeyInputs` contains a key not in the `keyVersionAndMaintainers.keySet`
     * @throws java.lang.IllegalArgumentException if `subviewKeyResolutions.keySet` is not a subset of `viewKeyInputs.keySet`
     */
   private def resolvedKeys(
       viewKeyInputs: Map[LfGlobalKey, KeyInput],
-      coreUsedOutsideRollback: Set[LfGlobalKey],
       keyVersionAndMaintainers: collection.Map[LfGlobalKey, (LfTransactionVersion, Set[LfPartyId])],
       subviewKeyResolutions: collection.Map[LfGlobalKey, SerializableKeyResolution],
   )(implicit
@@ -453,14 +417,13 @@ class TransactionTreeFactoryImplV3(
 
     def resolutionFor(
         key: LfGlobalKey,
-        rolledBack: Boolean,
         keyInput: KeyInput,
     ): Either[MissingContractKeyLookupError, SerializableKeyResolution] = {
       keyVersionAndMaintainers.get(key).toRight(MissingContractKeyLookupError(key)).map {
         case (lfVersion, maintainers) =>
           val resolution = keyInput match {
-            case KeyActive(cid) => AssignedKey(cid, rolledBack)(lfVersion)
-            case KeyCreate | NegativeKeyLookup => FreeKey(maintainers, rolledBack)(lfVersion)
+            case KeyActive(cid) => AssignedKey(cid)(lfVersion)
+            case KeyCreate | NegativeKeyLookup => FreeKey(maintainers)(lfVersion)
           }
           resolution
       }
@@ -469,9 +432,7 @@ class TransactionTreeFactoryImplV3(
     for {
       viewKeyResolutionSeq <- viewKeyInputs.toSeq
         .traverse { case (gkey, keyInput) =>
-          val rolledBack = !coreUsedOutsideRollback.contains(gkey) &&
-            subviewKeyResolutions.get(gkey).forall(_.rolledBack)
-          resolutionFor(gkey, rolledBack, keyInput).map(gkey -> _)
+          resolutionFor(gkey, keyInput).map(gkey -> _)
         }
     } yield {
       MapsUtil.mapDiff(viewKeyResolutionSeq.toMap, subviewKeyResolutions)

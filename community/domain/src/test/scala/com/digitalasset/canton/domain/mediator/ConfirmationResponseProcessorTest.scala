@@ -15,7 +15,11 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.domain.mediator.store.{InMemoryFinalizedResponseStore, MediatorState}
+import com.digitalasset.canton.domain.mediator.store.{
+  InMemoryFinalizedResponseStore,
+  InMemoryMediatorDeduplicationStore,
+  MediatorState,
+}
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol._
@@ -95,6 +99,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val mediatorState =
         new MediatorState(
           new InMemoryFinalizedResponseStore(loggerFactory),
+          new InMemoryMediatorDeduplicationStore(loggerFactory),
           DomainTestMetrics.mediator,
           timeouts,
           loggerFactory,
@@ -945,15 +950,5 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         _ <- sut.processor.handleTimeout(requestId, timeoutTs, decisionTime)
       } yield succeed
     }
-
-    "unique transaction id checked" should {
-      //TODO (i749)
-      "accept with empty pending set" in pending
-      "reject the same txid within 2 * max let offset" in pending
-      "accept the same txid within 2 * max let offset if the previous was rejected" in pending
-      "accept the same txid after 2 * max let offset" in pending
-      "accept different txid" in pending
-    }
   }
-
 }

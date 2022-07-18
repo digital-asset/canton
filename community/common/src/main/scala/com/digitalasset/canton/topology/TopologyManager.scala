@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.CantonTimestamp.now
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
@@ -21,14 +22,16 @@ import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   IncomingTopologyTransactionAuthorizationValidator,
   SequencedTime,
+  SnapshotAuthorizationValidator,
 }
 import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransactions,
   TopologyStore,
   TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
@@ -133,6 +136,80 @@ abstract class TopologyManager[E <: CantonError](
     } yield ()
   }
 
+  protected def keyRevocationDelegationIsNotDangerous(
+      transaction: SignedTopologyTransaction[TopologyChangeOp],
+      namespace: Namespace,
+      targetKey: SigningPublicKey,
+      force: Boolean,
+      removeFromCache: (
+          SnapshotAuthorizationValidator,
+          StoredTopologyTransactions[TopologyChangeOp],
+      ) => EitherT[Future, TopologyManagerError, Unit],
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] = {
+
+    lazy val unauthorizedTransaction: TopologyManagerError =
+      TopologyManagerError.UnauthorizedTransaction.Failure()
+
+    lazy val removingKeyWithDanglingTransactionsMustBeForcedError: TopologyManagerError =
+      TopologyManagerError.RemovingKeyWithDanglingTransactionsMustBeForced
+        .Failure(targetKey.fingerprint, targetKey.purpose)
+
+    val validatorSnap = new SnapshotAuthorizationValidator(now(), store, loggerFactory)
+
+    for {
+      // step1: check if transaction is authorized
+      authorized <- EitherT.right[TopologyManagerError](validatorSnap.authorizedBy(transaction))
+      _ <-
+        // not authorized
+        if (authorized.isEmpty)
+          EitherT.leftT[Future, Unit](unauthorizedTransaction: TopologyManagerError)
+        // authorized
+        else if (!force) {
+          for {
+            // step2: find transaction that is going to be removed
+            storedTxsToRemove <- EitherT.right[TopologyManagerError](
+              store.findStoredNoSignature(transaction.transaction.reverse)
+            )
+
+            // step3: remove namespace delegation transaction from cache store
+            _ = storedTxsToRemove.foreach { storedTxToRemove =>
+              {
+                val wrapStoredTx =
+                  new StoredTopologyTransactions[TopologyChangeOp](Seq(storedTxToRemove))
+                removeFromCache(validatorSnap, wrapStoredTx)
+              }
+            }
+
+            // step4: retrieve all transactions (possibly related with this namespace)
+            // TODO(i9809): this is risky for a big number of parties (i.e. 1M)
+            txs <- EitherT.right(
+              store.findPositiveTransactions(
+                CantonTimestamp.MaxValue,
+                asOfInclusive = true,
+                includeSecondary = true,
+                types = DomainTopologyTransactionType.all,
+                filterUid = None,
+                filterNamespace = Some(Seq(namespace)),
+              )
+            )
+
+            // step5: check if these transactions are still valid
+            _ <- txs.combine.result.traverse { txToCheck =>
+              EitherT(
+                validatorSnap
+                  .authorizedBy(txToCheck.transaction)
+                  .map(res =>
+                    Either
+                      .cond(res.nonEmpty, (), removingKeyWithDanglingTransactionsMustBeForcedError)
+                  )
+              )
+            }
+          } yield ()
+        } else
+          EitherT.rightT[Future, TopologyManagerError](())
+    } yield ()
+  }
+
   protected def transactionIsNotDangerous(
       transaction: SignedTopologyTransaction[TopologyChangeOp],
       force: Boolean,
@@ -145,7 +222,32 @@ abstract class TopologyManager[E <: CantonError](
       transaction.transaction.element.mapping match {
         case OwnerToKeyMapping(owner, key) =>
           keyRevocationIsNotDangerous(owner, key, transaction.transaction.element.id, force)
-        // TODO(i1031) check certificate revocations for creating dangling states
+        case NamespaceDelegation(namespace, targetKey, _) =>
+          keyRevocationDelegationIsNotDangerous(
+            transaction,
+            namespace,
+            targetKey,
+            force,
+            { (validatorSnap, transaction) =>
+              EitherT.right[TopologyManagerError](
+                validatorSnap
+                  .removeNamespaceDelegationFromCache(namespace, transaction)
+              )
+            },
+          )
+        case IdentifierDelegation(uniqueKey, targetKey) =>
+          keyRevocationDelegationIsNotDangerous(
+            transaction,
+            uniqueKey.namespace,
+            targetKey,
+            force,
+            { (validatorSnap, transaction) =>
+              EitherT.right[TopologyManagerError](
+                validatorSnap
+                  .removeIdentifierDelegationFromCache(uniqueKey, transaction)
+              )
+            },
+          )
         case _ => EitherT.rightT(())
       }
     }
@@ -252,7 +354,6 @@ abstract class TopologyManager[E <: CantonError](
       },
       "authorize transaction",
     )
-
   }
 
   protected def signingKeyForTransactionF(
@@ -736,7 +837,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
-    """This error indicates that the attempted key removal would remove the last valid key of the given entity, making the node unusuable."""
+    """This error indicates that the attempted key removal would remove the last valid key of the given entity, making the node unusable."""
   )
   @Resolution(
     """Add the `force = true` flag to your command if you are really sure what you are doing."""
@@ -750,6 +851,26 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Topology transaction would remove the last key of the given entity"
+        )
+        with TopologyManagerError
+  }
+
+  @Explanation(
+    """This error indicates that the attempted key removal would create dangling topology transactions, making the node unusable."""
+  )
+  @Resolution(
+    """Add the `force = true` flag to your command if you are really sure what you are doing."""
+  )
+  object RemovingKeyWithDanglingTransactionsMustBeForced
+      extends ErrorCode(
+        id = "REMOVING_KEY_DANGLING_TRANSACTIONS_MUST_BE_FORCED",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class Failure(key: Fingerprint, purpose: KeyPurpose)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "Topology transaction would remove a key that creates conflicts and dangling transactions"
         )
         with TopologyManagerError
   }

@@ -71,7 +71,7 @@ If a parameter value starts with a `@` prefix then its value will be read from t
  * `topologyName`: name used for shared infrastructure which can be used to run one or more nodes
  * `cantonVersion`: version of canton to download and run on the virtual machine.
    Available versions can be found on the [Github Releases page](https://github.com/digital-asset/canton/releases).
- * `cantonConfig`: `@` then the file path of the [canton configuration](https://www.canton.io/docs/stable/user-manual/usermanual/static_conf.html) you want to use
+ * `cantonConfig`: `@` then the file path of the [canton configuration](https://docs.daml.com/canton/usermanual/static_conf.html) you want to use
    * Example configurations are provided in `canton-domain.conf` and `canton-participant.conf` to deploy a domain or participant respectively
    * You are also able to use your own configuration file.
      Currently only one node is supported as only a single database is provisioned.
@@ -130,7 +130,7 @@ ssh -i path-to-private-key -NL 8080:127.0.0.1:8080 canton-admin@your-public-ip-a
 This can now be used like a local port, for instance to connect a local participant to a domain hosted in azure use the canton console commands:
 
 ```scala
-nodes.local start
+nodes.local.start()
 
 
 participant1.domains.connect("azure", "http://localhost:8080")

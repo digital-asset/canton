@@ -1,6 +1,6 @@
 
 // start all local instances defined in the configuration file
-nodes.local start
+nodes.local.start()
 
 // Connect participant1 to mydomain using the connect macro.
 // The connect macro will inspect the domain configuration to find the correct URL and Port.

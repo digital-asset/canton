@@ -61,6 +61,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
+import io.grpc.CallOptions
 import io.opentelemetry.api.trace.Tracer
 
 import java.nio.file.Path
@@ -1278,30 +1279,52 @@ object SequencerClient {
       private def grpcTransport(connection: GrpcSequencerConnection, member: Member)(implicit
           executionContext: ExecutionContextExecutor
       ): Either[String, SequencerClientTransport] = {
-        val channelBuilder = ClientChannelBuilder(loggerFactory)
-        val channel =
+        def createChannel(conn: GrpcSequencerConnection) = {
+          val channelBuilder = ClientChannelBuilder(loggerFactory)
           GrpcSequencerChannelBuilder(
             channelBuilder,
-            connection,
+            conn,
             domainParameters.maxInboundMessageSize,
             traceContextPropagation,
             config.keepAliveClient,
           )
-        val auth =
+        }
+        val channel = createChannel(connection)
+        val auth = {
+          val channelPerEndpoint = connection.endpoints.map { endpoint =>
+            val subConnection = connection.copy(endpoints = NonEmpty.mk(Seq, endpoint))
+            endpoint -> createChannel(subConnection)
+          }.toMap
           new GrpcSequencerClientAuth(
             domainId,
             member,
             crypto,
             agreedAgreementId,
-            channel,
+            channelPerEndpoint,
             supportedProtocolVersions,
             config.authToken,
             clock,
             processingTimeout,
             loggerFactory,
           )
+        }
+        val callOptions = {
+          // the wait-for-ready call option is added for when round-robin-ing through connections
+          // so that if one of them gets closed, we try the next one instead of unnecessarily failing.
+          // wait-for-ready semantics: https://github.com/grpc/grpc/blob/master/doc/wait-for-ready.md
+          // this is safe for non-idempotent RPCs.
+          if (connection.endpoints.length > 1) CallOptions.DEFAULT.withWaitForReady()
+          else CallOptions.DEFAULT
+        }
         Right(
-          new GrpcSequencerClientTransport(channel, auth, metrics, processingTimeout, loggerFactory)
+          new GrpcSequencerClientTransport(
+            channel,
+            callOptions,
+            auth,
+            metrics,
+            processingTimeout,
+            loggerFactory,
+          )
         )
       }
     }

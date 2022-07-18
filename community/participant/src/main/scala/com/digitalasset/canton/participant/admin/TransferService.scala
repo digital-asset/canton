@@ -12,7 +12,12 @@ import com.digitalasset.canton.participant.protocol.transfer.{
 import com.digitalasset.canton.participant.store.TransferLookup
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  SourceProtocolVersion,
+  TargetProtocolVersion,
+}
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -21,7 +26,9 @@ class TransferService(
     domainIdOfAlias: DomainAlias => Option[DomainId],
     submissionHandles: DomainId => Option[TransferSubmissionHandle],
     transferLookups: DomainId => Option[TransferLookup],
+    protocolVersionFor: Traced[DomainId] => Future[Option[ProtocolVersion]],
 )(implicit ec: ExecutionContext) {
+
   private[admin] def transferOut(
       submittingParty: LfPartyId,
       contractId: LfContractId,
@@ -31,8 +38,13 @@ class TransferService(
     for {
       submissionHandle <- EitherT.fromEither[Future](submissionHandleFor(sourceDomain))
       targetDomainId <- EitherT.fromEither[Future](domainIdFor(targetDomain))
+
+      targetProtocolVersion <- protocolVersionFor(targetDomainId, "target").map(
+        TargetProtocolVersion(_)
+      )
+
       transferId <- submissionHandle
-        .submitTransferOut(submittingParty, contractId, targetDomainId)
+        .submitTransferOut(submittingParty, contractId, targetDomainId, targetProtocolVersion)
         .biflatMap(
           error => EitherT.leftT[Future, TransferId](error.toString),
           result =>
@@ -48,12 +60,25 @@ class TransferService(
         )
     } yield transferId
 
+  private def protocolVersionFor(domain: DomainId, kind: String)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, ProtocolVersion] = EitherT(
+    protocolVersionFor(Traced(domain)).map(
+      _.toRight(s"Unable to get protocol version of $kind domain")
+    )
+  )
+
   def transferIn(submittingParty: LfPartyId, targetDomain: DomainAlias, transferId: TransferId)(
       implicit traceContext: TraceContext
   ): EitherT[Future, String, Unit] =
     for {
       submisisonHandle <- EitherT.fromEither[Future](submissionHandleFor(targetDomain))
-      result <- submisisonHandle.submitTransferIn(submittingParty, transferId).leftMap(_.toString)
+      sourceProtocolVersion <- protocolVersionFor(transferId.sourceDomain, "source").map(
+        SourceProtocolVersion(_)
+      )
+      result <- submisisonHandle
+        .submitTransferIn(submittingParty, transferId, sourceProtocolVersion)
+        .leftMap(_.toString)
       _ <- EitherT(
         result.transferInCompletionF.map(status =>
           Either.cond(

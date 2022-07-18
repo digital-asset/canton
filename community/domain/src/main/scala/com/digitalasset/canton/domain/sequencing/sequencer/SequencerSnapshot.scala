@@ -84,3 +84,8 @@ object SequencerSnapshot extends HasVersionedMessageCompanion[SequencerSnapshot]
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
     )
 }
+
+case class SequencerInitialState(
+    snapshot: SequencerSnapshot,
+    latestTopologyClientTimestamp: Option[CantonTimestamp],
+)

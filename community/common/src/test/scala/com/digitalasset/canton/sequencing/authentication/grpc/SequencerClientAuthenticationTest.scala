@@ -5,12 +5,15 @@ package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
 import cats.implicits._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
@@ -79,8 +82,9 @@ class SequencerClientAuthenticationTest extends FixtureAsyncWordSpec with BaseTe
         logger,
         "auth-test-client-channel",
       )
+    val managers = NonEmpty.mk(Seq, Endpoint("localhost", Port.tryCreate(10)) -> tokenManager).toMap
     val clientAuthentication =
-      new SequencerClientTokenAuthentication(domainId, participantId, tokenManager, loggerFactory)
+      new SequencerClientTokenAuthentication(domainId, participantId, managers, loggerFactory)
     val client = HelloServiceGrpc
       .stub(clientChannel.channel)
       .withInterceptors(clientAuthentication.reauthorizationInterceptor)

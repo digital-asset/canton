@@ -118,8 +118,10 @@ trait TransactionAuthorizationValidator {
       new AuthorizationGraph(namespace, extraDebugInfo = false, loggerFactory),
     )
 
-  protected def loadAuthorizationGraphs(timestamp: CantonTimestamp, namespaces: Set[Namespace])(
-      implicit
+  protected def loadAuthorizationGraphs(
+      timestamp: CantonTimestamp,
+      namespaces: Set[Namespace],
+  )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): Future[Unit] = {

@@ -18,8 +18,8 @@ import com.digitalasset.canton.domain.config.TopologyConfig
 import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.InvalidOrFaultyOnboardingRequest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponse.State._
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State._
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -39,8 +39,8 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
+import org.scalatest.{Assertion, FutureOutcome}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
@@ -137,6 +137,7 @@ class DomainTopologyManagerRequestServiceTest
           loggerFactory = loggerFactory,
         ),
         factory.cryptoApi.crypto.pureCrypto,
+        testedProtocolVersion,
         loggerFactory,
       )
     }
@@ -157,10 +158,10 @@ class DomainTopologyManagerRequestServiceTest
    */
 
   private def all(
-      res: Seq[RegisterTopologyTransactionResponse.Result],
+      res: Seq[RegisterTopologyTransactionResponseResult],
       len: Long,
-      status: RegisterTopologyTransactionResponse.State,
-  ) = {
+      status: RegisterTopologyTransactionResponseResult.State,
+  ): Assertion = {
     res should have length len
     forAll(res.map(_.state)) {
       case `status` => succeed

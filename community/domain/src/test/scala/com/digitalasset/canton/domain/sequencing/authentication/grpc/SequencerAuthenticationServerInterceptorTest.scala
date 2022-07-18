@@ -4,7 +4,9 @@
 package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
@@ -14,6 +16,7 @@ import com.digitalasset.canton.domain.sequencing.authentication.{
   MemberAuthenticationService,
   StoredAuthenticationToken,
 }
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.sequencing.authentication.grpc.{
   AuthenticationTokenManagerTest,
   AuthenticationTokenWithExpiry,
@@ -129,11 +132,18 @@ class SequencerAuthenticationServerInterceptorTest
       }
 
     "succeed request if participant use interceptor with correct token information" in {
+      val obtainToken = NonEmpty
+        .mk(
+          Seq,
+          Endpoint("localhost", Port.tryCreate(10)) -> (() => EitherT.pure[Future, Status](token)),
+        )
+        .toMap
+
       val clientAuthentication =
         SequencerClientTokenAuthentication(
           domainId,
           participantId,
-          () => EitherT.pure[Future, Status](token),
+          obtainToken,
           isClosed = false,
           AuthenticationTokenManagerConfig(),
           AuthenticationTokenManagerTest.mockClock,
@@ -157,11 +167,21 @@ class SequencerAuthenticationServerInterceptorTest
     }
 
     "fail request if participant use interceptor with incorrect token information" in {
+      val obtainToken = NonEmpty
+        .mk(
+          Seq,
+          Endpoint("localhost", Port.tryCreate(10)) -> (() =>
+            EitherT
+              .pure[Future, Status](incorrectToken)
+          ),
+        )
+        .toMap
+
       val clientAuthentication =
         SequencerClientTokenAuthentication(
           domainId,
           participantId,
-          () => EitherT.pure[Future, Status](incorrectToken),
+          obtainToken,
           isClosed = false,
           AuthenticationTokenManagerConfig(),
           AuthenticationTokenManagerTest.mockClock,

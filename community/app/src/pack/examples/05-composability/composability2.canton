@@ -30,7 +30,7 @@ val Painter = participant3.parties.enable("Painter", waitForDomain = DomainChoic
 
 // enable the house owner on participant 5 and the painter on participant 4
 // as explained in the identity management documentation at
-// https://www.canton.io/docs/stable/user-manual/usermanual/identity_management.html#party-on-two-nodes
+// https://docs.daml.com/canton/usermanual/identity_management.html#party-on-two-nodes
 import com.digitalasset.canton.console.ParticipantReference
 def authorizePartyParticipant(partyId: PartyId, createdAt: ParticipantReference, to: ParticipantReference): Unit = {
   val createdAtP = createdAt.id

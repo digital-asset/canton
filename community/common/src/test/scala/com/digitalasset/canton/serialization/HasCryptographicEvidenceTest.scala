@@ -4,7 +4,6 @@
 package com.digitalasset.canton.serialization
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.version.{
   HasProtocolVersionedSerializerCompanion,
   ProtobufVersion,
@@ -117,11 +116,8 @@ object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[Memoi
   )
 
   private val defaultProtocolVersionRepresentative = protocolVersionRepresentativeFor(
-    TestDomainParameters.defaultStatic.protocolVersion
+    BaseTest.testedProtocolVersion
   )
-
-  private[this] def apply(b: Byte)(deserializedFrom: Option[ByteString]): MemoizedEvidenceSUT =
-    throw new UnsupportedOperationException("Use the public apply method instead")
 
   def apply(b: Byte): MemoizedEvidenceSUT = new MemoizedEvidenceSUT(b)(
     defaultProtocolVersionRepresentative,

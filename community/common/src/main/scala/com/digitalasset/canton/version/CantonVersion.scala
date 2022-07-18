@@ -25,6 +25,7 @@ import com.digitalasset.canton.version.ProtocolVersion.{
 }
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
+import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.annotation.tailrec
 import scala.util.Try
@@ -164,7 +165,7 @@ sealed trait CompanionTrait {
 }
 
 /** This class represent a release version.
-  * Please refer to the [[https://www.canton.io/docs/stable/user-manual/usermanual/versioning.html versioning documentation]]
+  * Please refer to the [[https://docs.daml.com/canton/usermanual/versioning.html versioning documentation]]
   * in the user manual for details.
   */
 final case class ReleaseVersion(
@@ -223,7 +224,7 @@ object ReleaseVersion extends CompanionTrait {
   * If two Canton nodes have a protocol version which is compatible, they can transact and interact with each-other (using one of the protocol versions they share).
   * Two Canton nodes coming from the same release are always guaranteed to be compatible in such a way.
   *
-  * For more details, please refer to the [[https://www.canton.io/docs/stable/user-manual/usermanual/versioning.html versioning documentation]]
+  * For more details, please refer to the [[https://docs.daml.com/canton/usermanual/versioning.html versioning documentation]]
   * in the user manual.
   */
 // Internal only: for the full background, please refer to the following [design doc](https://docs.google.com/document/d/1kDiN-373bZOWploDrtOJ69m_0nKFu_23RNzmEXQOFc8/edit?usp=sharing).
@@ -239,7 +240,24 @@ final case class ProtocolVersion(
 
 /** When dealing with transfer, allow to be more precise with respect to the domain */
 case class SourceProtocolVersion(v: ProtocolVersion) extends AnyVal
+
+object SourceProtocolVersion {
+  implicit val getResultSourceProtocolVersion: GetResult[SourceProtocolVersion] =
+    GetResult[ProtocolVersion].andThen(SourceProtocolVersion(_))
+
+  implicit val setParameterSourceProtocolVersion: SetParameter[SourceProtocolVersion] =
+    (pv: SourceProtocolVersion, pp: PositionedParameters) => pp >> pv.v
+}
+
 case class TargetProtocolVersion(v: ProtocolVersion) extends AnyVal
+
+object TargetProtocolVersion {
+  implicit val getResultTargetProtocolVersion: GetResult[TargetProtocolVersion] =
+    GetResult[ProtocolVersion].andThen(TargetProtocolVersion(_))
+
+  implicit val setParameterTargetProtocolVersion: SetParameter[TargetProtocolVersion] =
+    (pv: TargetProtocolVersion, pp: PositionedParameters) => pp >> pv.v
+}
 
 object ProtocolVersion extends CompanionTrait {
 
@@ -252,6 +270,18 @@ object ProtocolVersion extends CompanionTrait {
     }
   }
 
+  implicit val getResultProtocolVersion: GetResult[ProtocolVersion] =
+    GetResult(r => create(r.nextInt()))
+
+  implicit val setParameterProtocolVersion: SetParameter[ProtocolVersion] =
+    (pv: ProtocolVersion, pp: PositionedParameters) => {
+      val i =
+        if (pv == ProtocolVersion.unstable_development) 0
+        else pv.major
+
+      pp >> i
+    }
+
   val all: List[ProtocolVersion] =
     BuildInfo.protocolVersions.map(ProtocolVersion.tryCreate).toList
 
@@ -261,6 +291,17 @@ object ProtocolVersion extends CompanionTrait {
     all.maxOption.getOrElse(
       sys.error("Release needs to support at least one protocol version")
     )
+
+  def lastStableVersions2 = {
+    val List(beforeLastStableProtocolVersion, lastStableProtocolVersion) =
+      ProtocolVersion.all.sorted.takeRight(2): @unchecked
+
+    (beforeLastStableProtocolVersion, lastStableProtocolVersion)
+  }
+
+  private def create(i: Int) = if (i == 0)
+    ProtocolVersion.unstable_development
+  else ProtocolVersion(i, 0, 0)
 
   def create(rawVersion: String): Either[String, ProtocolVersion] =
     createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>

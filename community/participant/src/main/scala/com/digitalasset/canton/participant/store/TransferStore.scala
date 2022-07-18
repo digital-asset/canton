@@ -187,7 +187,7 @@ trait TransferLookup {
     * and ties are broken with lexicographic ordering on domain IDs.
     *
     * The ordering here has been chosen to allow a participant to fetch all the pending transfers. The ordering has to
-    * be consistent accross calls and uniquely identify a pending transfer, but is otherwise arbitary.
+    * be consistent accross calls and uniquely identify a pending transfer, but is otherwise arbitrary.
     *
     * @param requestAfter optionally, specify a strict lower bound for the transfers returned, according to the
     *                     (request timestamp, source domain ID) ordering

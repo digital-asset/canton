@@ -55,7 +55,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.SourceProtocolVersion
+import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -241,6 +241,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           SourceProtocolVersion(testedProtocolVersion),
           sourceMediator,
           targetDomain,
+          TargetProtocolVersion(testedProtocolVersion),
           sourceIps,
           targetIps,
           logger,
@@ -378,6 +379,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
               sourceMediator = sourceMediator,
               targetDomain = targetDomain,
+              targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
               targetTimeProof = timeEvent,
             ),
             Set(submittingParticipant, participant1, participant2, participant3, participant4),
@@ -401,6 +403,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
               sourceProtocolVersion = SourceProtocolVersion(testedProtocolVersion),
               sourceMediator = sourceMediator,
               targetDomain = targetDomain,
+              targetProtocolVersion = TargetProtocolVersion(testedProtocolVersion),
               targetTimeProof = timeEvent,
             ),
             Set(submittingParticipant, participant1),
@@ -425,7 +428,12 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       )
       val transactionId = ExampleTransactionFactory.transactionId(1)
       val submissionParam =
-        TransferOutProcessingSteps.SubmissionParam(party1, contractId, targetDomain)
+        TransferOutProcessingSteps.SubmissionParam(
+          party1,
+          contractId,
+          targetDomain,
+          TargetProtocolVersion(testedProtocolVersion),
+        )
 
       for {
         _ <- state.storedContractManager.addPendingContracts(
@@ -452,8 +460,12 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         contractInstance = ExampleTransactionFactory.contractInstance(),
       )
       val transactionId = ExampleTransactionFactory.transactionId(1)
-      val submissionParam =
-        TransferOutProcessingSteps.SubmissionParam(party1, contractId, sourceDomain)
+      val submissionParam = TransferOutProcessingSteps.SubmissionParam(
+        party1,
+        contractId,
+        sourceDomain,
+        TargetProtocolVersion(testedProtocolVersion),
+      )
 
       for {
         _ <- state.storedContractManager.addPendingContracts(
@@ -486,6 +498,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       SourceProtocolVersion(testedProtocolVersion),
       sourceMediator,
       targetDomain,
+      TargetProtocolVersion(testedProtocolVersion),
       timeEvent,
     )
     val outTree = makeFullTransferOutTree(outRequest)
@@ -565,6 +578,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         SourceProtocolVersion(testedProtocolVersion),
         sourceMediator,
         targetDomain,
+        TargetProtocolVersion(testedProtocolVersion),
         timeEvent,
       )
 

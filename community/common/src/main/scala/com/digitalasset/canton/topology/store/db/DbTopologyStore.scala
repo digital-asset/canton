@@ -651,18 +651,29 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     queryForTransactions(storeId, query4)
   }
 
+  private def findStoredSql(transaction: TopologyTransaction[TopologyChangeOp])(implicit
+      traceContext: TraceContext
+  ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
+    queryForTransactions(
+      transactionStoreIdName,
+      sql"AND" ++ pathQuery(
+        transaction.element.uniquePath
+      ) ++ sql" AND operation = ${transaction.op}",
+    )
+
   override def findStored(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit
       traceContext: TraceContext
   ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
-    queryForTransactions(
-      transactionStoreIdName,
-      sql"AND" ++ pathQuery(
-        transaction.uniquePath
-      ) ++ sql" AND operation = ${transaction.operation}",
-    )
-      .map(_.result.headOption)
+    findStoredSql(transaction.transaction).map(_.result.headOption)
+
+  override def findStoredNoSignature(
+      transaction: TopologyTransaction[TopologyChangeOp]
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
+    findStoredSql(transaction).map(_.result)
 
   /** query interface used by [[com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot]] */
   override def findPositiveTransactions(

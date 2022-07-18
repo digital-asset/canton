@@ -28,7 +28,6 @@ import com.digitalasset.canton.protocol.{
   RequestId,
   RequestProcessor,
   RootHash,
-  TestDomainParameters,
   TransferId,
   ViewHash,
   v0 => protocolv0,
@@ -1189,7 +1188,7 @@ private[protocol] object MessageDispatcherTest {
   ) extends RegularMediatorResult {
     def representativeProtocolVersion: RepresentativeProtocolVersion[TestRegularMediatorResult] =
       TestRegularMediatorResult.protocolVersionRepresentativeFor(
-        TestDomainParameters.defaultStatic.protocolVersion
+        BaseTest.testedProtocolVersion
       )
 
     override def toProtoSomeSignedProtocolMessage

@@ -22,7 +22,7 @@ trait SequencerFactory {
       clock: Clock,
       topologyClientMember: Member,
       domainSyncCryptoApi: DomainSyncCryptoClient,
-      snapshot: Option[SequencerSnapshot],
+      initialState: Option[SequencerInitialState],
       localNodeParameters: LocalNodeParameters,
       protocolVersion: ProtocolVersion,
   )(implicit ec: ExecutionContext, tracer: Tracer, actorMaterializer: Materializer): Sequencer
@@ -40,7 +40,8 @@ object SequencerFactory {
           clock: Clock,
           topologyClientMember: Member,
           domainSyncCryptoApi: DomainSyncCryptoClient,
-          snapshot: Option[SequencerSnapshot],
+          // TODO(#8110) consider whether we can make use of this parameter
+          initialState: Option[SequencerInitialState],
           localNodeParameters: LocalNodeParameters,
           sequencerProtocolVersion: ProtocolVersion,
       )(implicit

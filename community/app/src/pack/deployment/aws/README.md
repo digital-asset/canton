@@ -17,7 +17,7 @@ To allow generating configuration and creating databases based on values from th
 ## Limitations
 
  * All Canton APIs are exposed publicly without authentication.
-   For any moderately real use either the load balancer should limit access or [client authentication should be enabled](https://www.canton.io/docs/stable/user-manual/usermanual/static_conf.html#api-configuration).
+   For any moderately real use either the load balancer should limit access or [client authentication should be enabled](https://docs.daml.com/canton/usermanual/apis.html).
 
 
 ## Deployment

@@ -111,7 +111,7 @@ class SequencerRuntime(
     storage: Storage,
     clock: Clock,
     auditLogger: TracedLogger,
-    snapshot: Option[SequencerSnapshot],
+    initialState: Option[SequencerInitialState],
     authenticationConfig: SequencerAuthenticationConfig,
     additionalAdminServiceFactory: Sequencer => Option[ServerServiceDefinition],
     registerSequencerMember: Boolean,
@@ -146,7 +146,7 @@ class SequencerRuntime(
       clock,
       topologyClientMember,
       syncCrypto,
-      snapshot,
+      initialState,
       localNodeParameters,
       staticDomainParameters.protocolVersion,
     )
@@ -240,7 +240,7 @@ class SequencerRuntime(
           replayEnabled = false,
           localNodeParameters.loggingConfig,
           loggerFactory,
-          snapshot.flatMap(_.heads.get(sequencerId).map(_ + 1)),
+          initialState.flatMap(_.snapshot.heads.get(sequencerId).map(_ + 1)),
         )
         val timeTracker = DomainTimeTracker(timeTrackerConfig, clock, client, loggerFactory)
 

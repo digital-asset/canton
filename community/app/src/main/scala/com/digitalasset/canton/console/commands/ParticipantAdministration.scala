@@ -1203,9 +1203,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     )
     @Help.Description("""Domains can provide many endpoints to connect to for availability and performance benefits.
         This version of connect allows specifying multiple endpoints for a single domain connection:
-           connect_ha("mydomain", Seq(sequencer1, sequencer2))
+           connect_multi("mydomain", Seq(sequencer1, sequencer2))
            or:
-           connect_ha("mydomain", Seq("https://host1.mydomain.net", "https://host2.mydomain.net", "https://host3.mydomain.net"))
+           connect_multi("mydomain", Seq("https://host1.mydomain.net", "https://host2.mydomain.net", "https://host3.mydomain.net"))
         
         To create a more advanced connection config use domains.toConfig with a single host,
         |then use config.addConnection to add additional connections before connecting:
@@ -1218,7 +1218,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           connections - The sequencer connection definitions (can be an URL) to connect to this domain. I.e. https://url:port
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.           
         """)
-    def connect_ha(
+    def connect_multi(
         domainAlias: DomainAlias,
         connections: Seq[SequencerConnection],
         synchronize: Option[TimeoutDuration] = Some(

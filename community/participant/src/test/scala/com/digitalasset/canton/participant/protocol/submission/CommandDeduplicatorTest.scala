@@ -44,13 +44,14 @@ class CommandDeduplicatorTest extends AsyncWordSpec with BaseTest {
 
   lazy val submissionId1 = DefaultDamlValues.submissionId().some
   lazy val event1 = TransactionAccepted(
-    DefaultDamlValues.completionInfo(List.empty).some,
-    DefaultDamlValues.transactionMeta(),
-    DefaultDamlValues.emptyCommittedTransaction,
-    DefaultDamlValues.lfTransactionId(1),
-    CantonTimestamp.Epoch.toLf,
-    List.empty,
-    None,
+    optCompletionInfo = DefaultDamlValues.completionInfo(List.empty).some,
+    transactionMeta = DefaultDamlValues.transactionMeta(),
+    transaction = DefaultDamlValues.emptyCommittedTransaction,
+    transactionId = DefaultDamlValues.lfTransactionId(1),
+    recordTime = CantonTimestamp.Epoch.toLf,
+    divulgedContracts = List.empty,
+    blindingInfo = None,
+    contractMetadata = Map(), // TODO(#9795) wire proper value
   )
   lazy val changeId1 = event1.optCompletionInfo.value.changeId
   lazy val changeId1Hash = ChangeIdHash(changeId1)

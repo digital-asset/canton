@@ -5,7 +5,9 @@ package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
 import cats.implicits._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
@@ -16,6 +18,7 @@ import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
 import io.grpc._
+import io.grpc.internal.GrpcAttributes
 import io.grpc.stub.AbstractStub
 
 import java.util.concurrent.Executor
@@ -28,7 +31,7 @@ import scala.util.control.NonFatal
 private[grpc] class SequencerClientTokenAuthentication(
     domainId: DomainId,
     member: AuthenticatedMember,
-    tokenManager: AuthenticationTokenManager,
+    tokenManagerPerEndpoint: NonEmpty[Map[Endpoint, AuthenticationTokenManager]],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends SequencerClientAuthentication
@@ -38,6 +41,11 @@ private[grpc] class SequencerClientTokenAuthentication(
   def apply[S <: AbstractStub[S]](client: S): S =
     client.withCallCredentials(callCredentials).withInterceptors(reauthorizationInterceptor)
 
+  private def getTokenManager(maybeEndpoint: Option[Endpoint]) = (for {
+    endpoint <- maybeEndpoint
+    tokenManager <- tokenManagerPerEndpoint.get(endpoint)
+  } yield tokenManager).getOrElse(tokenManagerPerEndpoint.head1._2)
+
   /** Asks token manager for the current auth token and applies it to outgoing requests */
   @VisibleForTesting
   private[grpc] val callCredentials: CallCredentials = new CallCredentials {
@@ -45,7 +53,15 @@ private[grpc] class SequencerClientTokenAuthentication(
         requestInfo: CallCredentials.RequestInfo,
         appExecutor: Executor,
         applier: CallCredentials.MetadataApplier,
-    ): Unit =
+    ): Unit = {
+      val maybeEndpoint = for {
+        clientEagAttrs <- Option(
+          requestInfo.getTransportAttrs.get(GrpcAttributes.ATTR_CLIENT_EAG_ATTRS)
+        )
+        endpoint <- Option(clientEagAttrs.get(Endpoint.ATTR_ENDPOINT))
+      } yield endpoint
+      val tokenManager = getTokenManager(maybeEndpoint)
+
       tokenManager.getToken
         .leftMap(err =>
           Status.PERMISSION_DENIED.withDescription(s"Authentication token refresh error: $err")
@@ -69,8 +85,9 @@ private[grpc] class SequencerClientTokenAuthentication(
         }
         .foreach {
           case Left(errorStatus) => applier.fail(errorStatus)
-          case Right(token) => applier.apply(generateMetadata(token))
+          case Right(token) => applier.apply(generateMetadata(token, maybeEndpoint))
         }
+    }
 
     override def thisUsesUnstableApi(): Unit = {
       // yes, we know - cheers grpc
@@ -106,6 +123,9 @@ private[grpc] class SequencerClientTokenAuthentication(
           extends SimpleForwardingClientCallListener[RespT](responseListener) {
         override def onClose(status: Status, trailers: Metadata): Unit = {
           if (status.getCode == Status.UNAUTHENTICATED.getCode) {
+            val tokenManager = Option(trailers.get(Constant.ENDPOINT_METADATA_KEY))
+              .flatMap(tokenManagerPerEndpoint.get)
+              .getOrElse(tokenManagerPerEndpoint.head1._2)
             Option(trailers.get(Constant.AUTH_TOKEN_METADATA_KEY))
               .foreach(tokenManager.invalidateToken)
           }
@@ -117,11 +137,15 @@ private[grpc] class SequencerClientTokenAuthentication(
     }
   }
 
-  private def generateMetadata(token: AuthenticationToken): Metadata = {
+  private def generateMetadata(
+      token: AuthenticationToken,
+      maybeEndpoint: Option[Endpoint],
+  ): Metadata = {
     val metadata = new Metadata()
     metadata.put(Constant.MEMBER_ID_METADATA_KEY, member.toProtoPrimitive)
     metadata.put(Constant.AUTH_TOKEN_METADATA_KEY, token)
     metadata.put(Constant.DOMAIN_ID_METADATA_KEY, domainId.toProtoPrimitive)
+    maybeEndpoint.foreach(endpoint => metadata.put(Constant.ENDPOINT_METADATA_KEY, endpoint))
     metadata
   }
 }
@@ -130,24 +154,30 @@ object SequencerClientTokenAuthentication {
   def apply(
       domainId: DomainId,
       authenticatedMember: AuthenticatedMember,
-      obtainToken: () => EitherT[Future, Status, AuthenticationTokenWithExpiry],
+      obtainTokenPerEndpoint: NonEmpty[
+        Map[Endpoint, () => EitherT[Future, Status, AuthenticationTokenWithExpiry]]
+      ],
       isClosed: => Boolean,
       tokenManagerConfig: AuthenticationTokenManagerConfig,
       clock: Clock,
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): SequencerClientAuthentication =
-    new SequencerClientTokenAuthentication(
-      domainId,
-      authenticatedMember,
+  )(implicit executionContext: ExecutionContext): SequencerClientAuthentication = {
+    val tokenManagerPerEndpoint = obtainTokenPerEndpoint.transform { case (_, obtainToken) =>
       new AuthenticationTokenManager(
         obtainToken,
         isClosed,
         tokenManagerConfig,
         clock,
         loggerFactory,
-      ),
+      )
+    }
+    new SequencerClientTokenAuthentication(
+      domainId,
+      authenticatedMember,
+      tokenManagerPerEndpoint,
       loggerFactory,
     )
+  }
 
 }
 
