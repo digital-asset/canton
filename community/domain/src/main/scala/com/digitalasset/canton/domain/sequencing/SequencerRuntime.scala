@@ -42,6 +42,7 @@ import com.digitalasset.canton.domain.topology.client.DomainInitializationObserv
 import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client._
@@ -70,6 +71,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
+import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
 
@@ -150,6 +152,14 @@ class SequencerRuntime(
       localNodeParameters,
       staticDomainParameters.protocolVersion,
     )
+
+  private val healthManager = new io.grpc.protobuf.services.HealthStatusManager()
+  sequencer.onHealthChange(status =>
+    healthManager.setStatus(
+      CantonGrpcUtil.sequencerHealthCheckServiceName,
+      if (status.isActive) ServingStatus.SERVING else ServingStatus.NOT_SERVING,
+    )
+  )(TraceContext.empty)
 
   private val keyCheckF =
     syncCrypto
@@ -457,6 +467,8 @@ class SequencerRuntime(
         interceptors,
       )
     )
+
+    register(healthManager.getHealthService.bindService())
   }
 
   override def onClosed(): Unit =

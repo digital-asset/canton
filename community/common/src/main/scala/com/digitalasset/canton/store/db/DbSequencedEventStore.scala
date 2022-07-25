@@ -124,7 +124,7 @@ class DbSequencedEventStore(
 
   private def bulkInsertQuery(
       events: Seq[PossiblyIgnoredSerializedEvent]
-  )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Unit, NoStream, Effect.All] = {
+  )(implicit traceContext: TraceContext): DBIOAction[Unit, NoStream, Effect.All] = {
     val insertSql = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
         """merge /*+ INDEX ( sequenced_events ( ts, client ) ) */ 

@@ -4,19 +4,27 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.metrics.MetricHandle.GaugeM
+import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
+import com.digitalasset.canton.topology.{MediatorId, Member}
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
+import io.functionmeta.functionFullName
+import slick.jdbc.{GetResult, SetParameter}
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ConcurrentNavigableMap, ConcurrentSkipListMap}
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
 trait MediatorDeduplicationStore extends NamedLogging {
@@ -33,10 +41,21 @@ trait MediatorDeduplicationStore extends NamedLogging {
 
   /** Clients must call this method before any other method.
     *
-    * The method populates in-memory caches and
-    * deletes all data with `timestamp` greater than or equal to `deleteFromInclusive`.
+    * @param firstEventTs the timestamp used to subscribe to the sequencer, i.e.,
+    *   all data with a requestTime greater than or equal to `firstEventTs` will be deleted so that
+    *   sequencer events can be replayed
     */
-  def initialize(deleteFromInclusive: CantonTimestamp)(implicit
+  def initialize(firstEventTs: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    require(!initialized.getAndSet(true), "The store most not be initialized more than once!")
+    doInitialize(firstEventTs)
+  }
+
+  /** Populate in-memory caches and
+    * delete all data with `requestTime` greater than or equal to `deleteFromInclusive`.
+    */
+  protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit]
 
@@ -68,7 +87,12 @@ trait MediatorDeduplicationStore extends NamedLogging {
 
     // Updating in-memory state synchronously, so that changes are effective when the method returns,
     // as promised in the scaladoc.
+    storeInMemory(data)
 
+    persist(data)
+  }
+
+  protected def storeInMemory(data: DeduplicationData): Unit = {
     dataByUuid.updateWith(data.uuid) {
       case None => Some(NonEmpty(Set, data))
       case Some(existing) => Some(existing.incl(data))
@@ -76,12 +100,12 @@ trait MediatorDeduplicationStore extends NamedLogging {
 
     // The map uuidByExpiration is updated second, so that a concurrent call to prune
     // won't leave behind orphaned data in dataByUuid.
-    uuidByExpiration.asScala.updateWith(data.expireAfter) {
-      case None => Some(NonEmpty(Set, data.uuid))
-      case Some(existing) => Some(existing.incl(data.uuid))
-    }
-
-    persist(data)
+    uuidByExpiration.asScala
+      .updateWith(data.expireAfter) {
+        case None => Some(NonEmpty(Set, data.uuid))
+        case Some(existing) => Some(existing.incl(data.uuid))
+      }
+      .discard[Option[NonEmpty[Set[UUID]]]]
   }
 
   /** Persist data to the database. */
@@ -133,29 +157,62 @@ trait MediatorDeduplicationStore extends NamedLogging {
 }
 
 object MediatorDeduplicationStore {
-  def apply(storage: Storage, loggerFactory: NamedLoggerFactory): MediatorDeduplicationStore =
-    new InMemoryMediatorDeduplicationStore(loggerFactory)
-  // TODO(i8900): support persistence
-  // TODO(i8900): make sure to implement batching
+  def apply(
+      mediatorId: MediatorId,
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+      batchAggregatorConfig: BatchAggregatorConfig =
+        BatchAggregatorConfig(), // TODO(i9798): make this configurable
+  )(implicit executionContext: ExecutionContext): MediatorDeduplicationStore = storage match {
+    case _: MemoryStorage => new InMemoryMediatorDeduplicationStore(loggerFactory)
+    case dbStorage: DbStorage =>
+      new DbMediatorDeduplicationStore(
+        mediatorId,
+        dbStorage,
+        timeouts,
+        batchAggregatorConfig,
+        loggerFactory,
+      )
+  }
 
   case class DeduplicationData(
       uuid: UUID,
       requestTime: CantonTimestamp,
       expireAfter: CantonTimestamp,
-  )
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[DeduplicationData] =
+      prettyOfClass(
+        param("uuid", _.uuid),
+        param("requestTime", _.requestTime),
+        param("expireAfter", _.expireAfter),
+      )
+  }
+
+  import DbStorage.Implicits._
+
+  implicit val setParameterDeduplicationData: SetParameter[DeduplicationData] = {
+    case (DeduplicationData(uuid, requestTime, expireAfter), pp) =>
+      pp >> uuid
+      pp >> requestTime
+      pp >> expireAfter
+  }
+
+  implicit val getResultDeduplicationData: GetResult[DeduplicationData] = GetResult { r =>
+    val uuid = r.<<[UUID]
+    val requestTime = r.<<[CantonTimestamp]
+    val expireAfter = r.<<[CantonTimestamp]
+    DeduplicationData(uuid, requestTime, expireAfter)
+  }
 }
 
 class InMemoryMediatorDeduplicationStore(override protected val loggerFactory: NamedLoggerFactory)
     extends MediatorDeduplicationStore
     with NamedLogging {
 
-  override def initialize(
-      deleteFromInclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    ErrorUtil.requireState(!initialized.get(), "The store most not be initialized more than once!")
-    initialized.set(true)
-    Future.unit
-  }
+  override protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = Future.unit
 
   override protected def persist(data: DeduplicationData)(implicit
       traceContext: TraceContext
@@ -164,4 +221,93 @@ class InMemoryMediatorDeduplicationStore(override protected val loggerFactory: N
   override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
+}
+
+class DbMediatorDeduplicationStore(
+    mediatorId: MediatorId,
+    override protected val storage: DbStorage,
+    override protected val timeouts: ProcessingTimeout,
+    batchAggregatorConfig: BatchAggregatorConfig,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext)
+    extends MediatorDeduplicationStore
+    with DbStore {
+
+  import Member.DbStorageImplicits._
+  import storage.api._
+
+  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+    storage.metrics.loadGaugeM("mediator-deduplication-store")
+
+  override protected def doInitialize(
+      deleteFromInclusive: CantonTimestamp
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+    for {
+      _ <- storage.update_(
+        sqlu"""delete from mediator_deduplication_store
+              where mediator_id = $mediatorId and request_time >= $deleteFromInclusive""",
+        functionFullName,
+      )
+
+      activeUuids <- storage.query(
+        sql"""select uuid, request_time, expire_after from mediator_deduplication_store
+             where mediator_id = $mediatorId and expire_after > $deleteFromInclusive"""
+          .as[DeduplicationData],
+        functionFullName,
+      )
+    } yield {
+      activeUuids.foreach(storeInMemory)
+    }
+  }
+
+  override protected def persist(data: DeduplicationData)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    batchAggregator.run(data)
+
+  private val batchAggregator = {
+    val processor: BatchAggregator.Processor[DeduplicationData, Unit] =
+      new BatchAggregator.Processor[DeduplicationData, Unit] {
+        override val kind: String = "deduplication data"
+        override def logger: TracedLogger = DbMediatorDeduplicationStore.this.logger
+
+        override def executeBatch(items: NonEmpty[Seq[Traced[DeduplicationData]]])(implicit
+            traceContext: TraceContext
+        ): Future[Seq[Unit]] = processingTime.metric.event {
+          // The query does not have to be idempotent, because the stores don't have unique indices and
+          // the data gets deduplicated on the read path.
+          val action = DbStorage.bulkOperation_(
+            """insert into mediator_deduplication_store(mediator_id, uuid, request_time, expire_after)
+              |values (?, ?, ?, ?)""".stripMargin,
+            items,
+            storage.profile,
+          ) { pp => data =>
+            pp >> mediatorId
+            pp >> data.value
+          }
+
+          for {
+            _ <- storage.queryAndUpdate(action, functionFullName)
+          } yield Seq.fill(items.size)(())
+        }
+
+        override def prettyItem: Pretty[DeduplicationData] = implicitly
+      }
+
+    BatchAggregator(
+      processor,
+      batchAggregatorConfig,
+      Some(storage.metrics.loadGaugeM("mediator-deduplication-store-query-batcher")),
+    )
+  }
+
+  override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = processingTime.metric.event {
+    storage.update_(
+      sqlu"""delete from mediator_deduplication_store 
+          where mediator_id = $mediatorId and expire_after <= $upToInclusive""",
+      functionFullName,
+    )
+  }
 }

@@ -42,13 +42,12 @@ class LocalSequencerStateEventSignaller(
     with NamedLogging {
 
   private val ((queue, killSwitch), notificationsHubSource) = AkkaUtil.runSupervised(
-    logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty), {
-      Source
-        .queue[WriteNotification](1, OverflowStrategy.backpressure)
-        .conflate(_ union _)
-        .viaMat(KillSwitches.single)(Keep.both)
-        .toMat(BroadcastHub.sink(1))(Keep.both)
-    },
+    logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty),
+    Source
+      .queue[WriteNotification](1, OverflowStrategy.backpressure)
+      .conflate(_ union _)
+      .viaMat(KillSwitches.single)(Keep.both)
+      .toMat(BroadcastHub.sink(1))(Keep.both),
   )
 
   override def notifyOfLocalWrite(

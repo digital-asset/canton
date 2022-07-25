@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -24,10 +24,9 @@ object DomainConnectionInfo {
   def fromConfig(
       sequencerConnectClientBuilder: SequencerConnectClient.Builder
   )(config: DomainConnectionConfig)(implicit
-      loggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
       executionContext: ExecutionContext,
   ): EitherT[Future, SequencerConnectClient.Error, DomainConnectionInfo] = {
-    implicit val traceContext = loggingContext.traceContext
     def getDomainInfo(
         alias: DomainAlias,
         sequencerConnectClient: SequencerConnectClient,
@@ -38,7 +37,7 @@ object DomainConnectionInfo {
       } yield (domainId, staticDomainParameters))
 
     for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(config, loggingContext)
+      sequencerConnectClient <- sequencerConnectClientBuilder(config)(traceContext)
       domainInfo <- getDomainInfo(config.domain, sequencerConnectClient).thereafter(_ =>
         sequencerConnectClient.close()
       )

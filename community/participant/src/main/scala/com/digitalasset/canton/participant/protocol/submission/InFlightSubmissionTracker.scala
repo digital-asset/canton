@@ -189,17 +189,6 @@ class InFlightSubmissionTracker(
   def timelyReject(domainId: DomainId, upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, UnknownDomain, Unit] = {
-    def rejectionEventFor(
-        inFlight: InFlightSubmission[UnsequencedSubmission]
-    ): Traced[(TimelyRejectionEventId, LedgerSyncEvent)] = {
-      val submissionTraceContext = inFlight.submissionTraceContext
-      // Use the trace context from the submission for the rejection
-      // because we don't have any other later trace context available
-      val rejectionEvent = inFlight.sequencingInfo.trackingData
-        .rejectionEvent(inFlight.associatedTimestamp)(loggingContext(submissionTraceContext))
-      Traced(inFlight.timelyRejectionEventId -> rejectionEvent)(submissionTraceContext)
-    }
-
     domainStateFor(domainId).semiflatMap { domainState =>
       for {
         // Increase the watermark for two reasons:
@@ -211,7 +200,7 @@ class InFlightSubmissionTracker(
         //    a second chance of observing the timestamp when the sequencer counter becomes clean.
         _ <- domainState.observedTimestampTracker.increaseWatermark(upToInclusive)
         timelyRejects <- store.lookupUnsequencedUptoUnordered(domainId, upToInclusive)
-        events = timelyRejects.map(rejectionEventFor)
+        events = timelyRejects.map(timelyRejectionEventFor)
         skippedE <- participantEventPublisher.publishWithIds(events).value
       } yield {
         skippedE.valueOr { skipped =>
@@ -222,6 +211,17 @@ class InFlightSubmissionTracker(
         }
       }
     }
+  }
+
+  private[this] def timelyRejectionEventFor(
+      inFlight: InFlightSubmission[UnsequencedSubmission]
+  ): Traced[(TimelyRejectionEventId, LedgerSyncEvent)] = {
+    implicit val traceContext: TraceContext = inFlight.submissionTraceContext
+    // Use the trace context from the submission for the rejection
+    // because we don't have any other later trace context available
+    val rejectionEvent = inFlight.sequencingInfo.trackingData
+      .rejectionEvent(inFlight.associatedTimestamp)
+    Traced(inFlight.timelyRejectionEventId -> rejectionEvent)
   }
 
   val onPublishListener: MultiDomainEventLog.OnPublish = new MultiDomainEventLog.OnPublish {

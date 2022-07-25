@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.RequestCounter
@@ -294,8 +294,6 @@ class DbRequestJournalStore(
             else if (data.state != oldState)
               Success(Left(InconsistentRequestState(rc, data.state, oldState)))
             else {
-              implicit val loggingContext: ErrorLoggingContext =
-                ErrorLoggingContext.fromTracedLogger(logger)
               val ex = new ConcurrentModificationException(
                 s"Concurrent request journal modification for request $rc"
               )

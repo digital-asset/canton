@@ -8,13 +8,13 @@ import akka.stream.scaladsl.{RunnableGraph, Source}
 import akka.stream.{ActorAttributes, Materializer, Supervision}
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.typesafe.config.ConfigFactory
 
 import scala.concurrent.{ExecutionContext, Future}
 
-object AkkaUtil {
+object AkkaUtil extends HasLoggerName {
 
   /** Utility function to run the graph supervised and stop on an unhandled exception.
     *
@@ -57,8 +57,8 @@ object AkkaUtil {
     */
   def statefulMapAsync[Out, Mat, S, T](source: Source[Out, Mat], initial: S)(
       f: (S, Out) => Future[(S, T)]
-  )(implicit loggingContext: ErrorLoggingContext): Source[T, Mat] = {
-    val directExecutionContext = DirectExecutionContext(loggingContext.logger)
+  )(implicit loggingContext: NamedLoggingContext): Source[T, Mat] = {
+    val directExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
     source
       .scanAsync((initial, Option.empty[T])) { case ((state, _), next) =>
         f(state, next)

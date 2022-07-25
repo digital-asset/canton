@@ -14,8 +14,7 @@ import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractKeyResolutionError,
   MissingContractKeyLookupError,
@@ -344,7 +343,7 @@ class TransactionTreeFactoryImplV3(
       csmState: ContractStateMachine[Unit]#State,
       transactionView: TransactionView,
       viewPosition: ViewPosition,
-  )(implicit loggingContext: ErrorLoggingContext): Unit = {
+  )(implicit traceContext: TraceContext): Unit = {
     val viewGki = transactionView.globalKeyInputs.fmap(_.resolution)
     val stateGki = csmState.globalKeyInputs.fmap(_.toKeyMapping)
     ErrorUtil.requireState(

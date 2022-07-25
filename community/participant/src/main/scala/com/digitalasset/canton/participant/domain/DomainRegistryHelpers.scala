@@ -81,10 +81,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       agreementClient: AgreementClient,
       sequencerConnectClient: SequencerConnectClient,
   )(implicit
-      loggingContext: ErrorLoggingContext
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
-    implicit val traceContext = loggingContext.traceContext
-
     for {
       domainId <- getDomainId(config.domain, sequencerConnectClient).mapK(
         FutureUnlessShutdown.outcomeK
@@ -106,7 +104,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       )
 
       _ <- aliasManager
-        .processHandshake(config.domain, domainId)(loggingContext.traceContext)
+        .processHandshake(config.domain, domainId)
         .leftMap(toDomainRegistryError)
         .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -328,7 +326,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(reason).asLeft
         }
       _ <- aliasManager
-        .processHandshake(alias, domainId)(loggingContext.traceContext)
+        .processHandshake(alias, domainId)
         .leftMap(toDomainRegistryError)
 
     } yield success

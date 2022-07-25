@@ -59,7 +59,7 @@ class GrpcSequencerConnectClient(
         logger = logger,
         logPolicy = CantonGrpcUtil.silentLogPolicy,
         retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
-      )(_.getDomainId(v0.SequencerConnect.GetDomainId.Request()))(loggingContext.traceContext)
+      )(_.getDomainId(v0.SequencerConnect.GetDomainId.Request()))
       .leftMap(err => Error.Transport(err.toString))
 
     domainId = DomainId
@@ -82,9 +82,7 @@ class GrpcSequencerConnectClient(
         logger = logger,
         logPolicy = CantonGrpcUtil.silentLogPolicy,
         retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
-      )(_.getDomainParameters(v0.SequencerConnect.GetDomainParameters.Request()))(
-        loggingContext.traceContext
-      )
+      )(_.getDomainParameters(v0.SequencerConnect.GetDomainParameters.Request()))
       .leftMap(err => Error.Transport(err.toString))
 
     domainParametersP = responseP.parameters
@@ -110,14 +108,14 @@ class GrpcSequencerConnectClient(
       responseP <- CantonGrpcUtil
         .sendSingleGrpcRequest(
           serverName = domainAlias.unwrap,
-          requestDescription = "get domain parameters",
+          requestDescription = "handshake",
           channel = builder.build(),
           stubFactory = v0.SequencerConnectServiceGrpc.stub,
           timeout = timeouts.network.unwrap,
           logger = logger,
           logPolicy = CantonGrpcUtil.silentLogPolicy,
           retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
-        )(_.handshake(request.toProtoV0))(loggingContext.traceContext)
+        )(_.handshake(request.toProtoV0))
         .leftMap(err => Error.Transport(err.toString))
 
       handshakeResponse <- EitherT
@@ -140,7 +138,7 @@ class GrpcSequencerConnectClient(
         logger = logger,
         logPolicy = CantonGrpcUtil.silentLogPolicy,
         retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
-      )(_.getServiceAgreement(GetServiceAgreementRequest()))(loggingContext.traceContext)
+      )(_.getServiceAgreement(GetServiceAgreementRequest()))
       .leftMap(e => Error.Transport(e.toString))
     optAgreement <- EitherT
       .fromEither[Future](

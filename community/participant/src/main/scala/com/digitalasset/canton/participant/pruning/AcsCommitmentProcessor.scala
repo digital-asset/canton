@@ -21,7 +21,13 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   SyncCloseable,
 }
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.participant.event.{AcsChange, AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.PruningMetrics
 import com.digitalasset.canton.participant.store._
@@ -724,7 +730,7 @@ class AcsCommitmentProcessor(
 
 }
 
-object AcsCommitmentProcessor {
+object AcsCommitmentProcessor extends HasLoggerName {
 
   type ProcessorType =
     (
@@ -929,7 +935,7 @@ object AcsCommitmentProcessor {
       reconciliationInterval: PositiveSeconds,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: ErrorLoggingContext,
+      loggingContext: NamedLoggingContext,
   ): Future[Option[CantonTimestampSecond]] =
     for {
       // This logic progressively lowers the timestamp based on the following constraints:
@@ -1004,7 +1010,7 @@ object AcsCommitmentProcessor {
       checkForOutstandingCommitments: Boolean,
   )(implicit
       ec: ExecutionContext,
-      loggingContext: ErrorLoggingContext,
+      loggingContext: NamedLoggingContext,
   ): Future[Option[CantonTimestampSecond]] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
     val cleanReplayF = SyncDomainEphemeralStateFactory

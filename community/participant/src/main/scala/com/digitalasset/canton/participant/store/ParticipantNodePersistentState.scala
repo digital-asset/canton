@@ -8,7 +8,12 @@ import cats.syntax.foldable._
 import cats.syntax.traverseFilter._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateLookup
@@ -49,7 +54,7 @@ class ParticipantNodePersistentState private (
     )(logger)
 }
 
-object ParticipantNodePersistentState {
+object ParticipantNodePersistentState extends HasLoggerName {
 
   /** Creates a [[ParticipantNodePersistentState]] and initializes the settings store.
     *
@@ -87,11 +92,9 @@ object ParticipantNodePersistentState {
     val commandDeduplicationStore = CommandDeduplicationStore(storage, timeouts, loggerFactory)
     val pruningStore = ParticipantPruningStore(storage, timeouts, loggerFactory)
 
-    val logger = loggerFactory.getTracedLogger(ParticipantNodePersistentState.getClass)
-
-    implicit lazy val loggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(logger)
-
+    implicit val loggingContext: NamedLoggingContext =
+      NamedLoggingContext(loggerFactory, traceContext)
+    val logger = loggingContext.tracedLogger
     val flagCloseable = FlagCloseable(logger, timeouts)
     implicit val closeContext: CloseContext = CloseContext(flagCloseable)
 

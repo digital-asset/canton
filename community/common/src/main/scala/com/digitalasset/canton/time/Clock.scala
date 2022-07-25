@@ -83,9 +83,9 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
             .get()
             .isBefore(nowSnapshot.minusSeconds(30))
         ) {
+          import TraceContext.Implicits.Empty._
           backwardsClockAlerted.set(nowSnapshot)
-          val ctx = loggingContext(TraceContext.empty)
-          SystemClockRunningBackwards.Error(nowSnapshot, oldTs)(ctx)
+          SystemClockRunningBackwards.Error(nowSnapshot, oldTs)
         }
         if (minSpacingMicros > 0)
           oldTs.addMicros(minSpacingMicros)

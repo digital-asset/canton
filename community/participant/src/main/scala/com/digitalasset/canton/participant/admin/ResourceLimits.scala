@@ -35,5 +35,14 @@ object ResourceLimits {
 
   def noLimit: ResourceLimits = ResourceLimits(None, None)
 
+  /** Default resource limits to protect Canton from being overloaded by applications that send excessively many commands.
+    * The default settings allow for processing an average of 100 commands/s with a latency of 5s,
+    * with bursts of up to 200 commands/s.
+    */
+  def default: ResourceLimits = ResourceLimits(
+    maxDirtyRequests = Some(NonNegativeInt.tryCreate(500)),
+    maxRate = Some(NonNegativeInt.tryCreate(200)),
+  )
+
   def community: ResourceLimits = ResourceLimits(Some(NonNegativeInt.tryCreate(100)), None)
 }

@@ -206,4 +206,10 @@ object CantonGrpcUtil {
   object RetryPolicy {
     lazy val noRetry: GrpcError => Boolean = _ => false
   }
+
+  /** The name of the service that is associated with the sequencer servers' health status.
+    * This name can have no relation with the gRPC services that the server is running with, and can be anything
+    * as long as the client and servers use the same value.
+    */
+  val sequencerHealthCheckServiceName = "sequencer-health-check-service"
 }

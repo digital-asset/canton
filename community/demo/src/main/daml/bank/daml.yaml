@@ -4,7 +4,7 @@ exposed-modules:
 - Bank
 source: Bank.daml
 init-script: Bank:setup
-version: 2.3.0
+version: 2.4.0
 dependencies: 
 - daml-prim
 - daml-stdlib
