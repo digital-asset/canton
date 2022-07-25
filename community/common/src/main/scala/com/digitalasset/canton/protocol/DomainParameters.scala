@@ -182,7 +182,7 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
   * @param transferExclusivityTimeout this timeout affects who can initiate a transfer-in.
   *                                   Before the timeout, only the submitter of the transfer-out can initiate the
   *                                   corresponding transfer-in.
-  *                                   After the timeout, every stakeholder of the contract can initiate a transfer-in,
+  *                                   From the timeout onwards, every stakeholder of the contract can initiate a transfer-in,
   *                                   if it has not yet happened.
   *                                   Moreover, if this timeout is zero, no automatic transfer-ins will occur.
   *                                   Choose a low value, if you want to lower the time that contracts can be inactive

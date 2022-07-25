@@ -20,7 +20,7 @@ trait ParticipantSettingsStoreTest
     with HasExecutionContext // because we want to test concurrent insertions
     {
 
-  lazy val resourceLimits0: ResourceLimits = ResourceLimits.noLimit
+  lazy val resourceLimits0: ResourceLimits = ResourceLimits.default
   lazy val resourceLimits1: ResourceLimits =
     ResourceLimits(Some(NonNegativeInt.tryCreate(42)), None)
   lazy val resourceLimits2: ResourceLimits =

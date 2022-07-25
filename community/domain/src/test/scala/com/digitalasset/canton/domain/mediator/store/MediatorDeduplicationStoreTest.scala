@@ -4,15 +4,23 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
+import com.digitalasset.canton.topology.DefaultTestIdentities
+import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
+import scala.concurrent.Future
 
 trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest {
 
-  def mkStore(): MediatorDeduplicationStore
+  def mkStore(
+      firstEventTs: CantonTimestamp = CantonTimestamp.MaxValue
+  ): MediatorDeduplicationStore
 
   lazy val uuids: Seq[UUID] = List(
     "51f3ffff-9248-453b-807b-91dd7ed23298",
@@ -192,12 +200,68 @@ trait MediatorDeduplicationStoreTest extends AsyncWordSpec with BaseTest {
 }
 
 class MediatorDeduplicationStoreTestInMemory extends MediatorDeduplicationStoreTest {
-  override def mkStore(): MediatorDeduplicationStore = {
+  override def mkStore(firstEventTs: CantonTimestamp): MediatorDeduplicationStore = {
     val store = new InMemoryMediatorDeduplicationStore(loggerFactory)
-    store.initialize(CantonTimestamp.MinValue).futureValue
+    store.initialize(firstEventTs).futureValue
     store
   }
 }
 
-// TODO(i8900): create db based tests
-//  - Make sure to test that cache gets properly initialized after restart.
+trait DbMediatorDeduplicationStoreTest extends MediatorDeduplicationStoreTest with DbTest {
+
+  override def mkStore(
+      firstEventTs: CantonTimestamp
+  ): DbMediatorDeduplicationStore = {
+    val store = new DbMediatorDeduplicationStore(
+      DefaultTestIdentities.mediator,
+      storage,
+      timeouts,
+      BatchAggregatorConfig.defaultsForTesting,
+      loggerFactory,
+    )
+    store.initialize(firstEventTs).futureValue
+    store
+  }
+
+  override protected def cleanDb(storage: DbStorage): Future[_] = {
+    import storage.api._
+    storage.update_(sqlu"truncate table mediator_deduplication_store", functionFullName)
+  }
+
+  "The DbMediatorDeduplicationStore" should {
+    "cleanup and initialize caches" in {
+      val store = mkStore()
+
+      val data1 = DeduplicationData(
+        uuids(0),
+        CantonTimestamp.Epoch,
+        CantonTimestamp.ofEpochSecond(10),
+      )
+      val data2 = DeduplicationData(
+        uuids(1),
+        CantonTimestamp.ofEpochSecond(1),
+        CantonTimestamp.ofEpochSecond(11),
+      )
+
+      for {
+        _ <- store.store(data1)
+        _ <- store.store(data2)
+      } yield {
+        val store2 = mkStore(CantonTimestamp.ofEpochSecond(2))
+        store2.allData() shouldBe Set(data1, data2)
+
+        val store3 = mkStore(CantonTimestamp.ofEpochSecond(1))
+        store3.allData() shouldBe Set(data1)
+
+        val store4 = mkStore(CantonTimestamp.Epoch)
+        store4.allData() shouldBe empty
+      }
+    }
+  }
+}
+
+class MediatorDeduplicationStoreTestH2 extends DbMediatorDeduplicationStoreTest with H2Test
+
+class MediatorDeduplicationStoreTestPostgres
+    extends DbMediatorDeduplicationStoreTest
+    with PostgresTest

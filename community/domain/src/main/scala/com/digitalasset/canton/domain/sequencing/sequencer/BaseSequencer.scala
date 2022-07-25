@@ -15,6 +15,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.ifThenET
 import io.opentelemetry.api.trace.Tracer
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Provides additional functionality that is common between sequencer implementations:
@@ -28,6 +29,10 @@ abstract class BaseSequencer(
     extends Sequencer
     with NamedLogging
     with Spanning {
+
+  private val healthListeners = new AtomicReference[List[SequencerHealthStatus => Unit]](Nil)
+  private val currentHealth =
+    new AtomicReference[SequencerHealthStatus](SequencerHealthStatus(isActive = true))
 
   /** The domain manager is responsible for identities within the domain.
     * If they decide to address a message to a member then we can be confident that they want the member available on the sequencer.
@@ -90,8 +95,27 @@ abstract class BaseSequencer(
       } yield ()
     }
 
-  override def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] =
-    Future.successful(SequencerHealthStatus(isActive = true))
+  override def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = for {
+    newHealth <- healthInternal
+  } yield {
+    val old = currentHealth.getAndSet(newHealth)
+    if (old != newHealth) healthChanged(newHealth)
+    newHealth
+  }
+
+  protected def healthInternal(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
+
+  override def onHealthChange(
+      listener: SequencerHealthStatus => Unit
+  )(implicit traceContext: TraceContext): Unit = {
+    healthListeners.getAndUpdate(listener :: _)
+    listener(currentHealth.get())
+  }
+
+  protected def healthChanged(health: SequencerHealthStatus): Unit = {
+    currentHealth.set(health)
+    healthListeners.get().foreach(_(health))
+  }
 
   protected def sendAsyncInternal(submission: SubmissionRequest)(implicit
       traceContext: TraceContext

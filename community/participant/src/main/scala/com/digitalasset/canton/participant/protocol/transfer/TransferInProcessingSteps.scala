@@ -593,7 +593,7 @@ private[transfer] class TransferInProcessingSteps(
           exclusivityLimit = domainParameters.transferExclusivityLimitFor(exclusivityBaseline)
 
           _ <- condUnitET[Future](
-            tsIn > exclusivityLimit
+            tsIn >= exclusivityLimit
               || transferOutSubmitter == transferInRequest.submitter,
             NonInitiatorSubmitsBeforeExclusivityTimeout(
               transferId,

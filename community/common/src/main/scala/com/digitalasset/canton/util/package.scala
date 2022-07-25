@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton
 
-import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggingContext}
 import com.digitalasset.canton.tracing.TraceContext
 
 package object util {
@@ -14,4 +14,8 @@ package object util {
   type ErrorLoggingLazyVal[T] = LazyValWithContext[T, ErrorLoggingContext]
   val ErrorLoggingLazyVal: LazyValWithContextCompanion[ErrorLoggingContext] =
     new LazyValWithContextCompanion[ErrorLoggingContext] {}
+
+  type NamedLoggingLazyVal[T] = LazyValWithContext[T, NamedLoggingContext]
+  val NamedLoggingLazyVal: LazyValWithContextCompanion[NamedLoggingContext] =
+    new LazyValWithContextCompanion[NamedLoggingContext] {}
 }

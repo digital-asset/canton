@@ -6,20 +6,14 @@ package com.digitalasset.canton.participant.protocol.validation
 import cats.syntax.functor._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.TransactionViewTree
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
   ActivenessSet,
 }
 import com.digitalasset.canton.participant.store.ContractKeyJournal
-import com.digitalasset.canton.protocol.{
-  LfContractId,
-  LfGlobalKey,
-  SerializableContract,
-  ViewHash,
-  WithContractHash,
-}
+import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 
@@ -62,7 +56,7 @@ trait InputAndUpdatedKeys extends PrettyPrinting {
 
   /** A key resolver that is suitable for reinterpreting the given root view. */
   def keyResolverFor(rootView: TransactionViewTree)(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): LfKeyResolver
 
   /** Keys that must be free before executing the transaction */
@@ -87,12 +81,13 @@ case class InputAndUpdatedKeysV2(
     keyResolvers: Map[ViewHash, LfKeyResolver],
     override val uckFreeKeysOfHostedMaintainers: Set[LfGlobalKey],
     override val uckUpdatedKeysOfHostedMaintainers: Map[LfGlobalKey, ContractKeyJournal.Status],
-) extends InputAndUpdatedKeys {
+) extends InputAndUpdatedKeys
+    with HasLoggerName {
 
   /** @throws java.lang.IllegalArgumentException if the root view is not a root view of the projection */
   override def keyResolverFor(
       rootView: TransactionViewTree
-  )(implicit loggingContext: ErrorLoggingContext): LfKeyResolver = keyResolvers.getOrElse(
+  )(implicit loggingContext: NamedLoggingContext): LfKeyResolver = keyResolvers.getOrElse(
     rootView.viewHash,
     ErrorUtil.internalError(new IllegalArgumentException(s"Unknown root view hash $rootView")),
   )
@@ -110,7 +105,7 @@ case class InputAndUpdatedKeysV3(
 ) extends InputAndUpdatedKeys {
 
   override def keyResolverFor(rootView: TransactionViewTree)(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): LfKeyResolver = rootView.view.globalKeyInputs.fmap(_.resolution)
 
   override def pretty: Pretty[InputAndUpdatedKeysV3] = prettyOfClass(

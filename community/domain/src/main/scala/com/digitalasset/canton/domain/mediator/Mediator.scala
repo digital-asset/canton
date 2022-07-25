@@ -55,7 +55,7 @@ class Mediator(
     topologyTransactionProcessor: TopologyTransactionProcessor,
     timeTrackerConfig: DomainTimeTrackerConfig,
     state: MediatorState,
-    sequencerCounterTrackerStore: SequencerCounterTrackerStore,
+    private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
     parameters: LocalNodeParameters,
     protocolVersion: ProtocolVersion,

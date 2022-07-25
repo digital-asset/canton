@@ -34,20 +34,18 @@ class HttpSequencerConnectClient(
   def getDomainId(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerConnectClient.Error, DomainId] =
-    httpSequencerClient.getDomainId()(loggingContext.traceContext).leftMap(toSequencerConnectError)
+    httpSequencerClient.getDomainId().leftMap(toSequencerConnectError)
 
   def getDomainParameters(domainAlias: DomainAlias)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerConnectClient.Error, StaticDomainParameters] =
-    httpSequencerClient
-      .getDomainParameters()(loggingContext.traceContext)
-      .leftMap(toSequencerConnectError)
+    httpSequencerClient.getDomainParameters().leftMap(toSequencerConnectError)
 
   def isActive(participantId: ParticipantId, waitForActive: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerConnectClient.Error, Boolean] =
     httpSequencerClient
-      .verifyActive(VerifyActiveRequest())(loggingContext.traceContext)
+      .verifyActive(VerifyActiveRequest())
       .leftMap(toSequencerConnectError)
       .flatMap {
         case VerifyActiveResponse.Success(isActive) =>
@@ -64,7 +62,7 @@ class HttpSequencerConnectClient(
       traceContext: TraceContext
   ): EitherT[Future, SequencerConnectClient.Error, HandshakeResponse] = for {
     res <- httpSequencerClient
-      .handshakeUnauthenticated(request)(loggingContext.traceContext)
+      .handshakeUnauthenticated(request)
       .leftMap(toSequencerConnectError)
     _ = if (res.serverVersion.isDeprecated && !dontWarnOnDeprecatedPV)
       DeprecatedProtocolVersion.WarnSequencerClient(domainAlias, res.serverVersion)

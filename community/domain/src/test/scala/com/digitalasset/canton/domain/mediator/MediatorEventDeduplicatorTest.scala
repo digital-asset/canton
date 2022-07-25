@@ -11,11 +11,14 @@ import com.digitalasset.canton.domain.mediator.store.{
   InMemoryMediatorDeduplicationStore,
   MediatorDeduplicationStore,
 }
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject.MaliciousSubmitter.NonUniqueRequestUuid
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{RequestId, TransferId}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.DefaultTestIdentities._
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import org.scalatest.Assertion
@@ -41,7 +44,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     val store: MediatorDeduplicationStore = new InMemoryMediatorDeduplicationStore(loggerFactory)
     store.initialize(CantonTimestamp.MinValue).futureValue
 
-    val verdictSender: TestVerdictSender = new TestVerdictSender
+    val verdictSender = new TestVerdictSender
 
     val deduplicator = new DefaultMediatorEventDeduplicator(
       store,
@@ -77,8 +80,13 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     deduplicationData(is.map(_ -> requestTime): _*)
 
   def mkMediatorRequest(uuid: UUID): OpenEnvelope[MediatorRequest] = {
+    import Pretty._
+
     val mediatorRequest = mock[MediatorRequest]
     when(mediatorRequest.requestUuid).thenReturn(uuid)
+    when(mediatorRequest.pretty).thenReturn(
+      prettyOfClass[MediatorRequest](param("uuid", _.requestUuid))
+    )
 
     mkDefaultOpenEnvelope(mediatorRequest)
   }
@@ -287,10 +295,90 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       storeF2.futureValue
       verdictSender.sentResults shouldBe empty
     }
+
+    "handle concurrent requests in the right order" in {
+      val (deduplicator, verdictSender, store) = mkDeduplicator()
+
+      forAll(request.indices) { i =>
+        val (uniqueEvents1, storeF1) =
+          deduplicator.rejectDuplicates(requestTime, requests(i)).futureValue
+        val (uniqueEvents2, storeF2) = loggerFactory.suppressWarningsAndErrors(
+          deduplicator.rejectDuplicates(requestTime2, requests(i)).futureValue
+        )
+
+        uniqueEvents1 shouldBe requests(i)
+        uniqueEvents2 shouldBe empty
+
+        store.findUuid(uuids(i), requestTime) shouldBe deduplicationData(requestTime, i)
+
+        storeF1.futureValue
+        storeF2.futureValue
+        assertNextSentVerdict(verdictSender, request(i), requestTime = requestTime2)
+      }
+    }
+
+    "correctly propagate completion of asynchronous actions" in {
+      val deduplicator = mkHangingDeduplicator()
+
+      val (uniqueEvents1, storeF1) =
+        deduplicator.rejectDuplicates(requestTime, requests(0)).futureValue
+
+      val (uniqueEvents2, storeF2) = loggerFactory.suppressWarningsAndErrors(
+        deduplicator.rejectDuplicates(requestTime, requests(0)).futureValue
+      )
+
+      uniqueEvents1 shouldBe requests(0)
+      uniqueEvents2 shouldBe empty
+
+      always(durationOfSuccess = 1.second) {
+        storeF1 should not be Symbol("completed")
+        storeF2 should not be Symbol("completed")
+      }
+    }
   }
 
-  // TODO(i8900):
-  //  - test that changes have been persisted after completion of storeF
-  //  - add concurrency test
+  def mkHangingDeduplicator(): MediatorEventDeduplicator = {
+    val store = new MediatorDeduplicationStore {
+      override protected def loggerFactory: NamedLoggerFactory =
+        MediatorEventDeduplicatorTest.this.loggerFactory
 
+      override protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
+          traceContext: TraceContext
+      ): Future[Unit] = Future.unit
+
+      override protected def persist(data: DeduplicationData)(implicit
+          traceContext: TraceContext
+      ): Future[Unit] = Future.never
+
+      override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
+          traceContext: TraceContext
+      ): Future[Unit] = Future.unit
+    }
+    store.initialize(CantonTimestamp.MinValue).futureValue
+
+    val verdictSender = new VerdictSender {
+      override def sendResult(
+          requestId: RequestId,
+          request: MediatorRequest,
+          verdict: Verdict,
+          decisionTime: CantonTimestamp,
+      )(implicit traceContext: TraceContext): Future[Unit] =
+        Future.never
+
+      override def sendResultBatch(
+          requestId: RequestId,
+          batch: Batch[DefaultOpenEnvelope],
+          decisionTime: CantonTimestamp,
+      )(implicit traceContext: TraceContext): Future[Unit] =
+        Future.never
+    }
+
+    new DefaultMediatorEventDeduplicator(
+      store,
+      verdictSender,
+      _ => Future.successful(deduplicationTimeout),
+      _ => Future.successful(decisionTime),
+      loggerFactory,
+    )
+  }
 }

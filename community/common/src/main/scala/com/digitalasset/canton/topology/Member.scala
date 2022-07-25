@@ -103,7 +103,7 @@ object KeyOwner {
       _ <- Either.cond(
         keyOwner.substring(3, 3 + dlen) == SafeSimpleString.delimiter,
         (),
-        s"Expected delimiter after three letter code of `$keyOwner``",
+        s"Expected delimiter ${SafeSimpleString.delimiter} after three letter code of `$keyOwner`",
       )
       code <- KeyOwnerCode.fromProtoPrimitive_(typ)
       uid <- UniqueIdentifier.fromProtoPrimitive_(uidS.substring(dlen))

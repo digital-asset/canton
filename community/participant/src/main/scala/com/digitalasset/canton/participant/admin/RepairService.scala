@@ -29,7 +29,12 @@ import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, HasCloseContext}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
@@ -1300,7 +1305,7 @@ object RepairService {
     override protected def factoryMethodWrapper(str: String255): RepairContext = RepairContext(str)
   }
 
-  object ContractConverter {
+  object ContractConverter extends HasLoggerName {
 
     def contractDataToInstance(
         templateId: Identifier,
@@ -1308,44 +1313,39 @@ object RepairService {
         signatories: Set[String],
         lfContractId: LfContractId,
         ledgerTime: Instant,
-    ): Either[String, SerializableContract] = TraceContext.withNewTraceContext {
-      implicit traceContext =>
-        val logger = NamedLoggerFactory.root.getTracedLogger(ContractConverter.getClass)
-        implicit val loggingContext: ErrorLoggingContext =
-          ErrorLoggingContext.fromTracedLogger(logger)
+    )(implicit namedLoggingContext: NamedLoggingContext): Either[String, SerializableContract] = {
+      for {
+        template <- LedgerApiFieldValidations.validateIdentifier(templateId).leftMap(_.getMessage)
 
-        for {
-          template <- LedgerApiFieldValidations.validateIdentifier(templateId).leftMap(_.getMessage)
+        argsValue <- LedgerApiValueValidator
+          .validateRecord(createArguments)
+          .leftMap(e => s"Failed to validate arguments: ${e}")
 
-          argsValue <- LedgerApiValueValidator
-            .validateRecord(createArguments)
-            .leftMap(e => s"Failed to validate arguments: ${e}")
-
-          argsVersionedValue = CantonOnly.asVersionedValue(
-            argsValue,
-            CantonOnly.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
-          )
-
-          lfContractInst = LfContractInst(
-            template = template,
-            arg = argsVersionedValue,
-            agreementText = "",
-          )
-
-          serializableRawContractInst <- SerializableRawContractInstance
-            .create(lfContractInst)
-            .leftMap(_.errorMessage)
-
-          signatoriesAsParties <- signatories.toList.traverse(LfPartyId.fromString).map(_.toSet)
-
-          time <- CantonTimestamp.fromInstant(ledgerTime)
-        } yield SerializableContract(
-          contractId = lfContractId,
-          rawContractInstance = serializableRawContractInst,
-          metadata =
-            checked(ContractMetadata.tryCreate(signatoriesAsParties, signatoriesAsParties, None)),
-          ledgerCreateTime = time,
+        argsVersionedValue = CantonOnly.asVersionedValue(
+          argsValue,
+          CantonOnly.DummyTransactionVersion, // Version is ignored by daml engine upon RepairService.addContract
         )
+
+        lfContractInst = LfContractInst(
+          template = template,
+          arg = argsVersionedValue,
+          agreementText = "",
+        )
+
+        serializableRawContractInst <- SerializableRawContractInstance
+          .create(lfContractInst)
+          .leftMap(_.errorMessage)
+
+        signatoriesAsParties <- signatories.toList.traverse(LfPartyId.fromString).map(_.toSet)
+
+        time <- CantonTimestamp.fromInstant(ledgerTime)
+      } yield SerializableContract(
+        contractId = lfContractId,
+        rawContractInstance = serializableRawContractInst,
+        metadata =
+          checked(ContractMetadata.tryCreate(signatoriesAsParties, signatoriesAsParties, None)),
+        ledgerCreateTime = time,
+      )
     }
 
     def contractInstanceToData(

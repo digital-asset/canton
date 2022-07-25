@@ -12,6 +12,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   RegisterMemberError,
   SequencerWriteError,
 }
+import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   domainManager,
@@ -100,6 +101,14 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override def authorizeLedgerIdentity(identity: LedgerIdentity)(implicit
         traceContext: TraceContext
     ): EitherT[Future, String, Unit] = ???
+
+    // making this public on purpose so we can test
+    override def healthChanged(health: SequencerHealthStatus): Unit = super.healthChanged(health)
+
+    override protected def healthInternal(implicit
+        traceContext: TraceContext
+    ): Future[SequencerHealthStatus] = Future.successful(SequencerHealthStatus(isActive = true))
+
   }
 
   "sendAsync" should {
@@ -138,6 +147,32 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
           .read(unauthenticatedMemberId, 0L)
           .value
       } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
+    }
+  }
+
+  "health" should {
+    "onHealthChange should register listener and immediately call it with current status" in {
+      val sequencer = new StubSequencer(Set())
+      var status = SequencerHealthStatus(false)
+      sequencer.onHealthChange { newHealth =>
+        status = newHealth
+      }
+
+      status shouldBe SequencerHealthStatus(true)
+    }
+
+    "health status change should trigger registered health listener" in {
+      val sequencer = new StubSequencer(Set())
+      var status = SequencerHealthStatus(true)
+      sequencer.onHealthChange { newHealth =>
+        status = newHealth
+      }
+
+      val badHealth = SequencerHealthStatus(false, Some("something bad happened"))
+      sequencer.healthChanged(badHealth)
+
+      status shouldBe badHealth
+
     }
   }
 }

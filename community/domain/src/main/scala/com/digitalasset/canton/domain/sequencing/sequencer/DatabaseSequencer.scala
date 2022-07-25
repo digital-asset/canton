@@ -236,7 +236,7 @@ class DatabaseSequencer(
   override def pruningStatus(implicit traceContext: TraceContext): Future[SequencerPruningStatus] =
     store.status(clock.now)
 
-  override def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] =
+  override def healthInternal(implicit traceContext: TraceContext): Future[SequencerHealthStatus] =
     Future.successful(
       SequencerHealthStatus(
         isActive = writer.isActive

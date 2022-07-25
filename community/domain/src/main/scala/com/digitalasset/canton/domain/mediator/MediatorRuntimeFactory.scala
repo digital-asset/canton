@@ -120,7 +120,13 @@ object CommunityMediatorRuntimeFactory extends MediatorRuntimeFactory {
       nodeParameters.processingTimeouts,
       loggerFactory,
     )
-    val deduplicationStore = MediatorDeduplicationStore(storage, loggerFactory)
+    val deduplicationStore =
+      MediatorDeduplicationStore(
+        mediatorId,
+        storage,
+        nodeParameters.processingTimeouts,
+        loggerFactory,
+      )
     val state =
       new MediatorState(
         finalizedResponseStore,

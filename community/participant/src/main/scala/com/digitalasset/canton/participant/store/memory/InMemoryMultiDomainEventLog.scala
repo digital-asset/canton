@@ -16,7 +16,12 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingEventPublish,
   PendingPublish,
@@ -52,15 +57,15 @@ import scala.collection.immutable.{SortedMap, TreeMap}
 import scala.concurrent.{ExecutionContext, Future}
 
 class InMemoryMultiDomainEventLog(
-    lookupEvent: ErrorLoggingContext => (
+    lookupEvent: NamedLoggingContext => (
         EventLogId,
         LocalOffset,
     ) => Future[TimestampedEventAndCausalChange],
-    lookupOffsetsBetween: ErrorLoggingContext => EventLogId => (
+    lookupOffsetsBetween: NamedLoggingContext => EventLogId => (
         LocalOffset,
         LocalOffset,
     ) => Future[Seq[LocalOffset]],
-    byEventId: ErrorLoggingContext => EventId => OptionT[Future, (EventLogId, LocalOffset)],
+    byEventId: NamedLoggingContext => EventId => OptionT[Future, (EventLogId, LocalOffset)],
     clock: Clock,
     metrics: ParticipantMetrics,
     override val indexedStringStore: IndexedStringStore,
@@ -179,12 +184,12 @@ class InMemoryMultiDomainEventLog(
     val fromExclusive = entriesRef.get().lastLocalOffsets.getOrElse(id, Long.MinValue)
     val upToInclusive = upToInclusiveO.getOrElse(Long.MaxValue)
     for {
-      unpublishedOffsets <- lookupOffsetsBetween(loggingContext)(id)(
+      unpublishedOffsets <- lookupOffsetsBetween(namedLoggingContext)(id)(
         fromExclusive + 1,
         upToInclusive,
       )
       unpublishedEvents <- unpublishedOffsets.traverse(offset =>
-        lookupEvent(loggingContext)(id, offset)
+        lookupEvent(namedLoggingContext)(id, offset)
       )
     } yield unpublishedEvents.map { tseAndUpdate =>
       PendingEventPublish(
@@ -239,7 +244,7 @@ class InMemoryMultiDomainEventLog(
           .mapAsync(1) { // Parallelism 1 is ok, as the lookup operation are quite fast with in memory stores.
             case (globalOffset, (id, localOffset, _processingTime)) =>
               for {
-                eventAndCausalChange <- lookupEvent(loggingContext)(id, localOffset)
+                eventAndCausalChange <- lookupEvent(namedLoggingContext)(id, localOffset)
               } yield globalOffset -> Traced(eventAndCausalChange.tse.event)(
                 eventAndCausalChange.tse.traceContext
               )
@@ -259,7 +264,7 @@ class InMemoryMultiDomainEventLog(
     }
     limitedReferencesInRange.toList.traverse {
       case (globalOffset, (id, localOffset, _processingTime)) =>
-        lookupEvent(loggingContext)(id, localOffset).map(globalOffset -> _)
+        lookupEvent(namedLoggingContext)(id, localOffset).map(globalOffset -> _)
     }
   }
 
@@ -270,10 +275,10 @@ class InMemoryMultiDomainEventLog(
   ] = {
     eventIds
       .traverseFilter { eventId =>
-        byEventId(loggingContext)(eventId).flatMap { case (eventLogId, localOffset) =>
+        byEventId(namedLoggingContext)(eventId).flatMap { case (eventLogId, localOffset) =>
           OptionT(globalOffsetFor(eventLogId, localOffset)).semiflatMap {
             case (globalOffset, publicationTime) =>
-              lookupEvent(loggingContext)(eventLogId, localOffset).map { event =>
+              lookupEvent(namedLoggingContext)(eventLogId, localOffset).map { event =>
                 (eventId, (globalOffset, event, publicationTime))
               }
           }
@@ -285,7 +290,7 @@ class InMemoryMultiDomainEventLog(
   override def lookupTransactionDomain(
       transactionId: LedgerTransactionId
   )(implicit traceContext: TraceContext): OptionT[Future, DomainId] =
-    byEventId(loggingContext)(TransactionEventId(transactionId)).subflatMap {
+    byEventId(namedLoggingContext)(TransactionEventId(transactionId)).subflatMap {
       case (DomainEventLogId(id), _localOffset) => Some(id.item)
       case (ParticipantEventLogId(_), _localOffset) => None
     }
@@ -302,7 +307,7 @@ class InMemoryMultiDomainEventLog(
         .toList
         .reverse
     reversedLocalOffsets.collectFirstSomeM { localOffset =>
-      lookupEvent(loggingContext)(eventLogId, localOffset).map(eventAndCausalChange =>
+      lookupEvent(namedLoggingContext)(eventLogId, localOffset).map(eventAndCausalChange =>
         if (eventAndCausalChange.tse.timestamp <= timestampInclusive) Some(localOffset) else None
       )
     }
@@ -398,7 +403,7 @@ class InMemoryMultiDomainEventLog(
   override def flush(): Future[Unit] = executionQueue.flush()
 }
 
-object InMemoryMultiDomainEventLog {
+object InMemoryMultiDomainEventLog extends HasLoggerName {
   def apply(
       syncDomainPersistentStates: SyncDomainPersistentStateLookup,
       participantEventLog: ParticipantEventLog,
@@ -428,11 +433,11 @@ object InMemoryMultiDomainEventLog {
   }
 
   private def lookupEvent(allEventLogs: => Map[EventLogId, SingleDimensionEventLog[EventLogId]])(
-      errorLoggingContext: ErrorLoggingContext
+      namedLoggingContext: NamedLoggingContext
   )(id: EventLogId, localOffset: LocalOffset): Future[TimestampedEventAndCausalChange] = {
-    implicit val loggingContext: ErrorLoggingContext = errorLoggingContext
+    implicit val loggingContext: NamedLoggingContext = namedLoggingContext
     implicit val tc: TraceContext = loggingContext.traceContext
-    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
     allEventLogs(id)
       .eventAt(localOffset)
       .getOrElse(
@@ -446,12 +451,12 @@ object InMemoryMultiDomainEventLog {
 
   private def lookupOffsetsBetween(
       allEventLogs: => Map[EventLogId, SingleDimensionEventLog[EventLogId]]
-  )(errorLoggingContext: ErrorLoggingContext)(
+  )(namedLoggingContext: NamedLoggingContext)(
       id: EventLogId
   )(fromInclusive: LocalOffset, upToInclusive: LocalOffset): Future[Seq[LocalOffset]] = {
-    implicit val loggingContext: ErrorLoggingContext = errorLoggingContext
+    implicit val loggingContext: NamedLoggingContext = namedLoggingContext
     implicit val tc: TraceContext = loggingContext.traceContext
-    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
     for {
       events <- allEventLogs(id).lookupEventRange(
         Some(fromInclusive),
@@ -464,11 +469,11 @@ object InMemoryMultiDomainEventLog {
   }
 
   private def byEventId(allEventLogs: => Map[EventLogId, SingleDimensionEventLog[EventLogId]])(
-      errorLoggingContext: ErrorLoggingContext
+      namedLoggingContext: NamedLoggingContext
   )(eventId: EventId): OptionT[Future, (EventLogId, LocalOffset)] = {
-    implicit val loggingContext: ErrorLoggingContext = errorLoggingContext
+    implicit val loggingContext: NamedLoggingContext = namedLoggingContext
     implicit val tc: TraceContext = loggingContext.traceContext
-    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.logger)
+    implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
 
     OptionT(for {
       result <- allEventLogs.toList.traverseFilter { case (eventLogId, eventLog) =>

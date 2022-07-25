@@ -103,6 +103,11 @@ trait Sequencer extends AutoCloseable {
     */
   def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus]
 
+  /** Register a listener function that will be called every time the health status of the sequencer changes.
+    * Useful for things like signalling health changes to load balancers
+    */
+  def onHealthChange(f: SequencerHealthStatus => Unit)(implicit traceContext: TraceContext): Unit
+
   /** Prune as much sequencer data as safely possible without breaking operation (except for members
     * that have been previously flagged as disabled).
     * Sequencers are permitted to prune to an earlier timestamp if required to for their own consistency.

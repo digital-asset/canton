@@ -13,7 +13,12 @@ import com.digitalasset.canton.config.{KeyStoreConfig, Password, ProcessingTimeo
 import com.digitalasset.canton.crypto.X509CertificatePem
 import com.digitalasset.canton.crypto.store.{ProtectedKeyStore, TrustStore}
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, FlagCloseable, Lifecycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.logging.{
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.google.protobuf.ByteString
@@ -221,7 +226,7 @@ class HttpClient private (
   }
 }
 
-object HttpClient {
+object HttpClient extends HasLoggerName {
 
   import HttpClientError._
 
@@ -240,12 +245,12 @@ object HttpClient {
         ec: ExecutionContext,
         tc: TraceContext,
     ): Either[HttpClientError, HttpClient] = {
-      val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+      implicit val loggingContext: NamedLoggingContext = NamedLoggingContext(loggerFactory, tc)
 
       for {
         trustStore <- TrustStore.create(certificate).leftMap(FailedToLoadTrustStore)
         customSslContext <- Insecure
-          .buildCustomSslContext(trustStore, protectedKeyStore, logger)
+          .buildCustomSslContext(trustStore, protectedKeyStore)
           .leftMap[HttpClientError](FailedToBuildSslContext)
         (sslContext, trustManager) = customSslContext
         client = new HttpClient(sslContext, trustManager, protectedKeyStore, keyName)(
@@ -263,10 +268,10 @@ object HttpClient {
         ec: ExecutionContext,
         tc: TraceContext,
     ): Either[HttpClientError, HttpClient] = {
-      val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+      implicit val loggingContext: NamedLoggingContext = NamedLoggingContext(loggerFactory, tc)
 
       for {
-        protectedKeyStore <- loadKeyStore(keyStoreConfig, logger)
+        protectedKeyStore <- loadKeyStore(keyStoreConfig)
         client <- Insecure.create(certificate, protectedKeyStore, keyName)(timeouts, loggerFactory)
       } yield client
     }
@@ -277,8 +282,9 @@ object HttpClient {
     def buildCustomSslContext(
         trustStore: TrustStore,
         protectedKeyStore: ProtectedKeyStore,
-        logger: TracedLogger,
-    )(implicit tc: TraceContext): Either[String, (SSLContext, X509TrustManager)] =
+    )(implicit
+        loggingContext: NamedLoggingContext
+    ): Either[String, (SSLContext, X509TrustManager)] =
       for {
         sslContext <- Either
           .catchOnly[NoSuchAlgorithmException](SSLContext.getInstance("TLS"))
@@ -312,7 +318,7 @@ object HttpClient {
           // OkHttp only accept a single trust manager
           case Array(tm: X509TrustManager) => Right(tm)
           case Array(tm: X509TrustManager, _*) =>
-            logger.info(s"More than one trust manager, ignoring the others.")
+            loggingContext.info(s"More than one trust manager, ignoring the others.")
             Right(tm)
           case _ => Left(s"Invalid trust managers: $trustManagers")
         }
@@ -321,14 +327,12 @@ object HttpClient {
           override def checkClientTrusted(
               x509Certificates: Array[X509Certificate],
               s: String,
-          ): Unit =
-            ()
+          ): Unit = ()
 
           override def checkServerTrusted(
               x509Certificates: Array[X509Certificate],
               s: String,
-          ): Unit =
-            ()
+          ): Unit = ()
 
           override def getAcceptedIssuers: Array[X509Certificate] = trustManager.getAcceptedIssuers
         }
@@ -346,17 +350,16 @@ object HttpClient {
         _ = sslContext.createSSLEngine()
 
       } yield (sslContext, insecureTrustManager)
-
   }
 
   def create(trustStore: TrustStore, protectedKeyStore: ProtectedKeyStore, keyName: Option[String])(
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, tc: TraceContext): Either[HttpClientError, HttpClient] = {
-    val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+    implicit val loggingContext: NamedLoggingContext = NamedLoggingContext(loggerFactory, tc)
 
     for {
-      customSslContext <- buildCustomSslContext(trustStore, protectedKeyStore, logger)
+      customSslContext <- buildCustomSslContext(trustStore, protectedKeyStore)
         .leftMap[HttpClientError](FailedToBuildSslContext)
       (sslContext, trustManager) = customSslContext
       client = new HttpClient(sslContext, trustManager, protectedKeyStore, keyName)(
@@ -387,11 +390,11 @@ object HttpClient {
       ec: ExecutionContext,
       tc: TraceContext,
   ): Either[HttpClientError, HttpClient] = {
-    val logger = loggerFactory.getTracedLogger(HttpClient.getClass)
+    implicit val loggingContext: NamedLoggingContext = NamedLoggingContext(loggerFactory, tc)
 
     for {
       trustStore <- TrustStore.create(certificate).leftMap(FailedToLoadTrustStore)
-      protectedKeyStore <- loadKeyStore(keyStoreConfig, logger)
+      protectedKeyStore <- loadKeyStore(keyStoreConfig)
       client <- create(trustStore, protectedKeyStore, keyName)(timeouts, loggerFactory)
     } yield client
   }
@@ -400,8 +403,7 @@ object HttpClient {
   def buildCustomSslContext(
       trustStore: TrustStore,
       protectedKeyStore: ProtectedKeyStore,
-      logger: TracedLogger,
-  )(implicit tc: TraceContext): Either[String, (SSLContext, X509TrustManager)] =
+  )(implicit loggingContext: NamedLoggingContext): Either[String, (SSLContext, X509TrustManager)] =
     for {
       sslContext <- Either
         .catchOnly[NoSuchAlgorithmException](SSLContext.getInstance("TLS"))
@@ -448,7 +450,7 @@ object HttpClient {
         // OkHttp only accept a single trust manager
         case Array(tm: X509TrustManager) => Right(tm)
         case Array(tm: X509TrustManager, _*) =>
-          logger.info(s"More than one trust manager, ignoring the others.")
+          loggingContext.info(s"More than one trust manager, ignoring the others.")
           Right(tm)
         case _ => Left(s"Invalid trust managers: $trustManagers")
       }
@@ -456,11 +458,10 @@ object HttpClient {
 
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   def loadKeyStore[A](
-      keyStoreConfig: KeyStoreConfig,
-      logger: TracedLogger,
-  )(implicit tc: TraceContext): Either[HttpClientError, ProtectedKeyStore] = {
+      keyStoreConfig: KeyStoreConfig
+  )(implicit loggingContext: NamedLoggingContext): Either[HttpClientError, ProtectedKeyStore] = {
     val password = keyStoreConfig.password
-    loadP12Store(keyStoreConfig.path.toScala, password, logger)
+    loadP12Store(keyStoreConfig.path.toScala, password)
       .map(store => ProtectedKeyStore(store, password))
       .leftMap(FailedToLoadKeyStore)
   }
@@ -469,8 +470,7 @@ object HttpClient {
   private def loadP12Store(
       path: File,
       password: Password,
-      logger: TracedLogger,
-  )(implicit tc: TraceContext): Either[String, KeyStore] =
+  )(implicit loggingContext: NamedLoggingContext): Either[String, KeyStore] =
     for {
       store <- Either
         .catchOnly[KeyStoreException](KeyStore.getInstance("PKCS12"))
@@ -481,7 +481,7 @@ object HttpClient {
         .leftMap {
           case ioException: IOException
               if ioException.getCause.isInstanceOf[UnrecoverableKeyException] =>
-            logger.warn(
+            loggingContext.warn(
               "encountered IOException caused by a UnrecoverableKeyException while loading a keystore likely indicating an incorrect password was used",
               ioException,
             )

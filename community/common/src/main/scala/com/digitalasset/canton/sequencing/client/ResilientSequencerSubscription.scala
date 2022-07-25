@@ -163,7 +163,7 @@ class ResilientSequencerSubscription[HandlerError](
     } else {
       TraceContext.withNewTraceContext { tx =>
         this.degradationOccurred(
-          LostSequencerSubscription.Warn(identifier)(this.loggingContext(tx))
+          LostSequencerSubscription.Warn(identifier)(this.errorLoggingContext(tx))
         )
       }
     }

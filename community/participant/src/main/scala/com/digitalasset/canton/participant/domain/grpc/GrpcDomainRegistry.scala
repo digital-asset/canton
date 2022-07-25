@@ -11,7 +11,7 @@ import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervisio
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.lifecycle._
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain._
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
@@ -104,14 +104,14 @@ class GrpcDomainRegistry(
   }
 
   def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (config: DomainConnectionConfig, context: ErrorLoggingContext) =>
+    (config: DomainConnectionConfig) => implicit traceContext: TraceContext =>
       SequencerConnectClient(
         config,
         cryptoApiProvider.crypto,
         participantNodeParameters.processingTimeouts,
         participantNodeParameters.tracing.propagation,
         loggerFactory,
-      )(ec, context)
+      )
   }
 
   override def connect(
@@ -124,7 +124,7 @@ class GrpcDomainRegistry(
     val sequencerConnection = config.sequencerConnection
 
     val runE = for {
-      sequencerConnectClient <- sequencerConnectClientBuilder(config, loggingContext)
+      sequencerConnectClient <- sequencerConnectClientBuilder(config)(traceContext)
         .leftMap(err =>
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err.message)
         )

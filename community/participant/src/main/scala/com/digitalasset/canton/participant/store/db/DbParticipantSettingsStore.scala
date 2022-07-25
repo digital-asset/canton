@@ -52,14 +52,35 @@ class DbParticipantSettingsStore(
     executionQueue.execute(
       processingTime.metric.event {
         for {
-          settings <- storage.query(
+          settingsO <- storage.query(
             sql"select max_dirty_requests, max_rate, max_deduplication_duration, unique_contract_keys from participant_settings"
               .as[Settings]
-              .headOption
-              .map(_.getOrElse(Settings())),
+              .headOption,
             functionFullName,
           )
+          settings = settingsO.getOrElse(Settings())
 
+          // Configure default resource limits for any participant without persistent settings.
+          // For participants with v2.3.0 or earlier, this will upgrade resource limits from "no limits" to the new default
+          _ <- settingsO match {
+            case None if storage.isActive =>
+              val ResourceLimits(maxDirtyRequests, maxRate) = ResourceLimits.default
+              val query = storage.profile match {
+                case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
+                  sqlu"""insert into participant_settings(client, max_dirty_requests, max_rate)
+                           values($client, $maxDirtyRequests, $maxRate)
+                           on conflict do nothing"""
+
+                case _: DbStorage.Profile.Oracle =>
+                  sqlu"""merge into participant_settings using dual on (1 = 1)
+                           when not matched then
+                             insert(client, max_dirty_requests, max_rate) 
+                             values($client, $maxDirtyRequests, $maxRate)"""
+              }
+              storage.update_(query, functionFullName)
+
+            case _ => Future.unit
+          }
         } yield cache.set(Some(settings))
       },
       functionFullName,
@@ -130,7 +151,7 @@ class DbParticipantSettingsStore(
       query: SqlAction[Int, NoStream, Effect.Write],
       operationName: String,
   )(implicit traceContext: TraceContext): Future[Unit] =
-    storage.update_(query, functionFullName).transformWith { res =>
+    storage.update_(query, operationName).transformWith { res =>
       // Reload cache to make it consistent with the DB. Particularly important in case of concurrent writes.
       FutureUtil
         .logOnFailure(

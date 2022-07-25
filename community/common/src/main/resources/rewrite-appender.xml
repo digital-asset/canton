@@ -285,6 +285,18 @@
             <contains>DEPRECATED_PROTOCOL_VERSION</contains>
             <testing>true</testing>
         </rewrite>
+
+        <!-- The enterprise sequencer client supports connecting to multiple sequencer nodes using
+             round robin load balancing with health checks as a basis for failover. If some of the sequencer
+             nodes are running an older version without the health check service on, things will still work fine
+             as explained here: https://github.com/grpc/proposal/blob/master/A17-client-side-health-checking.md?plain=1#L141-L147
+             However an error message will be printed which we can safely suppress.
+         -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>io.grpc.protobuf.services.HealthCheckingLoadBalancerFactory</logger>
+            <contains>UNIMPLEMENTED</contains>
+            <maxLevel>INFO</maxLevel>
+        </rewrite>
     </appender>
 
     <!-- using an async appender to move rendering and filtering of log messages to background thread -->

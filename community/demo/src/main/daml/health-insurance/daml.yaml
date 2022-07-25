@@ -4,7 +4,7 @@ exposed-modules:
 - HealthInsurance
 source: HealthInsurance.daml
 init-script: HealthInsurance:setup
-version: 2.3.0
+version: 2.4.0
 dependencies: 
 - daml-prim
 - daml-stdlib

@@ -6,7 +6,7 @@ exposed-modules:
 - Paint
 - Swap
 source: .
-version: 2.3.0
+version: 2.4.0
 dependencies: 
 - daml-prim
 - daml-stdlib

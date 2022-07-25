@@ -278,18 +278,19 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     def contract_data_to_instance(contractData: ContractData, ledgerTime: Instant)(implicit
         env: ConsoleEnvironment
     ): SerializableContract =
-      env.run(
-        ConsoleCommandResult.fromEither(
-          RepairService.ContractConverter
-            .contractDataToInstance(
+      TraceContext.withNewTraceContext { implicit traceContext =>
+        env.run(
+          ConsoleCommandResult.fromEither(
+            RepairService.ContractConverter.contractDataToInstance(
               contractData.templateId,
               contractData.createArguments,
               contractData.signatories,
               contractData.inheritedContractId,
               ledgerTime,
             )
+          )
         )
-      )
+      }
 
     @Help.Summary("Convert a contract instance to contract data.")
     @Help.Description(

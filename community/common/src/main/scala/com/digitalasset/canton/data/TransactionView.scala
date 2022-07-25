@@ -18,8 +18,8 @@ import com.digitalasset.canton.data.ActionDescription.{
 import com.digitalasset.canton.data.TransactionView._
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.{RollbackContext, v0, _}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -28,7 +28,7 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
   SerializationCheckFailed,
 }
-import com.digitalasset.canton.util.{ErrorLoggingLazyVal, ErrorUtil, MapsUtil, NoCopy}
+import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal, NoCopy}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtoV0,
@@ -66,6 +66,7 @@ case class TransactionView private (
     extends MerkleTreeInnerNode[TransactionView](hashOps)
     with HasVersionedToByteString
     with HasProtoV0[v0.ViewNode]
+    with HasLoggerName
     with NoCopy {
 
   if (viewCommonData.unwrap.isRight) {
@@ -83,7 +84,7 @@ case class TransactionView private (
 
   def tryUnblindViewParticipantData(
       fieldName: String
-  )(implicit loggingContext: ErrorLoggingContext): ViewParticipantData =
+  )(implicit loggingContext: NamedLoggingContext): ViewParticipantData =
     viewParticipantData.unwrap.getOrElse(
       ErrorUtil.internalError(
         new IllegalStateException(
@@ -93,7 +94,7 @@ case class TransactionView private (
     )
 
   private def tryUnblindSubview(subview: MerkleTree[TransactionView], fieldName: String)(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): TransactionView =
     subview.unwrap.getOrElse(
       ErrorUtil.internalError(
@@ -179,13 +180,13 @@ case class TransactionView private (
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded
     */
   def globalKeyInputs(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): Map[LfGlobalKey, KeyResolutionWithMaintainers] =
     _globalKeyInputs.get
 
   private[this] val _globalKeyInputs
-      : ErrorLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] =
-    ErrorLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] { implicit loggingContext =>
+      : NamedLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] =
+    NamedLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] { implicit loggingContext =>
       val viewParticipantData = tryUnblindViewParticipantData("Global key inputs")
 
       if (viewParticipantData.isEquivalentTo(ProtocolVersion.v2_0_0)) {
@@ -208,7 +209,7 @@ case class TransactionView private (
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded
     */
   def inputContracts(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): Map[LfContractId, InputContract] = _inputsAndCreated.get._1
 
   /** The contracts appearing in create nodes in the view (including subviews).
@@ -216,12 +217,12 @@ case class TransactionView private (
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded
     */
   def createdContracts(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): Map[LfContractId, CreatedContractInView] = _inputsAndCreated.get._2
 
-  private[this] val _inputsAndCreated: ErrorLoggingLazyVal[
+  private[this] val _inputsAndCreated: NamedLoggingLazyVal[
     (Map[LfContractId, InputContract], Map[LfContractId, CreatedContractInView])
-  ] = ErrorLoggingLazyVal[
+  ] = NamedLoggingLazyVal[
     (Map[LfContractId, InputContract], Map[LfContractId, CreatedContractInView])
   ] { implicit loggingContext =>
     val vpd = viewParticipantData.unwrap.getOrElse(
@@ -300,7 +301,7 @@ case class TransactionView private (
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def activeLedgerState(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): ActiveLedgerState[Unit] =
     _activeLedgerStateAndUpdatedKeys.get._1
 
@@ -312,7 +313,7 @@ case class TransactionView private (
     *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
-  def updatedKeys(implicit loggingContext: ErrorLoggingContext): Map[LfGlobalKey, Set[LfPartyId]] =
+  def updatedKeys(implicit loggingContext: NamedLoggingContext): Map[LfGlobalKey, Set[LfPartyId]] =
     _activeLedgerStateAndUpdatedKeys.get._2
 
   /** The keys that this view updates (including reassigning the key), along with the assignment of that key at the end of the transaction.
@@ -324,7 +325,7 @@ case class TransactionView private (
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def updatedKeyValues(implicit
-      loggingContext: ErrorLoggingContext
+      loggingContext: NamedLoggingContext
   ): Map[LfGlobalKey, KeyMapping] = {
     val localActiveKeys = activeLedgerState.localActiveKeys
     def resolveKey(key: LfGlobalKey): KeyMapping =
@@ -337,8 +338,8 @@ case class TransactionView private (
   }
 
   private[this] val _activeLedgerStateAndUpdatedKeys
-      : ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] =
-    ErrorLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] {
+      : NamedLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] =
+    NamedLoggingLazyVal[(ActiveLedgerState[Unit], Map[LfGlobalKey, Set[LfPartyId]])] {
       implicit loggingContext =>
         val updatedKeysB = Map.newBuilder[LfGlobalKey, Set[LfPartyId]]
         @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -385,7 +386,7 @@ case class TransactionView private (
           updatedKeysB.result()
     }
 
-  def consumed(implicit loggingContext: ErrorLoggingContext): Map[LfContractId, Unit] = {
+  def consumed(implicit loggingContext: NamedLoggingContext): Map[LfContractId, Unit] = {
     // In strict mode, every node involving a key updates the active ledger state
     // unless it is under a rollback node.
     // So it suffices to look at the created and input contracts

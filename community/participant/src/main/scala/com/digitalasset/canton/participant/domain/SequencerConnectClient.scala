@@ -9,7 +9,7 @@ import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.SequencerConnectClient.Error
 import com.digitalasset.canton.participant.domain.grpc.GrpcSequencerConnectClient
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -61,7 +61,7 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 object SequencerConnectClient {
 
   type Builder =
-    (DomainConnectionConfig, ErrorLoggingContext) => EitherT[Future, Error, SequencerConnectClient]
+    DomainConnectionConfig => TraceContext => EitherT[Future, Error, SequencerConnectClient]
 
   sealed trait Error {
     def message: String
@@ -82,8 +82,8 @@ object SequencerConnectClient {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContextExecutor
-  ): Builder = { case (config, context) =>
-    apply(config, crypto, timeouts, traceContextPropagation, loggerFactory)(ec, context)
+  ): Builder = { config => implicit traceContext =>
+    apply(config, crypto, timeouts, traceContextPropagation, loggerFactory)
   }
 
   def apply(
@@ -94,7 +94,7 @@ object SequencerConnectClient {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContextExecutor,
-      loggingContext: ErrorLoggingContext,
+      traceContext: TraceContext,
   ): EitherT[Future, Error, SequencerConnectClient] = {
     for {
       client <- config.sequencerConnection match {
@@ -115,7 +115,7 @@ object SequencerConnectClient {
               timeouts,
               traceContextPropagation,
               loggerFactory,
-            )(ec, loggingContext.traceContext)
+            )
               .leftMap[Error](str => Error.Transport(str))
           } yield new HttpSequencerConnectClient(httpClient, loggerFactory)
       }
