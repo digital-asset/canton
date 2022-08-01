@@ -15,7 +15,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedSerializerCompanion,
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
@@ -36,7 +35,6 @@ import com.google.protobuf.ByteString
 case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
     val representativeProtocolVersion: RepresentativeProtocolVersion[Batch[Envelope[_]]]
 ) extends HasProtocolVersionedWrapper[Batch[Envelope[_]]]
-    with HasProtoV0[v0.CompressedBatch]
     with PrettyPrinting {
 
   override val companionObj = Batch
@@ -47,7 +45,7 @@ case class Batch[+Env <: Envelope[_]] private (envelopes: List[Env])(
     e.recipients.allRecipients
   }.toSet
 
-  override def toProtoV0: v0.CompressedBatch = {
+  def toProtoV0: v0.CompressedBatch = {
     val batch = v0.Batch(envelopes = envelopes.map(_.toProtoV0))
     val compressed = ByteStringUtil.compressGzip(batch.toByteString)
     v0.CompressedBatch(

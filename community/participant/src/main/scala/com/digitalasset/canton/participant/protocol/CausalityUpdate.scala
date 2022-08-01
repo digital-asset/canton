@@ -19,7 +19,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -30,8 +29,7 @@ import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 /** Represents the causal dependencies of a given request.
   */
 sealed trait CausalityUpdate
-    extends HasProtoV0[CausalityUpdateProto]
-    with HasVersionedWrapper[VersionedMessage[CausalityUpdate]]
+    extends HasVersionedWrapper[VersionedMessage[CausalityUpdate]]
     with PrettyPrinting {
 
   val ts: CantonTimestamp

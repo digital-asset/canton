@@ -7,7 +7,11 @@ import cats.data.NonEmptySeq
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.Mediator.{Safe, SafeUntil}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
+import com.digitalasset.canton.protocol.{
+  DomainParameters,
+  DynamicDomainParameters,
+  TestDomainParameters,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
@@ -26,7 +30,7 @@ class MediatorTest extends AnyWordSpec with BaseTest {
 
   "Mediator.checkPruningStatus" should {
     "deal with current domain parameters" in {
-      val parameters = DynamicDomainParameters.WithValidity(
+      val parameters = DomainParameters.WithValidity[DynamicDomainParameters](
         CantonTimestamp.Epoch,
         None,
         defaultParameters,
@@ -40,12 +44,11 @@ class MediatorTest extends AnyWordSpec with BaseTest {
       )
     }
 
-    "cap the time using DynamicDomainParameters.WithValidity.validFrom" in {
+    "cap the time using DomainParameters.WithValidity[DynamicDomainParameters].validFrom" in {
       val validFrom = origin
 
       def test(validUntil: Option[CantonTimestamp]): Assertion = {
-        val parameters =
-          DynamicDomainParameters.WithValidity(validFrom, validUntil, defaultParameters)
+        val parameters = DomainParameters.WithValidity(validFrom, validUntil, defaultParameters)
 
         // Capping happen
         Mediator.checkPruningStatus(parameters, validFrom.plusSeconds(1)) shouldBe SafeUntil(
@@ -63,11 +66,7 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     }
 
     "deal with future domain parameters" in {
-      val parameters = DynamicDomainParameters.WithValidity(
-        origin,
-        None,
-        defaultParameters,
-      )
+      val parameters = DomainParameters.WithValidity(origin, None, defaultParameters)
 
       Mediator.checkPruningStatus(
         parameters,
@@ -78,7 +77,7 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     "deal with past domain parameters" in {
       val dpChangeTs = relTime(60)
 
-      val parameters = DynamicDomainParameters.WithValidity(
+      val parameters = DomainParameters.WithValidity[DynamicDomainParameters](
         origin,
         Some(dpChangeTs),
         defaultParameters,
@@ -117,11 +116,10 @@ class MediatorTest extends AnyWordSpec with BaseTest {
     val dpChangeTs2 = relTime(40)
 
     val parameters = NonEmptySeq.of(
-      DynamicDomainParameters.WithValidity(origin, Some(dpChangeTs1), defaultParameters),
+      DomainParameters.WithValidity(origin, Some(dpChangeTs1), defaultParameters),
       // This one prevents pruning for some time
-      DynamicDomainParameters
-        .WithValidity(dpChangeTs1, Some(dpChangeTs2), parametersWith(hugeTimeout)),
-      DynamicDomainParameters.WithValidity(dpChangeTs2, None, defaultParameters),
+      DomainParameters.WithValidity(dpChangeTs1, Some(dpChangeTs2), parametersWith(hugeTimeout)),
+      DomainParameters.WithValidity(dpChangeTs2, None, defaultParameters),
     )
 
     "query in the first slice" in {

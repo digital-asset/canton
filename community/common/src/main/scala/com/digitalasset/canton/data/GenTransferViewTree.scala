@@ -13,7 +13,6 @@ import com.digitalasset.canton.protocol.{ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedWrapper,
   ProtocolVersion,
   UntypedVersionedMessage,
@@ -33,8 +32,7 @@ abstract class GenTransferViewTree[
 ] protected (commonData: MerkleTree[CommonData], participantData: MerkleTree[View])(
     hashOps: HashOps
 ) extends MerkleTreeInnerNode[Tree](hashOps)
-    with HasVersionedWrapper[VersionedMessage[TransferViewTree]]
-    with HasProtoV0[v0.TransferViewTree] { this: Tree =>
+    with HasVersionedWrapper[VersionedMessage[TransferViewTree]] { this: Tree =>
 
   override def subtrees: Seq[MerkleTree[_]] = Seq(commonData, participantData)
 
@@ -43,7 +41,7 @@ abstract class GenTransferViewTree[
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TransferViewTree] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.TransferViewTree =
+  def toProtoV0: v0.TransferViewTree =
     v0.TransferViewTree(
       commonData = Some(MerkleTree.toBlindableNode(commonData)),
       participantData = Some(MerkleTree.toBlindableNode(participantData)),

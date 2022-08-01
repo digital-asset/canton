@@ -15,7 +15,6 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -43,7 +42,6 @@ sealed abstract case class MalformedMediatorRequestResult(
 ) extends MediatorResult
     with SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MalformedMediatorRequestResult]
-    with HasProtoV0[v0.MalformedMediatorRequestResult]
     with NoCopy
     with PrettyPrinting {
 
@@ -57,7 +55,7 @@ sealed abstract case class MalformedMediatorRequestResult(
 
   override def companionObj = MalformedMediatorRequestResult
 
-  override protected def toProtoV0: v0.MalformedMediatorRequestResult =
+  protected def toProtoV0: v0.MalformedMediatorRequestResult =
     v0.MalformedMediatorRequestResult(
       requestId = Some(requestId.unwrap.toProtoPrimitive),
       domainId = domainId.toProtoPrimitive,

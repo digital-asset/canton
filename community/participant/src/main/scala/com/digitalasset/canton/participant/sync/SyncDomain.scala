@@ -44,7 +44,11 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
   TransferProcessorError,
 }
 import com.digitalasset.canton.participant.protocol.transfer._
-import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruneObserver}
+import com.digitalasset.canton.participant.pruning.{
+  AcsCommitmentProcessor,
+  PruneObserver,
+  SortedReconciliationIntervalsProvider,
+}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
@@ -196,10 +200,17 @@ class SyncDomain(
     loggerFactory,
   )
 
+  private val sortedReconciliationIntervalsProvider = SortedReconciliationIntervalsProvider(
+    staticDomainParameters,
+    topologyClient,
+    futureSupervisor,
+    loggerFactory,
+  )
+
   private val pruneObserver = new PruneObserver(
     persistent.requestJournalStore,
     persistent.sequencerCounterTrackerStore,
-    staticDomainParameters.reconciliationInterval,
+    sortedReconciliationIntervalsProvider,
     persistent.acsCommitmentStore,
     persistent.activeContractStore,
     persistent.contractKeyJournal,
@@ -217,7 +228,7 @@ class SyncDomain(
       participantId,
       sequencerClient,
       domainCrypto,
-      staticDomainParameters.reconciliationInterval,
+      sortedReconciliationIntervalsProvider,
       persistent.acsCommitmentStore,
       pruneObserver.observer(_, _),
       killSwitch = selfKillSwitch,
@@ -385,7 +396,7 @@ class SyncDomain(
       })
     }
 
-    def initialiseClientAtCleanHead(): Future[Unit] = {
+    def initializeClientAtCleanHead(): Future[Unit] = {
       // generally, the topology client will be initialised by the topology processor. however,
       // if there is nothing to be replayed, then the topology processor will only be initialised
       // once the first event is dispatched.
@@ -426,7 +437,7 @@ class SyncDomain(
       _ <- EitherT.right(missingKeysAlerter.init())
 
       // Phase 0: Initialise topology client at current clean head
-      _ <- EitherT.right(initialiseClientAtCleanHead())
+      _ <- EitherT.right(initializeClientAtCleanHead())
 
       // Phase 1: publish pending events of the event log up to the prehead clean request
       // Later events may have already been published before the crash

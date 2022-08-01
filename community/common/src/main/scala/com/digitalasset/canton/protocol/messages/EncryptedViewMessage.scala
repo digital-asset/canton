@@ -18,8 +18,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasProtoV1,
   HasProtocolVersionedCompanion,
   HasRepresentativeProtocolVersion,
   HasVersionedToByteString,
@@ -192,7 +190,6 @@ case class EncryptedViewMessageV0[+VT <: ViewType] private (
     encryptedView: EncryptedView[VT],
     override val domainId: DomainId,
 ) extends EncryptedViewMessage[VT]
-    with HasProtoV0[v0.EncryptedViewMessage]
     with ProtocolMessageV0 {
 
   protected[messages] def participants: Option[Set[ParticipantId]] = Some(randomnessMap.keySet)
@@ -200,7 +197,7 @@ case class EncryptedViewMessageV0[+VT <: ViewType] private (
   val representativeProtocolVersion: RepresentativeProtocolVersion[EncryptedViewMessage[_]] =
     EncryptedViewMessage.protocolVersionRepresentativeFor(ProtobufVersion(0))
 
-  override def toProtoV0: v0.EncryptedViewMessage =
+  def toProtoV0: v0.EncryptedViewMessage =
     v0.EncryptedViewMessage(
       viewTree = encryptedView.viewTree.ciphertext,
       submitterParticipantSignature = submitterParticipantSignature.map(_.toProtoV0),
@@ -232,8 +229,7 @@ case class EncryptedViewMessageV1[+VT <: ViewType] private (
 )(
     informeeParticipants: Option[Set[ParticipantId]]
 ) extends EncryptedViewMessage[VT]
-    with ProtocolMessageV1
-    with HasProtoV1[v1.EncryptedViewMessage] {
+    with ProtocolMessageV1 {
 
   protected[messages] def participants: Option[Set[ParticipantId]] =
     informeeParticipants

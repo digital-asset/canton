@@ -14,7 +14,6 @@ import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -38,7 +37,6 @@ sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
     extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with HasProtoV0[v0.RootHashMessage]
     with PrettyPrinting {
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
@@ -47,7 +45,7 @@ sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV0))
 
-  override def toProtoV0: v0.RootHashMessage = v0.RootHashMessage(
+  def toProtoV0: v0.RootHashMessage = v0.RootHashMessage(
     rootHash = rootHash.toProtoPrimitive,
     domainId = domainId.toProtoPrimitive,
     viewType = viewType.toProtoEnum,

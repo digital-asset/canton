@@ -8,15 +8,14 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 
 /** Why was the sequencer unable to sequence the requested send */
-sealed trait DeliverErrorReason extends HasProtoV0[v0.DeliverErrorReason] with PrettyPrinting {
+sealed trait DeliverErrorReason extends PrettyPrinting {
 
   /** Printable message explaining error */
   val message: String
 
-  override def toProtoV0: v0.DeliverErrorReason =
+  def toProtoV0: v0.DeliverErrorReason =
     v0.DeliverErrorReason(toProtoReason)
 
   protected def toProtoReason: v0.DeliverErrorReason.Reason

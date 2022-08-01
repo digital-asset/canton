@@ -5,15 +5,15 @@ package com.digitalasset.canton.resource
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{DbConfig, LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{CloseContext, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.RetryEither
+import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
 import io.functionmeta.functionFullName
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.FlywayException
@@ -24,6 +24,7 @@ import slick.jdbc.{DataSourceJdbcDataSource, JdbcBackend, JdbcDataSource}
 import java.sql.SQLException
 import javax.sql.DataSource
 import scala.concurrent.blocking
+import scala.concurrent.duration.Duration
 
 trait DbMigrationsFactory {
 
@@ -61,7 +62,7 @@ trait DbMigrations { this: NamedLogging =>
       .load()
   }
 
-  protected def withCreatedDb[A](
+  protected def withCreatedDb[A](retryConfig: DbStorage.RetryConfig)(
       fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A]
   ): EitherT[UnlessShutdown, DbMigrations.Error, A] = {
     DbStorage
@@ -72,20 +73,22 @@ trait DbMigrations { this: NamedLogging =>
         withWriteConnectionPool = false,
         withMainConnection = false,
         forMigration = true,
+        retryConfig = retryConfig,
       )(loggerFactory)
       .leftMap(DbMigrations.DatabaseError)
       .flatMap(db => ResourceUtil.withResource(db)(fn))
   }
 
   /** Obtain access to the database to run the migration operation. */
-  protected def withDb[A](fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A])(implicit
+  protected def withDb[A](
+      retryConfig: DbStorage.RetryConfig = DbStorage.RetryConfig.failFast
+  )(fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A])(implicit
       traceContext: TraceContext
   ): EitherT[UnlessShutdown, DbMigrations.Error, A]
 
   protected def migrateDatabaseInternal(
-      db: Database
+      flyway: Flyway
   )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    val flyway = createFlyway(DbMigrations.createDataSource(db.source))
     // Retry the migration in case of failures, which may happen due to a race condition in concurrent migrations
     RetryEither.retry[DbMigrations.Error, Unit](10, 100, functionFullName, logger) {
       Either
@@ -96,9 +99,8 @@ trait DbMigrations { this: NamedLogging =>
   }
 
   protected def repairFlywayMigrationInternal(
-      db: Database
+      flyway: Flyway
   )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    val flyway = createFlyway(DbMigrations.createDataSource(db.source))
     Either
       .catchOnly[FlywayException](flyway.repair())
       .map(r =>
@@ -115,7 +117,12 @@ trait DbMigrations { this: NamedLogging =>
   /** Migrate the database with all pending migrations. */
   def migrateDatabase(): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
     TraceContext.withNewTraceContext { implicit traceContext =>
-      withDb(migrateDatabaseInternal)
+      withDb() { createdDb =>
+        ResourceUtil.withResource(createdDb) { db =>
+          val flyway = createFlyway(DbMigrations.createDataSource(db.source))
+          migrateDatabaseInternal(flyway)
+        }
+      }
     }
 
   /** Repair the database in case the migrations files changed (e.g. due to comment changes)
@@ -130,82 +137,76 @@ trait DbMigrations { this: NamedLogging =>
     */
   def repairFlywayMigration(): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
     TraceContext.withNewTraceContext { implicit traceContext =>
-      withDb(repairFlywayMigrationInternal)
+      withFlyway(repairFlywayMigrationInternal)
     }
 
   protected def withFlyway[A](
-      fn: (Database, Flyway) => EitherT[UnlessShutdown, DbMigrations.Error, A]
+      fn: Flyway => EitherT[UnlessShutdown, DbMigrations.Error, A]
   )(implicit
       traceContext: TraceContext
   ): EitherT[UnlessShutdown, DbMigrations.Error, A] =
-    withDb { createdDb =>
+    withDb() { createdDb =>
       ResourceUtil.withResource(createdDb) { db =>
         val flyway = createFlyway(DbMigrations.createDataSource(db.source))
-        fn(db, flyway)
+        fn(flyway)
       }
     }
 
-  def connectionCheck(
-      failFast: Boolean,
+  private def connectionCheck(
+      source: JdbcDataSource,
       processingTimeout: ProcessingTimeout,
-  )(implicit tc: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    def attempt: EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-      withDb { createdDb =>
-        ResourceUtil.withResource(createdDb) { db: JdbcBackend.Database =>
-          //TODO(i9497): The DataSource could be created from the DbConfig, without first having to create the whole
-          // Database. Swap to this more light-weight approach.
-          val dataSource = db.source
-          val conn = dataSource.createConnection()
-          val valid = blocking {
-            Either.catchOnly[SQLException](
-              conn.isValid(processingTimeout.network.duration.toSeconds.toInt)
+  ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
+    (ResourceUtil
+      .withResourceEither(source.createConnection()) { conn =>
+        val valid = blocking {
+          Either.catchOnly[SQLException](
+            conn.isValid(processingTimeout.network.duration.toSeconds.toInt)
+          )
+        }
+        valid
+          .leftMap(err => show"failed to check connection $err")
+          .flatMap { valid =>
+            Either.cond(
+              valid,
+              (),
+              "A trial database connection was not valid",
             )
           }
+          .leftMap[DbMigrations.Error](err => DbMigrations.DatabaseError(err))
+      } match {
+      case Right(value) => value
+      case Left(err) =>
+        Left(DbMigrations.DatabaseError(s"failed to create connection ${err.getMessage}"))
+    }).toEitherT[UnlessShutdown]
+  }
 
-          valid
-            .leftMap(err => show"failed to check connection $err")
-            .flatMap { valid =>
-              Either.cond(
-                valid,
-                (),
-                "A trial database connection was not valid",
-              )
-            }
-            .leftMap[DbMigrations.Error](err => DbMigrations.DatabaseError(err))
-            .toEitherT[UnlessShutdown]
+  def checkAndMigrate(params: LocalNodeParameters, retryConfig: RetryConfig)(implicit
+      tc: TraceContext
+  ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
+    val standardConfig = !params.nonStandardConfig
+    val started = System.nanoTime()
+    withDb(retryConfig) { createdDb =>
+      ResourceUtil.withResource(createdDb) { db =>
+        val flyway = createFlyway(DbMigrations.createDataSource(db.source))
+        for {
+          _ <- connectionCheck(db.source, params.processingTimeouts)
+          _ <- checkDbVersion(db, params.processingTimeouts, standardConfig)
+          _ <- migrateIfFreshAndCheckPending(flyway)
+        } yield {
+          val elapsed = System.nanoTime() - started
+          logger.debug(
+            s"Finished setting up database schemas after ${LoggerUtil
+              .roundDurationForHumans(Duration.fromNanos(elapsed))}"
+          )
         }
       }
     }
-
-    if (failFast) {
-      attempt
-    } else {
-      // Repeatedly attempt to create a valid connection, so that the system waits for the database to come up
-      // We must retry the whole `attempt` operation including the `withDb`, as `withDb` may itself fail if the
-      // database is not up.
-      val retryConfig = RetryConfig.forever
-      RetryEither.retryUnlessShutdown[DbMigrations.Error, Unit](
-        retryConfig.maxRetries,
-        retryConfig.retryWaitingTime.toMillis,
-        functionFullName,
-        logger,
-      )(attempt)
-    }
   }
 
-  /** Migrate a database if it is empty, otherwise skip the migration. */
-  def migrateIfFresh(): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
-    TraceContext.withNewTraceContext { implicit traceContext =>
-      withFlyway { case (db, flyway) =>
-        migrateIfFreshInternal(db, flyway)
-      }
-    }
-
-  private def migrateIfFreshInternal(db: Database, flyway: Flyway)(implicit
+  private def migrateIfFreshInternal(flyway: Flyway)(implicit
       traceContext: TraceContext
   ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    if (flyway.info().applied().isEmpty)
-      migrateDatabaseInternal(db)
+    if (flyway.info().applied().isEmpty) migrateDatabaseInternal(flyway)
     else {
       logger.debug("Skip flyway migration on non-empty database")
       EitherT.rightT(())
@@ -213,25 +214,25 @@ trait DbMigrations { this: NamedLogging =>
   }
 
   /** Combined method of migrateIfFresh and checkPendingMigration, avoids creating multiple pools */
-  def migrateIfFreshAndCheckPending(): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
+  private def migrateIfFreshAndCheckPending(
+      flyway: Flyway
+  ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
     TraceContext.withNewTraceContext { implicit traceContext =>
-      withFlyway { case (db, flyway) =>
-        for {
-          _ <- migrateIfFreshInternal(db, flyway)
-          _ <- checkPendingMigrationInternal(flyway).toEitherT[UnlessShutdown]
-        } yield ()
-      }
+      for {
+        _ <- migrateIfFreshInternal(flyway)
+        _ <- checkPendingMigrationInternal(flyway).toEitherT[UnlessShutdown]
+      } yield ()
     }
 
-  def checkDbVersion(
+  private def checkDbVersion(
+      db: JdbcBackend.Database,
       timeouts: ProcessingTimeout,
       standardConfig: Boolean,
-  )(implicit tc: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
-    withDb { db =>
-      val check = DbVersionCheck
-        .dbVersionCheck(timeouts, standardConfig, dbConfig)
-      check(db).toEitherT[UnlessShutdown]
-    }
+  )(implicit tc: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
+    val check = DbVersionCheck
+      .dbVersionCheck(timeouts, standardConfig, dbConfig)
+    check(db).toEitherT[UnlessShutdown]
+  }
 
   private def checkPendingMigrationInternal(
       flyway: Flyway
@@ -283,9 +284,11 @@ class CommunityDbMigrations(
     extends DbMigrations
     with NamedLogging {
 
-  override protected def withDb[A](fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A])(
-      implicit traceContext: TraceContext
-  ): EitherT[UnlessShutdown, DbMigrations.Error, A] = withCreatedDb(fn)
+  override def withDb[A](
+      retryConfig: RetryConfig
+  )(fn: Database => EitherT[UnlessShutdown, DbMigrations.Error, A])(implicit
+      traceContext: TraceContext
+  ): EitherT[UnlessShutdown, DbMigrations.Error, A] = withCreatedDb(retryConfig)(fn)
 }
 
 object DbMigrations {

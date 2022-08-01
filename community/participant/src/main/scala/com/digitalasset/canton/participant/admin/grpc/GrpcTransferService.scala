@@ -17,7 +17,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
-import com.digitalasset.canton.version.HasProtoV0
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -113,8 +112,8 @@ case class TransferSearchResult(
     sourceDomain: String,
     contractId: LfContractId,
     readyForTransferIn: Boolean,
-) extends HasProtoV0[AdminTransferSearchResponse.TransferSearchResult] {
-  override def toProtoV0: AdminTransferSearchResponse.TransferSearchResult =
+) {
+  def toProtoV0: AdminTransferSearchResponse.TransferSearchResult =
     AdminTransferSearchResponse.TransferSearchResult(
       contractId = contractId.toProtoPrimitive,
       transferId = Some(transferId.toProtoV0),

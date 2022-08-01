@@ -126,6 +126,8 @@ class GrpcSequencerService(
     subscriptionPool.activeSubscriptions().map(_.member)
   def disconnectMember(member: Member)(implicit traceContext: TraceContext): Unit =
     subscriptionPool.closeSubscriptions(member)
+  def disconnectAllMembers()(implicit traceContext: TraceContext): Unit =
+    subscriptionPool.closeAllSubscriptions()
 
   override def sendAsync(requestP: v0.SubmissionRequest): Future[v0.SendAsyncResponse] =
     fromGrpcContext { implicit traceContext =>

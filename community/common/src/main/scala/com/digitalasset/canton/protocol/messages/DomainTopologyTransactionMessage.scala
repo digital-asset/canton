@@ -14,7 +14,6 @@ import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -35,12 +34,11 @@ sealed abstract case class DomainTopologyTransactionMessage private (
 ) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with HasProtoV0[v0.DomainTopologyTransactionMessage]
     with NoCopy {
   def hashToSign(hashOps: HashOps): Hash =
     DomainTopologyTransactionMessage.hash(transactions, domainId, hashOps)
 
-  override def toProtoV0: v0.DomainTopologyTransactionMessage = {
+  def toProtoV0: v0.DomainTopologyTransactionMessage = {
     v0.DomainTopologyTransactionMessage(
       signature = Some(domainTopologyManagerSignature.toProtoV0),
       transactions = transactions.map(_.getCryptographicEvidence),

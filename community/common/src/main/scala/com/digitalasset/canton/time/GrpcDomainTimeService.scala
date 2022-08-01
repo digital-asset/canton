@@ -15,7 +15,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.empty.Empty
 import io.grpc.Status
 
@@ -75,9 +74,11 @@ class GrpcDomainTimeService(
     EitherTUtil.toFuture(handler.leftMap(_.asRuntimeException()))
 }
 
-case class FetchTimeRequest(domainIdO: Option[DomainId], freshnessBound: NonNegativeFiniteDuration)
-    extends HasProtoV0[v0.FetchTimeRequest] {
-  override def toProtoV0: v0.FetchTimeRequest =
+case class FetchTimeRequest(
+    domainIdO: Option[DomainId],
+    freshnessBound: NonNegativeFiniteDuration,
+) {
+  def toProtoV0: v0.FetchTimeRequest =
     v0.FetchTimeRequest(domainIdO.map(_.toProtoPrimitive), freshnessBound.toProtoPrimitive.some)
 }
 
@@ -95,8 +96,8 @@ object FetchTimeRequest {
     } yield FetchTimeRequest(domainIdO, freshnessBound)
 }
 
-case class FetchTimeResponse(timestamp: CantonTimestamp) extends HasProtoV0[v0.FetchTimeResponse] {
-  override def toProtoV0: v0.FetchTimeResponse =
+case class FetchTimeResponse(timestamp: CantonTimestamp) {
+  def toProtoV0: v0.FetchTimeResponse =
     v0.FetchTimeResponse(timestamp.toProtoPrimitive.some)
 }
 
@@ -113,9 +114,8 @@ object FetchTimeResponse {
     } yield FetchTimeResponse(timestamp)
 }
 
-case class AwaitTimeRequest(domainIdO: Option[DomainId], timestamp: CantonTimestamp)
-    extends HasProtoV0[v0.AwaitTimeRequest] {
-  override def toProtoV0: v0.AwaitTimeRequest =
+case class AwaitTimeRequest(domainIdO: Option[DomainId], timestamp: CantonTimestamp) {
+  def toProtoV0: v0.AwaitTimeRequest =
     v0.AwaitTimeRequest(domainIdO.map(_.toProtoPrimitive), timestamp.toProtoPrimitive.some)
 }
 

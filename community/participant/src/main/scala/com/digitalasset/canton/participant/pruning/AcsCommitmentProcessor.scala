@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.participant.pruning
 
+import cats.data.{NonEmptyList, ValidatedNec}
+import cats.syntax.contravariantSemigroupal._
 import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.traverse._
+import cats.syntax.validated._
 import com.daml.error._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.Threading
@@ -42,7 +45,6 @@ import com.digitalasset.canton.protocol.{LfContractId, LfHash, WithContractHash}
 import com.digitalasset.canton.sequencing.client.{SendType, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
-import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
@@ -52,14 +54,12 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
-import java.time.temporal.ChronoUnit
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, blocking}
-import scala.math.Ordering
 import scala.math.Ordering.Implicits._
 
 /** Computes, sends, receives and compares ACS commitments
@@ -136,7 +136,7 @@ class AcsCommitmentProcessor(
     participantId: ParticipantId,
     val sequencerClient: SequencerClient,
     domainCrypto: SyncCryptoClient[SyncCryptoApi],
-    reconciliationInterval: PositiveSeconds,
+    sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     store: AcsCommitmentStore,
     commitmentPeriodObserver: (ExecutionContext, TraceContext) => FutureUnlessShutdown[Unit],
     killSwitch: => Unit,
@@ -153,14 +153,21 @@ class AcsCommitmentProcessor(
 
   // As the commitment computation is in the worst case expected to last the same order of magnitude as the
   // reconciliation interval, wait for at least that long
-  override protected def closingTimeout: FiniteDuration =
-    super.closingTimeout.max(reconciliationInterval.toScala)
+  override protected def closingTimeout: FiniteDuration = {
+    // If we don't have any, nothing around commitment processing happened, so we take 0
+    val latestReconciliationInterval =
+      sortedReconciliationIntervalsProvider.getApproximateLatestReconciliationInterval
+        .map(_.intervalLength.toScala)
+        .getOrElse(Duration.Zero)
+
+    super.closingTimeout.max(latestReconciliationInterval)
+  }
 
   /** The parallelism to use when computing commitments */
   private val threadCount: PositiveNumeric[Int] = {
     implicit val traceContext = TraceContext.empty
     val count = Threading.detectNumberOfThreads(logger)
-    logger.info(s"Will use parallelism $count when computing ACs commitments")
+    logger.info(s"Will use parallelism $count when computing ACS commitments")
     PositiveNumeric.tryCreate(count)
   }
 
@@ -193,6 +200,12 @@ class AcsCommitmentProcessor(
     new AtomicReference[List[Traced[CantonTimestamp]]](List())
 
   private[pruning] val queue: SimpleExecutionQueue = new SimpleExecutionQueue(logTaskTiming = true)
+
+  private def getReconciliationIntervals(validAt: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[SortedReconciliationIntervals] = performUnlessClosingF(functionFullName)(
+    sortedReconciliationIntervalsProvider.reconciliationIntervals(validAt)
+  )
 
   // Ensure we queue the initialization as the first task in the queue. We don't care about initialization having
   // completed by the time we return - only that no other task is queued before initialization.
@@ -260,7 +273,7 @@ class AcsCommitmentProcessor(
           timestampsWithPotentialTopologyChanges.updateAndGet(_.drop(1))
           // only update if this is a separate timestamp
           val eft = effectiveTime.value
-          if (eft < toc.timestamp && lastPublished.forall(_.timestamp < eft)) {
+          if (eft < toc.timestamp && lastPublished.exists(_.timestamp < eft)) {
             publishTick(
               RecordTime(timestamp = eft, tieBreaker = 0),
               AcsChange.empty,
@@ -305,7 +318,7 @@ class AcsCommitmentProcessor(
       )
     lastPublished = Some(toc)
     lazy val msg =
-      s"Publishing ACS change at $toc activated, ${acsChange.deactivations.size} archived"
+      s"Publishing ACS change at $toc, ${acsChange.activations.size} activated, ${acsChange.deactivations.size} archived"
     logger.debug(msg)
 
     def processCompletedPeriod(
@@ -335,20 +348,26 @@ class AcsCommitmentProcessor(
       }
     }
 
-    def performPublish(): Future[Unit] = performUnlessClosingF(functionFullName) {
+    def performPublish(): Future[Unit] = {
       for {
-        snapshot <- runningCommitments
+        snapshot <- performUnlessClosingF(functionFullName)(runningCommitments)
+        reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
         _ <-
           if (snapshot.watermark >= toc) {
             logger.debug(s"ACS change at $toc is a replay, treating it as a no-op")
             // This is a replay of an already processed ACS change, ignore
-            Future.unit
+            FutureUnlessShutdown.unit
           } else {
             // Check whether this change pushes us to a new commitment period; if so, the previous one is completed
-            val optCompletedPeriod =
-              commitmentPeriodPreceding(reconciliationInterval, endOfLastProcessedPeriod)(
-                toc.timestamp
-              )
+            val optCompletedPeriod = reconciliationIntervals
+              .commitmentPeriodPreceding(endOfLastProcessedPeriod)(toc.timestamp)
+              .tapLeft { err =>
+                logger.info(
+                  s"Unable to compute commitment period preceding ${toc.timestamp}: $err. Keeping the current period"
+                )
+              }
+              .getOrElse(None)
+
             for {
               // Important invariant:
               // - let t be the tick of [[com.digitalasset.canton.participant.store.AcsCommitmentStore#lastComputedAndSent]];
@@ -358,8 +377,13 @@ class AcsCommitmentProcessor(
               //   otherwise, we lose the ability to compute the commitments at t'
               // Hence, the order here is critical for correctness; if the change moves us beyond t', first compute
               // the commitments at t', and only then update the snapshot
-              _ <- optCompletedPeriod.traverse_(processCompletedPeriod(snapshot))
-              _ <- updateSnapshot(toc, acsChange)
+              _ <- optCompletedPeriod.traverse_(commitmentPeriod =>
+                performUnlessClosingF(functionFullName)(
+                  processCompletedPeriod(snapshot)(commitmentPeriod)
+                )
+              )
+
+              _ <- FutureUnlessShutdown.outcomeF(updateSnapshot(toc, acsChange))
             } yield ()
           }
       } yield ()
@@ -411,50 +435,26 @@ class AcsCommitmentProcessor(
       Errors.InternalError.MultipleCommitmentsInBatch(domainId, timestamp, batch.length)
     }
 
-    val future = initFuture.flatMap { case () =>
-      batch.traverse_ { envelope =>
-        performUnlessClosingF(functionFullName) {
-          val payload = envelope.protocolMessage.message
+    val future = for {
+      _ <- initFuture
+      _ <- batch.traverse_ { envelope =>
+        getReconciliationIntervals(envelope.protocolMessage.message.period.toInclusive.forgetSecond)
+          .map { reconciliationIntervals =>
+            validateEnvelope(timestamp, envelope, reconciliationIntervals) match {
+              case Right(()) =>
+                val payload = envelope.protocolMessage.message
+                logger.debug(
+                  s"Checking commitment (purportedly by) ${payload.sender} for period ${payload.period}"
+                )
+                checkSignedMessage(timestamp, envelope.protocolMessage)
 
-          val errors = List(
-            (
-              envelope.recipients != Recipients.cc(participantId),
-              s"At $timestamp, (purportedly) ${payload.sender} sent an ACS commitment to me, but addressed the message to ${envelope.recipients}",
-            ),
-            (
-              payload.counterParticipant != participantId,
-              s"At $timestamp, (purportedly) ${payload.sender} sent an ACS commitment to me, but the commitment lists ${payload.counterParticipant} as the counterparticipant",
-            ),
-            (
-              payload.period.toInclusive > timestamp,
-              s"Received an ACS commitment with a future beforeAndAt timestamp. (Purported) sender: ${payload.sender}. Timestamp: ${payload.period.toInclusive}, receive timestamp: $timestamp",
-            ),
-            (
-              tickBeforeOrAt(
-                payload.period.toInclusive.forgetSecond,
-                reconciliationInterval,
-              ) != payload.period.toInclusive
-                || tickBeforeOrAt(
-                  payload.period.fromExclusive.forgetSecond,
-                  reconciliationInterval,
-                ) != payload.period.fromExclusive,
-              s"Received commitment period doesn't align with the domain reconciliation interval: ${payload.period}",
-            ),
-          ).filter(_._1)
-
-          errors match {
-            case Nil =>
-              val logMsg =
-                s"Checking commitment (purportedly by) ${payload.sender} for period ${payload.period}"
-              logger.debug(logMsg)
-              checkSignedMessage(timestamp, envelope.protocolMessage)
-            case _ =>
-              errors.foreach { case (_, msg) => logger.error(msg) }
-              Future.unit
+              case Left(errors) =>
+                errors.toList.foreach(logger.error(_))
+                Future.unit
+            }
           }
-        }
       }
-    }
+    } yield ()
 
     FutureUtil.logOnFailureUnlessShutdown(
       future,
@@ -466,6 +466,48 @@ class AcsCommitmentProcessor(
         FutureUtil.doNotAwait(Future.successful(killSwitch), s"failed to kill SyncDomain $domainId")
       },
     )
+  }
+
+  private def validateEnvelope(
+      timestamp: CantonTimestamp,
+      envelope: OpenEnvelope[SignedProtocolMessage[AcsCommitment]],
+      reconciliationIntervals: SortedReconciliationIntervals,
+  ): Either[NonEmptyList[String], Unit] = {
+    val payload = envelope.protocolMessage.message
+
+    def validate(valid: Boolean, error: => String): ValidatedNec[String, Unit] =
+      if (valid) ().validNec else error.invalidNec
+
+    val validRecipients = validate(
+      envelope.recipients == Recipients.cc(participantId),
+      s"At $timestamp, (purportedly) ${payload.sender} sent an ACS commitment to me, but addressed the message to ${envelope.recipients}",
+    )
+
+    val validCounterParticipant = validate(
+      payload.counterParticipant == participantId,
+      s"At $timestamp, (purportedly) ${payload.sender} sent an ACS commitment to me, but the commitment lists ${payload.counterParticipant} as the counterparticipant",
+    )
+
+    val commitmentPeriodEndsInPast = validate(
+      payload.period.toInclusive <= timestamp,
+      s"Received an ACS commitment with a future beforeAndAt timestamp. (Purported) sender: ${payload.sender}. Timestamp: ${payload.period.toInclusive}, receive timestamp: $timestamp",
+    )
+
+    val commitmentPeriodEndsAtTick =
+      reconciliationIntervals.isAtTick(payload.period.toInclusive) match {
+        case Some(true) => ().validNec
+        case Some(false) =>
+          s"finish time of received commitment period is not on a tick: ${payload.period}".invalidNec
+        case None =>
+          s"Unable to determine whether finish time of received commitment period is on a tick: ${payload.period}".invalidNec
+      }
+
+    (
+      validRecipients,
+      validCounterParticipant,
+      commitmentPeriodEndsInPast,
+      commitmentPeriodEndsAtTick,
+    ).mapN((_, _, _, _) => ()).toEither.left.map(_.toNonEmptyList)
   }
 
   private def persistRunningCommitments(
@@ -511,27 +553,21 @@ class AcsCommitmentProcessor(
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       validSig <- checkCommitmentSignature(message)
-      // If signature passes, store such that we can prove Byzantine behavior if necessary
-      _ <- if (validSig) store.storeReceived(message) else Future.unit
+
       commitment = message.message
 
-      // TODO(#8207) Properly check that bounds of commitment.period fall on commitment ticks
-      correctInterval = Seq(commitment.period.fromExclusive, commitment.period.toInclusive).forall {
-        ts => tickBeforeOrAt(ts.forgetSecond, reconciliationInterval) == ts
-      }
-
-      _ <- if (validSig && correctInterval) checkCommitment(commitment) else Future.unit
+      // If signature passes, store such that we can prove Byzantine behavior if necessary
+      _ <-
+        if (validSig) for {
+          _ <- store.storeReceived(message)
+          _ <- checkCommitment(commitment)
+        } yield ()
+        else Future.unit
     } yield {
       if (!validSig) {
         // TODO(M40): Somebody is being Byzantine, but we don't know who (we don't necessarily know the sender). Raise alarm?
         logger.error(
           s"""Received wrong signature for ACS commitment at timestamp $timestamp; purported sender: ${commitment.sender}; commitment: $commitment"""
-        )
-      } else if (!correctInterval) {
-        // TODO(#8207) This will change once we can update domain parameters dynamically.
-        // TODO(M40) Also, if the interval is actually wrong, raise an alarm
-        logger.error(
-          s"""Wrong interval for ACS commitment at timestamp $timestamp; sender: ${commitment.sender}; commitment: $commitment, period: ${commitment.period}"""
         )
       }
     }
@@ -638,7 +674,7 @@ class AcsCommitmentProcessor(
         }
         _ <-
           if (matches(cmt, commitments, lastPruningTime.map(_.timestamp))) {
-            store.markSafe(cmt.sender, cmt.period)
+            store.markSafe(cmt.sender, cmt.period, sortedReconciliationIntervalsProvider)
           } else Future.unit
       } yield ()
     }
@@ -831,46 +867,6 @@ object AcsCommitmentProcessor extends HasLoggerName {
 
   }
 
-  def tickBeforeOrAt(
-      timestamp: CantonTimestamp,
-      tickInterval: PositiveSeconds,
-  ): CantonTimestampSecond = {
-    // Uses the assumption that the interval has a round number of seconds
-    val mod = timestamp.getEpochSecond % tickInterval.unwrap.getSeconds
-    val sinceTickStart = if (mod >= 0) mod else tickInterval.unwrap.getSeconds + mod
-    val beforeTs = timestamp.toInstant.truncatedTo(ChronoUnit.SECONDS).minusSeconds(sinceTickStart)
-
-    CantonTimestampSecond.assertFromInstant(beforeTs.max(CantonTimestamp.MinValue.toInstant))
-  }
-
-  def tickBefore(
-      timestamp: CantonTimestamp,
-      tickInterval: PositiveSeconds,
-  ): CantonTimestampSecond = {
-    val beforeOrAt = tickBeforeOrAt(timestamp, tickInterval)
-    Ordering[CantonTimestampSecond]
-      .max(
-        CantonTimestampSecond.MinValue,
-        if (beforeOrAt < timestamp) beforeOrAt else beforeOrAt - tickInterval,
-      )
-  }
-
-  def tickAfter(
-      timestamp: CantonTimestamp,
-      tickInterval: PositiveSeconds,
-  ): CantonTimestampSecond = tickBeforeOrAt(timestamp, tickInterval) + tickInterval
-
-  @VisibleForTesting
-  private[pruning] def commitmentPeriodPreceding(
-      interval: PositiveSeconds,
-      endOfPreviousPeriod: Option[CantonTimestampSecond],
-  )(timestamp: CantonTimestamp): Option[CommitmentPeriod] = {
-    val periodEnd = tickBefore(timestamp, interval)
-    val periodStart = endOfPreviousPeriod.getOrElse(CantonTimestampSecond.MinValue)
-
-    CommitmentPeriod(periodStart.forgetSecond, periodEnd.forgetSecond, interval).toOption
-  }
-
   /** Compute the ACS commitments at the given timestamp.
     *
     * Extracted as a pure function to be able to test.
@@ -932,11 +928,13 @@ object AcsCommitmentProcessor extends HasLoggerName {
       cleanReplayF: Future[CantonTimestamp],
       commitmentsPruningBound: CommitmentsPruningBound,
       earliestInFlightSubmissionF: Future[Option[CantonTimestamp]],
-      reconciliationInterval: PositiveSeconds,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
   )(implicit
       ec: ExecutionContext,
       loggingContext: NamedLoggingContext,
-  ): Future[Option[CantonTimestampSecond]] =
+  ): Future[Option[CantonTimestampSecond]] = {
+    val logger = loggingContext.loggerFactory.getLogger(AcsCommitmentProcessor.getClass)
+
     for {
       // This logic progressively lowers the timestamp based on the following constraints:
       // 1. Pruning must not delete data needed for recovery (after the clean replay timestamp)
@@ -951,11 +949,21 @@ object AcsCommitmentProcessor extends HasLoggerName {
       // the calculation below.
       inFlightSubmissionTs <- earliestInFlightSubmissionF
 
-      getTickBeforeOrAt = tickBeforeOrAt(_, reconciliationInterval)
+      getTickBeforeOrAt = (ts: CantonTimestamp) =>
+        sortedReconciliationIntervalsProvider
+          .reconciliationIntervals(ts)(loggingContext.traceContext)
+          .map(_.tickBeforeOrAt(ts))
+          .flatMap {
+            case Some(tick) =>
+              logger.info(s"Tick before or at $ts yields $tick")
+              Future.successful(tick)
+            case None =>
+              Future.failed(new RuntimeException(s"Unable to compute tick before or at `$ts`"))
+          }
 
       // Latest potential pruning point is the ACS commitment tick before or at the "clean replay" timestamp
       // and strictly before the earliest timestamp associated with an in-flight submission.
-      latestTickBeforeOrAt = getTickBeforeOrAt(
+      latestTickBeforeOrAt <- getTickBeforeOrAt(
         cleanReplayTs.min(
           inFlightSubmissionTs.fold(CantonTimestamp.MaxValue)(_.immediatePredecessor)
         )
@@ -965,13 +973,25 @@ object AcsCommitmentProcessor extends HasLoggerName {
       // so look for the most recent such tick before latestTickBeforeOrAt if any.
       tsSafeToPruneUpTo <- commitmentsPruningBound match {
         case CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF) =>
-          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetSecond).map(_.map(getTickBeforeOrAt))
-        case CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF) =>
-          lastComputedAndSentF.map(
-            _.map(lastComputedAndSent =>
-              getTickBeforeOrAt(lastComputedAndSent).min(latestTickBeforeOrAt)
-            )
+          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetSecond).flatMap(
+            _.traverse(getTickBeforeOrAt)
           )
+        case CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF) =>
+          for {
+            lastComputedAndSentO <- lastComputedAndSentF
+            tickBeforeLastComputedAndSentO <- lastComputedAndSentO.traverse(getTickBeforeOrAt)
+          } yield tickBeforeLastComputedAndSentO.map(_.min(latestTickBeforeOrAt))
+      }
+
+      _ = logger.info {
+        val timestamps = Map(
+          "cleanReplayTs" -> cleanReplayTs.toString,
+          "inFlightSubmissionTs" -> inFlightSubmissionTs.toString,
+          "latestTickBeforeOrAt" -> latestTickBeforeOrAt.toString,
+          "tsSafeToPruneUpTo" -> tsSafeToPruneUpTo.toString,
+        )
+
+        s"Getting safe to prune commitment tick with data $timestamps"
       }
 
       // Sanity check that safe pruning timestamp has not "increased" (which would be a coding bug).
@@ -982,6 +1002,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         )
       )
     } yield tsSafeToPruneUpTo
+  }
 
   /*
     Describe how ACS commitments are taken into account for the safeToPrune computation:
@@ -1003,7 +1024,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
   def safeToPrune(
       requestJournalStore: RequestJournalStore,
       sequencerCounterTrackerStore: SequencerCounterTrackerStore,
-      reconciliationInterval: PositiveSeconds,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
       acsCommitmentStore: AcsCommitmentStore,
       inFlightSubmissionStore: InFlightSubmissionStore,
       domainId: DomainId,
@@ -1029,7 +1050,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       cleanReplayF,
       commitmentsPruningBound = commitmentsPruningBound,
       earliestInFlightF,
-      reconciliationInterval,
+      sortedReconciliationIntervalsProvider,
     )
   }
 

@@ -70,9 +70,8 @@ class SyncDomainPersistentStateManager(
       throw new IllegalArgumentException(s"domain state already exists for $domainId")
   }
 
-  def putIfAbsent(state: SyncDomainPersistentState): Unit = {
-    val _ = domainStates.putIfAbsent(state.domainId.item, state)
-  }
+  def putIfAbsent(state: SyncDomainPersistentState): Unit =
+    domainStates.putIfAbsent(state.domainId.item, state).discard
 
   def get(domainId: DomainId): Option[SyncDomainPersistentState] = domainStates.get(domainId)
 

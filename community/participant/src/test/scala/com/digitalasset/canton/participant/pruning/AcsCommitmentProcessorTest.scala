@@ -12,7 +12,6 @@ import com.digitalasset.canton._
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TimeoutDuration}
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
@@ -55,10 +54,9 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import org.scalacheck.{Arbitrary, Gen, Shrink}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
-import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
 import java.time.{Duration => JDuration}
 import java.util.UUID
@@ -71,38 +69,42 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordering.Implicits._
 
 @nowarn("msg=match may not be exhaustive")
-trait AcsCommitmentProcessorBaseTest extends BaseTest {
+sealed trait AcsCommitmentProcessorBaseTest
+    extends BaseTest
+    with SortedReconciliationIntervalsHelpers {
 
-  val interval = PositiveSeconds.ofSeconds(5)
-  val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da"))
-  val localId = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain"))
-  val remoteId1 = ParticipantId(
+  protected val interval = PositiveSeconds.ofSeconds(5)
+  protected val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("domain::da"))
+  protected val localId = ParticipantId(
+    UniqueIdentifier.tryFromProtoPrimitive("localParticipant::domain")
+  )
+  protected val remoteId1 = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant1::domain")
   )
-  val remoteId2 = ParticipantId(
+  protected val remoteId2 = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant2::domain")
   )
-  val remoteId3 = ParticipantId(
+  protected val remoteId3 = ParticipantId(
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant3::domain")
   )
 
-  val List(alice, bob, carol) =
+  protected val List(alice, bob, carol) =
     List("Alice::1", "Bob::2", "Carol::3").map(LfPartyId.assertFromString)
 
-  val topology = Map(
+  protected val topology = Map(
     localId -> Set(alice),
     remoteId1 -> Set(bob),
     remoteId2 -> Set(carol),
   )
 
-  def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
+  protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
-  def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
+  protected def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
     TimeOfChange(requestCounter.toLong, ts(timestamp).forgetSecond)
 
-  def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
+  protected def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
 
-  def acsSetup(
+  protected def acsSetup(
       lifespan: Map[LfContractId, (CantonTimestamp, CantonTimestamp)]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[ActiveContractSnapshot] = {
     val acs = new InMemoryActiveContractStore(loggerFactory)
@@ -116,7 +118,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       .map(_ => acs)
   }
 
-  def cryptoSetup(
+  protected def cryptoSetup(
       owner: ParticipantId,
       topology: Map[ParticipantId, Set[LfPartyId]],
   ): SyncCryptoClient[DomainSnapshotSyncCryptoApi] = {
@@ -125,7 +127,7 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     TestingTopology().withReversedTopology(topologyWithPermissions).build().forOwnerAndDomain(owner)
   }
 
-  def changesAtToc(
+  protected def changesAtToc(
       contractSetup: Map[LfContractId, (Set[LfPartyId], TimeOfChange, TimeOfChange)]
   )(toc: TimeOfChange): (CantonTimestamp, RequestCounter, AcsChange) = {
     (
@@ -148,12 +150,15 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
 
   // Create the processor, but return the changes instead of publishing them, such that the user can decide when
   // to publish
-  def testSetupDontPublish(
+  protected def testSetupDontPublish(
       timeProofs: List[CantonTimestamp],
       contractSetup: Map[LfContractId, (Set[LfPartyId], TimeOfChange, TimeOfChange)],
       topology: Map[ParticipantId, Set[LfPartyId]],
       killSwitch: => Unit = (),
       optCommitmentStore: Option[AcsCommitmentStore] = None,
+      overrideDefaultSortedReconciliationIntervalsProvider: Option[
+        SortedReconciliationIntervalsProvider
+      ] = None,
   )(implicit ec: ExecutionContext): (
       AcsCommitmentProcessor,
       AcsCommitmentStore,
@@ -182,12 +187,18 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
       }).distinct.sorted
     val changes = changeTimes.map(changesAtToc(contractSetup))
     val store = optCommitmentStore.getOrElse(new InMemoryAcsCommitmentStore(loggerFactory))
+
+    val sortedReconciliationIntervalsProvider =
+      overrideDefaultSortedReconciliationIntervalsProvider.getOrElse {
+        constantSortedReconciliationIntervalsProvider(interval)
+      }
+
     val acsCommitmentProcessor = new AcsCommitmentProcessor(
       domainId,
       localId,
       sequencerClient,
       domainCrypto,
-      interval,
+      sortedReconciliationIntervalsProvider,
       store,
       (_, _) => FutureUnlessShutdown.unit,
       killSwitch,
@@ -201,18 +212,28 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
     (acsCommitmentProcessor, store, sequencerClient, changes)
   }
 
-  def testSetup(
+  protected def testSetup(
       timeProofs: List[CantonTimestamp],
       contractSetup: Map[LfContractId, (Set[LfPartyId], TimeOfChange, TimeOfChange)],
       topology: Map[ParticipantId, Set[LfPartyId]],
       killSwitch: => Unit = (),
       optCommitmentStore: Option[AcsCommitmentStore] = None,
+      overrideDefaultSortedReconciliationIntervalsProvider: Option[
+        SortedReconciliationIntervalsProvider
+      ] = None,
   )(implicit
       ec: ExecutionContext
   ): (AcsCommitmentProcessor, AcsCommitmentStore, SequencerClient) = {
 
     val (acsCommitmentProcessor, store, sequencerClient, changes) =
-      testSetupDontPublish(timeProofs, contractSetup, topology, killSwitch, optCommitmentStore)
+      testSetupDontPublish(
+        timeProofs,
+        contractSetup,
+        topology,
+        killSwitch,
+        optCommitmentStore,
+        overrideDefaultSortedReconciliationIntervalsProvider,
+      )
 
     changes.foreach { case (ts, rc, acsChange) =>
       acsCommitmentProcessor.publish(RecordTime(ts, rc), acsChange)
@@ -222,70 +243,44 @@ trait AcsCommitmentProcessorBaseTest extends BaseTest {
 
   val testHash = ExampleTransactionFactory.lfHash(0)
 
-  def withTestHash[A] = WithContractHash[A](_, testHash)
+  protected def withTestHash[A] = WithContractHash[A](_, testHash)
 
-  def rt(timestamp: Int, tieBreaker: Int) =
+  protected def rt(timestamp: Int, tieBreaker: Int) =
     RecordTime(ts(timestamp).forgetSecond, tieBreaker.toLong)
 
   val coid = (txId, discriminator) => ExampleTransactionFactory.suffixedId(txId, discriminator)
 }
 
 class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcessorBaseTest {
-
-  import AcsCommitmentProcessorTestHelpers._
-
-  def mkPeriod(interval: PositiveSeconds)(times: (Long, Long)): CommitmentPeriod =
-    times match {
-      case (after: Long, beforeAndAt: Long) =>
-        CommitmentPeriod(
-          CantonTimestamp.ofEpochSecond(after),
-          CantonTimestamp.ofEpochSecond(beforeAndAt),
-          interval,
-        ).value
+  // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
+  // if we want to test whether commitment buffering works
+  // Also assumes that all the contract IDs in the list have the same stakeholders
+  private def commitment(cids: List[LfContractId]): AcsCommitment.CommitmentType = {
+    val h = LtHash16()
+    cids.foreach { cid =>
+      h.add((testHash.bytes.toByteString concat cid.encodeDeterministically).toByteArray)
     }
+    val doubleH = LtHash16()
+    doubleH.add(h.get())
+    doubleH.getByteString()
+  }
 
-  "AcsCommitmentProcessor.commitmentPeriodPreceding" must {
-    "compute reasonable commitment periods for a basic example" in {
-      val eventTimestamps = List(-2, 6, 24, 25, 26, 31L).map(CantonTimestamp.ofEpochSecond)
-      val expectedPeriods =
-        List(
-          (CantonTimestamp.MinValue.getEpochSecond, -5L),
-          (-5L, 5L),
-          (5L, 20L),
-          (20L, 25L),
-          (25L, 30L),
-        )
-          .map(mkPeriod(interval))
+  private def commitmentMsg(
+      params: (ParticipantId, List[LfContractId], CantonTimestampSecond, CantonTimestampSecond)
+  ): Future[SignedProtocolMessage[AcsCommitment]] = {
+    val (remote, cids, fromExclusive, toInclusive) = params
 
-      timeProofPeriodFlow(interval, eventTimestamps) shouldBe expectedPeriods
-    }
+    val crypto =
+      TestingTopology().withParticipants(remote).build().forOwnerAndDomain(remote)
+    val cmt = commitment(cids)
+    val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
+    val period =
+      CommitmentPeriod.create(fromExclusive.forgetSecond, toInclusive.forgetSecond, interval).value
+    val payload =
+      AcsCommitment.create(domainId, remote, localId, period, cmt, testedProtocolVersion)
 
-    "work for a commitment period that starts at MinValue and is smaller than the reconciliation interval" in {
-      val longIntervalSeconds = 5 * scala.math.pow(10, 10L).toLong
-      val longInterval = PositiveSeconds.ofSeconds(longIntervalSeconds)
-      val eventTimestamps = List(-5L, 2L).map(CantonTimestamp.ofEpochSecond)
-      val expectedPeriods =
-        List(
-          (CantonTimestamp.MinValue.getEpochSecond, -longIntervalSeconds),
-          (-longIntervalSeconds, 0L),
-        )
-          .map(mkPeriod(longInterval))
-      timeProofPeriodFlow(longInterval, eventTimestamps) shouldBe expectedPeriods
-    }
-
-    "work when MinValue.getEpochSeconds isn't a multiple of the reconciliation interval" in {
-      val longInterval = PositiveSeconds.ofDays(100)
-      val longIntervalSeconds = longInterval.unwrap.getSeconds
-      assert(
-        CantonTimestamp.MinValue.getEpochSecond % longIntervalSeconds != 0,
-        "Precondition for the test to make sense",
-      )
-      val eventTimestamps =
-        List(2L, 5L, longIntervalSeconds + 2L).map(CantonTimestamp.ofEpochSecond)
-      val expectedPeriods =
-        List((CantonTimestamp.MinValue.getEpochSecond, 0L), (0L, longIntervalSeconds))
-          .map(mkPeriod(longInterval))
-      timeProofPeriodFlow(longInterval, eventTimestamps) shouldBe expectedPeriods
+    snapshotF.flatMap { snapshot =>
+      SignedProtocolMessage.tryCreate(payload, snapshot, crypto.pureCrypto, testedProtocolVersion)
     }
   }
 
@@ -298,7 +293,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           commitmentsPruningBound =
             CommitmentsPruningBound.Outstanding(_ => Future.successful(None)),
           earliestInFlightSubmissionF = Future.successful(None),
-          reconciliationInterval = longInterval,
+          sortedReconciliationIntervalsProvider =
+            constantSortedReconciliationIntervalsProvider(longInterval),
         )
       } yield res shouldBe None
     }
@@ -312,7 +308,8 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
             Future.successful(Some(CantonTimestamp.MinValue))
           ),
           earliestInFlightSubmissionF = Future.successful(None),
-          reconciliationInterval = longInterval,
+          sortedReconciliationIntervalsProvider =
+            constantSortedReconciliationIntervalsProvider(longInterval),
         )
       } yield res shouldBe Some(CantonTimestampSecond.MinValue)
     }
@@ -320,6 +317,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     "take checkForOutstandingCommitments flag into account" in {
       val longInterval = PositiveSeconds.ofDays(100)
       val now = CantonTimestamp.now()
+
+      val sortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(longInterval)
 
       def safeToPrune(
           checkForOutstandingCommitments: Boolean
@@ -335,16 +335,20 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
               CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF)
             else CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF),
           earliestInFlightSubmissionF = Future.successful(None),
-          reconciliationInterval = longInterval,
+          sortedReconciliationIntervalsProvider =
+            constantSortedReconciliationIntervalsProvider(longInterval),
         )
       }
 
       for {
         res1 <- safeToPrune(true)
         res2 <- safeToPrune(false)
+        sortedReconciliationIntervals <- sortedReconciliationIntervalsProvider
+          .reconciliationIntervals(now)
+        tick = sortedReconciliationIntervals.tickBeforeOrAt(now).value
       } yield {
         res1 shouldBe Some(CantonTimestampSecond.MinValue)
-        res2 shouldBe Some(AcsCommitmentProcessor.tickBeforeOrAt(now, longInterval))
+        res2 shouldBe Some(tick)
       }
     }
   }
@@ -489,51 +493,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         remoteId2 -> Set(carol),
       )
 
-      val (processor, store, _sequencerClient, changes) =
-        testSetupDontPublish(timeProofs, contractSetup, topology)
-
-      // This is duplicating the internal logic of the commitment computation, but I don't have a better solution at the moment
-      // if we want to test whether commitment buffering works
-      // Also assumes that all the contract IDs in the list have the same stakeholders
-      def commitment(cids: List[LfContractId]): AcsCommitment.CommitmentType = {
-        val h = LtHash16()
-        cids.foreach { cid =>
-          h.add((testHash.bytes.toByteString concat cid.encodeDeterministically).toByteArray)
-        }
-        val doubleH = LtHash16()
-        doubleH.add(h.get())
-        doubleH.getByteString()
-      }
-
-      def commitmentMsg(
-          params: (ParticipantId, List[LfContractId], CantonTimestampSecond, CantonTimestampSecond)
-      ): Future[SignedProtocolMessage[AcsCommitment]] =
-        params match {
-          case (remote, cids, fromExclusive, toInclusive) =>
-            val crypto =
-              TestingTopology().withParticipants(remote).build().forOwnerAndDomain(remote)
-            val cmt = commitment(cids)
-            val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
-            val period =
-              CommitmentPeriod(fromExclusive.forgetSecond, toInclusive.forgetSecond, interval).value
-            val payload = AcsCommitment.create(
-              domainId,
-              remote,
-              localId,
-              period,
-              cmt,
-              testedProtocolVersion,
-            )
-
-            snapshotF.flatMap { snapshot =>
-              SignedProtocolMessage.tryCreate(
-                payload,
-                snapshot,
-                crypto.pureCrypto,
-                testedProtocolVersion,
-              )
-            }
-        }
+      val (processor, store, _, changes) = testSetupDontPublish(timeProofs, contractSetup, topology)
 
       val remoteCommitments = List(
         (remoteId1, List(coid(0, 0)), ts(0), ts(5)),
@@ -571,6 +531,116 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         assert(received.size === 2)
       }
     }
+    // TODO(#9800) migrate to stable version
+    /*
+     This test is disabled for protocol versions for which the reconciliation interval is
+     static because the described setting cannot occur.
+     */
+    if (testedProtocolVersion >= ProtocolVersion.unstable_development) {
+      "work when commitment tick falls between two participants connection to the domain" in {
+        /*
+        The goal here is to check that ACS commitment processing works even when
+        a commitment tick falls between two participants' connection timepoints to the domain.
+        The reason this scenario is important is because the reconciliation interval (and
+        thus ticks) is defined only from the connection time.
+
+        We test the following scenario (timestamps are considered as seconds since epoch):
+        - Reconciliation interval = 5s
+        - Remote participant (RP) connects to the domain at t=0
+        - Local participant (LP) connects to the domain at t=6
+        - A shared contract lives between t=8 and t=12
+        - RP sends a commitment with period (5, 10)
+          Note: t=5 is not on a tick for LP
+        - LP sends a commitment with period (0, 10]
+
+        At t=13, we check that:
+        - Nothing is outstanding at LP
+        - Computed and received commitments are correct
+         */
+
+        interval shouldBe PositiveSeconds.ofSeconds(5)
+
+        val timeProofs = List[Long](9, 13).map(CantonTimestamp.ofEpochSecond)
+        val contractSetup = Map(
+          // contract ID to stakeholders, creation and archival time
+          (coid(0, 0), (Set(alice, bob), toc(8), toc(12)))
+        )
+
+        val topology = Map(
+          localId -> Set(alice),
+          remoteId1 -> Set(bob),
+        )
+
+        val sortedReconciliationIntervalsProvider = constantSortedReconciliationIntervalsProvider(
+          interval,
+          domainBootstrappingTime = CantonTimestamp.ofEpochSecond(6),
+        )
+
+        val (processor, store, _) = testSetup(
+          timeProofs,
+          contractSetup,
+          topology,
+          overrideDefaultSortedReconciliationIntervalsProvider =
+            Some(sortedReconciliationIntervalsProvider),
+        )
+
+        val remoteCommitments = List((remoteId1, List(coid(0, 0)), ts(5), ts(10)))
+
+        for {
+          remote <- remoteCommitments.traverse(commitmentMsg)
+          delivered = remote.map(cmt =>
+            (
+              cmt.message.period.toInclusive.plusSeconds(1),
+              List(OpenEnvelope(cmt, Recipients.cc(localId), testedProtocolVersion)),
+            )
+          )
+          // First ask for the remote commitments to be processed, and then compute locally
+          _ <- delivered
+            .traverse_ { case (ts, batch) =>
+              processor.processBatchInternal(ts.forgetSecond, batch)
+            }
+            .onShutdown(fail())
+
+          _ <- processor.queue.flush()
+
+          computed <- store.searchComputedBetween(
+            CantonTimestamp.Epoch,
+            timeProofs.lastOption.value,
+          )
+          received <- store.searchReceivedBetween(
+            CantonTimestamp.Epoch,
+            timeProofs.lastOption.value,
+          )
+          outstanding <- store.outstanding(
+            CantonTimestamp.MinValue,
+            timeProofs.lastOption.value,
+            None,
+          )
+        } yield {
+          computed.size shouldBe 1
+          inside(computed.headOption.value) { case (commitmentPeriod, participantId, _) =>
+            commitmentPeriod shouldBe CommitmentPeriod
+              .create(CantonTimestampSecond.MinValue, ts(10))
+              .value
+            participantId shouldBe remoteId1
+          }
+
+          received.size shouldBe 1
+
+          inside(received.headOption.value) {
+            case SignedProtocolMessage(
+                  AcsCommitment(_, sender, counterParticipant, period, _),
+                  _,
+                ) =>
+              sender shouldBe remoteId1
+              counterParticipant shouldBe localId
+              period shouldBe CommitmentPeriod.create(ts(5), ts(10)).value
+          }
+
+          outstanding shouldBe empty
+        }
+      }
+    }
 
     "prevent pruning when there is no timestamp such that no commitments are outstanding" in {
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
@@ -591,7 +661,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          StaticDomainParameters.defaultReconciliationInterval,
+          constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -616,7 +686,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          StaticDomainParameters.defaultReconciliationInterval,
+          constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -650,6 +720,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           )
         }
 
+      val sortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(reconciliationInterval)
+
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
       val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
@@ -673,7 +746,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res1 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -689,7 +762,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res2 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -719,6 +792,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         }
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
+      val sortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(reconciliationInterval)
+
       val ts0 = CantonTimestamp.Epoch
       val tsCleanRequest = CantonTimestamp.Epoch.plusMillis(requestTsDelta.toMillis * 1)
       val ts3 = CantonTimestamp.Epoch.plusMillis(requestTsDelta.toMillis * 3)
@@ -735,7 +811,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -747,6 +823,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     "prevent pruning of dirty sequencer counters" in {
       val reconciliationInterval = PositiveSeconds.ofSeconds(1)
       val requestTsDelta = 20.seconds
+
+      val sortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(reconciliationInterval)
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
       val sequencerCounterTrackerStore = new InMemorySequencerCounterTrackerStore(loggerFactory)
@@ -769,7 +848,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -799,6 +878,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           )
         }
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
+
+      val sortedReconciliationIntervalsProvider =
+        constantSortedReconciliationIntervalsProvider(reconciliationInterval)
 
       // In-flight submission 2 and 3 are clean
       val tsCleanRequest = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis * 2)
@@ -841,7 +923,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res1 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -852,7 +934,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res2 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -863,7 +945,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         res3 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
-          reconciliationInterval,
+          sortedReconciliationIntervalsProvider,
           acsCommitmentStore,
           inFlightSubmissionStore,
           domainId,
@@ -1018,104 +1100,4 @@ class AcsCommitmentProcessorSyncTest
       },
     )
   }
-
-}
-
-/* Scalacheck doesn't play nice with AsyncWordSpec, so using AnyWordSpec and waiting on futures */
-class AcsCommitmentProcessorPropertyTest
-    extends AnyWordSpec
-    with BaseTest
-    with ScalaCheckDrivenPropertyChecks
-    with HasExecutionContext {
-  import AcsCommitmentProcessorTestHelpers._
-
-  val hashOps: HashOps = new SymbolicPureCrypto
-  "AcsCommitmentProcessor" must {
-
-    val interval = PositiveSeconds.ofSeconds(5)
-
-    "compute tick periods with no gaps" in {
-
-      implicit lazy val incrementArb: Arbitrary[Seq[(Long, Long)]] =
-        Arbitrary(for {
-          len <- Gen.choose(0, 10)
-          seq1 <- Gen.containerOfN[List, Long](len, Gen.choose(1L, 20L))
-          seq2 <- Gen.containerOfN[List, Long](len, Gen.choose(0L, 999999L))
-        } yield seq1.zip(seq2))
-
-      implicit lazy val arbInstant: Arbitrary[CantonTimestamp] = Arbitrary(for {
-        delta <- Gen.choose(0L, 20L)
-      } yield CantonTimestamp.ofEpochSecond(delta))
-
-      // Prevent scalacheck from shrinking, as it doesn't use the above generators and thus doesn't respect the required invariants
-      import Shrink.shrinkAny
-
-      forAll {
-        (
-            startTs: CantonTimestamp,
-            increments: Seq[(Long, Long)],
-        ) =>
-          val incrementsToTimes =
-            (increments: Seq[(Long, Long)]) =>
-              increments.scanLeft(startTs) { case (ts, (diffS, diffMicros)) =>
-                ts.plusSeconds(diffS).addMicros(diffMicros)
-              }
-
-          val times = incrementsToTimes(increments)
-          val periods = timeProofPeriodFlow(interval, times)
-
-          periods.foreach { period =>
-            assert(
-              JDuration.between(
-                period.fromExclusive.toInstant,
-                period.toInclusive.toInstant,
-              ) >= interval.unwrap,
-              "Commitment periods must be longer than the specified interval",
-            )
-            assert(period.toInclusive.microsOverSecond() == 0, "period must end at whole seconds")
-            assert(
-              period.fromExclusive.microsOverSecond() == 0,
-              "period must start at whole seconds",
-            )
-            assert(
-              period.toInclusive.getEpochSecond % interval.unwrap.getSeconds == 0,
-              "period must end at commitment ticks",
-            )
-            assert(
-              period.fromExclusive.getEpochSecond % interval.unwrap.getSeconds == 0,
-              "period must start at commitment ticks",
-            )
-          }
-
-          val gaps = periods.lazyZip(periods.drop(1)).map { case (p1, p2) =>
-            JDuration.between(p1.toInclusive.toInstant, p2.fromExclusive.toInstant)
-          }
-
-          gaps.foreach { g =>
-            assert(g === JDuration.ZERO, s"All gaps must be zero; times: $times; periods: $periods")
-          }
-      }
-
-    }
-  }
-}
-
-object AcsCommitmentProcessorTestHelpers {
-
-  // Just empty commit sets (i.e., time proofs)
-  def timeProofPeriodFlow(
-      interval: PositiveSeconds,
-      times: Seq[CantonTimestamp],
-  ): Seq[CommitmentPeriod] = {
-    times.foldLeft((None: Option[CantonTimestampSecond], Seq.empty[CommitmentPeriod])) {
-      case ((lastTick, periods), ts) =>
-        AcsCommitmentProcessor.commitmentPeriodPreceding(interval, lastTick)(ts) match {
-          case Some(period) => (Some(period.toInclusive), periods :+ period)
-          case None => (lastTick, periods)
-        }
-    } match {
-      case (_lastTickNoLongerNeeded, commitmentPeriods) => commitmentPeriods
-    }
-  }
-
 }

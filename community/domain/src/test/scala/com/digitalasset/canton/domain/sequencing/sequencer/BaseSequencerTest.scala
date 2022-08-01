@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -13,7 +14,9 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   SequencerWriteError,
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
+import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   domainManager,
   participant1,
@@ -52,7 +55,13 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     UniqueIdentifier.fromProtoPrimitive_("unm1::default").map(new UnauthenticatedMemberId(_)).value
 
   class StubSequencer(existingMembers: Set[Member])
-      extends BaseSequencer(domainManager, loggerFactory) {
+      extends BaseSequencer(
+        domainManager,
+        loggerFactory,
+        None,
+        new SimClock(CantonTimestamp.Epoch, loggerFactory),
+      )
+      with FlagCloseable {
     val newlyRegisteredMembers =
       mutable
         .Set[Member]() // we're using the scalatest serial execution context so don't need a concurrent collection
@@ -92,8 +101,6 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       ???
     override def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] =
       ???
-    override def close(): Unit = ()
-
     override def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
         traceContext: TraceContext
     ): Future[Boolean] = ???
@@ -103,12 +110,15 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     ): EitherT[Future, String, Unit] = ???
 
     // making this public on purpose so we can test
-    override def healthChanged(health: SequencerHealthStatus): Unit = super.healthChanged(health)
+    override def healthChanged(health: SequencerHealthStatus)(implicit
+        traceContext: TraceContext
+    ): Unit = super.healthChanged(health)
 
     override protected def healthInternal(implicit
         traceContext: TraceContext
     ): Future[SequencerHealthStatus] = Future.successful(SequencerHealthStatus(isActive = true))
 
+    override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
   }
 
   "sendAsync" should {
@@ -154,7 +164,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "onHealthChange should register listener and immediately call it with current status" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(false)
-      sequencer.onHealthChange { newHealth =>
+      sequencer.onHealthChange { (newHealth, _tc) =>
         status = newHealth
       }
 
@@ -164,7 +174,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     "health status change should trigger registered health listener" in {
       val sequencer = new StubSequencer(Set())
       var status = SequencerHealthStatus(true)
-      sequencer.onHealthChange { newHealth =>
+      sequencer.onHealthChange { (newHealth, _tc) =>
         status = newHealth
       }
 

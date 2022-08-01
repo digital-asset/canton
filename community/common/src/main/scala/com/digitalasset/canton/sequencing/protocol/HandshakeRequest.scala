@@ -6,16 +6,16 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.traverse._
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 
 final case class HandshakeRequest(
     clientProtocolVersions: Seq[ProtocolVersion],
     minimumProtocolVersion: Option[ProtocolVersion],
-) extends HasProtoV0[v0.Handshake.Request] {
+) {
 
   // IMPORTANT: changing the version handshakes can lead to issues with upgrading domains - be very careful
   // when changing the handshake message format
-  override def toProtoV0: v0.Handshake.Request =
+  def toProtoV0: v0.Handshake.Request =
     v0.Handshake.Request(
       clientProtocolVersions.map(_.fullVersion),
       minimumProtocolVersion.map(_.fullVersion),

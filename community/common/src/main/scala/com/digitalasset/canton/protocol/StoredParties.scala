@@ -8,7 +8,6 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -19,11 +18,10 @@ import scala.collection.immutable.SortedSet
 
 // TODO(#3256) get rid of, or at least simplify this; using an array would also allow us to remove the stakeholders_hash column in the commitment_snapshot table
 case class StoredParties(parties: SortedSet[LfPartyId])
-    extends HasProtoV0[v0.StoredParties]
-    with HasVersionedWrapper[VersionedMessage[StoredParties]] {
+    extends HasVersionedWrapper[VersionedMessage[StoredParties]] {
 
-  override protected def toProtoV0: v0.StoredParties = v0.StoredParties(parties.toList)
-  override protected def toProtoVersioned(
+  protected def toProtoV0: v0.StoredParties = v0.StoredParties(parties.toList)
+  protected def toProtoVersioned(
       version: ProtocolVersion
   ): VersionedMessage[StoredParties] =
     VersionedMessage(toProtoV0.toByteString, 0)

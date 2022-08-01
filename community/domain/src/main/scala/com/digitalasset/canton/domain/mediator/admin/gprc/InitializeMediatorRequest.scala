@@ -13,7 +13,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, MediatorId, UniqueIdentifier}
-import com.digitalasset.canton.version.HasProtoV0
 
 case class InitializeMediatorRequest(
     domainId: DomainId,
@@ -21,8 +20,8 @@ case class InitializeMediatorRequest(
     topologyState: Option[StoredTopologyTransactions[TopologyChangeOp.Positive]],
     domainParameters: StaticDomainParameters,
     sequencerConnection: SequencerConnection,
-) extends HasProtoV0[v0.InitializeMediatorRequest] {
-  override def toProtoV0: v0.InitializeMediatorRequest =
+) {
+  def toProtoV0: v0.InitializeMediatorRequest =
     v0.InitializeMediatorRequest(
       domainId.toProtoPrimitive,
       mediatorId.uid.toProtoPrimitive,

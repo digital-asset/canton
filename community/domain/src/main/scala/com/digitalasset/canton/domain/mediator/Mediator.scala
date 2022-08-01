@@ -21,7 +21,11 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, LoggingAlarmStreamer}
+import com.digitalasset.canton.protocol.{
+  DomainParameters,
+  DynamicDomainParameters,
+  LoggingAlarmStreamer,
+}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
@@ -182,7 +186,7 @@ class Mediator(
   private def prune(
       pruneAt: CantonTimestamp,
       cleanTimestamp: CantonTimestamp,
-      domainParametersChanges: NonEmptySeq[DynamicDomainParameters.WithValidity],
+      domainParametersChanges: NonEmptySeq[DomainParameters.WithValidity[DynamicDomainParameters]],
   ): EitherT[Future, PruningError, Unit] = {
     val latestSafePruningTsO = Mediator.latestSafePruningTsBefore(
       domainParametersChanges,
@@ -273,10 +277,10 @@ object Mediator {
   case class SafeUntil(ts: CantonTimestamp) extends PruningSafetyCheck
 
   private[mediator] def checkPruningStatus(
-      domainParameters: DynamicDomainParameters.WithValidity,
+      domainParameters: DomainParameters.WithValidity[DynamicDomainParameters],
       cleanTs: CantonTimestamp,
   ): PruningSafetyCheck = {
-    lazy val timeout = domainParameters.parameters.participantResponseTimeout
+    lazy val timeout = domainParameters.parameter.participantResponseTimeout
     lazy val cappedSafePruningTs =
       CantonTimestamp.max(cleanTs - timeout, domainParameters.validFrom)
 
@@ -294,7 +298,9 @@ object Mediator {
 
   /** Returns the latest safe pruning ts which is <= cleanTs */
   private[mediator] def latestSafePruningTsBefore(
-      allDomainParametersChanges: NonEmptySeq[DynamicDomainParameters.WithValidity],
+      allDomainParametersChanges: NonEmptySeq[
+        DomainParameters.WithValidity[DynamicDomainParameters]
+      ],
       cleanTs: CantonTimestamp,
   ): Option[CantonTimestamp] = allDomainParametersChanges
     .map(checkPruningStatus(_, cleanTs))

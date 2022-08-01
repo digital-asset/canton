@@ -11,7 +11,6 @@ import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -50,8 +49,7 @@ object HmacAlgorithm {
 }
 
 final case class Hmac private (private val hmac: ByteString, private val algorithm: HmacAlgorithm)
-    extends HasProtoV0[v0.Hmac]
-    with PrettyPrinting
+    extends PrettyPrinting
     with NoCopy {
 
   require(!hmac.isEmpty, "HMAC must not be empty")
@@ -60,7 +58,7 @@ final case class Hmac private (private val hmac: ByteString, private val algorit
     s"HMAC size ${hmac.size()} must match HMAC's hash algorithm length ${algorithm.hashAlgorithm.length}",
   )
 
-  override def toProtoV0: v0.Hmac =
+  def toProtoV0: v0.Hmac =
     v0.Hmac(algorithm = algorithm.toProtoEnum, hmac = hmac)
 
   override def pretty: Pretty[Hmac] = {

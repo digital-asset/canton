@@ -13,8 +13,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasProtoV1,
   HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -33,9 +31,6 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
     // By default, we use ProtoBuf for serialization.
     // Serializable classes that have a corresponding Protobuf message should inherit from this trait to inherit common code and naming conventions.
     // If the corresponding Protobuf message of a class has multiple versions (e.g. `v0.InformeeMessage` and `v1.InformeeMessage`),
-    // it should implement traits for each (e.g. InformeeMessage should implement HasProtoV0 and HasProtoV1)
-    with HasProtoV0[v0.InformeeMessage]
-    with HasProtoV1[v1.InformeeMessage]
     with ProtocolMessageV0
     with ProtocolMessageV1 {
 
@@ -66,7 +61,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
   // Implementing a `toProto<version>` method allows us to compose serializable classes.
   // You should define the toProtoV0 method on the serializable class, because then it is easiest to find and use.
   // (Conversely, you should not define a separate proto converter class.)
-  override def toProtoV0: v0.InformeeMessage =
+  def toProtoV0: v0.InformeeMessage =
     // The proto generated version of InformeeMessage is referenced with a package prefix (preferably the version of the corresponding
     // Protobuf package, e.g., "v0") so that it can easily be distinguished from the hand written version of the
     // InformeeMessage class and other versions of the protobuf message InformeeMessage.
@@ -79,7 +74,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
     // indicate the version of the nested Protobuf message via calling `toProto<version>
     v0.InformeeMessage(fullInformeeTree = Some(fullInformeeTree.toProtoV0))
 
-  override def toProtoV1: v1.InformeeMessage =
+  def toProtoV1: v1.InformeeMessage =
     v1.InformeeMessage(
       fullInformeeTree = Some(fullInformeeTree.toProtoV0),
       protocolVersion = protocolVersion.toProtoPrimitive,

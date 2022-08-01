@@ -7,11 +7,9 @@ import com.digitalasset.canton.LfVersioned
 import com.digitalasset.canton.data.SerializableKeyResolution
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 
-case class ResolvedKey(key: LfGlobalKey, resolution: SerializableKeyResolution)
-    extends HasProtoV0[v0.ViewParticipantData.ResolvedKey] {
-  override def toProtoV0: v0.ViewParticipantData.ResolvedKey =
+case class ResolvedKey(key: LfGlobalKey, resolution: SerializableKeyResolution) {
+  def toProtoV0: v0.ViewParticipantData.ResolvedKey =
     v0.ViewParticipantData.ResolvedKey(
       // oddity: pass the version from resolution to the proto-key
       key = Some(GlobalKeySerialization.assertToProto(LfVersioned(resolution.version, key))),

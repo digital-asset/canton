@@ -19,7 +19,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{HasProtoV0, HasVersionedToByteString, ProtocolVersion}
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.annotation.tailrec
@@ -34,8 +34,7 @@ import scala.annotation.tailrec
 case class MerkleSeq[+M <: MerkleTree[_] with HasVersionedToByteString](
     rootOrEmpty: Option[MerkleTree[MerkleSeqElement[M]]]
 )(hashOps: HashOps)
-    extends HasProtoV0[v0.MerkleSeq]
-    with PrettyPrinting {
+    extends PrettyPrinting {
 
   lazy val unblindedElementsWithIndex: Seq[(M, MerklePathElement)] = rootOrEmpty match {
     case Some(root) =>
@@ -69,7 +68,7 @@ case class MerkleSeq[+M <: MerkleTree[_] with HasVersionedToByteString](
       case None => this
     }
 
-  override def toProtoV0: v0.MerkleSeq =
+  def toProtoV0: v0.MerkleSeq =
     v0.MerkleSeq(rootOrEmpty = rootOrEmpty.map(MerkleTree.toBlindableNode))
 
   override def pretty: Pretty[MerkleSeq.this.type] = prettyOfClass(
@@ -90,7 +89,6 @@ object MerkleSeq {
 
   sealed trait MerkleSeqElement[+M <: MerkleTree[_] with HasVersionedToByteString]
       extends MerkleTree[MerkleSeqElement[M]]
-      with HasProtoV0[v0.MerkleSeqElement]
       with HasVersionedToByteString
       with Product
       with Serializable {

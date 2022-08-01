@@ -17,7 +17,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscrip
 import com.digitalasset.canton.domain.sequencing.sequencer.store._
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -205,7 +205,7 @@ class SequencerReader(
 
     private def signValidatedEvent(
         unsignedEventData: UnsignedEventData
-    )(implicit traceContext: TraceContext): Future[OrdinarySerializedEvent] = {
+    ): Future[OrdinarySerializedEvent] = {
       val UnsignedEventData(
         event,
         signingTimestampAndSnapshotO,
@@ -213,9 +213,10 @@ class SequencerReader(
         latestTopologyClientTimestamp,
         eventTraceContext,
       ) = unsignedEventData
+      implicit val traceContext: TraceContext = eventTraceContext
       logger.trace(
         s"Latest topology client timestamp for $member at counter ${event.counter} / ${event.timestamp} is $previousTopologyClientTimestamp / $latestTopologyClientTimestamp"
-      )(eventTraceContext)
+      )
 
       val signingTimestampOAndSnapshotF = signingTimestampAndSnapshotO match {
         case Some((signingTimestamp, signingSnaphot)) =>
@@ -230,14 +231,14 @@ class SequencerReader(
               previousTopologyClientTimestamp,
               protocolVersion,
               warnIfApproximate = warnIfApproximate,
-            )(implicitly, ErrorLoggingContext.fromTracedLogger(logger)(eventTraceContext))
+            )
             .map(None -> _)
       }
       signingTimestampOAndSnapshotF.flatMap { case (signingTimestampO, signingSnapshot) =>
         logger.debug(
           s"Signing event with counter ${event.counter} / timestamp ${event.timestamp} for $member"
         )
-        signEvent(event, signingTimestampO, signingSnapshot)(eventTraceContext)
+        signEvent(event, signingTimestampO, signingSnapshot)
       }
     }
 

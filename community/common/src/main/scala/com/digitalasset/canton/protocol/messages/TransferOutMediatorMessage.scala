@@ -14,7 +14,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -32,8 +31,7 @@ case class TransferOutMediatorMessage(
     tree: TransferOutViewTree
 ) extends MediatorRequest
     with ProtocolMessageV0
-    with ProtocolMessageV1
-    with HasProtoV0[v0.TransferOutMediatorMessage] {
+    with ProtocolMessageV1 {
   require(tree.commonData.isFullyUnblinded, "The transfer-out common data must be unblinded")
   require(tree.view.isBlinded, "The transfer-out view must be blinded")
 
@@ -77,7 +75,7 @@ case class TransferOutMediatorMessage(
     )
   }
 
-  override def toProtoV0: v0.TransferOutMediatorMessage =
+  def toProtoV0: v0.TransferOutMediatorMessage =
     v0.TransferOutMediatorMessage(tree = Some(tree.toProtoV0))
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =

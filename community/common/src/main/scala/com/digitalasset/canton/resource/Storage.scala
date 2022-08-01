@@ -37,7 +37,7 @@ import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 import com.google.protobuf.ByteString
-import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
+import com.typesafe.config.{Config, ConfigValueFactory}
 import com.typesafe.scalalogging.Logger
 import com.zaxxer.hikari.pool.HikariPool.PoolInitializationException
 import io.functionmeta.functionFullName
@@ -51,7 +51,7 @@ import slick.jdbc.{ActionBasedSQLInterpolation => _, SQLActionBuilder => _, _}
 import slick.lifted.Aliases
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 
-import java.sql.{Blob, Driver, SQLException, Statement}
+import java.sql.{Blob, SQLException, Statement}
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -606,16 +606,12 @@ object DbStorage {
     // copy paste from JdbcBackend.forConfig
     import slick.util.ConfigExtensionMethods._
     try {
-      val path = ""
-      val driver: Driver = null
       val classLoader: ClassLoader = ClassLoaderUtil.defaultClassLoader
-      val initializedConfig = if (config eq null) ConfigFactory.load(classLoader) else config
-      val usedConfig = if (path.isEmpty) initializedConfig else initializedConfig.getConfig(path)
-      val source = JdbcDataSource.forConfig(usedConfig, driver, path, classLoader)
-      val poolName = usedConfig.getStringOr("poolName", path)
-      val numThreads = usedConfig.getIntOr("numThreads", 20)
+      val source = JdbcDataSource.forConfig(config, null, "path", classLoader)
+      val poolName = config.getStringOr("poolName", "")
+      val numThreads = config.getIntOr("numThreads", 20)
       val maxConnections = source.maxConnections.getOrElse(numThreads)
-      val registerMbeans = usedConfig.getBooleanOr("registerMbeans", false)
+      val registerMbeans = config.getBooleanOr("registerMbeans", false)
 
       val executor = metrics match {
         // inject our own Canton Async executor with metrics
@@ -624,7 +620,7 @@ object DbStorage {
             poolName,
             numThreads,
             numThreads,
-            queueSize = usedConfig.getIntOr("queueSize", 1000),
+            queueSize = config.getIntOr("queueSize", 1000),
             maxConnections = maxConnections,
             registerMbeans = registerMbeans,
             logQueryCost = logQueryCost,
@@ -636,7 +632,7 @@ object DbStorage {
             poolName,
             numThreads,
             numThreads,
-            queueSize = usedConfig.getIntOr("queueSize", 1000),
+            queueSize = config.getIntOr("queueSize", 1000),
             maxConnections = maxConnections,
             registerMbeans = registerMbeans,
           )

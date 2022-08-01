@@ -102,6 +102,15 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
       }
     }
 
+  def closeAllSubscriptions(waitForClosed: Boolean = false)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    pool.foreach { case (member, _) =>
+      // safe to modify the underlying collection from the foreach iterator.
+      closeSubscriptions(member, waitForClosed)
+    }
+  }
+
   private def closeSubscription(
       member: Member,
       subscription: Subscription,
@@ -145,12 +154,9 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
     synchronized {
       withNewTraceContext { implicit traceContext =>
         logger.debug(s"Closing all subscriptions in pool: $poolDescription")
-        pool.foreach { case (member, _) =>
-          // safe to modify the underlying collection from the foreach iterator.
-          // wait for the subscriptions to actually close in case they are already in the process of closing
-          // in which case FlagClosable doesn't wait.
-          closeSubscriptions(member, waitForClosed = true)
-        }
+        // wait for the subscriptions to actually close in case they are already in the process of closing
+        // in which case FlagClosable doesn't wait.
+        closeAllSubscriptions(waitForClosed = true)
       }
     }
   }

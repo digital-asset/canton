@@ -17,6 +17,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{
+  DomainParameters,
   DynamicDomainParameters,
   ExampleTransactionFactory,
   RequestId,
@@ -60,9 +61,10 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
 
   private lazy val initialDomainParameters = TestDomainParameters.defaultDynamic
 
-  private lazy val defaultDynamicDomainParameters: List[DynamicDomainParameters.WithValidity] =
+  private lazy val defaultDynamicDomainParameters
+      : List[DomainParameters.WithValidity[DynamicDomainParameters]] =
     List(
-      DynamicDomainParameters.WithValidity(
+      DomainParameters.WithValidity(
         CantonTimestamp.Epoch,
         None,
         initialDomainParameters.copy(participantResponseTimeout = participantResponseTimeout),
@@ -70,7 +72,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     )
 
   private class Env(
-      dynamicDomainParameters: List[DynamicDomainParameters.WithValidity] =
+      dynamicDomainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]] =
         defaultDynamicDomainParameters
   ) {
     val identityClientEventHandler: UnsignedProtocolEventHandler = ApplicationHandler.success()
@@ -231,14 +233,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     "be raised if a pending event timeouts, taking dynamic domain parameters into account" in {
 
       val domainParameters = List(
-        DynamicDomainParameters.WithValidity(
+        DomainParameters.WithValidity(
           CantonTimestamp.Epoch,
           Some(CantonTimestamp.ofEpochSecond(5)),
           initialDomainParameters.copy(participantResponseTimeout =
             NonNegativeFiniteDuration.ofSeconds(4)
           ),
         ),
-        DynamicDomainParameters.WithValidity(
+        DomainParameters.WithValidity(
           CantonTimestamp.ofEpochSecond(5),
           None,
           initialDomainParameters.copy(participantResponseTimeout =

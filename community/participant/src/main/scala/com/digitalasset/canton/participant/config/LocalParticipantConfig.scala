@@ -213,6 +213,7 @@ case class RemoteParticipantConfig(
   * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fanout" performance optimization (default false; not tested for production yet)
   * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)
   * @param additionalMigrationPaths Optional extra paths for the database migrations
+  * @param inMemoryStateUpdaterParallelism The processing parallelism of the Ledger API server in-memory state updater
   */
 case class LedgerApiServerConfig(
     address: String = "127.0.0.1",
@@ -245,6 +246,8 @@ case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultMaxTransactionsInMemoryFanOutBufferSize,
     enableInMemoryFanOutForLedgerApi: Boolean = false, // Not tested for production yet
     additionalMigrationPaths: Seq[String] = Seq.empty,
+    inMemoryStateUpdaterParallelism: Int =
+      LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -275,6 +278,7 @@ object LedgerApiServerConfig {
   val DefaultMaxTransactionsInMemoryFanOutBufferSize: Int = 10000
   val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
+  val DefaultInMemoryStateUpdaterParallelism: Int = 2
 
   /** the following case class match will help us detect any additional configuration options added
     * when we upgrade the Daml code. if the below match fails because there are more config options,
@@ -318,6 +322,7 @@ object LedgerApiServerConfig {
       _maxTransactionsInMemoryFanOutBufferSize,
       _enableInMemoryFanOutForLedgerApi,
       _apiStreamShutdownTimeout, // configured via LedgerApiServerConfig.apiStreamShutdownTimeout
+      _inMemoryStateUpdaterParallelism,
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -370,6 +375,7 @@ object LedgerApiServerConfig {
       managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout.toJava),
       apiStreamShutdownTimeout =
         NonNegativeFiniteDuration.ofMillis(_apiStreamShutdownTimeout.toMillis),
+      inMemoryStateUpdaterParallelism = _inMemoryStateUpdaterParallelism,
     ).discard
   }
 
@@ -378,9 +384,9 @@ object LedgerApiServerConfig {
   ): TlsConfiguration =
     TlsConfiguration(
       enabled = true,
-      keyCertChainFile = Some(tlsCantonConfig.certChainFile.unwrap),
-      keyFile = Some(tlsCantonConfig.privateKeyFile.unwrap),
-      trustCertCollectionFile = tlsCantonConfig.trustCollectionFile.map(x => x.unwrap),
+      certChainFile = Some(tlsCantonConfig.certChainFile.unwrap),
+      privateKeyFile = Some(tlsCantonConfig.privateKeyFile.unwrap),
+      trustCollectionFile = tlsCantonConfig.trustCollectionFile.map(_.unwrap),
       secretsUrl = tlsCantonConfig.secretsUrl.map(SecretsUrl.fromString),
       clientAuth = tlsCantonConfig.clientAuth match {
         case ServerAuthRequirementConfig.Require(_cert) => ClientAuth.REQUIRE

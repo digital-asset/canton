@@ -64,8 +64,8 @@ class HttpSequencerConnectClient(
     res <- httpSequencerClient
       .handshakeUnauthenticated(request)
       .leftMap(toSequencerConnectError)
-    _ = if (res.serverVersion.isDeprecated && !dontWarnOnDeprecatedPV)
-      DeprecatedProtocolVersion.WarnSequencerClient(domainAlias, res.serverVersion)
+    _ = if (res.serverProtocolVersion.isDeprecated && !dontWarnOnDeprecatedPV)
+      DeprecatedProtocolVersion.WarnSequencerClient(domainAlias, res.serverProtocolVersion)
   } yield res
 
   override def getAgreement(domainId: DomainId)(implicit

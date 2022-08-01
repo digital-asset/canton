@@ -12,7 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.environment.{Environment, ParticipantNodes}
 import com.digitalasset.canton.metrics.HealthMetrics
 import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PingService}
-import com.digitalasset.canton.participant.ledger.api.LedgerApiDependentCantonServices
+import com.digitalasset.canton.participant.ledger.api.StartableStoppableLedgerApiDependentServices
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
@@ -138,7 +138,7 @@ class HealthCheckTest extends AsyncWordSpec with BaseTest {
       val init = mock[ParticipantNodeBootstrap]
       val node = mock[ParticipantNode]
       val id = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(s"${participant}::test"))
-      val ledgerApiDependentServices = mock[LedgerApiDependentCantonServices]
+      val ledgerApiDependentServices = mock[StartableStoppableLedgerApiDependentServices]
       val adminWorkflowServices = mock[AdminWorkflowServices]
       val pingService = mock[PingService]
 
@@ -146,7 +146,8 @@ class HealthCheckTest extends AsyncWordSpec with BaseTest {
       when(node.id).thenReturn(id)
       when(node.readyDomains).thenReturn(Map(DomainId.tryFromString("test::test") -> true))
       when(node.ledgerApiDependentCantonServices).thenReturn(ledgerApiDependentServices)
-      when(ledgerApiDependentServices.adminWorkflowServices).thenReturn(adminWorkflowServices)
+      when(ledgerApiDependentServices.adminWorkflowServices(any[TraceContext]))
+        .thenReturn(adminWorkflowServices)
       when(adminWorkflowServices.ping).thenReturn(pingService)
       when(
         pingService

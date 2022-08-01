@@ -17,7 +17,6 @@ import com.digitalasset.canton.serialization.{DeserializationError, ProtoConvert
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util._
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedToByteString,
   HasVersionedWrapper,
@@ -262,12 +261,11 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
 
 final case class EncryptionKeyPair(publicKey: EncryptionPublicKey, privateKey: EncryptionPrivateKey)
     extends CryptoKeyPair[EncryptionPublicKey, EncryptionPrivateKey]
-    with HasProtoV0[v0.EncryptionKeyPair]
     with NoCopy {
-  override def toProtoV0: v0.EncryptionKeyPair =
+  def toProtoV0: v0.EncryptionKeyPair =
     v0.EncryptionKeyPair(Some(publicKey.toProtoV0), Some(privateKey.toProtoV0))
 
-  override protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair =
+  protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair =
     v0.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV0)
 }
 
@@ -316,14 +314,13 @@ case class EncryptionPublicKey private[crypto] (
 ) extends PublicKey
     with HasVersionedWrapper[VersionedMessage[EncryptionPublicKey]]
     with PrettyPrinting
-    with HasProtoV0[v0.EncryptionPublicKey]
     with NoCopy {
   val purpose: KeyPurpose = KeyPurpose.Encryption
 
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPublicKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.EncryptionPublicKey =
+  def toProtoV0: v0.EncryptionPublicKey =
     v0.EncryptionPublicKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,
@@ -386,7 +383,6 @@ final case class EncryptionPrivateKey private[crypto] (
     scheme: EncryptionKeyScheme,
 ) extends PrivateKey
     with HasVersionedWrapper[VersionedMessage[EncryptionPrivateKey]]
-    with HasProtoV0[v0.EncryptionPrivateKey]
     with NoCopy {
 
   override def purpose: KeyPurpose = KeyPurpose.Encryption
@@ -394,7 +390,7 @@ final case class EncryptionPrivateKey private[crypto] (
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPrivateKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.EncryptionPrivateKey =
+  def toProtoV0: v0.EncryptionPrivateKey =
     v0.EncryptionPrivateKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,

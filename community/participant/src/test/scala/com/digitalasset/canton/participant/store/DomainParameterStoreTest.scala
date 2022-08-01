@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -28,8 +27,7 @@ trait DomainParameterStoreTest { this: AsyncWordSpec with BaseTest =>
 
       "be idempotent" in {
         val store = mk(domainId)
-        val params =
-          defaultStaticDomainParameters.copy(maxRatePerParticipant = NonNegativeInt.tryCreate(100))
+        val params = BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant = 100)
         for {
           _ <- store.setParameters(params)
           _ <- store.setParameters(params)
@@ -42,7 +40,9 @@ trait DomainParameterStoreTest { this: AsyncWordSpec with BaseTest =>
       "not overwrite changed domain parameters" in {
         val store = mk(domainId)
         val params = defaultStaticDomainParameters
-        val modified = params.copy(maxInboundMessageSize = params.maxInboundMessageSize.tryAdd(1))
+        val modified = BaseTest.defaultStaticDomainParametersWith(maxInboundMessageSize =
+          params.maxInboundMessageSize.unwrap + 1
+        )
         for {
           _ <- store.setParameters(params)
           ex <- store.setParameters(modified).failed

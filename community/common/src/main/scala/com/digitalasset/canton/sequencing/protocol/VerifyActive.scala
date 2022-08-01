@@ -6,12 +6,10 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 
-final case class VerifyActiveRequest()
-    extends HasProtoV0[v0.SequencerConnect.VerifyActive.Request] {
+final case class VerifyActiveRequest() {
 
-  override def toProtoV0: v0.SequencerConnect.VerifyActive.Request =
+  def toProtoV0: v0.SequencerConnect.VerifyActive.Request =
     v0.SequencerConnect.VerifyActive.Request()
 
   /* We allow serializing this message to a ByteArray despite it implementing ProtoNonSerializable because the serialization

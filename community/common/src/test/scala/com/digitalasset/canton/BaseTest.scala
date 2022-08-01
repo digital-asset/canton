@@ -7,11 +7,13 @@ import cats.Functor
 import cats.data.{EitherT, OptionT}
 import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
@@ -326,17 +328,28 @@ trait BaseTest
 object BaseTest {
 
   // Uses SymbolicCrypto for the configured crypto schemes
-  lazy val defaultStaticDomainParameters: StaticDomainParameters = StaticDomainParameters(
-    reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
-    maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
-    maxInboundMessageSize = StaticDomainParameters.defaultMaxInboundMessageSize,
+  lazy val defaultStaticDomainParameters: StaticDomainParameters =
+    defaultStaticDomainParametersWith(
+      protocolVersion = testedProtocolVersion
+    )
+
+  def defaultStaticDomainParametersWith(
+      maxInboundMessageSize: Int = StaticDomainParameters.defaultMaxInboundMessageSize.unwrap,
+      maxRatePerParticipant: Int = StaticDomainParameters.defaultMaxRatePerParticipant.unwrap,
+      reconciliationInterval: PositiveSeconds =
+        StaticDomainParameters.defaultReconciliationInterval,
+      protocolVersion: ProtocolVersion = testedProtocolVersion,
+  ) = StaticDomainParameters.create(
+    reconciliationInterval = reconciliationInterval,
+    maxRatePerParticipant = NonNegativeInt.tryCreate(maxRatePerParticipant),
+    maxInboundMessageSize = NonNegativeInt.tryCreate(maxInboundMessageSize),
     uniqueContractKeys = false,
     requiredSigningKeySchemes = SymbolicCryptoProvider.supportedSigningKeySchemes,
     requiredEncryptionKeySchemes = SymbolicCryptoProvider.supportedEncryptionKeySchemes,
     requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
     requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
     requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
-    protocolVersion = testedProtocolVersion,
+    protocolVersion = protocolVersion,
   )
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv

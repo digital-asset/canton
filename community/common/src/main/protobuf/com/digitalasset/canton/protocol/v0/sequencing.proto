@@ -112,7 +112,7 @@ message Handshake {
     }
 
     message Response {
-        string server_version = 1;
+        string server_protocol_version = 1;
         oneof value {
             Success success = 2;
             Failure failure = 3;

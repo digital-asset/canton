@@ -17,7 +17,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
@@ -37,14 +36,13 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 ) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with HasProtoV0[v0.SignedProtocolMessage]
     with HasProtocolVersionedWrapper[SignedProtocolMessage[SignedProtocolMessageContent]] {
 
   override def domainId: DomainId = message.domainId
 
   override def companionObj = SignedProtocolMessage
 
-  override protected def toProtoV0: v0.SignedProtocolMessage = {
+  protected def toProtoV0: v0.SignedProtocolMessage = {
     val content = message.toProtoSomeSignedProtocolMessage
     v0.SignedProtocolMessage(
       signature = signature.toProtoV0.some,

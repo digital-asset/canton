@@ -10,16 +10,15 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 
 /** Synchronous error returned by a sequencer. */
-sealed trait SendAsyncError extends HasProtoV0[v0.SendAsyncResponse.Error] with PrettyPrinting {
+sealed trait SendAsyncError extends PrettyPrinting {
 
   val message: String
 
   protected def toProtoReason: v0.SendAsyncResponse.Error.Reason
 
-  override def toProtoV0: v0.SendAsyncResponse.Error =
+  def toProtoV0: v0.SendAsyncResponse.Error =
     v0.SendAsyncResponse.Error(toProtoReason)
 
   override def pretty: Pretty[SendAsyncError] = prettyOfClass(unnamedParam(_.message.unquoted))
@@ -91,9 +90,8 @@ object SendAsyncError {
     }
 }
 
-case class SendAsyncResponse(error: Option[SendAsyncError])
-    extends HasProtoV0[v0.SendAsyncResponse] {
-  override def toProtoV0: v0.SendAsyncResponse =
+case class SendAsyncResponse(error: Option[SendAsyncError]) {
+  def toProtoV0: v0.SendAsyncResponse =
     v0.SendAsyncResponse(error.map(_.toProtoV0))
 }
 

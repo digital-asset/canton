@@ -18,7 +18,6 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -66,7 +65,6 @@ sealed abstract case class MediatorResponse(
     override val deserializedFrom: Option[ByteString],
 ) extends SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MediatorResponse]
-    with HasProtoV0[v0.MediatorResponse]
     with HasDomainId
     with NoCopy {
 
@@ -92,7 +90,7 @@ sealed abstract case class MediatorResponse(
 
   override def companionObj = MediatorResponse
 
-  override protected def toProtoV0: v0.MediatorResponse =
+  protected def toProtoV0: v0.MediatorResponse =
     v0.MediatorResponse(
       requestId = Some(requestId.unwrap.toProtoPrimitive),
       sender = sender.toProtoPrimitive,

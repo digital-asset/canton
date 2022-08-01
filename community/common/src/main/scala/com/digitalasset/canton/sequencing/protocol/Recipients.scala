@@ -12,14 +12,11 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.HasProtoV0
 
 /** Recipients of a batch. Uses a list of [[com.digitalasset.canton.sequencing.protocol.RecipientsTree]]s
   * that define the members receiving a batch, and which members see which other recipients.
   */
-case class Recipients private (trees: NonEmpty[Seq[RecipientsTree]])
-    extends PrettyPrinting
-    with HasProtoV0[v0.Recipients] {
+case class Recipients private (trees: NonEmpty[Seq[RecipientsTree]]) extends PrettyPrinting {
 
   lazy val allRecipients: Set[Member] = {
     trees.flatMap(t => t.allRecipients).toSet
@@ -31,7 +28,7 @@ case class Recipients private (trees: NonEmpty[Seq[RecipientsTree]])
     optTs.map(Recipients(_))
   }
 
-  override def toProtoV0: v0.Recipients = {
+  def toProtoV0: v0.Recipients = {
     val protoTrees = trees.map(_.toProtoV0)
     new v0.Recipients(protoTrees.toList)
   }

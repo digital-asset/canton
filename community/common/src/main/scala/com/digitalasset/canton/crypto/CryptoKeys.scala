@@ -18,7 +18,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.SafeSimpleString
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 import io.circe.Encoder
 import slick.jdbc.{GetResult, SetParameter}
@@ -169,12 +168,12 @@ object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
 
 }
 
-trait PublicKeyWithName extends Product with Serializable with HasProtoV0[v0.PublicKeyWithName] {
+trait PublicKeyWithName extends Product with Serializable {
   type K <: PublicKey
   def publicKey: K
   def name: Option[KeyName]
 
-  override def toProtoV0: v0.PublicKeyWithName =
+  def toProtoV0: v0.PublicKeyWithName =
     v0.PublicKeyWithName(
       publicKey = Some(publicKey.toProtoPublicKey),
       name = name.map(_.unwrap).getOrElse(""),

@@ -78,6 +78,14 @@ object ErrorUtil {
   def invalidState(message: => String)(implicit loggingContext: ErrorLoggingContext): Nothing =
     internalError(new IllegalStateException(message))
 
+  /** Indicate an illegal state by logging an ERROR and return a IllegalStateException in a failed future.
+    * @return The throwable in a failed future.
+    */
+  def invalidStateAsync(
+      message: => String
+  )(implicit loggingContext: ErrorLoggingContext): Future[Nothing] =
+    internalErrorAsync(new IllegalStateException(message))
+
   /** Log a throwable at ERROR level with proper formatting.
     * @return The throwable in a failed future.
     */

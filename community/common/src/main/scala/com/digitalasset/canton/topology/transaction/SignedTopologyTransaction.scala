@@ -15,7 +15,6 @@ import com.digitalasset.canton.store.db.DbSerializationException
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -43,7 +42,6 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
     ],
     val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SignedTopologyTransaction[TopologyChangeOp]]
-    with HasProtoV0[v0.SignedTopologyTransaction]
     with ProtocolVersionedMemoizedEvidence
     with Product
     with Serializable
@@ -54,7 +52,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp](
 
   override def companionObj = SignedTopologyTransaction
 
-  override protected def toProtoV0: v0.SignedTopologyTransaction =
+  private def toProtoV0: v0.SignedTopologyTransaction =
     v0.SignedTopologyTransaction(
       transaction = transaction.getCryptographicEvidence,
       key = Some(key.toProtoV0),

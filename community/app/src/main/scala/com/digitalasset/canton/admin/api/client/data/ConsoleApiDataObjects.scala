@@ -365,7 +365,12 @@ object LedgerMeteringReport {
   def fromProtoV0(
       value: GetMeteringReportResponse
   ): ParsingResult[LedgerMeteringReport] = {
-    val GetMeteringReportResponse(requestO, participantReportO, reportGenerationTimeO) = value
+    val GetMeteringReportResponse(
+      requestO,
+      participantReportO,
+      reportGenerationTimeO,
+      _meteringReportJson,
+    ) = value
 
     for {
       request <- ProtoConverter.required("request", requestO)

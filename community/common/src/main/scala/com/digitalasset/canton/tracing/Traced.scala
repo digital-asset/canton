@@ -16,6 +16,9 @@ case class Traced[+A](value: A)(implicit override val traceContext: TraceContext
     extends HasTraceContext {
   def map[B](fn: A => B): Traced[B] = new Traced[B](fn(value))
 
+  def mapWithTraceContext[B](fn: TraceContext => A => B): Traced[B] =
+    Traced(withTraceContext(fn))
+
   def withTraceContext[B](fn: TraceContext => A => B): B = fn(traceContext)(value)
 
   override def toString: String = s"Traced($value)($traceContext)"

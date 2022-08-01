@@ -7,6 +7,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.{
   State => ProtoStateV0
 }
@@ -18,8 +19,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasProtoV1,
   HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -41,8 +40,6 @@ sealed abstract case class RegisterTopologyTransactionResponse[
 ) extends ProtocolMessage
     with ProtocolMessageV0
     with ProtocolMessageV1
-    with HasProtoV0[v0.RegisterTopologyTransactionResponse]
-    with HasProtoV1[v1.RegisterTopologyTransactionResponse]
     with NoCopy {
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
@@ -55,7 +52,7 @@ sealed abstract case class RegisterTopologyTransactionResponse[
       v1.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionResponse(toProtoV1)
     )
 
-  override def toProtoV0: v0.RegisterTopologyTransactionResponse =
+  def toProtoV0: v0.RegisterTopologyTransactionResponse =
     v0.RegisterTopologyTransactionResponse(
       requestedBy = requestedBy.toProtoPrimitive,
       participant = participant.uid.toProtoPrimitive,
@@ -64,7 +61,7 @@ sealed abstract case class RegisterTopologyTransactionResponse[
       domainId = domainId.unwrap.toProtoPrimitive,
     )
 
-  override def toProtoV1: v1.RegisterTopologyTransactionResponse =
+  def toProtoV1: v1.RegisterTopologyTransactionResponse =
     v1.RegisterTopologyTransactionResponse(
       requestedBy = requestedBy.toProtoPrimitive,
       participant = participant.uid.toProtoPrimitive,
@@ -216,21 +213,23 @@ sealed trait RegisterTopologyTransactionResponseResult {
 }
 
 object RegisterTopologyTransactionResponseResult {
-  sealed trait State
+  sealed trait State extends Product with Serializable with PrettyPrinting {
+    override def pretty: Pretty[this.type] = prettyOfObject[this.type]
+  }
   object State {
     @Deprecated
-    object Requested extends State
+    case object Requested extends State
 
-    object Failed extends State
+    case object Failed extends State
 
-    object Rejected extends State
+    case object Rejected extends State
 
-    object Accepted extends State
+    case object Accepted extends State
 
-    object Duplicate extends State
+    case object Duplicate extends State
 
     /** Unnecessary removes are marked as obsolete */
-    object Obsolete extends State
+    case object Obsolete extends State
 
     def isExpectedState(state: State): Boolean = state match {
       case State.Requested => false
@@ -245,8 +244,8 @@ object RegisterTopologyTransactionResponseResult {
 
   private[messages] sealed abstract case class V0(uniquePathProtoPrimitive: String, state: State)
       extends RegisterTopologyTransactionResponseResult
-      with HasProtoV0[v0.RegisterTopologyTransactionResponse.Result] {
-    override def toProtoV0: v0.RegisterTopologyTransactionResponse.Result = {
+      with PrettyPrinting {
+    def toProtoV0: v0.RegisterTopologyTransactionResponse.Result = {
       def reply(state: v0.RegisterTopologyTransactionResponse.Result.State) =
         v0.RegisterTopologyTransactionResponse.Result(
           uniquePath = uniquePathProtoPrimitive,
@@ -264,8 +263,13 @@ object RegisterTopologyTransactionResponseResult {
       }
     }
 
-    override def toProtoV1: v1.RegisterTopologyTransactionResponse.Result =
+    def toProtoV1: v1.RegisterTopologyTransactionResponse.Result =
       throw new UnsupportedOperationException("Cannot serialize a Result.V0 to Protobuf V1")
+
+    override def pretty: Pretty[V0] = prettyOfClass(
+      param("unique path proto primitive", _.uniquePathProtoPrimitive.unquoted),
+      param("state", _.state),
+    )
   }
 
   private[messages] object V0 {
@@ -299,12 +303,12 @@ object RegisterTopologyTransactionResponseResult {
 
   private[messages] sealed abstract case class V1(state: State)
       extends RegisterTopologyTransactionResponseResult
-      with HasProtoV1[v1.RegisterTopologyTransactionResponse.Result] {
+      with PrettyPrinting {
 
-    override def toProtoV0: v0.RegisterTopologyTransactionResponse.Result =
+    def toProtoV0: v0.RegisterTopologyTransactionResponse.Result =
       throw new UnsupportedOperationException("Cannot serialize a Result.V1 to Protobuf V0")
 
-    override def toProtoV1: v1.RegisterTopologyTransactionResponse.Result = {
+    def toProtoV1: v1.RegisterTopologyTransactionResponse.Result = {
       def reply(state: v1.RegisterTopologyTransactionResponse.Result.State) =
         v1.RegisterTopologyTransactionResponse.Result(
           state = state,
@@ -321,6 +325,10 @@ object RegisterTopologyTransactionResponseResult {
           throw new IllegalStateException("State.Requested not allowed in Result.V1")
       }
     }
+
+    override def pretty: Pretty[V1] = prettyOfClass(
+      param("state", _.state)
+    )
   }
 
   private[messages] object V1 {

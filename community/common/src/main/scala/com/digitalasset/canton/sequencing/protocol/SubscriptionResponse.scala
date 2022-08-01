@@ -6,16 +6,15 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, required}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.HasProtoV0
 
 case class SubscriptionResponse(
     signedSequencedEvent: Traced[SignedContent[SequencedEvent[ClosedEnvelope]]]
-) extends HasProtoV0[v0.SubscriptionResponse] {
+) {
 
   // despite being serialized in the HttpApiServer (ccf, cpp-part of the code base), we don't introduce a
   // `VersionedSubscriptionResponse` because we assume that the subscription endpoint will also be bumped if a V1
   // SubscriptionResponse is ever introduced
-  override def toProtoV0: v0.SubscriptionResponse =
+  def toProtoV0: v0.SubscriptionResponse =
     v0.SubscriptionResponse(
       signedSequencedEvent = Some(signedSequencedEvent.value.toProtoV0),
       traceContext = Some(signedSequencedEvent.traceContext.toProtoV0),

@@ -31,12 +31,11 @@ sealed trait Verdict
     extends Product
     with Serializable
     with PrettyPrinting
-    with HasVersionedWrapper[VersionedMessage[Verdict]]
-    with HasProtoV0[v0.Verdict] {
+    with HasVersionedWrapper[VersionedMessage[Verdict]] {
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Verdict] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.Verdict
+  def toProtoV0: v0.Verdict
 }
 
 object Verdict extends HasVersionedMessageCompanion[Verdict] {
@@ -53,8 +52,7 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
 
   sealed trait MediatorReject
       extends Verdict
-      with TransactionErrorWithEnum[v0.MediatorRejection.Code]
-      with HasProtoV0[v0.Verdict] {
+      with TransactionErrorWithEnum[v0.MediatorRejection.Code] {
 
     def reason: String
 
@@ -63,7 +61,7 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
       reason,
     )
 
-    override def toProtoV0: v0.Verdict =
+    def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV0))
 
     override def pretty: Pretty[this.type] =
@@ -276,7 +274,7 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
     */
   case class RejectReasons(reasons: List[(Set[LfPartyId], LocalReject)]) extends Verdict {
 
-    override def toProtoV0: v0.Verdict = {
+    def toProtoV0: v0.Verdict = {
       val reasonsP = v0.RejectionReasons(reasons.map { case (parties, message) =>
         v0.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV0))
       })
@@ -311,7 +309,7 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
   }
 
   case object Timeout extends Verdict {
-    override def toProtoV0: v0.Verdict =
+    def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Timeout(empty.Empty()))
 
     override def pretty: Pretty[Timeout.type] = prettyOfObject[Timeout.type]

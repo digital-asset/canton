@@ -12,7 +12,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.HasProtoV0
 
 /** A tree representation of the recipients for a batch.
   * Each member receiving the batch should see only subtrees of recipients from a node containing
@@ -20,8 +19,7 @@ import com.digitalasset.canton.version.HasProtoV0
   * the top-level subtree A.
   */
 case class RecipientsTree(recipientGroup: NonEmpty[Set[Member]], children: Seq[RecipientsTree])
-    extends PrettyPrinting
-    with HasProtoV0[v0.RecipientsTree] {
+    extends PrettyPrinting {
 
   override def pretty: Pretty[RecipientsTree] =
     prettyOfClass(param("recipient group", _.recipientGroup.toList), param("children", _.children))
@@ -44,7 +42,7 @@ case class RecipientsTree(recipientGroup: NonEmpty[Set[Member]], children: Seq[R
     case _ => recipientGroup
   }
 
-  override def toProtoV0: v0.RecipientsTree = {
+  def toProtoV0: v0.RecipientsTree = {
     val recipientsP = recipientGroup.toSeq.map(member => member.toProtoPrimitive)
     val childrenP = children.map(_.toProtoV0)
     new v0.RecipientsTree(recipientsP, childrenP)

@@ -11,7 +11,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -24,10 +23,9 @@ case class SequencerSnapshot(
     heads: Map[Member, SequencerCounter],
     status: SequencerPruningStatus,
     additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
-) extends HasProtoV0[v0.SequencerSnapshot]
-    with HasVersionedWrapper[VersionedMessage[SequencerSnapshot]] {
+) extends HasVersionedWrapper[VersionedMessage[SequencerSnapshot]] {
 
-  override def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
+  def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
     Some(lastTs.toProtoPrimitive),
     heads.map { case (member, counter) =>
       member.toProtoPrimitive -> counter

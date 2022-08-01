@@ -8,7 +8,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.domain.admin.{v0 => adminproto}
 import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
-import com.digitalasset.canton.protocol.{StaticDomainParameters, v0}
+import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
@@ -68,16 +68,29 @@ object DomainAdminCommands {
   }
 
   final case object GetDomainParameters
-      extends BaseDomainServiceCommand[Empty, v0.StaticDomainParameters, StaticDomainParameters] {
+      extends BaseDomainServiceCommand[
+        Empty,
+        adminproto.GetDomainParameters.Response,
+        StaticDomainParameters,
+      ] {
     override def createRequest(): Either[String, Empty] = Right(Empty())
     override def submitRequest(
         service: adminproto.DomainServiceGrpc.DomainServiceStub,
         request: Empty,
-    ): Future[v0.StaticDomainParameters] =
-      service.getDomainParameters(request)
+    ): Future[adminproto.GetDomainParameters.Response] =
+      service.getDomainParameters(adminproto.GetDomainParameters.Request())
     override def handleResponse(
-        response: v0.StaticDomainParameters
-    ): Either[String, StaticDomainParameters] =
-      StaticDomainParameters.fromProtoV0(response).leftMap(_.toString)
+        response: adminproto.GetDomainParameters.Response
+    ): Either[String, StaticDomainParameters] = {
+      import adminproto.GetDomainParameters.Response.Parameters
+
+      response.parameters match {
+        case Parameters.Empty => Left("Field parameters was not found in the response")
+        case Parameters.ParametersV0(parametersV0) =>
+          StaticDomainParameters.fromProtoV0(parametersV0).leftMap(_.toString)
+        case Parameters.ParametersV1(parametersV1) =>
+          StaticDomainParameters.fromProtoV1(parametersV1).leftMap(_.toString)
+      }
+    }
   }
 }

@@ -9,6 +9,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.config.{Password, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.crypto.store.ProtectedKeyStore
+import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
 import com.digitalasset.canton.domain.api.{v0 => domainProto}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -229,18 +230,19 @@ class HttpSequencerClient(
         )
         .leftMap[HttpSequencerClientError](DeserializationError(_))
         .toEitherT[Future]
-      domainParametersP <- EitherT.fromEither[Future](
-        responseP.parameters.toRight[HttpSequencerClientError](
-          DeserializationError(
-            ProtoDeserializationError.FieldNotSet("GetDomainParameters.parameters")
-          )
-        )
-      )
-      domainParameters <- EitherT.fromEither[Future](
-        StaticDomainParameters
-          .fromProtoV0(domainParametersP)
-          .leftMap[HttpSequencerClientError](DeserializationError(_))
-      )
+
+      domainParametersE = responseP.parameters match {
+        case Parameters.Empty =>
+          Left(ProtoDeserializationError.FieldNotSet("GetDomainParameters.parameters"))
+        case Parameters.ParametersV0(parametersV0) =>
+          StaticDomainParameters.fromProtoV0(parametersV0)
+        case Parameters.ParametersV1(parametersV1) =>
+          StaticDomainParameters.fromProtoV1(parametersV1)
+      }
+      domainParameters <- EitherT
+        .fromEither[Future](domainParametersE)
+        .leftMap[HttpSequencerClientError](DeserializationError(_))
+
     } yield domainParameters
 
   def verifyActive(

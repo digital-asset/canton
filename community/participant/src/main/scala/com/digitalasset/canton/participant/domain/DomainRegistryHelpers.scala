@@ -100,7 +100,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       ).mapK(FutureUnlessShutdown.outcomeK)
 
       _ = logger.info(
-        s"Version handshake with domain using protocol version ${success.serverVersion} succeeded."
+        s"Version handshake with domain using protocol version ${success.serverProtocolVersion} succeeded."
       )
 
       _ <- aliasManager

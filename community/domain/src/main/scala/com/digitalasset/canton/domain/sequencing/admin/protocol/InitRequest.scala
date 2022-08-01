@@ -12,21 +12,20 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
-import com.digitalasset.canton.version.HasProtoV0
 
 case class InitRequest private (
     domainId: DomainId,
     topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
     domainParameters: StaticDomainParameters,
     sequencerSnapshot: Option[SequencerSnapshot] = None,
-) extends HasProtoV0[v0.InitRequest] {
+) {
 
   /* We allow serializing this message to a ByteArray despite it implementing ProtoNonSerializable because the serialization
  is (and should) only used in the HttpSequencerClient.
 If you need to save this message in a database, please add an UntypedVersionedMessage message as documented in contributing.md  */
   def toByteArrayV0: Array[Byte] = toProtoV0.toByteArray
 
-  override def toProtoV0: v0.InitRequest = v0.InitRequest(
+  def toProtoV0: v0.InitRequest = v0.InitRequest(
     domainId.toProtoPrimitive,
     Some(topologySnapshot.toProtoV0),
     Some(domainParameters.toProtoV0),

@@ -15,7 +15,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.protocol.v0.LocalReject.Code
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.empty
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
@@ -24,17 +23,13 @@ import org.slf4j.event.Level
   * The verdict can be `LocalApprove`, `LocalReject` or `Malformed`.
   * The verdicts `LocalReject` and `Malformed` include a `reason` pointing out which checks in Phase 3 have failed.
   */
-sealed trait LocalVerdict
-    extends Product
-    with Serializable
-    with PrettyPrinting
-    with HasProtoV0[v0.LocalVerdict] {
-  override def toProtoV0: v0.LocalVerdict
+sealed trait LocalVerdict extends Product with Serializable with PrettyPrinting {
+  def toProtoV0: v0.LocalVerdict
 
 }
 
 case object LocalApprove extends LocalVerdict {
-  override def toProtoV0: v0.LocalVerdict =
+  def toProtoV0: v0.LocalVerdict =
     v0.LocalVerdict(v0.LocalVerdict.SomeLocalVerdict.LocalApprove(empty.Empty()))
 
   override def pretty: Pretty[this.type] = prettyOfObject[LocalApprove.type]
@@ -52,7 +47,7 @@ trait LocalReject
     with HasResourceSeq
     with TransactionErrorWithEnum[v0.LocalReject.Code] {
 
-  override def toProtoV0: v0.LocalVerdict =
+  def toProtoV0: v0.LocalVerdict =
     v0.LocalVerdict(v0.LocalVerdict.SomeLocalVerdict.LocalReject(toLocalRejectProtoV0))
 
   def toLocalRejectProtoV0: v0.LocalReject = v0.LocalReject(code.protoCode, reason, _resource)
