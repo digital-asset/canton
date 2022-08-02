@@ -17,7 +17,11 @@ import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, Symboli
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
+import com.digitalasset.canton.protocol.{
+  DomainParameters,
+  DynamicDomainParameters,
+  TestDomainParameters,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities._
 import com.digitalasset.canton.topology.client.{
@@ -88,11 +92,11 @@ case class TestingTopology(
     mediators: Set[MediatorId] = Set(DefaultTestIdentities.mediator),
     additionalParticipants: Set[ParticipantId] = Set.empty,
     keyPurposes: Set[KeyPurpose] = KeyPurpose.all,
-    domainParameters: List[DynamicDomainParameters.WithValidity] = List(
-      DynamicDomainParameters.WithValidity(
+    domainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]] = List(
+      DomainParameters.WithValidity(
         validFrom = CantonTimestamp.Epoch,
         validUntil = None,
-        parameters = DefaultTestIdentities.defaultDynamicDomainParameters,
+        parameter = DefaultTestIdentities.defaultDynamicDomainParameters,
       )
     ),
 ) {
@@ -167,7 +171,7 @@ case class TestingTopology(
 class TestingIdentityFactory(
     topology: TestingTopology,
     override protected val loggerFactory: NamedLoggerFactory,
-    dynamicDomainParameters: List[DynamicDomainParameters.WithValidity],
+    dynamicDomainParameters: List[DomainParameters.WithValidity[DynamicDomainParameters]],
 ) extends NamedLogging {
 
   private implicit val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
@@ -303,7 +307,7 @@ class TestingIdentityFactory(
   }
 
   private def domainParametersChangeTx(ts: CantonTimestamp): DynamicDomainParameters =
-    dynamicDomainParameters.collect { case dp if dp.isValidAt(ts) => dp.parameters } match {
+    dynamicDomainParameters.collect { case dp if dp.isValidAt(ts) => dp.parameter } match {
       case dp :: Nil => dp
       case Nil => DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
       case _ => throw new IllegalStateException(s"Multiple domain parameters are valid at $ts")
@@ -628,10 +632,10 @@ object TestingIdentityFactory {
     topology,
     loggerFactory,
     dynamicDomainParameters = List(
-      DynamicDomainParameters.WithValidity(
+      DomainParameters.WithValidity(
         validFrom = CantonTimestamp.Epoch,
         validUntil = None,
-        parameters = dynamicDomainParameters,
+        parameter = dynamicDomainParameters,
       )
     ),
   )

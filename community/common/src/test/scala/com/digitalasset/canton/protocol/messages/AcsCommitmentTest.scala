@@ -19,16 +19,20 @@ class AcsCommitmentTest extends AnyWordSpec with BaseTest with HasCryptographicE
   val sender = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("participant::da"))
   val counterParticipant = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("participant2::da"))
   val interval = PositiveSeconds.ofSeconds(1)
-  val period1 = CommitmentPeriod(
-    CantonTimestamp.Epoch,
-    CantonTimestamp.Epoch.plusSeconds(2),
-    interval,
-  ).value
-  val period2 = CommitmentPeriod(
-    CantonTimestamp.Epoch.plusSeconds(2),
-    CantonTimestamp.Epoch.plusSeconds(4),
-    interval,
-  ).value
+  val period1 = CommitmentPeriod
+    .create(
+      CantonTimestamp.Epoch,
+      CantonTimestamp.Epoch.plusSeconds(2),
+      interval,
+    )
+    .value
+  val period2 = CommitmentPeriod
+    .create(
+      CantonTimestamp.Epoch.plusSeconds(2),
+      CantonTimestamp.Epoch.plusSeconds(4),
+      interval,
+    )
+    .value
 
   val h = LtHash16()
   h.add("abc".getBytes())

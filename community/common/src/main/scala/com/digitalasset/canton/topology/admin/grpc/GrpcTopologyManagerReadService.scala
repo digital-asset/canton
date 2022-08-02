@@ -26,7 +26,6 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,8 +36,8 @@ case class BaseQuery(
     timeQuery: TimeQuery,
     ops: Option[TopologyChangeOp],
     filterSigningKey: String,
-) extends HasProtoV0[adminProto.BaseQuery] {
-  override def toProtoV0: adminProto.BaseQuery =
+) {
+  def toProtoV0: adminProto.BaseQuery =
     adminProto.BaseQuery(
       filterStore,
       useStateStore,

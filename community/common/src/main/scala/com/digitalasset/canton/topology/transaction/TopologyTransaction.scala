@@ -207,7 +207,6 @@ sealed trait TopologyTransaction[+Op <: TopologyChangeOp]
     extends ProtocolVersionedMemoizedEvidence
     with PrettyPrinting
     with HasProtocolVersionedWrapper[TopologyTransaction[TopologyChangeOp]]
-    with HasProtoV0[v0.TopologyTransaction]
     with Product
     with Serializable {
   def op: Op
@@ -364,10 +363,10 @@ sealed abstract case class TopologyStateUpdate[+Op <: AddRemoveChangeOp](
     v1.TopologyStateUpdate(operation = op.toProto, id = element.id.unwrap, mapping = mappingP)
   }
 
-  override def toProtoV0: v0.TopologyTransaction =
+  def toProtoV0: v0.TopologyTransaction =
     v0.TopologyTransaction(v0.TopologyTransaction.Transaction.StateUpdate(toStateUpdateProtoV0))
 
-  override def toProtoV1: v1.TopologyTransaction =
+  def toProtoV1: v1.TopologyTransaction =
     v1.TopologyTransaction(v1.TopologyTransaction.Transaction.StateUpdate(toStateUpdateProtoV1))
 
   /** Create reversion of this transaction
@@ -550,7 +549,7 @@ sealed abstract case class DomainGovernanceTransaction(
   private def toDomainGovernanceTransactionProtoV1: v1.DomainGovernanceTransaction = {
     val mappingP = element.mapping match {
       case x: DomainParametersChange =>
-        v1.DomainGovernanceTransaction.Mapping.DomainParametersChange(x.toProtoV0)
+        v1.DomainGovernanceTransaction.Mapping.DomainParametersChange(x.toProtoV1)
     }
 
     v1.DomainGovernanceTransaction(mapping = mappingP)
@@ -624,7 +623,7 @@ object DomainGovernanceTransaction {
   ): ParsingResult[DomainGovernanceTransaction] = {
     val mapping: ParsingResult[DomainGovernanceMapping] = protoTopologyTransaction.mapping match {
       case v1.DomainGovernanceTransaction.Mapping.DomainParametersChange(domainParametersChange) =>
-        DomainParametersChange.fromProtoV0(domainParametersChange)
+        DomainParametersChange.fromProtoV1(domainParametersChange)
 
       case v1.DomainGovernanceTransaction.Mapping.Empty =>
         Left(UnrecognizedField("DomainGovernanceTransaction.Mapping is empty"))

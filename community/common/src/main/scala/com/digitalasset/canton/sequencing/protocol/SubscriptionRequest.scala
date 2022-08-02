@@ -6,19 +6,17 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.HasProtoV0
 
 /** A request to receive events from a given counter from a sequencer.
   *
   * @param member the member subscribing to the sequencer
   * @param counter the counter of the first event to receive.
   */
-case class SubscriptionRequest(member: Member, counter: Long)
-    extends HasProtoV0[v0.SubscriptionRequest] {
+case class SubscriptionRequest(member: Member, counter: Long) {
 
   // despite being serialized in the HttpSequencerClient, we don't introduce a `VersionedSubscriptionRequest` because
   // we assume that the subscription endpoint will also be bumped if a V1 SubscriptionRequest is ever introduced
-  override def toProtoV0: v0.SubscriptionRequest =
+  def toProtoV0: v0.SubscriptionRequest =
     v0.SubscriptionRequest(member.toProtoPrimitive, counter)
 }
 

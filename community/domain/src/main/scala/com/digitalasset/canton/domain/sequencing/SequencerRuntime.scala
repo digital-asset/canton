@@ -154,12 +154,6 @@ class SequencerRuntime(
     )
 
   private val healthManager = new io.grpc.protobuf.services.HealthStatusManager()
-  sequencer.onHealthChange(status =>
-    healthManager.setStatus(
-      CantonGrpcUtil.sequencerHealthCheckServiceName,
-      if (status.isActive) ServingStatus.SERVING else ServingStatus.NOT_SERVING,
-    )
-  )(TraceContext.empty)
 
   private val keyCheckF =
     syncCrypto
@@ -299,6 +293,23 @@ class SequencerRuntime(
     staticDomainParameters.maxBatchMessageSize,
     localNodeParameters.processingTimeouts,
     loggerFactory,
+  )
+
+  TraceContext.withNewTraceContext(tc =>
+    sequencer.onHealthChange { (status, traceContext) =>
+      healthManager.setStatus(
+        CantonGrpcUtil.sequencerHealthCheckServiceName,
+        if (status.isActive) ServingStatus.SERVING else ServingStatus.NOT_SERVING,
+      )
+      if (!status.isActive) {
+        logger.warn(
+          s"Sequencer is unhealthy, so disconnecting all members. ${status.details.getOrElse("")}"
+        )(traceContext)
+        sequencerService.disconnectAllMembers()(traceContext)
+      } else {
+        logger.info(s"Sequencer is healthy")(traceContext)
+      }
+    }(tc)
   )
 
   private val sequencerAdministrationService = new GrpcSequencerAdministrationService(sequencer)

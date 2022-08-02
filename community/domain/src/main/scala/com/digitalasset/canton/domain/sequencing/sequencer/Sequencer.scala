@@ -15,6 +15,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   SequencerWriteError,
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
+import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
@@ -26,7 +27,7 @@ import com.digitalasset.canton.util.EitherTUtil
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Errors from pruning */
-sealed trait PruningError
+sealed trait PruningError extends Product with Serializable
 object PruningError {
 
   /** The sequencer implementation does not support pruning */
@@ -41,7 +42,7 @@ object PruningError {
   * The default [[DatabaseSequencer]] implementation is backed by a database run by a single operator.
   * Other implementations support operating a Sequencer on top of third party ledgers or other infrastructure.
   */
-trait Sequencer extends AutoCloseable {
+trait Sequencer extends FlagCloseable with HasCloseContext {
   protected val loggerFactory: NamedLoggerFactory
 
   def isRegistered(member: Member)(implicit traceContext: TraceContext): Future[Boolean]
@@ -88,6 +89,11 @@ trait Sequencer extends AutoCloseable {
     * not validated (and could be invalid if the member has many subscriptions from the same or many processes).
     * It is expected that members will periodically call this endpoint with their latest clean timestamp rather than
     * calling it for every event they process. The default interval is in the range of once a minute.
+    *
+    * A member should only acknowledge timestamps it has actually received.
+    * The behaviour of the sequencer is implementation-defined when a member acknowledges a later timestamp.
+    *
+    * @see com.digitalasset.canton.sequencing.client.SequencerClientConfig.acknowledgementInterval for the default interval
     */
   def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -106,7 +112,9 @@ trait Sequencer extends AutoCloseable {
   /** Register a listener function that will be called every time the health status of the sequencer changes.
     * Useful for things like signalling health changes to load balancers
     */
-  def onHealthChange(f: SequencerHealthStatus => Unit)(implicit traceContext: TraceContext): Unit
+  def onHealthChange(f: (SequencerHealthStatus, TraceContext) => Unit)(implicit
+      traceContext: TraceContext
+  ): Unit
 
   /** Prune as much sequencer data as safely possible without breaking operation (except for members
     * that have been previously flagged as disabled).

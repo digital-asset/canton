@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProvider
 import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
@@ -48,9 +49,11 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
   ): Future[Unit] =
     incrementCounterAndErrF()
 
-  override def markSafe(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] =
+  override def markSafe(
+      counterParticipant: ParticipantId,
+      period: CommitmentPeriod,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
+  )(implicit traceContext: TraceContext): Future[Unit] =
     incrementCounterAndErrF()
 
   private val err: AcsCommitmentStore.AcsCommitmentStoreError =

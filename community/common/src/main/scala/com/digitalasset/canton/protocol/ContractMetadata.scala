@@ -11,7 +11,6 @@ import com.digitalasset.canton.protocol.ContractMetadata.InvalidContractMetadata
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -30,7 +29,6 @@ case class ContractMetadata private (
     stakeholders: Set[LfPartyId],
     maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
 ) extends HasVersionedWrapper[VersionedMessage[ContractMetadata]]
-    with HasProtoV0[v0.SerializableContract.Metadata]
     with PrettyPrinting {
 
   {
@@ -55,7 +53,7 @@ case class ContractMetadata private (
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[ContractMetadata] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.SerializableContract.Metadata = {
+  def toProtoV0: v0.SerializableContract.Metadata = {
     v0.SerializableContract.Metadata(
       nonMaintainerSignatories = (signatories -- maintainers).toList,
       nonSignatoryStakeholders = (stakeholders -- signatories).toList,

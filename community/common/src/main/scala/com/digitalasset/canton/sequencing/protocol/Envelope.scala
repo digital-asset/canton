@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 /** An [[Envelope]] wraps an envelope content such as a [[com.digitalasset.canton.protocol.messages.ProtocolMessage]]
@@ -14,7 +13,7 @@ import com.google.protobuf.ByteString
   *
   * @tparam M The type of the envelope content
   */
-trait Envelope[+M] extends HasProtoV0[v0.Envelope] with PrettyPrinting {
+trait Envelope[+M] extends PrettyPrinting {
 
   def recipients: Recipients
 
@@ -26,7 +25,7 @@ trait Envelope[+M] extends HasProtoV0[v0.Envelope] with PrettyPrinting {
   /** Returns the serialized contents of the envelope */
   protected def contentAsByteString: ByteString
 
-  override def toProtoV0: v0.Envelope = v0.Envelope(
+  def toProtoV0: v0.Envelope = v0.Envelope(
     content = contentAsByteString,
     recipients = Some(recipients.toProtoV0),
   )

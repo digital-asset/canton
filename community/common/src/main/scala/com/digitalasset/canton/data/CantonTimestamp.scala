@@ -78,11 +78,11 @@ object CantonTimestamp {
     }
   }
 
-  def Epoch = new CantonTimestamp(LfTimestamp.Epoch)
+  def Epoch: CantonTimestamp = new CantonTimestamp(LfTimestamp.Epoch)
 
-  def MinValue = new CantonTimestamp(LfTimestamp.MinValue)
+  def MinValue: CantonTimestamp = new CantonTimestamp(LfTimestamp.MinValue)
 
-  def MaxValue = new CantonTimestamp(LfTimestamp.MaxValue)
+  def MaxValue: CantonTimestamp = new CantonTimestamp(LfTimestamp.MaxValue)
 
   def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[CantonTimestamp] = {
     for {

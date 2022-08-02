@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.{
   SyncCryptoError,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
@@ -39,16 +39,16 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
     .focus(_.participantResponseTimeout)
     .modify(value => NonNegativeFiniteDuration.ofSeconds(value.unwrap.getSeconds + 1))
 
-  private val domainParameters1 = DynamicDomainParameters.WithValidity(
+  private val domainParameters1 = DomainParameters.WithValidity(
     CantonTimestamp.Epoch,
     Some(CantonTimestamp.ofEpochSecond(10)),
     increaseParticipantResponseTimeout(defaultDynamicDomainParameters),
   )
 
-  private val domainParameters2 = DynamicDomainParameters.WithValidity(
+  private val domainParameters2 = DomainParameters.WithValidity(
     CantonTimestamp.ofEpochSecond(10),
     None,
-    increaseParticipantResponseTimeout(domainParameters1.parameters),
+    increaseParticipantResponseTimeout(domainParameters1.parameter),
   )
 
   val domainParameters = List(domainParameters1, domainParameters2)
@@ -138,11 +138,11 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
         val transitionTs = domainParameters1.validUntil.value
 
         getParameters(CantonTimestamp.Epoch) shouldBe defaultDynamicDomainParameters
-        getParameters(transitionTs.minusMillis(1)) shouldBe domainParameters1.parameters
+        getParameters(transitionTs.minusMillis(1)) shouldBe domainParameters1.parameter
 
-        getParameters(transitionTs) shouldBe domainParameters1.parameters // validFrom is exclusive
+        getParameters(transitionTs) shouldBe domainParameters1.parameter // validFrom is exclusive
 
-        getParameters(transitionTs.plusMillis(1)) shouldBe domainParameters2.parameters
+        getParameters(transitionTs.plusMillis(1)) shouldBe domainParameters2.parameter
       }
 
     }

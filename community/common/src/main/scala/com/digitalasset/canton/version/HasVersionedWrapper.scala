@@ -12,28 +12,6 @@ import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
-/** Trait for classes that have a corresponding Protobuf definition but **don't** need the ability to be directly serialized
-  * into a ByteString or ByteArray.
-  * Commonly, this interface should be used when the corresponding Protobuf message is only used in other Protobuf
-  * messages or for gRPC calls and responses, but never sent around or stored as a bytestring.
-  * E.g. an `Envelope` is always embedded in a `Batch`, and therefore doesn't need a serialization method itself because
-  * it will be indirectly serialized when the enclosing Batch is serialized.
-  */
-trait HasProtoV0[ProtoClass <: scalapb.GeneratedMessage] {
-
-  /** Yields the proto representation of the class.
-    *
-    * Subclasses should make this method public by default, as this supports composing proto serializations.
-    * Keep it protected, if there are good reasons for it
-    * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
-    */
-  protected def toProtoV0: ProtoClass
-}
-
-trait HasProtoV1[ProtoClass <: scalapb.GeneratedMessage] {
-  protected def toProtoV1: ProtoClass
-}
-
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
   *

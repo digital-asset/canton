@@ -155,6 +155,8 @@ trait H2DbConfig extends DbConfig {
       "(:mem:|:file:)([^:;]+)([:;])".r.findFirstMatchIn(url).map(_.group(2))
     } else None
   }
+  private val defaultDriver: String = "org.h2.Driver"
+  val defaultConfig: Config = DbConfig.toConfig(Map("driver" -> defaultDriver))
 }
 
 trait PostgresDbConfig extends DbConfig
@@ -231,6 +233,8 @@ object DbConfig extends NoTracing {
   ): String =
     s"jdbc:oracle:thin:$username/$password@$host:$port/$dbName"
 
+  def toConfig(map: Map[String, Any]): Config = ConfigFactory.parseMap(map.asJava)
+
   /** Apply default values to the given db config
     */
   def configWithFallback(
@@ -242,8 +246,6 @@ object DbConfig extends NoTracing {
       poolName: String,
       logger: TracedLogger,
   ): Config = {
-    def toConfig(map: Map[String, Any]): Config = ConfigFactory.parseMap(map.asJava)
-
     val commonDefaults = toConfig(
       Map(
         "poolName" -> poolName,
@@ -258,7 +260,6 @@ object DbConfig extends NoTracing {
         "initializationFailTimeout" -> 1, // Must be greater than 0 to force a connection validation on startup
       )
     )
-    val h2Defaults = toConfig(Map("driver" -> "org.h2.Driver"))
     (dbConfig match {
       case h2: H2DbConfig =>
         def containsOption(c: Config, optionName: String, optionValue: String) = {
@@ -293,7 +294,7 @@ object DbConfig extends NoTracing {
         }
         enforceDelayClose(
           enforcePgMode(enforceSingleConnection(writeH2UrlIfNotSet(h2.config)))
-        ).withFallback(h2Defaults)
+        ).withFallback(h2.defaultConfig)
       case postgres: PostgresDbConfig => postgres.config
       // TODO(soren): this other is a workaround for supporting oracle without referencing the oracle config
       case other => other.config

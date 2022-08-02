@@ -9,7 +9,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 /** A seed to derive further salts from.
@@ -64,8 +63,7 @@ object SaltAlgorithm {
   * The algorithm that was used to generate/derive the salt is kept to support the verification of the salt generation.
   */
 final case class Salt private (private val salt: ByteString, private val algorithm: SaltAlgorithm)
-    extends HasProtoV0[v0.Salt]
-    with PrettyPrinting
+    extends PrettyPrinting
     with NoCopy {
 
   require(!salt.isEmpty, "Salt must not be empty")
@@ -74,7 +72,7 @@ final case class Salt private (private val salt: ByteString, private val algorit
     s"Salt size ${salt.size()} must match salt algorithm length ${algorithm.length}",
   )
 
-  override def toProtoV0: v0.Salt = v0.Salt(salt = salt, algorithm = algorithm.toProtoOneOf)
+  def toProtoV0: v0.Salt = v0.Salt(salt = salt, algorithm = algorithm.toProtoOneOf)
 
   def toByteString: ByteString = toProtoV0.toByteString
 

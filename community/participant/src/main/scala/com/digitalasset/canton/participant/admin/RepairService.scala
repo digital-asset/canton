@@ -95,7 +95,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class RepairService(
     participantId: ParticipantId,
-    identityStoreFactory: TopologyStoreFactory,
+    topologyStoreFactory: TopologyStoreFactory,
     syncCrypto: SyncCryptoApiProvider,
     packagesDarsService: PackageService,
     damle: DAMLe,
@@ -1118,7 +1118,7 @@ class RepairService(
             ),
           )
       }
-      topologyStore = identityStoreFactory.forId(DomainStore(domainId))
+      topologyStore = topologyStoreFactory.forId(DomainStore(domainId))
       topologySnapshot = new CachingTopologySnapshot(
         new StoreBasedTopologySnapshot(
           tsRepair,

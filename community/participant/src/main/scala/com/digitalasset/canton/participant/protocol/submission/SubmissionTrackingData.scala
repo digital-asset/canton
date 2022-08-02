@@ -22,7 +22,6 @@ import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -39,7 +38,6 @@ import com.google.protobuf.empty.Empty
 trait SubmissionTrackingData
     extends Product
     with Serializable
-    with HasProtoV0[v0.SubmissionTrackingData]
     with HasVersionedWrapper[VersionedMessage[SubmissionTrackingData]]
     with PrettyPrinting {
 
@@ -108,7 +106,7 @@ case class TransactionSubmissionTrackingData(
       version: ProtocolVersion
   ): VersionedMessage[SubmissionTrackingData] = VersionedMessage(toProtoV0.toByteString, 0)
 
-  override protected def toProtoV0: v0.SubmissionTrackingData = {
+  private def toProtoV0: v0.SubmissionTrackingData = {
     val completionInfoP = SerializableCompletionInfo(completionInfo).toProtoV0
     val transactionTracking = v0.TransactionSubmissionTrackingData(
       completionInfo = completionInfoP.some,
@@ -138,17 +136,13 @@ object TransactionSubmissionTrackingData {
     } yield TransactionSubmissionTrackingData(completionInfo, cause)
   }
 
-  trait RejectionCause
-      extends Product
-      with Serializable
-      with PrettyPrinting
-      with HasProtoV0[v0.TransactionSubmissionTrackingData.RejectionCause] {
+  trait RejectionCause extends Product with Serializable with PrettyPrinting {
 
     def asRejectionReasonTemplate(observedTimestamp: CantonTimestamp)(implicit
         loggingContext: ErrorLoggingContext
     ): RejectionReasonTemplate
 
-    override def toProtoV0: v0.TransactionSubmissionTrackingData.RejectionCause
+    def toProtoV0: v0.TransactionSubmissionTrackingData.RejectionCause
   }
 
   object RejectionCause {

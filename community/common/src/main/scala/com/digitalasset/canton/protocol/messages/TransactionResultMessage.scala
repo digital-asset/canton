@@ -16,7 +16,6 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -42,7 +41,6 @@ sealed abstract case class TransactionResultMessage(
 ) extends RegularMediatorResult
     with NoCopy
     with HasProtocolVersionedWrapper[TransactionResultMessage]
-    with HasProtoV0[v0.TransactionResultMessage]
     with PrettyPrinting {
 
   override def domainId: DomainId = notificationTree.domainId
@@ -61,7 +59,7 @@ sealed abstract case class TransactionResultMessage(
 
   override def companionObj = TransactionResultMessage
 
-  override protected def toProtoV0: v0.TransactionResultMessage =
+  protected def toProtoV0: v0.TransactionResultMessage =
     v0.TransactionResultMessage(
       requestId = Some(requestId.unwrap.toProtoPrimitive),
       verdict = Some(verdict.toProtoV0),

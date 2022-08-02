@@ -13,7 +13,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -34,12 +33,11 @@ sealed abstract case class CausalityMessage(
     clock: VectorClock,
 )(val representativeProtocolVersion: RepresentativeProtocolVersion[ProtocolMessage])
     extends ProtocolMessage
-    with HasProtoV0[v0.CausalityMessage]
     with PrettyPrinting
     with ProtocolMessageV0
     with ProtocolMessageV1 {
 
-  override def toProtoV0: v0.CausalityMessage = v0.CausalityMessage(
+  def toProtoV0: v0.CausalityMessage = v0.CausalityMessage(
     targetDomainId = domainId.toProtoPrimitive,
     transferId = Some(transferId.toProtoV0),
     clock = Some(clock.toProtoV0),
@@ -114,8 +112,7 @@ case class VectorClock(
     localTs: CantonTimestamp,
     partyId: LfPartyId,
     clock: Map[DomainId, CantonTimestamp],
-) extends HasProtoV0[v0.VectorClock]
-    with PrettyPrinting {
+) extends PrettyPrinting {
 
   override def pretty: Pretty[VectorClock.this.type] =
     prettyOfClass(
@@ -125,7 +122,7 @@ case class VectorClock(
       param("Party", _.partyId),
     )
 
-  override def toProtoV0: v0.VectorClock = {
+  def toProtoV0: v0.VectorClock = {
     v0.VectorClock(
       originDomainId = sourceDomainId.toProtoPrimitive,
       localTs = Some(localTs.toProtoPrimitive),

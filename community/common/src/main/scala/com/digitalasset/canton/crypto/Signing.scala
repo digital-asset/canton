@@ -19,7 +19,6 @@ import com.digitalasset.canton.topology.KeyOwner
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -125,14 +124,13 @@ case class Signature private[crypto] (
     private val signature: ByteString,
     signedBy: Fingerprint,
 ) extends HasVersionedWrapper[VersionedMessage[Signature]]
-    with HasProtoV0[v0.Signature]
     with PrettyPrinting
     with NoCopy {
 
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Signature] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.Signature =
+  def toProtoV0: v0.Signature =
     v0.Signature(
       format = format.toProtoEnum,
       signature = signature,
@@ -248,12 +246,11 @@ object SigningKeyScheme {
 
 final case class SigningKeyPair(publicKey: SigningPublicKey, privateKey: SigningPrivateKey)
     extends CryptoKeyPair[SigningPublicKey, SigningPrivateKey]
-    with HasProtoV0[v0.SigningKeyPair]
     with NoCopy {
-  override protected def toProtoV0: v0.SigningKeyPair =
+  protected def toProtoV0: v0.SigningKeyPair =
     v0.SigningKeyPair(Some(publicKey.toProtoV0), Some(privateKey.toProtoV0))
 
-  override protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair =
+  protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair =
     v0.CryptoKeyPair.Pair.SigningKeyPair(toProtoV0)
 }
 
@@ -302,14 +299,13 @@ case class SigningPublicKey private[crypto] (
 ) extends PublicKey
     with HasVersionedWrapper[VersionedMessage[SigningPublicKey]]
     with PrettyPrinting
-    with HasProtoV0[v0.SigningPublicKey]
     with NoCopy {
   override val purpose: KeyPurpose = KeyPurpose.Signing
 
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPublicKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.SigningPublicKey =
+  def toProtoV0: v0.SigningPublicKey =
     v0.SigningPublicKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,
@@ -376,13 +372,12 @@ final case class SigningPrivateKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: SigningKeyScheme,
 ) extends PrivateKey
-    with HasProtoV0[v0.SigningPrivateKey]
     with HasVersionedWrapper[VersionedMessage[SigningPrivateKey]]
     with NoCopy {
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPrivateKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.SigningPrivateKey =
+  def toProtoV0: v0.SigningPrivateKey =
     v0.SigningPrivateKey(
       id = id.toProtoPrimitive,
       format = format.toProtoEnum,

@@ -25,13 +25,12 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.MigrateSchemaConfig
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
+import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.resource.{DbMigrations, DbMigrationsFactory}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.LoggerUtil
 
 import scala.Function.tupled
 import scala.collection.mutable
-import scala.concurrent.duration.Duration
 import scala.concurrent.{Future, blocking}
 import scala.util.Try
 
@@ -220,8 +219,6 @@ class ManagedNodes[
       val migrations = migrationsFactory.create(dbConfig, name, params.devVersionSupport)
       import TraceContext.Implicits.Empty._
       logger.info(s"Setting up database schemas for $name")
-      val started = System.nanoTime()
-      val standardConfig = !params.nonStandardConfig
 
       def errorMapping(err: DbMigrations.Error): StartupError = {
         err match {
@@ -232,24 +229,11 @@ class ManagedNodes[
           case err: DbMigrations.DatabaseConfigError => FailedDatabaseConfigChecks(name, err)
         }
       }
+      val retryConfig = if (failFastIfDbOut) RetryConfig.failFast else RetryConfig.forever
 
-      val result = for {
-        _ <- migrations
-          .connectionCheck(failFastIfDbOut, params.processingTimeouts)
-          .leftMap(
-            FailedDatabaseMigration(name, _)
-          )
-        _ <- migrations
-          .checkDbVersion(params.processingTimeouts, standardConfig)
-          .leftMap(errorMapping)
-        _ <- migrations.migrateIfFreshAndCheckPending().leftMap(errorMapping)
-      } yield {
-        val elapsed = System.nanoTime() - started
-        logger.debug(
-          s"Finished setting up database schemas after ${LoggerUtil
-            .roundDurationForHumans(Duration.fromNanos(elapsed))}"
-        )
-      }
+      val result = migrations
+        .checkAndMigrate(params, retryConfig)
+        .leftMap(errorMapping)
 
       result.value.onShutdown(
         Left(ShutdownDuringStartup(name, "DB migration check interrupted due to shutdown"))

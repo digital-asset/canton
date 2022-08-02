@@ -583,6 +583,13 @@ object ReferenceDemoScript {
     )
     val loggerFactory = consoleEnvironment.environment.loggerFactory
 
+    // update domain parameters
+    Seq(banking, medical).foreach(
+      _.service.update_dynamic_parameters(
+        _.copy(reconciliationInterval = com.digitalasset.canton.time.PositiveSeconds.ofSeconds(1))
+      )
+    )
+
     val script = new ReferenceDemoScript(
       consoleEnvironment.participants.all,
       bankingConnection,

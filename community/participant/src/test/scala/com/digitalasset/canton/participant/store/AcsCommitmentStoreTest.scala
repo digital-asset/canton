@@ -7,6 +7,10 @@ import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, Symboli
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint, HashPurpose, LtHash16}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.pruning.{
+  SortedReconciliationIntervalsHelpers,
+  SortedReconciliationIntervalsProvider,
+}
 import com.digitalasset.canton.protocol.ContractMetadata
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
@@ -17,6 +21,7 @@ import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -45,7 +50,7 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
   def meta(stakeholders: LfPartyId*): ContractMetadata =
     ContractMetadata.tryCreate(Set.empty, stakeholders.toSet, maybeKeyWithMaintainers = None)
   def period(fromExclusive: Int, toInclusive: Int) =
-    CommitmentPeriod(ts(fromExclusive), ts(toInclusive), interval).value
+    CommitmentPeriod.create(ts(fromExclusive), ts(toInclusive), interval).value
 
   val dummyCommitment: AcsCommitment.CommitmentType = {
     val h = LtHash16()
@@ -88,7 +93,13 @@ trait CommitmentStoreBaseTest extends AsyncWordSpec with BaseTest {
   val charlie: LfPartyId = LfPartyId.assertFromString("charlie")
 }
 
-trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTimeTest {
+trait AcsCommitmentStoreTest
+    extends CommitmentStoreBaseTest
+    with PrunableByTimeTest
+    with SortedReconciliationIntervalsHelpers {
+
+  lazy val srip: SortedReconciliationIntervalsProvider =
+    constantSortedReconciliationIntervalsProvider(interval)
 
   def acsCommitmentStore(mkWith: ExecutionContext => AcsCommitmentStore): Unit = {
 
@@ -122,15 +133,15 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         outstanding0 <- store.outstanding(ts(0), ts(10), None)
         _ <- store.markOutstanding(period(1, 5), Set(remoteId, remoteId2))
         outstanding1 <- store.outstanding(ts(0), ts(10), None)
-        _ <- store.markSafe(remoteId, period(1, 2))
+        _ <- store.markSafe(remoteId, period(1, 2), srip)
         outstanding2 <- store.outstanding(ts(0), ts(10), None)
-        _ <- store.markSafe(remoteId2, period(2, 3))
+        _ <- store.markSafe(remoteId2, period(2, 3), srip)
         outstanding3 <- store.outstanding(ts(0), ts(10), None)
-        _ <- store.markSafe(remoteId, period(4, 6))
+        _ <- store.markSafe(remoteId, period(4, 6), srip)
         outstanding4 <- store.outstanding(ts(0), ts(10), None)
-        _ <- store.markSafe(remoteId2, period(1, 5))
+        _ <- store.markSafe(remoteId2, period(1, 5), srip)
         outstanding5 <- store.outstanding(ts(0), ts(10), None)
-        _ <- store.markSafe(remoteId, period(2, 4))
+        _ <- store.markSafe(remoteId, period(2, 4), srip)
         outstanding6 <- store.outstanding(ts(0), ts(10), None)
       } yield {
         outstanding0.toSet shouldBe Set.empty
@@ -156,6 +167,45 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
       }
     }
 
+    // TODO(#9800) migrate to stable version
+    /*
+     This test is disabled for protocol versions for which the reconciliation interval is
+     static because the described setting cannot occur.
+     */
+    if (testedProtocolVersion >= ProtocolVersion.unstable_development) {
+      "correctly compute outstanding commitments when intersection contains no tick" in {
+        /*
+        This copies the scenario of the test
+        `work when commitment tick falls between two participants connection to the domain`
+        in ACSCommitmentProcessorTest.
+
+        We check that when markSafe yield an outstanding interval which contains no tick,
+        then this "empty" interval is not inserted in the store.
+         */
+        val store = mk()
+
+        lazy val sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider =
+          constantSortedReconciliationIntervalsProvider(interval, domainBootstrappingTime = ts(6))
+
+        for {
+          outstanding0 <- store.outstanding(ts(0), ts(10), None)
+          _ <- store.markOutstanding(period(0, 10), Set(remoteId))
+          outstanding1 <- store.outstanding(ts(0), ts(10), None)
+          _ <- store.markSafe(remoteId, period(5, 10), sortedReconciliationIntervalsProvider)
+          outstanding2 <- store.outstanding(ts(0), ts(10), None)
+        } yield {
+          outstanding0.toSet shouldBe Set.empty
+          outstanding1.toSet shouldBe Set(period(0, 10) -> remoteId)
+
+          /*
+          Period (0, 5) is not explicitly marked as safe but since it contains no tick
+          (because domainBootstrapping=6), then it is dropped and we get an empty result.
+           */
+          outstanding2.toSet shouldBe Set.empty
+        }
+      }
+    }
+
     "correctly compute the no outstanding commitment limit" in {
       val store = mk()
 
@@ -168,13 +218,13 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         _ <- store.markOutstanding(period(2, 4), Set(remoteId, remoteId2))
         _ <- store.markComputedAndSent(period(2, 4))
         limit2 <- store.noOutstandingCommitments(endOfTime)
-        _ <- store.markSafe(remoteId, period(2, 3))
+        _ <- store.markSafe(remoteId, period(2, 3), srip)
         limit3 <- store.noOutstandingCommitments(endOfTime)
-        _ <- store.markSafe(remoteId2, period(3, 4))
+        _ <- store.markSafe(remoteId2, period(3, 4), srip)
         limit4 <- store.noOutstandingCommitments(endOfTime)
-        _ <- store.markSafe(remoteId2, period(2, 3))
+        _ <- store.markSafe(remoteId2, period(2, 3), srip)
         limit5 <- store.noOutstandingCommitments(endOfTime)
-        _ <- store.markSafe(remoteId, period(3, 4))
+        _ <- store.markSafe(remoteId, period(3, 4), srip)
         limit6 <- store.noOutstandingCommitments(endOfTime)
       } yield {
         limit0 shouldBe None
@@ -203,22 +253,22 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
         limit21 <- store.noOutstandingCommitments(ts(2))
         limit22 <- store.noOutstandingCommitments(ts(3))
         limit23 <- store.noOutstandingCommitments(ts(4))
-        _ <- store.markSafe(remoteId, period(2, 3))
+        _ <- store.markSafe(remoteId, period(2, 3), srip)
         limit3 <- store.noOutstandingCommitments(endOfTime)
         limit31 <- store.noOutstandingCommitments(ts(2))
         limit32 <- store.noOutstandingCommitments(ts(3))
         limit33 <- store.noOutstandingCommitments(ts(4))
-        _ <- store.markSafe(remoteId2, period(3, 4))
+        _ <- store.markSafe(remoteId2, period(3, 4), srip)
         limit4 <- store.noOutstandingCommitments(endOfTime)
         limit41 <- store.noOutstandingCommitments(ts(2))
         limit42 <- store.noOutstandingCommitments(ts(3))
         limit43 <- store.noOutstandingCommitments(ts(4))
-        _ <- store.markSafe(remoteId, period(3, 4))
+        _ <- store.markSafe(remoteId, period(3, 4), srip)
         limit5 <- store.noOutstandingCommitments(endOfTime)
         limit51 <- store.noOutstandingCommitments(ts(2))
         limit52 <- store.noOutstandingCommitments(ts(3))
         limit53 <- store.noOutstandingCommitments(ts(4))
-        _ <- store.markSafe(remoteId2, period(2, 3))
+        _ <- store.markSafe(remoteId2, period(2, 3), srip)
         limit6 <- store.noOutstandingCommitments(endOfTime)
         limit61 <- store.noOutstandingCommitments(ts(3))
         _ <- store.markOutstanding(period(4, 6), Set(remoteId, remoteId2))
@@ -412,7 +462,7 @@ trait AcsCommitmentStoreTest extends CommitmentStoreBaseTest with PrunableByTime
       for {
         _ <- store.markOutstanding(period(0, 1), Set(remoteId))
         _ <- store.markOutstanding(period(0, 2), Set(remoteId))
-        _ <- store.markSafe(remoteId, period(1, 2))
+        _ <- store.markSafe(remoteId, period(1, 2), srip)
         outstandingWithId <- store.outstanding(ts(0), ts(2), Some(remoteId))
         outstandingWithoutId <- store.outstanding(ts(0), ts(2), None)
       } yield {
@@ -522,7 +572,7 @@ trait CommitmentQueueTest extends CommitmentStoreBaseTest {
         domainId,
         remoteId,
         localId,
-        CommitmentPeriod(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
+        CommitmentPeriod.create(ts(start), ts(end), PositiveSeconds.ofSeconds(5)).value,
         cmt,
         testedProtocolVersion,
       )

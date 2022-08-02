@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
@@ -777,7 +777,7 @@ class StoreBasedTopologySnapshot(
 
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]] = store
+  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] = store
     .inspect(
       stateStore = false,
       timeQuery = TimeQuery.Range(None, Some(timestamp)),
@@ -802,11 +802,7 @@ class StoreBasedTopologySnapshot(
                 validUntil,
                 DomainGovernanceElement(DomainParametersChange(_, domainParameters)),
               ) =>
-            DynamicDomainParameters.WithValidity(
-              validFrom,
-              validUntil,
-              domainParameters,
-            )
+            DomainParameters.WithValidity(validFrom, validUntil, domainParameters)
         }
     }
 }

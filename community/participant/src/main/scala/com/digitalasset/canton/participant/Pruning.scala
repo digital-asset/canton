@@ -20,6 +20,8 @@ object Pruning {
 
   case class LedgerPruningNothingPruned(message: String) extends LedgerPruningError
 
+  case class LedgerPruningInternalError(message: String) extends LedgerPruningError
+
   case class LedgerPruningOnlySupportedInEnterpriseEdition(message: String)
       extends LedgerPruningError
 
@@ -40,10 +42,6 @@ object Pruning {
   }
 
   case class LedgerPruningOffsetNonCantonFormat(message: String) extends LedgerPruningError
-
-  case class LedgerPruningDomainParametersMissing(domain: DomainId) extends LedgerPruningError {
-    override def message = s"Cannot determine the reconciliation interval for $domain"
-  }
 
   case class LedgerPruningAcsError(err: AcsError) extends LedgerPruningError {
     override def message = err.toString

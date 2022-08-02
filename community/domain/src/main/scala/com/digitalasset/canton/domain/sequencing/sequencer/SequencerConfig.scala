@@ -47,3 +47,10 @@ object CommunitySequencerConfig {
     override def highAvailabilityEnabled: Boolean = false
   }
 }
+
+/** Health check related sequencer config
+  * @param backendCheckPeriod interval with which the sequencer will poll the health of its backend connection or state.
+  */
+case class SequencerHealthConfig(
+    backendCheckPeriod: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
+)

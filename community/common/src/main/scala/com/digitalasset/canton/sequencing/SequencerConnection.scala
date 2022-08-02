@@ -18,7 +18,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -41,12 +40,11 @@ sealed trait SequencerConnection
     extends Product
     with Serializable
     with HasVersionedWrapper[VersionedMessage[SequencerConnection]]
-    with HasProtoV0[v0.SequencerConnection]
     with PrettyPrinting {
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SequencerConnection] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.SequencerConnection
+  def toProtoV0: v0.SequencerConnection
 
   def addConnection(
       connection: String,

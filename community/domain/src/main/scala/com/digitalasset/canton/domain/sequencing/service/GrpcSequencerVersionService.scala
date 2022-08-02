@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.version.ProtocolVersion
 
 class GrpcSequencerVersionService(
-    protected val serverVersion: ProtocolVersion,
+    protected val serverProtocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 ) extends SequencerVersionService
     with GrpcHandshakeService

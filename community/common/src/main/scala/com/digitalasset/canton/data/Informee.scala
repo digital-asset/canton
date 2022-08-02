@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.Informee.InvalidInformee
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** A party that must be informed about the view.
@@ -18,11 +17,7 @@ import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 // The design is quite simple. It should be applied whenever possible, but it will not cover all cases.
 //
 // Please consult the team if you intend to change the design of serialization.
-sealed trait Informee
-    extends Product
-    with Serializable
-    with HasProtoV0[v0.Informee]
-    with PrettyPrinting {
+sealed trait Informee extends Product with Serializable with PrettyPrinting {
   def party: LfPartyId
 
   def weight: Int
@@ -32,7 +27,7 @@ sealed trait Informee
     * Plain informees get weight 0.
     * Confirming parties get their assigned (positive) weight.
     */
-  override def toProtoV0: v0.Informee =
+  def toProtoV0: v0.Informee =
     v0.Informee(party = party, weight = weight)
 
   override def pretty: Pretty[Informee] =

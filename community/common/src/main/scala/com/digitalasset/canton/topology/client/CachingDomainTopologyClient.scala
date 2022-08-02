@@ -13,7 +13,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
@@ -276,7 +276,8 @@ private class ForwardingTopologySnapshotClient(
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]] = parent.listDynamicDomainParametersChanges()
+  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] =
+    parent.listDynamicDomainParametersChanges()
 
   override private[client] def loadBatchActiveParticipantsOf(
       parties: Seq[PartyId],
@@ -324,7 +325,9 @@ class CachingTopologySnapshot(
     new AtomicReference[Option[Future[Option[DynamicDomainParameters]]]](None)
 
   private val domainParametersChangesCache =
-    new AtomicReference[Option[Future[Seq[DynamicDomainParameters.WithValidity]]]](None)
+    new AtomicReference[
+      Option[Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]]]
+    ](None)
 
   override def participants(): Future[Seq[(ParticipantId, ParticipantPermission)]] =
     parent.participants()
@@ -416,6 +419,6 @@ class CachingTopologySnapshot(
   /** List all the dynamic domain parameters (past and current) */
   override def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]] =
+  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]] =
     getAndCache(domainParametersChangesCache, parent.listDynamicDomainParametersChanges())
 }

@@ -14,7 +14,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
@@ -30,7 +29,6 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     signature: Signature,
     timestampOfSigningKey: Option[CantonTimestamp],
 ) extends HasProtocolVersionedWrapper[SignedContent[ProtocolVersionedMemoizedEvidence]]
-    with HasProtoV0[v0.SignedContent]
     with Serializable
     with Product {
   override def companionObj = SignedContent.serializer
@@ -44,7 +42,7 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
 
   def getCryptographicEvidence: ByteString = content.getCryptographicEvidence
 
-  override def toProtoV0: v0.SignedContent =
+  def toProtoV0: v0.SignedContent =
     v0.SignedContent(
       Some(content.getCryptographicEvidence),
       Some(signature.toProtoV0),

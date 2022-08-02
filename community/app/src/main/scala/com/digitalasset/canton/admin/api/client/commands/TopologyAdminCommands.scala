@@ -363,13 +363,19 @@ object TopologyAdminCommands {
         newParameters: DynamicDomainParameters,
         force: Boolean,
     ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
-      override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] =
+      override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] = {
+        // TODO(#9001) properly choose serialization
+        // Version for the serialization should depend on the internal version
+        val parameters =
+          v0.DomainParametersChangeAuthorization.Parameters.ParametersV1(newParameters.toProtoV1)
+
         v0.DomainParametersChangeAuthorization(
           authorization =
             authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
           domain = domainId.toProtoPrimitive,
-          parameters = Option(newParameters.toProtoV0),
+          parameters = parameters,
         ).asRight
+      }
 
       override def submitRequest(
           service: TopologyManagerWriteServiceStub,

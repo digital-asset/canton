@@ -23,6 +23,8 @@ object CantonErrorGroups {
 
   abstract class ProtoDeserializationErrorGroup extends ErrorGroup
 
+  abstract class SequencerErrorGroup extends ErrorGroup()
+
   abstract class SequencerSubscriptionErrorGroup extends ErrorGroup()
 
   object ParticipantErrorGroup extends ErrorGroup() {

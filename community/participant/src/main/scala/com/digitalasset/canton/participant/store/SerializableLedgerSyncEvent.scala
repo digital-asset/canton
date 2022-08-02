@@ -43,7 +43,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
 }
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageWithContextCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -70,14 +69,13 @@ import slick.jdbc.{GetResult, SetParameter}
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
 final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
-    extends HasVersionedWrapper[VersionedMessage[LedgerSyncEvent]]
-    with HasProtoV0[v0.LedgerSyncEvent] {
+    extends HasVersionedWrapper[VersionedMessage[LedgerSyncEvent]] {
   private val SyncEventP = v0.LedgerSyncEvent.Value
 
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[LedgerSyncEvent] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.LedgerSyncEvent =
+  def toProtoV0: v0.LedgerSyncEvent =
     v0.LedgerSyncEvent(
       ledgerSyncEvent match {
         case configurationChanged: LedgerSyncEvent.ConfigurationChanged =>
@@ -181,8 +179,8 @@ trait ConfigurationParamsDeserializer {
 
 case class SerializableConfigurationChanged(
     configurationChanged: LedgerSyncEvent.ConfigurationChanged
-) extends HasProtoV0[v0.ConfigurationChanged] {
-  override def toProtoV0: v0.ConfigurationChanged = {
+) {
+  def toProtoV0: v0.ConfigurationChanged = {
     val LedgerSyncEvent.ConfigurationChanged(
       recordTime,
       submissionId,
@@ -224,8 +222,8 @@ object SerializableConfigurationChanged extends ConfigurationParamsDeserializer 
 
 case class SerializableConfigurationChangeRejected(
     configurationChangeRejected: LedgerSyncEvent.ConfigurationChangeRejected
-) extends HasProtoV0[v0.ConfigurationChangeRejected] {
-  override def toProtoV0: v0.ConfigurationChangeRejected = {
+) {
+  def toProtoV0: v0.ConfigurationChangeRejected = {
     val LedgerSyncEvent.ConfigurationChangeRejected(
       recordTime,
       submissionId,
@@ -276,8 +274,8 @@ object SerializableConfigurationChangeRejected extends ConfigurationParamsDeseri
 
 case class SerializablePartyAddedToParticipant(
     partyAddedToParticipant: LedgerSyncEvent.PartyAddedToParticipant
-) extends HasProtoV0[v0.PartyAddedToParticipant] {
-  override def toProtoV0: v0.PartyAddedToParticipant = {
+) {
+  def toProtoV0: v0.PartyAddedToParticipant = {
     val LedgerSyncEvent.PartyAddedToParticipant(
       party,
       displayName,
@@ -325,8 +323,8 @@ object SerializablePartyAddedToParticipant {
 
 case class SerializablePartyAllocationRejected(
     partyAllocationRejected: LedgerSyncEvent.PartyAllocationRejected
-) extends HasProtoV0[v0.PartyAllocationRejected] {
-  override def toProtoV0: v0.PartyAllocationRejected = {
+) {
+  def toProtoV0: v0.PartyAllocationRejected = {
     val LedgerSyncEvent.PartyAllocationRejected(
       submissionId,
       participantId,
@@ -364,9 +362,10 @@ object SerializablePartyAllocationRejected {
   }
 }
 
-case class SerializablePublicPackageUpload(publicPackageUpload: LedgerSyncEvent.PublicPackageUpload)
-    extends HasProtoV0[v0.PublicPackageUpload] {
-  override def toProtoV0: v0.PublicPackageUpload = {
+case class SerializablePublicPackageUpload(
+    publicPackageUpload: LedgerSyncEvent.PublicPackageUpload
+) {
+  def toProtoV0: v0.PublicPackageUpload = {
     val LedgerSyncEvent.PublicPackageUpload(archives, sourceDescription, recordTime, submissionId) =
       publicPackageUpload
     v0.PublicPackageUpload(
@@ -407,8 +406,8 @@ object SerializablePublicPackageUpload {
 
 case class SerializablePublicPackageUploadRejected(
     publicPackageUploadRejected: LedgerSyncEvent.PublicPackageUploadRejected
-) extends HasProtoV0[v0.PublicPackageUploadRejected] {
-  override def toProtoV0: v0.PublicPackageUploadRejected = {
+) {
+  def toProtoV0: v0.PublicPackageUploadRejected = {
     val LedgerSyncEvent.PublicPackageUploadRejected(submissionId, recordTime, rejectionReason) =
       publicPackageUploadRejected
     v0.PublicPackageUploadRejected(
@@ -434,9 +433,10 @@ object SerializablePublicPackageUploadRejected {
   }
 }
 
-case class SerializableTransactionAccepted(transactionAccepted: LedgerSyncEvent.TransactionAccepted)
-    extends HasProtoV0[v0.TransactionAccepted] {
-  override def toProtoV0: v0.TransactionAccepted = {
+case class SerializableTransactionAccepted(
+    transactionAccepted: LedgerSyncEvent.TransactionAccepted
+) {
+  def toProtoV0: v0.TransactionAccepted = {
     val LedgerSyncEvent.TransactionAccepted(
       optCompletionInfo,
       transactionMeta,
@@ -514,9 +514,8 @@ object SerializableTransactionAccepted {
   }
 }
 
-case class SerializableDivulgedContract(divulgedContract: DivulgedContract)
-    extends HasProtoV0[v0.DivulgedContract] {
-  override def toProtoV0: v0.DivulgedContract = {
+case class SerializableDivulgedContract(divulgedContract: DivulgedContract) {
+  def toProtoV0: v0.DivulgedContract = {
     val DivulgedContract(contractId, contractInst) = divulgedContract
     v0.DivulgedContract(
       contractId = contractId.toProtoPrimitive,
@@ -541,9 +540,8 @@ object SerializableDivulgedContract {
   }
 }
 
-case class SerializableCommandRejected(commandRejected: LedgerSyncEvent.CommandRejected)
-    extends HasProtoV0[v0.CommandRejected] {
-  override def toProtoV0: v0.CommandRejected = {
+case class SerializableCommandRejected(commandRejected: LedgerSyncEvent.CommandRejected) {
+  def toProtoV0: v0.CommandRejected = {
     val LedgerSyncEvent.CommandRejected(recordTime, completionInfo, reason) = commandRejected
     v0.CommandRejected(
       Some(SerializableCompletionInfo(completionInfo).toProtoV0),
@@ -572,9 +570,8 @@ object SerializableCommandRejected {
   }
 }
 
-case class SerializableLfTimestamp(timestamp: Timestamp)
-    extends HasProtoV0[com.google.protobuf.timestamp.Timestamp] {
-  override def toProtoV0: com.google.protobuf.timestamp.Timestamp =
+case class SerializableLfTimestamp(timestamp: Timestamp) {
+  def toProtoV0: com.google.protobuf.timestamp.Timestamp =
     InstantConverter.toProtoPrimitive(timestamp.toInstant)
 }
 
@@ -657,9 +654,8 @@ object SerializableWorkflowId
 object SerializablePackageId
     extends SerializableStringModule[LfPackageId, LfPackageId.type](LfPackageId)
 
-case class SerializableConfiguration(configuration: Configuration)
-    extends HasProtoV0[v0.Configuration] {
-  override def toProtoV0: v0.Configuration = configuration match {
+case class SerializableConfiguration(configuration: Configuration) {
+  def toProtoV0: v0.Configuration = configuration match {
     case Configuration(generation, timeModel, maxDeduplicationDuration) =>
       v0.Configuration(
         generation,
@@ -684,8 +680,8 @@ object SerializableConfiguration {
   }
 }
 
-case class SerializableTimeModel(timeModel: LedgerTimeModel) extends HasProtoV0[v0.TimeModel] {
-  override def toProtoV0: v0.TimeModel =
+case class SerializableTimeModel(timeModel: LedgerTimeModel) {
+  def toProtoV0: v0.TimeModel =
     // uses direct field access as TimeModel is a trait rather than interface
     v0.TimeModel(
       Some(DurationConverter.toProtoPrimitive(timeModel.avgTransactionLatency)),
@@ -717,9 +713,8 @@ object SerializableTimeModel {
     required(field, optDurationP).flatMap(DurationConverter.fromProtoPrimitive)
 }
 
-case class SerializableCompletionInfo(completionInfo: CompletionInfo)
-    extends HasProtoV0[v0.CompletionInfo] {
-  override def toProtoV0: v0.CompletionInfo = {
+case class SerializableCompletionInfo(completionInfo: CompletionInfo) {
+  def toProtoV0: v0.CompletionInfo = {
     val CompletionInfo(
       actAs,
       applicationId,
@@ -769,9 +764,8 @@ object SerializableCompletionInfo {
   }
 }
 
-case class SerializableNodeSeed(nodeId: LfNodeId, seedHash: LfHash)
-    extends HasProtoV0[v0.NodeSeed] {
-  override def toProtoV0: v0.NodeSeed =
+case class SerializableNodeSeed(nodeId: LfNodeId, seedHash: LfHash) {
+  def toProtoV0: v0.NodeSeed =
     v0.NodeSeed(nodeId.index, ByteString.copyFrom(seedHash.bytes.toByteArray))
 }
 
@@ -787,9 +781,8 @@ object SerializableNodeSeed {
   }
 }
 
-case class SerializableTransactionMeta(transactionMeta: TransactionMeta)
-    extends HasProtoV0[v0.TransactionMeta] {
-  override def toProtoV0: v0.TransactionMeta = {
+case class SerializableTransactionMeta(transactionMeta: TransactionMeta) {
+  def toProtoV0: v0.TransactionMeta = {
     val TransactionMeta(
       ledgerTime,
       workflowId,
@@ -866,9 +859,8 @@ object SerializableTransactionMeta {
   }
 }
 
-case class SerializableBlindingInfo(blindingInfo: BlindingInfo)
-    extends HasProtoV0[v0.BlindingInfo] {
-  override def toProtoV0: v0.BlindingInfo = {
+case class SerializableBlindingInfo(blindingInfo: BlindingInfo) {
+  def toProtoV0: v0.BlindingInfo = {
     val BlindingInfo(disclosure, divulgence) = blindingInfo
 
     v0.BlindingInfo(
@@ -906,10 +898,8 @@ object SerializableBlindingInfo {
   }
 }
 
-case class SerializableRejectionReasonTemplate(rejectionReason: RejectionReasonTemplate)
-    extends HasProtoV0[v0.CommandRejected.GrpcRejectionReasonTemplate] {
-
-  override def toProtoV0: v0.CommandRejected.GrpcRejectionReasonTemplate =
+case class SerializableRejectionReasonTemplate(rejectionReason: RejectionReasonTemplate) {
+  def toProtoV0: v0.CommandRejected.GrpcRejectionReasonTemplate =
     v0.CommandRejected.GrpcRejectionReasonTemplate(rejectionReason.status.toByteString)
 }
 

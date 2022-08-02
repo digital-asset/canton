@@ -29,7 +29,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbTy
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -142,7 +142,6 @@ object SequencedEventStore {
     */
   sealed trait PossiblyIgnoredSequencedEvent[+Env <: Envelope[_]]
       extends HasTraceContext
-      with HasProtoV0[v0.PossiblyIgnoredSequencedEvent]
       with PrettyPrinting
       with Product
       with Serializable {
@@ -162,7 +161,7 @@ object SequencedEventStore {
 
     def asOrdinaryEvent: PossiblyIgnoredSequencedEvent[Env]
 
-    override def toProtoV0: v0.PossiblyIgnoredSequencedEvent =
+    def toProtoV0: v0.PossiblyIgnoredSequencedEvent =
       v0.PossiblyIgnoredSequencedEvent(
         counter = counter,
         timestamp = Some(timestamp.toProtoPrimitive),

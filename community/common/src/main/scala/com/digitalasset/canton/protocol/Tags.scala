@@ -16,7 +16,6 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ByteStringUtil
-import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
@@ -160,9 +159,8 @@ object RequestId {
 
 /** A transfer is identified by the source domain and the sequencer timestamp on the transfer-out request. */
 case class TransferId(sourceDomain: DomainId, requestTimestamp: CantonTimestamp)
-    extends PrettyPrinting
-    with HasProtoV0[v0.TransferId] {
-  override def toProtoV0: v0.TransferId =
+    extends PrettyPrinting {
+  def toProtoV0: v0.TransferId =
     v0.TransferId(
       originDomain = sourceDomain.toProtoPrimitive,
       timestamp = Some(requestTimestamp.toProtoPrimitive),

@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{v0 => protoV0}
+import com.digitalasset.canton.protocol.{v0 => protoV0, v1 => protoV1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{
@@ -21,18 +21,31 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
-import com.digitalasset.canton.version.{
-  HasProtoV0,
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
-  ProtocolVersion,
-  VersionedMessage,
-}
+import com.digitalasset.canton.version._
 
 import scala.Ordered.orderingToOrdered
 
-final case class StaticDomainParameters(
-    reconciliationInterval: PositiveSeconds,
+object DomainParameters {
+
+  /** This class is used to represent domain parameter(s) that can come from static
+    * domain parameters or dynamic ones, depending on the protocol version.
+    * @param validFrom If the parameter comes from dynamic parameters, exclusive
+    *                  timestamp coming from the topology transaction, otherwise, CantonTimestamp.MinValue
+    * @param validUntil If the parameter comes from dynamic parameters, timestamp
+    *                   coming from the topology transaction, otherwise None
+    */
+  final case class WithValidity[+P](
+      validFrom: CantonTimestamp,
+      validUntil: Option[CantonTimestamp],
+      parameter: P,
+  ) {
+    def map[T](f: P => T): WithValidity[T] = WithValidity(validFrom, validUntil, f(parameter))
+    def isValidAt(ts: CantonTimestamp) = validFrom < ts && validUntil.forall(ts <= _)
+  }
+}
+
+sealed abstract case class StaticDomainParameters(
+    reconciliationInterval: PositiveSeconds, // TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
     maxRatePerParticipant: NonNegativeInt,
     maxInboundMessageSize: NonNegativeInt,
     uniqueContractKeys: Boolean,
@@ -42,8 +55,10 @@ final case class StaticDomainParameters(
     requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
     requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
     protocolVersion: ProtocolVersion,
-) extends HasVersionedWrapper[VersionedMessage[StaticDomainParameters]]
-    with HasProtoV0[protoV0.StaticDomainParameters] {
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[StaticDomainParameters])
+    extends HasProtocolVersionedWrapper[StaticDomainParameters] {
+
+  val companionObj = StaticDomainParameters
 
   /** Compute the max size limit for the sum of the envelope payloads of a batch
     *
@@ -53,11 +68,7 @@ final case class StaticDomainParameters(
   def maxBatchMessageSize: NonNegativeInt =
     NonNegativeInt.tryCreate((0.9 * maxInboundMessageSize.unwrap).toInt)
 
-  override def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[StaticDomainParameters] = VersionedMessage(toProtoV0.toByteString, 0)
-
-  override def toProtoV0: protoV0.StaticDomainParameters =
+  def toProtoV0: protoV0.StaticDomainParameters =
     protoV0.StaticDomainParameters(
       reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
       maxInboundMessageSize = maxInboundMessageSize.unwrap,
@@ -70,11 +81,36 @@ final case class StaticDomainParameters(
       requiredCryptoKeyFormats = requiredCryptoKeyFormats.toSeq.map(_.toProtoEnum),
       protocolVersion = protocolVersion.fullVersion,
     )
+
+  def toProtoV1: protoV1.StaticDomainParameters =
+    protoV1.StaticDomainParameters(
+      maxInboundMessageSize = maxInboundMessageSize.unwrap,
+      maxRatePerParticipant = maxRatePerParticipant.unwrap,
+      uniqueContractKeys = uniqueContractKeys,
+      requiredSigningKeySchemes = requiredSigningKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredEncryptionKeySchemes = requiredEncryptionKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredSymmetricKeySchemes = requiredSymmetricKeySchemes.toSeq.map(_.toProtoEnum),
+      requiredHashAlgorithms = requiredHashAlgorithms.toSeq.map(_.toProtoEnum),
+      requiredCryptoKeyFormats = requiredCryptoKeyFormats.toSeq.map(_.toProtoEnum),
+      protocolVersion = protocolVersion.fullVersion,
+    )
 }
 
-object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainParameters] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0)
+object StaticDomainParameters
+    extends HasProtocolVersionedCompanion[StaticDomainParameters]
+    with ProtocolVersionedCompanionDbHelpers[StaticDomainParameters] {
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    // TODO(#9800) Move to stable protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersion(protoV1.StaticDomainParameters)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   override protected def name: String = "static domain parameters"
@@ -89,15 +125,40 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
   val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.ofSeconds(60)
 
+  def create(
+      maxRatePerParticipant: NonNegativeInt,
+      maxInboundMessageSize: NonNegativeInt,
+      uniqueContractKeys: Boolean,
+      requiredSigningKeySchemes: NonEmpty[Set[SigningKeyScheme]],
+      requiredEncryptionKeySchemes: NonEmpty[Set[EncryptionKeyScheme]],
+      requiredSymmetricKeySchemes: NonEmpty[Set[SymmetricKeyScheme]],
+      requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
+      requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
+      protocolVersion: ProtocolVersion,
+      reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
+  ) = new StaticDomainParameters(
+    reconciliationInterval = reconciliationInterval,
+    maxRatePerParticipant = maxRatePerParticipant,
+    maxInboundMessageSize = maxInboundMessageSize,
+    uniqueContractKeys = uniqueContractKeys,
+    requiredSigningKeySchemes = requiredSigningKeySchemes,
+    requiredEncryptionKeySchemes = requiredEncryptionKeySchemes,
+    requiredSymmetricKeySchemes = requiredSymmetricKeySchemes,
+    requiredHashAlgorithms = requiredHashAlgorithms,
+    requiredCryptoKeyFormats = requiredCryptoKeyFormats,
+    protocolVersion = protocolVersion,
+  )(protocolVersionRepresentativeFor(protocolVersion)) {}
+
+  private def requiredKeySchemes[P, A: Order](
+      field: String,
+      content: Seq[P],
+      parse: (String, P) => ParsingResult[A],
+  ): ParsingResult[NonEmpty[Set[A]]] =
+    ProtoConverter.pareRequiredNonEmpty(parse(field, _), field, content).map(_.toSet)
+
   def fromProtoV0(
       domainParametersP: protoV0.StaticDomainParameters
   ): ParsingResult[StaticDomainParameters] = {
-    def requiredKeySchemes[P, A: Order](
-        field: String,
-        content: Seq[P],
-        parse: (String, P) => ParsingResult[A],
-    ): ParsingResult[NonEmpty[Set[A]]] =
-      ProtoConverter.pareRequiredNonEmpty(parse(field, _), field, content).map(_.toSet)
 
     val protoV0.StaticDomainParameters(
       reconciliationIntervalP,
@@ -147,7 +208,7 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
       protocolVersion <- ProtocolVersion
         .create(protocolVersionP)
         .leftMap(err => ProtoDeserializationError.OtherError(err))
-    } yield StaticDomainParameters(
+    } yield new StaticDomainParameters(
       reconciliationInterval,
       maxRatePerParticipant,
       maxInboundMessageSize,
@@ -158,7 +219,68 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+  }
+
+  def fromProtoV1(
+      domainParametersP: protoV1.StaticDomainParameters
+  ): ParsingResult[StaticDomainParameters] = {
+    val protoV1.StaticDomainParameters(
+      maxRatePerParticipantP,
+      maxInboundMessageSizeP,
+      uniqueContractKeys,
+      requiredSigningKeySchemesP,
+      requiredEncryptionKeySchemesP,
+      requiredSymmetricKeySchemesP,
+      requiredHashAlgorithmsP,
+      requiredCryptoKeyFormatsP,
+      protocolVersionP,
+    ) = domainParametersP
+
+    for {
+      maxRatePerParticipant <- NonNegativeInt.create(maxRatePerParticipantP)
+      maxInboundMessageSize <- NonNegativeInt.create(maxInboundMessageSizeP)
+
+      requiredSigningKeySchemes <- requiredKeySchemes(
+        "requiredSigningKeySchemes",
+        requiredSigningKeySchemesP,
+        SigningKeyScheme.fromProtoEnum,
+      )
+      requiredEncryptionKeySchemes <- requiredKeySchemes(
+        "requiredEncryptionKeySchemes",
+        requiredEncryptionKeySchemesP,
+        EncryptionKeyScheme.fromProtoEnum,
+      )
+      requiredSymmetricKeySchemes <- requiredKeySchemes(
+        "requiredSymmetricKeySchemes",
+        requiredSymmetricKeySchemesP,
+        SymmetricKeyScheme.fromProtoEnum,
+      )
+      requiredHashAlgorithms <- requiredKeySchemes(
+        "requiredHashAlgorithms",
+        requiredHashAlgorithmsP,
+        HashAlgorithm.fromProtoEnum,
+      )
+      requiredCryptoKeyFormats <- requiredKeySchemes(
+        "requiredCryptoKeyFormats",
+        requiredCryptoKeyFormatsP,
+        CryptoKeyFormat.fromProtoEnum,
+      )
+      protocolVersion <- ProtocolVersion
+        .create(protocolVersionP)
+        .leftMap(err => ProtoDeserializationError.OtherError(err))
+    } yield new StaticDomainParameters(
+      StaticDomainParameters.defaultReconciliationInterval,
+      maxRatePerParticipant,
+      maxInboundMessageSize,
+      uniqueContractKeys,
+      requiredSigningKeySchemes,
+      requiredEncryptionKeySchemes,
+      requiredSymmetricKeySchemes,
+      requiredHashAlgorithms,
+      requiredCryptoKeyFormats,
+      protocolVersion,
+    )(protocolVersionRepresentativeFor(ProtobufVersion(1))) {}
   }
 }
 
@@ -195,16 +317,22 @@ object StaticDomainParameters extends HasVersionedMessageCompanion[StaticDomainP
   *                                      record time of a command.
   *                                      If the absolute difference would be larger for a command,
   *                                      then the command must be rejected.
+  * @param reconciliationInterval The size of the reconciliation interval (minimum duration between two ACS commitments).
+  *                               Note: default to [[StaticDomainParameters.defaultReconciliationInterval]] for backward
+  *                               compatibility.
   */
-final case class DynamicDomainParameters(
+sealed abstract case class DynamicDomainParameters(
     participantResponseTimeout: NonNegativeFiniteDuration,
     mediatorReactionTimeout: NonNegativeFiniteDuration,
     transferExclusivityTimeout: NonNegativeFiniteDuration,
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-) extends HasVersionedWrapper[VersionedMessage[DynamicDomainParameters]]
-    with HasProtoV0[protoV0.DynamicDomainParameters]
+    reconciliationInterval: PositiveSeconds,
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters])
+    extends HasProtocolVersionedWrapper[DynamicDomainParameters]
     with PrettyPrinting {
+
+  val companionObj = DynamicDomainParameters
 
   /** Computes the decision time for the given activeness time.
     *
@@ -247,12 +375,23 @@ final case class DynamicDomainParameters(
   def automaticTransferInEnabled: Boolean =
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
 
-  override def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[DynamicDomainParameters] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  def copy(
+      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
+      topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
+      reconciliationInterval: PositiveSeconds = reconciliationInterval,
+  ) = new DynamicDomainParameters(
+    participantResponseTimeout = participantResponseTimeout,
+    mediatorReactionTimeout = mediatorReactionTimeout,
+    transferExclusivityTimeout = transferExclusivityTimeout,
+    topologyChangeDelay = topologyChangeDelay,
+    ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+    reconciliationInterval = reconciliationInterval,
+  )(representativeProtocolVersion) {}
 
-  override def toProtoV0: protoV0.DynamicDomainParameters =
+  def toProtoV0: protoV0.DynamicDomainParameters =
     protoV0.DynamicDomainParameters(
       participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
       mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
@@ -261,29 +400,42 @@ final case class DynamicDomainParameters(
       ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
     )
 
+  def toProtoV1: protoV1.DynamicDomainParameters =
+    protoV1.DynamicDomainParameters(
+      participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
+      mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
+      transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
+      topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
+      ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
+      reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
+    )
+
   override def pretty: Pretty[DynamicDomainParameters] = prettyOfClass(
     param("participant response timeout", _.participantResponseTimeout),
     param("mediator reaction timeout", _.mediatorReactionTimeout),
     param("transfer exclusivity timeout", _.transferExclusivityTimeout),
     param("topology change delay", _.topologyChangeDelay),
     param("ledger time record time tolerance", _.ledgerTimeRecordTimeTolerance),
+    param("reconciliation interval", _.reconciliationInterval),
   )
 }
 
-object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomainParameters] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0)
+object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDomainParameters] {
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2_0_0,
+      supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    // TODO(#9800) Move to stable protocol version
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development,
+      supportedProtoVersion(protoV1.DynamicDomainParameters)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   override protected def name: String = "dynamic domain parameters"
-
-  final case class WithValidity(
-      validFrom: CantonTimestamp,
-      validUntil: Option[CantonTimestamp],
-      parameters: DynamicDomainParameters,
-  ) {
-    def isValidAt(ts: CantonTimestamp) = validFrom < ts && validUntil.forall(ts <= _)
-  }
 
   /*
    Set of default values used for configuration and tests
@@ -308,14 +460,18 @@ object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomai
 
   /** Default dynamic domain parameters for non-static clocks */
   lazy val defaultValues: DynamicDomainParameters = initialValues(defaultTopologyChangeDelay)
+  private lazy val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.ofSeconds(60)
 
-  def initialValues(topologyChangeDelay: NonNegativeFiniteDuration) = DynamicDomainParameters(
+  def initialValues(topologyChangeDelay: NonNegativeFiniteDuration) = new DynamicDomainParameters(
     participantResponseTimeout = defaultParticipantResponseTimeout,
     mediatorReactionTimeout = defaultMediatorReactionTimeout,
     transferExclusivityTimeout = defaultTransferExclusivityTimeout,
     topologyChangeDelay = topologyChangeDelay,
     ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
-  )
+    reconciliationInterval = defaultReconciliationInterval,
+  )(
+    protocolVersionRepresentativeFor(ProtobufVersion(1))
+  ) {} // TODO(#9900) remove this hardcoded representative protocol version
 
   def initialValues(clock: Clock): DynamicDomainParameters = {
     val topologyChangeDelay = clock match {
@@ -331,14 +487,6 @@ object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomai
   def fromProtoV0(
       domainParametersP: protoV0.DynamicDomainParameters
   ): ParsingResult[DynamicDomainParameters] = {
-    def requiredNonNegativeDuration(
-        field: String,
-        content: Option[com.google.protobuf.duration.Duration],
-    ): ParsingResult[NonNegativeFiniteDuration] =
-      ProtoConverter
-        .required(field, content)
-        .flatMap(NonNegativeFiniteDuration.fromProtoPrimitive(field))
-
     val protoV0.DynamicDomainParameters(
       participantResponseTimeoutP,
       mediatorReactionTimeoutP,
@@ -348,32 +496,87 @@ object DynamicDomainParameters extends HasVersionedMessageCompanion[DynamicDomai
     ) = domainParametersP
 
     for {
-      participantResponseTimeout <- requiredNonNegativeDuration(
-        "participantResponseTimeout",
-        participantResponseTimeoutP,
+      participantResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "participantResponseTimeout"
+      )(
+        participantResponseTimeoutP
       )
-      mediatorReactionTimeout <- requiredNonNegativeDuration(
-        "mediatorReactionTimeout",
-        mediatorReactionTimeoutP,
+      mediatorReactionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorReactionTimeout"
+      )(
+        mediatorReactionTimeoutP
       )
-      transferExclusivityTimeout <- requiredNonNegativeDuration(
-        "transferExclusivityTimeout",
-        transferExclusivityTimeoutP,
+      transferExclusivityTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "transferExclusivityTimeout"
+      )(
+        transferExclusivityTimeoutP
       )
-      topologyChangeDelay <- requiredNonNegativeDuration(
-        "topologyChangeDelay",
-        topologyChangeDelayP,
+      topologyChangeDelay <- NonNegativeFiniteDuration.fromProtoPrimitiveO("topologyChangeDelay")(
+        topologyChangeDelayP
       )
-      ledgerTimeRecordTimeTolerance <- requiredNonNegativeDuration(
-        "ledgerTimeRecordTimeTolerance",
-        ledgerTimeRecordTimeToleranceP,
+      ledgerTimeRecordTimeTolerance <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "ledgerTimeRecordTimeTolerance"
+      )(
+        ledgerTimeRecordTimeToleranceP
       )
-    } yield DynamicDomainParameters(
+    } yield new DynamicDomainParameters(
       participantResponseTimeout = participantResponseTimeout,
       mediatorReactionTimeout = mediatorReactionTimeout,
       transferExclusivityTimeout = transferExclusivityTimeout,
       topologyChangeDelay = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-    )
+      reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+  }
+
+  def fromProtoV1(
+      domainParametersP: protoV1.DynamicDomainParameters
+  ): ParsingResult[DynamicDomainParameters] = {
+    val protoV1.DynamicDomainParameters(
+      participantResponseTimeoutP,
+      mediatorReactionTimeoutP,
+      transferExclusivityTimeoutP,
+      topologyChangeDelayP,
+      ledgerTimeRecordTimeToleranceP,
+      reconciliationIntervalP,
+    ) = domainParametersP
+
+    for {
+      reconciliationInterval <- PositiveSeconds.fromProtoPrimitiveO(
+        "reconciliationInterval"
+      )(
+        reconciliationIntervalP
+      )
+      participantResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "participantResponseTimeout"
+      )(
+        participantResponseTimeoutP
+      )
+      mediatorReactionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorReactionTimeout"
+      )(
+        mediatorReactionTimeoutP
+      )
+      transferExclusivityTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "transferExclusivityTimeout"
+      )(
+        transferExclusivityTimeoutP
+      )
+      topologyChangeDelay <- NonNegativeFiniteDuration.fromProtoPrimitiveO("topologyChangeDelay")(
+        topologyChangeDelayP
+      )
+      ledgerTimeRecordTimeTolerance <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "ledgerTimeRecordTimeTolerance"
+      )(
+        ledgerTimeRecordTimeToleranceP
+      )
+    } yield new DynamicDomainParameters(
+      participantResponseTimeout = participantResponseTimeout,
+      mediatorReactionTimeout = mediatorReactionTimeout,
+      transferExclusivityTimeout = transferExclusivityTimeout,
+      topologyChangeDelay = topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+      reconciliationInterval = reconciliationInterval,
+    )(protocolVersionRepresentativeFor(ProtobufVersion(1))) {}
   }
 }

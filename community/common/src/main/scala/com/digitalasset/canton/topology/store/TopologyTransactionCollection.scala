@@ -29,8 +29,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[StoredTopologyTransaction[Op]]
-) extends HasProtoV0[v0.TopologyTransactions]
-    with HasVersionedWrapper[VersionedMessage[StoredTopologyTransactions[Op]]]
+) extends HasVersionedWrapper[VersionedMessage[StoredTopologyTransactions[Op]]]
     with PrettyPrinting {
 
   override def pretty: Pretty[StoredTopologyTransactions.this.type] = prettyOfParam(
@@ -43,7 +42,7 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
   def toDomainTopologyTransactions: Seq[SignedTopologyTransaction[Op]] =
     result.map(_.transaction)
 
-  override def toProtoV0: v0.TopologyTransactions = v0.TopologyTransactions(
+  def toProtoV0: v0.TopologyTransactions = v0.TopologyTransactions(
     items = result.map { item =>
       v0.TopologyTransactions.Item(
         sequenced = Some(item.sequenced.toProtoPrimitive),

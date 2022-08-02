@@ -19,7 +19,6 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -49,7 +48,7 @@ sealed abstract case class CommitmentPeriod(
 }
 
 object CommitmentPeriod {
-  def apply(
+  def create(
       fromExclusive: CantonTimestamp,
       periodLength: PositiveSeconds,
       interval: PositiveSeconds,
@@ -76,16 +75,16 @@ object CommitmentPeriod {
     periodLength = periodLength,
   ) {}
 
-  def apply(
+  def create(
       fromExclusive: CantonTimestamp,
       toInclusive: CantonTimestamp,
       interval: PositiveSeconds,
   ): Either[String, CommitmentPeriod] =
     PositiveSeconds
       .between(fromExclusive, toInclusive)
-      .flatMap(CommitmentPeriod(fromExclusive, _, interval))
+      .flatMap(CommitmentPeriod.create(fromExclusive, _, interval))
 
-  def apply(
+  def create(
       fromExclusive: CantonTimestampSecond,
       toInclusive: CantonTimestampSecond,
   ): Either[String, CommitmentPeriod] =
@@ -127,13 +126,12 @@ abstract sealed case class AcsCommitment private (
     val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitment]
-    with HasProtoV0[v0.AcsCommitment]
     with SignedProtocolMessageContent
     with NoCopy {
 
   override def companionObj = AcsCommitment
 
-  override protected def toProtoV0: v0.AcsCommitment = {
+  protected def toProtoV0: v0.AcsCommitment = {
     v0.AcsCommitment(
       domainId = domainId.toProtoPrimitive,
       sendingParticipant = sender.toProtoPrimitive,

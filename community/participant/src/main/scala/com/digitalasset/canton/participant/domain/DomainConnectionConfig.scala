@@ -22,7 +22,6 @@ import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteD
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -59,7 +58,6 @@ case class DomainConnectionConfig(
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
     timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
 ) extends HasVersionedWrapper[VersionedMessage[DomainConnectionConfig]]
-    with HasProtoV0[v0.DomainConnectionConfig]
     with PrettyPrinting {
 
   /** Helper methods to avoid having to use NonEmpty[Seq in the console */
@@ -106,7 +104,7 @@ case class DomainConnectionConfig(
   ): VersionedMessage[DomainConnectionConfig] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.DomainConnectionConfig =
+  def toProtoV0: v0.DomainConnectionConfig =
     v0.DomainConnectionConfig(
       domainAlias = domain.unwrap,
       sequencerConnection = sequencerConnection.toProtoV0.some,

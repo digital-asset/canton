@@ -13,7 +13,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.v0
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -28,8 +27,7 @@ import scala.collection.immutable
 /** Container for values tracing operations through canton.
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
-    extends HasProtoV0[v0.TraceContext]
-    with HasVersionedWrapper[VersionedMessage[TraceContext]]
+    extends HasVersionedWrapper[VersionedMessage[TraceContext]]
     with Equals
     with Serializable
     with NoCopy
@@ -45,7 +43,7 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
     .filter(_.getSpanContext.isValid)
     .map(_.getSpanContext.getTraceId)
 
-  override def toProtoV0: v0.TraceContext = {
+  def toProtoV0: v0.TraceContext = {
     val w3cTraceContext = asW3CTraceContext
     v0.TraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
   }
@@ -176,7 +174,7 @@ object TraceContext extends HasVersionedMessageCompanion[TraceContext] {
           withNewTraceContext { implicit traceContext =>
             // log that we're creating a single traceContext from many trace ids
             val traceIds = validTracesNE.map(_.traceId).collect { case Some(traceId) => traceId }
-            logger.debug(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
+            logger.info(s"Created batch from traceIds: [${traceIds.mkString(",")}]")
             traceContext
           }
     }

@@ -24,7 +24,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
 import com.digitalasset.canton.time.v0
 import com.digitalasset.canton.topology.{AuthenticatedMember, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -42,7 +42,6 @@ case class TimeProof private (
     private val event: OrdinarySequencedEvent[Envelope[_]],
     private val deliver: Deliver[Nothing],
 ) extends PrettyPrinting
-    with HasProtoV0[v0.TimeProof]
     with HasCryptographicEvidence {
   def timestamp: CantonTimestamp = deliver.timestamp
 

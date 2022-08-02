@@ -12,7 +12,7 @@ import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
@@ -358,7 +358,7 @@ trait DomainGovernanceSnapshotClient {
   /** List all the dynamic domain parameters (past and current) */
   def listDynamicDomainParametersChanges()(implicit
       traceContext: TraceContext
-  ): Future[Seq[DynamicDomainParameters.WithValidity]]
+  ): Future[Seq[DomainParameters.WithValidity[DynamicDomainParameters]]]
 }
 
 trait TopologySnapshot

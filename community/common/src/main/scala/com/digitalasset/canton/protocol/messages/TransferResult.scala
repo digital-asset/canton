@@ -24,7 +24,6 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   ProtobufVersion,
   ProtocolVersion,
@@ -48,7 +47,6 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
     override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with HasProtocolVersionedWrapper[TransferResult[TransferDomainId]]
-    with HasProtoV0[v0.TransferResult]
     with NoCopy
     with PrettyPrinting {
 
@@ -66,7 +64,7 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
 
   override def companionObj = TransferResult
 
-  override def toProtoV0: v0.TransferResult = {
+  def toProtoV0: v0.TransferResult = {
     val domainP = (domain: @unchecked) match {
       case TransferOutDomainId(domainId) =>
         v0.TransferResult.Domain.OriginDomain(domainId.toProtoPrimitive)

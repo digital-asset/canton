@@ -13,7 +13,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.protobuf.ByteString
 
 import java.time.Duration
@@ -49,11 +48,7 @@ object NodeStatus {
     override def successOption: Option[S] = status.some
   }
 
-  trait Status
-      extends PrettyPrinting
-      with HasProtoV0[v0.NodeStatus.Status]
-      with Product
-      with Serializable {
+  trait Status extends PrettyPrinting with Product with Serializable {
     def uid: UniqueIdentifier
     def uptime: Duration
     def ports: Map[String, Port]
@@ -86,7 +81,7 @@ case class SimpleStatus(
       ).mkString(System.lineSeparator())
     )
 
-  override def toProtoV0: v0.NodeStatus.Status =
+  def toProtoV0: v0.NodeStatus.Status =
     v0.NodeStatus.Status(
       uid.toProtoPrimitive,
       Some(DurationConverter.toProtoPrimitive(uptime)),
@@ -121,9 +116,8 @@ object SimpleStatus {
   * @param isActive implementation specific flag indicating whether the sequencer is active
   */
 case class SequencerHealthStatus(isActive: Boolean, details: Option[String] = None)
-    extends HasProtoV0[v0.SequencerHealthStatus]
-    with PrettyPrinting {
-  override def toProtoV0: v0.SequencerHealthStatus = v0.SequencerHealthStatus(isActive, details)
+    extends PrettyPrinting {
+  def toProtoV0: v0.SequencerHealthStatus = v0.SequencerHealthStatus(isActive, details)
   override def pretty: Pretty[SequencerHealthStatus] = prettyOfClass(
     param("isActive", _.isActive),
     paramIfDefined("details", _.details.map(_.unquoted)),
@@ -144,10 +138,8 @@ object SequencerHealthStatus {
   * @param dispatcher number of queued transactions in the dispatcher
   * @param clients number of observed transactions that are not yet effective
   */
-case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int)
-    extends HasProtoV0[v0.TopologyQueueStatus]
-    with PrettyPrinting {
-  override def toProtoV0: v0.TopologyQueueStatus =
+case class TopologyQueueStatus(manager: Int, dispatcher: Int, clients: Int) extends PrettyPrinting {
+  def toProtoV0: v0.TopologyQueueStatus =
     v0.TopologyQueueStatus(manager = manager, dispatcher = dispatcher, clients = clients)
 
   def isIdle: Boolean = Seq(manager, dispatcher, clients).forall(_ == 0)
@@ -192,7 +184,7 @@ case class DomainStatus(
       ).mkString(System.lineSeparator())
     )
 
-  override def toProtoV0: v0.NodeStatus.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
     SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0
       .copy(
@@ -254,7 +246,7 @@ case class ParticipantStatus(
       ).mkString(System.lineSeparator())
     )
 
-  override def toProtoV0: v0.NodeStatus.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val domains = connectedDomains.map { case (domainId, healthy) =>
       v0.ParticipantStatusInfo.ConnectedDomain(
         domain = domainId.toProtoPrimitive,
@@ -313,7 +305,7 @@ case class SequencerNodeStatus(
     topologyQueue: TopologyQueueStatus,
 ) extends NodeStatus.Status {
   override def active: Boolean = sequencer.isActive
-  override def toProtoV0: v0.NodeStatus.Status = {
+  def toProtoV0: v0.NodeStatus.Status = {
     val participants = connectedParticipants.map(_.toProtoPrimitive)
     SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
       extra = v0
@@ -392,7 +384,7 @@ case class MediatorNodeStatus(
       ).mkString(System.lineSeparator())
     )
 
-  override def toProtoV0: v0.NodeStatus.Status =
+  def toProtoV0: v0.NodeStatus.Status =
     SimpleStatus(uid, uptime, ports, active, topologyQueue).toProtoV0.copy(
       extra = v0
         .MediatorNodeStatus(domainId.toProtoPrimitive)

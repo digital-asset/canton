@@ -10,19 +10,12 @@ import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, Unrecogni
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.logging.pretty.PrettyInstances._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtoV0,
-  HasProtocolVersionedWrapper,
-  ProtobufVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version._
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -66,8 +59,7 @@ final case class NamespaceDelegation(
     namespace: Namespace,
     target: SigningPublicKey,
     isRootDelegation: Boolean,
-) extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.NamespaceDelegation] {
+) extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: NamespaceDelegation
   // TODO(error handling): Add a private constructor, private apply, and factory method to check constraint
   require(
@@ -75,7 +67,7 @@ final case class NamespaceDelegation(
     s"Root certificate for $namespace needs to be set as isRootDelegation = true",
   )
 
-  override def toProtoV0: v0.NamespaceDelegation =
+  def toProtoV0: v0.NamespaceDelegation =
     v0.NamespaceDelegation(
       namespace = namespace.fingerprint.unwrap,
       targetKey = Some(target.toProtoV0),
@@ -126,10 +118,9 @@ object NamespaceDelegation {
   */
 // architecture-handbook-entry-begin: IdentifierDelegation
 final case class IdentifierDelegation(identifier: UniqueIdentifier, target: SigningPublicKey)
-    extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.IdentifierDelegation] {
+    extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: IdentifierDelegation
-  override def toProtoV0: v0.IdentifierDelegation =
+  def toProtoV0: v0.IdentifierDelegation =
     v0.IdentifierDelegation(
       uniqueIdentifier = identifier.toProtoPrimitive,
       targetKey = Some(target.toProtoV0),
@@ -170,10 +161,9 @@ object IdentifierDelegation {
   */
 // architecture-handbook-entry-begin: OwnerToKeyMapping
 final case class OwnerToKeyMapping(owner: KeyOwner, key: PublicKey)
-    extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.OwnerToKeyMapping] {
+    extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: OwnerToKeyMapping
-  override def toProtoV0: v0.OwnerToKeyMapping =
+  def toProtoV0: v0.OwnerToKeyMapping =
     v0.OwnerToKeyMapping(
       keyOwner = owner.toProtoPrimitive,
       publicKey = Some(key.toProtoPublicKey),
@@ -208,9 +198,8 @@ final case class SignedLegalIdentityClaim(
     claim: ByteString,
     signature: Signature,
 ) extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.SignedLegalIdentityClaim]
     with PrettyPrinting {
-  override def toProtoV0: v0.SignedLegalIdentityClaim =
+  def toProtoV0: v0.SignedLegalIdentityClaim =
     v0.SignedLegalIdentityClaim(
       claim = claim,
       signature = signature.toProtoV0.some,
@@ -250,12 +239,11 @@ sealed abstract case class LegalIdentityClaim private (
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
     with HasProtocolVersionedWrapper[LegalIdentityClaim]
-    with HasProtoV0[v0.LegalIdentityClaim]
     with NoCopy {
 
   override def companionObj = LegalIdentityClaim
 
-  override protected def toProtoV0: v0.LegalIdentityClaim =
+  protected def toProtoV0: v0.LegalIdentityClaim =
     v0.LegalIdentityClaim(
       uniqueIdentifier = uid.toProtoPrimitive,
       evidence = evidence.toProtoOneOf,
@@ -394,8 +382,7 @@ final case class ParticipantState(
     participant: ParticipantId,
     permission: ParticipantPermission,
     trustLevel: TrustLevel,
-) extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.ParticipantState] {
+) extends TopologyStateUpdateMapping {
 
   require(
     permission.canConfirm || trustLevel == TrustLevel.Ordinary,
@@ -405,7 +392,7 @@ final case class ParticipantState(
 
   def toParticipantAttributes: ParticipantAttributes = ParticipantAttributes(permission, trustLevel)
 
-  override def toProtoV0: v0.ParticipantState = {
+  def toProtoV0: v0.ParticipantState = {
     v0.ParticipantState(
       side = side.toProtoEnum,
       domain = domain.toProtoPrimitive,
@@ -456,12 +443,11 @@ final case class MediatorDomainState(
     side: RequestSide,
     domain: DomainId,
     mediator: MediatorId,
-) extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.MediatorDomainState] {
+) extends TopologyStateUpdateMapping {
 
   // architecture-handbook-entry-end: MediatorDomainState
 
-  override def toProtoV0: v0.MediatorDomainState = {
+  def toProtoV0: v0.MediatorDomainState = {
     v0.MediatorDomainState(
       side = side.toProtoEnum,
       domain = domain.toProtoPrimitive,
@@ -514,15 +500,14 @@ final case class PartyToParticipant(
     party: PartyId,
     participant: ParticipantId,
     permission: ParticipantPermission,
-) extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.PartyToParticipant] {
+) extends TopologyStateUpdateMapping {
   // architecture-handbook-entry-end: PartyToParticipant
   require(
     party.uid != participant.uid,
     s"Unable to allocate party ${party.uid}, as it has the same name as the participant's admin party.",
   )
 
-  override def toProtoV0: v0.PartyToParticipant =
+  def toProtoV0: v0.PartyToParticipant =
     v0.PartyToParticipant(
       side = side.toProtoEnum,
       party = party.toProtoPrimitive,
@@ -588,9 +573,8 @@ object PartyToParticipant {
 
 final case class VettedPackages(participant: ParticipantId, packageIds: Seq[LfPackageId])
     extends TopologyStateUpdateMapping
-    with HasProtoV0[v0.VettedPackages]
     with PrettyPrinting {
-  override def toProtoV0: v0.VettedPackages =
+  def toProtoV0: v0.VettedPackages =
     v0.VettedPackages(
       participant =
         participant.uid.toProtoPrimitive, // use UID proto, not participant proto (as this would be Member.toProtoPrimitive) which includes the unnecessary code
@@ -628,11 +612,15 @@ object VettedPackages {
 final case class DomainParametersChange(
     domainId: DomainId,
     domainParameters: DynamicDomainParameters,
-) extends DomainGovernanceMapping
-    with HasProtoV0[v0.DomainParametersChange] {
-  override def toProtoV0: v0.DomainParametersChange = v0.DomainParametersChange(
+) extends DomainGovernanceMapping {
+  def toProtoV0: v0.DomainParametersChange = v0.DomainParametersChange(
     domain = domainId.toProtoPrimitive,
     Option(domainParameters.toProtoV0),
+  )
+
+  def toProtoV1: v1.DomainParametersChange = v1.DomainParametersChange(
+    domain = domainId.toProtoPrimitive,
+    Option(domainParameters.toProtoV1),
   )
 
   override def dbType: DomainTopologyTransactionType = DomainParametersChange.dbType
@@ -643,13 +631,23 @@ final case class DomainParametersChange(
 object DomainParametersChange {
   val dbType: DomainTopologyTransactionType = DomainTopologyTransactionType.DomainParameters
 
-  def fromProtoV0(
+  private[transaction] def fromProtoV0(
       value: v0.DomainParametersChange
   ): ParsingResult[DomainParametersChange] = {
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
       domainParametersP <- value.domainParameters.toRight(FieldNotSet("domainParameters"))
       domainParameters <- DynamicDomainParameters.fromProtoV0(domainParametersP)
+    } yield DomainParametersChange(DomainId(uid), domainParameters)
+  }
+
+  private[transaction] def fromProtoV1(
+      value: v1.DomainParametersChange
+  ): ParsingResult[DomainParametersChange] = {
+    for {
+      uid <- UniqueIdentifier.fromProtoPrimitive(value.domain, "domain")
+      domainParametersP <- value.domainParameters.toRight(FieldNotSet("domainParameters"))
+      domainParameters <- DynamicDomainParameters.fromProtoV1(domainParametersP)
     } yield DomainParametersChange(DomainId(uid), domainParameters)
   }
 }

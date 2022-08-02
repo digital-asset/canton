@@ -127,9 +127,8 @@ object CantonVersion {
     ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_0_rc1 -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_0 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_1_snapshot -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_3_1 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_2_snapshot -> List(v2_0_0, v3_0_0),
+    ReleaseVersion.v2_3_2 -> List(v2_0_0, v3_0_0),
     ReleaseVersion.v2_4_0_snapshot -> List(v2_0_0, v3_0_0),
   ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
 
@@ -203,11 +202,9 @@ object ReleaseVersion extends CompanionTrait {
   lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
   lazy val v2_3_0_rc1: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("rc1"))
   lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
-  lazy val v2_3_1_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 1, Some("SNAPSHOT"))
   lazy val v2_3_1: ReleaseVersion = ReleaseVersion(2, 3, 1)
-  lazy val v2_3_2_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 2, Some("SNAPSHOT"))
+  lazy val v2_3_2: ReleaseVersion = ReleaseVersion(2, 3, 2)
   lazy val v2_4_0_snapshot: ReleaseVersion = ReleaseVersion(2, 4, 0, Some("SNAPSHOT"))
-
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time

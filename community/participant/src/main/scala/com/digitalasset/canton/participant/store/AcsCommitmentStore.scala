@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProvider
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
@@ -79,13 +80,12 @@ trait AcsCommitmentStore
     * May be called with the same parameters again, after a restart or a domain reconnect.
     *
     * Marking a period as safe may change the result of calling [[outstanding]].
-    *
-    * TODO(#8207): Currently, the implementations may assume that all arguments this method is ever called with
-    *   will have the same interval, as will the intervals in the arguments to [[storeReceived]] and [[storeComputed]].
     */
-  def markSafe(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
+  def markSafe(
+      counterParticipant: ParticipantId,
+      period: CommitmentPeriod,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
+  )(implicit traceContext: TraceContext): Future[Unit]
 
   val runningCommitments: IncrementalCommitmentStore
 

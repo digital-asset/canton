@@ -15,6 +15,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.pruning.{
+  SortedReconciliationIntervals,
+  SortedReconciliationIntervalsProvider,
+}
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStore,
@@ -27,7 +31,7 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.resource.DbStorage.DbAction
+import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.store.IndexedDomain
@@ -354,67 +358,91 @@ class DbAcsCommitmentStore(
     )
   }
 
-  private def markSafeOracle(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    val queries = for {
-      overlappingIntervals <-
-        sql"""select from_exclusive, to_inclusive from outstanding_acs_commitments
-          where domain_id = $domainId and counter_participant = $counterParticipant
-          and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}"""
-          .as[(CantonTimestampSecond, CantonTimestampSecond)]
-
-      _ <-
-        sqlu"""delete from outstanding_acs_commitments
-          where domain_id = $domainId and counter_participant = $counterParticipant
-          and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}"""
-
-      newPeriods = overlappingIntervals
-        .flatMap { case (from, to) =>
-          val leftOverlap = CommitmentPeriod(from, period.fromExclusive)
-          val rightOverlap = CommitmentPeriod(period.toInclusive, to)
-          leftOverlap.toSeq ++ rightOverlap.toSeq
-        }
-        .toList
-        .distinct
-
-      insertQuery =
-        """merge /*+ INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */  
-          |into outstanding_acs_commitments t
-          |using (select ? domain_id, ? from_exclusive, ? to_inclusive, ? counter_participant from dual) input
-          |on (t.counter_participant = input.counter_participant and t.domain_id = input.domain_id and
-          |    t.from_exclusive = input.from_exclusive and t.to_inclusive = input.to_inclusive)
-          |when not matched then
-          |  insert (domain_id, from_exclusive, to_inclusive, counter_participant)
-          |  values (input.domain_id, input.from_exclusive, input.to_inclusive, input.counter_participant)""".stripMargin
-
-      _ <- DbStorage.bulkOperation_(insertQuery, newPeriods, storage.profile) { pp => newPeriod =>
-        pp >> domainId
-        pp >> newPeriod.fromExclusive
-        pp >> newPeriod.toInclusive
-        pp >> counterParticipant
-      }
-
-    } yield ()
-
-    storage.queryAndUpdate(
-      queries.transactionally.withTransactionIsolation(
-        TransactionIsolation.Serializable
-      ),
-      operationName = "commitments: mark period safe",
-    )
-  }
-
-  override def markSafe(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
+  override def markSafe(
+      counterParticipant: ParticipantId,
+      period: CommitmentPeriod,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] = processingTime.metric.event {
-    storage.profile match {
-      case _: DbStorage.Profile.H2 => markSafeH2(counterParticipant, period)
+    def dbQueries(
+        sortedReconciliationIntervals: SortedReconciliationIntervals
+    ): DBIOAction[Unit, NoStream, Effect.All] = {
+      def containsTick(commitmentPeriod: CommitmentPeriod): Boolean = sortedReconciliationIntervals
+        .containsTick(
+          commitmentPeriod.fromExclusive.forgetSecond,
+          commitmentPeriod.toInclusive.forgetSecond,
+        )
+        .getOrElse {
+          logger.warn(s"Unable to determine whether $commitmentPeriod contains a tick.")
+          true
+        }
 
-      case _: DbStorage.Profile.Postgres => markSafePostgres(counterParticipant, period)
+      val insertQuery = storage.profile match {
+        case Profile.H2(_) | Profile.Postgres(_) =>
+          """insert into outstanding_acs_commitments (domain_id, from_exclusive, to_inclusive, counter_participant)
+               values (?, ?, ?, ?) on conflict do nothing"""
 
-      case _: DbStorage.Profile.Oracle => markSafeOracle(counterParticipant, period)
+        case Profile.Oracle(_) =>
+          """merge /*+ INDEX ( outstanding_acs_commitments ( counter_participant, domain_id, from_exclusive, to_inclusive ) ) */  
+            |into outstanding_acs_commitments t
+            |using (select ? domain_id, ? from_exclusive, ? to_inclusive, ? counter_participant from dual) input
+            |on (t.counter_participant = input.counter_participant and t.domain_id = input.domain_id and
+            |    t.from_exclusive = input.from_exclusive and t.to_inclusive = input.to_inclusive)
+            |when not matched then
+            |  insert (domain_id, from_exclusive, to_inclusive, counter_participant)
+            |  values (input.domain_id, input.from_exclusive, input.to_inclusive, input.counter_participant)""".stripMargin
+      }
+
+      for {
+        overlappingIntervals <-
+          sql"""select from_exclusive, to_inclusive from outstanding_acs_commitments
+          where domain_id = $domainId and counter_participant = $counterParticipant
+          and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}"""
+            .as[(CantonTimestampSecond, CantonTimestampSecond)]
+
+        _ <-
+          sqlu"""delete from outstanding_acs_commitments
+          where domain_id = $domainId and counter_participant = $counterParticipant
+          and from_exclusive < ${period.toInclusive} and to_inclusive > ${period.fromExclusive}"""
+
+        newPeriods = overlappingIntervals
+          .flatMap { case (from, to) =>
+            val leftOverlap = CommitmentPeriod.create(from, period.fromExclusive)
+            val rightOverlap = CommitmentPeriod.create(period.toInclusive, to)
+            leftOverlap.toSeq ++ rightOverlap.toSeq
+          }
+          .toList
+          .distinct
+          .filter(containsTick)
+
+        _ <- DbStorage.bulkOperation_(insertQuery, newPeriods, storage.profile) { pp => newPeriod =>
+          pp >> domainId
+          pp >> newPeriod.fromExclusive
+          pp >> newPeriod.toInclusive
+          pp >> counterParticipant
+        }
+
+      } yield ()
     }
+
+    for {
+      /*
+        That could be wrong if a period is marked as outstanding between the point where we
+        fetch the approximate timestamp of the topology client and the query for the sorted
+        reconciliation intervals.
+        Such a period would be kept as outstanding even if it contains no tick. On the other
+        hand, only commitment periods around restarts could be "empty" (not contain any tick).
+       */
+      sortedReconciliationIntervals <-
+        sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
+      _ <- storage.queryAndUpdate(
+        dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
+          TransactionIsolation.Serializable
+        ),
+        operationName = "commitments: mark period safe",
+      )
+    } yield ()
   }
 
   override def doPrune(

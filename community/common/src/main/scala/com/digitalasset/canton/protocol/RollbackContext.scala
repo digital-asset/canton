@@ -9,7 +9,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.HasProtoV0
 
 import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 
@@ -26,8 +25,7 @@ import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 case class RollbackContext private (
     private val rbScope: Vector[RollbackSibling],
     private val nextChild: RollbackSibling = firstChild,
-) extends HasProtoV0[com.digitalasset.canton.protocol.v0.ViewParticipantData.RollbackContext]
-    with NoCopy
+) extends NoCopy
     with PrettyPrinting {
 
   def enterRollback: RollbackContext = new RollbackContext(rbScope :+ nextChild)
@@ -53,7 +51,7 @@ case class RollbackContext private (
   def embeddedInScope(rbScopeToCheck: RollbackScope): Boolean =
     rollbackScope.startsWith(rbScopeToCheck)
 
-  override def toProtoV0: ViewParticipantData.RollbackContext =
+  def toProtoV0: ViewParticipantData.RollbackContext =
     ViewParticipantData.RollbackContext(rollbackScope = rollbackScope, nextChild = nextChild)
 
   override def pretty: Pretty[RollbackContext] = prettyOfClass(

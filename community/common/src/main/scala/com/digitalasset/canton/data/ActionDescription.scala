@@ -32,18 +32,13 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{LfTransactionUtil, NoCopy}
-import com.digitalasset.canton.version.HasProtoV0
 import com.digitalasset.canton.{LfChoiceName, LfPartyId, LfVersioned}
 import com.google.protobuf.ByteString
 
 /** Summarizes the information that is needed in addition to the other fields of [[ViewParticipantData]] for
   * determining the root action of a view.
   */
-sealed trait ActionDescription
-    extends Product
-    with Serializable
-    with PrettyPrinting
-    with HasProtoV0[v0.ActionDescription] {
+sealed trait ActionDescription extends Product with Serializable with PrettyPrinting {
 
   /** Whether the root action was a byKey action (exerciseByKey, fetchByKey, lookupByKey) */
   def byKey: Boolean
@@ -56,7 +51,7 @@ sealed trait ActionDescription
 
   protected def toProtoDescription: v0.ActionDescription.Description
 
-  override def toProtoV0: v0.ActionDescription =
+  def toProtoV0: v0.ActionDescription =
     v0.ActionDescription(description = toProtoDescription)
 }
 

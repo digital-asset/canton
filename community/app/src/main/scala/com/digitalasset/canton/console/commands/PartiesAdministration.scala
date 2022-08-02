@@ -4,6 +4,7 @@
 package com.digitalasset.canton.console.commands
 
 import cats.syntax.either._
+import cats.syntax.foldable._
 import cats.syntax.traverse._
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.admin.api.client.commands.{
@@ -36,6 +37,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil._
 import com.google.protobuf.ByteString
 
 import java.time.Instant
@@ -173,6 +175,7 @@ class ParticipantPartiesAdministrationGroup(
         partyId: PartyId,
         domainIds: Set[DomainId],
         registered: => Set[DomainId],
+        queriedParticipant: ParticipantId = participantId,
     ): Either[String, Unit] = {
       if (domainIds.nonEmpty) {
         AdminCommandRunner
@@ -180,7 +183,9 @@ class ParticipantPartiesAdministrationGroup(
             domainIds subsetOf registered
           }
           .toEither
-          .leftMap(_ => s"Party ${partyId} did not appear on domain ${domainIds.diff(registered)}")
+          .leftMap(_ =>
+            show"Party ${partyId} did not appear for $queriedParticipant on domain ${domainIds.diff(registered)}"
+          )
       } else Right(())
     }
     consoleEnvironment.run {
@@ -218,7 +223,7 @@ class ParticipantPartiesAdministrationGroup(
                 .toEither
           }
           _ <- waitForParty(partyId, domainIds, primaryRegistered(partyId))
-          _ <- additionalSync.traverse { case (p, domains) =>
+          _ <- additionalSync.traverse_ { case (p, domains) =>
             waitForParty(
               partyId,
               domains,
@@ -228,6 +233,7 @@ class ParticipantPartiesAdministrationGroup(
                   filterParticipant = participantId.filterString,
                 )
               ),
+              p.id,
             )
           }
         } yield partyId

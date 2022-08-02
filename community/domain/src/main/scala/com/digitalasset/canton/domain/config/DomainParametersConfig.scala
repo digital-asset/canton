@@ -95,7 +95,7 @@ final case class DomainParametersConfig(
         cryptoConfig.provider.supportedCryptoKeyFormats
       )
     } yield {
-      StaticDomainParameters(
+      StaticDomainParameters.create(
         reconciliationInterval = reconciliationInterval,
         maxRatePerParticipant = maxRatePerParticipant,
         maxInboundMessageSize = maxInboundMessageSize,

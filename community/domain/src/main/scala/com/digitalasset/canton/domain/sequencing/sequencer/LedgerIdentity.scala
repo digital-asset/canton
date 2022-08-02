@@ -7,12 +7,11 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 
 /** Trait for identities on ledgers that Canton integrates with.
   * For example, a ledger identity can be an Ethereum account or a Fabric identity.
   */
-sealed trait LedgerIdentity extends HasProtoV0[v0.LedgerIdentity] {
+sealed trait LedgerIdentity {
   def identifier: String
 
   def toProtoV0: v0.LedgerIdentity

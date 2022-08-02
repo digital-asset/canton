@@ -493,12 +493,14 @@ class PingService(
     // schedule completing the future if not already closed
     // if we are we'll assume the yet to be created ACS pull will timeout these items
     timeoutScheduler.schedule(
-      () =>
-        if (!closed.get()) result.tryFailure(new TimeoutException)
-        else
-          logger.info(
-            "Unable to complete time limited computation, as the service is already closed."
-          ),
+      { () =>
+        {
+          if (result.tryFailure(new TimeoutException))
+            logger.info(
+              "Unable to complete time limited computation, as the service is already closed."
+            )
+        }
+      }: Runnable,
       durationMillis,
       TimeUnit.MILLISECONDS,
     )

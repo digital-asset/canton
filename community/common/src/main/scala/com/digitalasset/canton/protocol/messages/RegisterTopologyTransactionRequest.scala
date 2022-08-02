@@ -11,7 +11,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedCompanion,
   ProtobufVersion,
   ProtocolVersion,
@@ -33,8 +32,7 @@ sealed abstract case class RegisterTopologyTransactionRequest(
     ]
 ) extends ProtocolMessage
     with ProtocolMessageV0
-    with ProtocolMessageV1
-    with HasProtoV0[v0.RegisterTopologyTransactionRequest] {
+    with ProtocolMessageV1 {
 
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(
@@ -46,7 +44,7 @@ sealed abstract case class RegisterTopologyTransactionRequest(
       v1.EnvelopeContent.SomeEnvelopeContent.RegisterTopologyTransactionRequest(toProtoV0)
     )
 
-  override def toProtoV0: v0.RegisterTopologyTransactionRequest =
+  def toProtoV0: v0.RegisterTopologyTransactionRequest =
     v0.RegisterTopologyTransactionRequest(
       requestedBy = requestedBy.toProtoPrimitive,
       participant = participant.uid.toProtoPrimitive,

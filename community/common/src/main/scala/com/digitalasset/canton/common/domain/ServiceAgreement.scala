@@ -13,7 +13,6 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtoV0
 import slick.jdbc.GetResult
 
 final case class ServiceAgreementId(override protected val str: String255)
@@ -29,9 +28,8 @@ object ServiceAgreementId
     ServiceAgreementId(str)
 }
 
-final case class ServiceAgreement(id: ServiceAgreementId, text: String256M)
-    extends HasProtoV0[v0.ServiceAgreement] {
-  override def toProtoV0: v0.ServiceAgreement =
+final case class ServiceAgreement(id: ServiceAgreementId, text: String256M) {
+  def toProtoV0: v0.ServiceAgreement =
     v0.ServiceAgreement(id.unwrap, text.toProtoPrimitive)
 }
 

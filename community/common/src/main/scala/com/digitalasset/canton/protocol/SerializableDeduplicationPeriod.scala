@@ -8,11 +8,9 @@ import com.daml.ledger.offset.Offset
 import com.daml.lf.data.{Bytes => LfBytes}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
-import com.digitalasset.canton.version.HasProtoV0
 
-case class SerializableDeduplicationPeriod(deduplicationPeriod: DeduplicationPeriod)
-    extends HasProtoV0[v0.DeduplicationPeriod] {
-  override def toProtoV0: v0.DeduplicationPeriod = deduplicationPeriod match {
+case class SerializableDeduplicationPeriod(deduplicationPeriod: DeduplicationPeriod) {
+  def toProtoV0: v0.DeduplicationPeriod = deduplicationPeriod match {
     case duration: DeduplicationPeriod.DeduplicationDuration =>
       v0.DeduplicationPeriod(
         v0.DeduplicationPeriod.Period.Duration(

@@ -13,7 +13,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtocolVersion,
@@ -42,7 +41,6 @@ case class SerializableContract(
 // writing to the TransferStore and thus need to encode the version of the serialized Protobuf message
     extends HasVersionedWrapper[VersionedMessage[SerializableContract]]
     // Even if implementing HasVersionedWrapper, we should still implement HasProtoV0
-    with HasProtoV0[v0.SerializableContract]
     with PrettyPrinting {
   def contractInstance: LfContractInst = rawContractInstance.contractInstance
 
@@ -60,7 +58,7 @@ case class SerializableContract(
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SerializableContract] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
-  override def toProtoV0: v0.SerializableContract =
+  def toProtoV0: v0.SerializableContract =
     v0.SerializableContract(
       contractId = contractId.toProtoPrimitive,
       rawContractInstance = rawContractInstance.getCryptographicEvidence,

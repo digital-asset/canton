@@ -20,7 +20,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util._
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -51,8 +50,8 @@ case class DomainTimeTrackerConfig(
     patienceDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(500),
     minObservationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofHours(24),
     timeRequest: TimeProofRequestConfig = TimeProofRequestConfig(),
-) extends HasProtoV0[v0.DomainTimeTrackerConfig] {
-  override def toProtoV0: v0.DomainTimeTrackerConfig = v0.DomainTimeTrackerConfig(
+) {
+  def toProtoV0: v0.DomainTimeTrackerConfig = v0.DomainTimeTrackerConfig(
     observationLatency.toProtoPrimitive.some,
     patienceDuration.toProtoPrimitive.some,
     minObservationDuration.toProtoPrimitive.some,

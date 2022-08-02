@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.admin
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.version.HasProtoV0
 
 /** Encapsulated resource limits for a participant.
   *
@@ -12,10 +11,12 @@ import com.digitalasset.canton.version.HasProtoV0
   *                         This also covers requests submitted by other participants.
   * @param maxRate the maximum rate at which commands may be submitted through the ledger api.
   */
-case class ResourceLimits(maxDirtyRequests: Option[NonNegativeInt], maxRate: Option[NonNegativeInt])
-    extends HasProtoV0[v0.ResourceLimits] {
+case class ResourceLimits(
+    maxDirtyRequests: Option[NonNegativeInt],
+    maxRate: Option[NonNegativeInt],
+) {
 
-  override def toProtoV0: v0.ResourceLimits =
+  def toProtoV0: v0.ResourceLimits =
     v0.ResourceLimits(
       maxDirtyRequests = maxDirtyRequests.fold(-1)(_.unwrap),
       maxRate = maxRate.fold(-1)(_.unwrap),

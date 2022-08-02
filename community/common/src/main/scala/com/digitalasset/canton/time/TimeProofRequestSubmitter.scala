@@ -16,7 +16,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Backoff, Success}
 import com.digitalasset.canton.util.{FutureUtil, HasFlushFuture, retry}
-import com.digitalasset.canton.version.HasProtoV0
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -32,8 +31,8 @@ case class TimeProofRequestConfig(
     initialRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(200),
     maxRetryDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5),
     maxSequencingDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
-) extends HasProtoV0[v0.TimeProofRequestConfig] {
-  override def toProtoV0: v0.TimeProofRequestConfig = v0.TimeProofRequestConfig(
+) {
+  def toProtoV0: v0.TimeProofRequestConfig = v0.TimeProofRequestConfig(
     initialRetryDelay.toProtoPrimitive.some,
     maxRetryDelay.toProtoPrimitive.some,
     maxSequencingDelay.toProtoPrimitive.some,

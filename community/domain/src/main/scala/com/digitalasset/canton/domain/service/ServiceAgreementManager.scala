@@ -22,7 +22,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{HasProtoV0, ProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import slick.jdbc.GetResult
 
 import java.io.IOException
@@ -33,8 +33,8 @@ case class ServiceAgreementAcceptance(
     participantId: ParticipantId,
     signature: Signature,
     timestamp: CantonTimestamp,
-) extends HasProtoV0[v0.ServiceAgreementAcceptance] {
-  override def toProtoV0: v0.ServiceAgreementAcceptance =
+) {
+  def toProtoV0: v0.ServiceAgreementAcceptance =
     v0.ServiceAgreementAcceptance(
       agreementId = agreementId.toProtoPrimitive,
       participantId = participantId.toProtoPrimitive,

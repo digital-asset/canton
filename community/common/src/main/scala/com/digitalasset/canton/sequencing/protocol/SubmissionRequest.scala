@@ -6,11 +6,11 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.traverse._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
+import com.digitalasset.canton.protocol
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasProtoV0,
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
   HasProtocolVersionedWrapperCompanion,
@@ -27,17 +27,19 @@ case class SubmissionRequest private (
     maxSequencingTime: CantonTimestamp,
     timestampOfSigningKey: Option[CantonTimestamp],
 )(val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest])
-    extends HasProtocolVersionedWrapper[SubmissionRequest]
-    with HasProtoV0[v0.SubmissionRequest] {
+    extends HasProtocolVersionedWrapper[SubmissionRequest] {
+
+  // Caches the serialized compressed batch to be able to do checks on its size without re-serializing
+  lazy val batchProtoV0: protocol.v0.CompressedBatch = batch.toProtoV0
 
   override val companionObj: HasProtocolVersionedWrapperCompanion[SubmissionRequest] =
     SubmissionRequest
 
-  override def toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
+  def toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
     sender = sender.toProtoPrimitive,
     messageId = messageId.toProtoPrimitive,
     isRequest = isRequest,
-    batch = Some(batch.toProtoV0),
+    batch = Some(batchProtoV0),
     maxSequencingTime = Some(maxSequencingTime.toProtoPrimitive),
     timestampOfSigningKey = timestampOfSigningKey.map(_.toProtoPrimitive),
   )

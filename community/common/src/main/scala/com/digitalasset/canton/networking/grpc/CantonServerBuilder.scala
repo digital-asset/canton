@@ -36,7 +36,7 @@ trait CantonMutableHandlerRegistry extends AutoCloseable {
   def addService(
       service: ServerServiceDefinition,
       withLogging: Boolean = true,
-  ): CantonMutableHandlerRegistry
+  ): (ServerServiceDefinition, CantonMutableHandlerRegistry)
 
   def removeService(service: ServerServiceDefinition): CantonMutableHandlerRegistry
 }
@@ -59,9 +59,13 @@ object CantonServerBuilder {
         override def addService(
             service: ServerServiceDefinition,
             withLogging: Boolean,
-        ): CantonMutableHandlerRegistry = {
-          registry.addService(interceptors.addAllInterceptors(service, withLogging))
-          this
+        ): (ServerServiceDefinition, CantonMutableHandlerRegistry) = {
+          val serverServiceDefinition = interceptors.addAllInterceptors(service, withLogging)
+          registry.addService(serverServiceDefinition)
+
+          // addAllInterceptors call returns a new wrapped ServerServiceDefinition reference
+          // Hence, return the new reference for allowing removal in removeService.
+          serverServiceDefinition -> this
         }
 
         override def removeService(

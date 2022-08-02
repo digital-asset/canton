@@ -8,6 +8,10 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordTime
+import com.digitalasset.canton.participant.pruning.{
+  SortedReconciliationIntervals,
+  SortedReconciliationIntervalsProvider,
+}
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.AcsCommitmentStoreError
 import com.digitalasset.canton.participant.store.{
   AcsCommitmentStore,
@@ -136,20 +140,34 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
       counterParticipant: ParticipantId,
       safePeriod: CommitmentPeriod,
       currentOutstanding: Set[(CommitmentPeriod, ParticipantId)],
+      sortedReconciliationIntervals: SortedReconciliationIntervals,
   )(implicit traceContext: TraceContext): Set[(CommitmentPeriod, ParticipantId)] = {
     val oldPeriods = currentOutstanding.filter { case (oldPeriod, participant) =>
       oldPeriod.overlaps(safePeriod) && participant == counterParticipant
     }
 
+    def containsTick(commitmentPeriod: CommitmentPeriod): Boolean = sortedReconciliationIntervals
+      .containsTick(
+        commitmentPeriod.fromExclusive.forgetSecond,
+        commitmentPeriod.toInclusive.forgetSecond,
+      )
+      .getOrElse {
+        logger.warn(s"Unable to determine whether $commitmentPeriod contains a tick.")
+
+        // We default to a safe value: the commitment period will not be marked as safe.
+        true
+      }
+
     val periodsToAdd = oldPeriods
       .flatMap { case (oldPeriod, _) =>
         Set(
-          CommitmentPeriod(oldPeriod.fromExclusive, safePeriod.fromExclusive),
-          CommitmentPeriod(safePeriod.toInclusive, oldPeriod.toInclusive),
+          CommitmentPeriod.create(oldPeriod.fromExclusive, safePeriod.fromExclusive),
+          CommitmentPeriod.create(safePeriod.toInclusive, oldPeriod.toInclusive),
         )
       }
-      .collect { case Right(commitmentPeriod) =>
-        commitmentPeriod -> counterParticipant
+      .collect {
+        case Right(commitmentPeriod) if containsTick(commitmentPeriod) =>
+          commitmentPeriod -> counterParticipant
       }
 
     val newPeriods = currentOutstanding.diff(oldPeriods).union(periodsToAdd)
@@ -164,12 +182,24 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
     newPeriods
   }
 
-  override def markSafe(counterParticipant: ParticipantId, period: CommitmentPeriod)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] = {
-    _outstanding.updateAndGet(os => computeOutstanding(counterParticipant, period, os))
-    Future.unit
-  }
+  override def markSafe(
+      counterParticipant: ParticipantId,
+      period: CommitmentPeriod,
+      sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    sortedReconciliationIntervalsProvider.approximateReconciliationIntervals.map {
+      sortedReconciliationIntervals =>
+        _outstanding.updateAndGet(currentOutstanding =>
+          computeOutstanding(
+            counterParticipant,
+            period,
+            currentOutstanding,
+            sortedReconciliationIntervals,
+          )
+        )
+
+        ()
+    }
 
   override def noOutstandingCommitments(
       beforeOrAt: CantonTimestamp

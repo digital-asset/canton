@@ -28,6 +28,7 @@ import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.protocol.v0.CompressedBatch
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
@@ -295,8 +296,14 @@ class SequencerClient(
 
       span.setAttribute("member", member.show)
       span.setAttribute("message_id", messageId.unwrap)
-      // TODO(i8810): don't serialize a batch again here
-      val unitOrBatchSizeErr = verifyBatchSize(request.batch)
+
+      require(
+        Batch.supportedProtoVersions.protobufVersionsCount == 1,
+        "verifyBatchSize below assumes the batch is serialized with protocol version 0." +
+          " Update it if more versions are supported",
+      )
+
+      val unitOrBatchSizeErr = verifyBatchSize(request.batchProtoV0)
 
       def trackSend: EitherT[Future, SendAsyncClientError, Unit] =
         sendTracker
@@ -368,8 +375,10 @@ class SequencerClient(
       }
   }
 
-  private def verifyBatchSize(batch: Batch[_]): Either[SendAsyncClientError, Unit] = {
-    val batchSerializedSize = batch.toProtoVersioned.serializedSize
+  private def verifyBatchSize(
+      compressedBatch: CompressedBatch
+  ): Either[SendAsyncClientError, Unit] = {
+    val batchSerializedSize = compressedBatch.serializedSize
     val maxBatchMessageSize = staticDomainParameters.maxBatchMessageSize.unwrap
     Either.cond(
       batchSerializedSize <= maxBatchMessageSize,

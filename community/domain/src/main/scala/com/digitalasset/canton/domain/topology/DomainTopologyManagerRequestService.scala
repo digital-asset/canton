@@ -38,7 +38,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait RequestProcessingStrategy {
+private[domain] trait RequestProcessingStrategy {
 
   def decide(
       requestedBy: Member,
@@ -50,7 +50,7 @@ trait RequestProcessingStrategy {
 
 }
 
-object RequestProcessingStrategy {
+private[domain] object RequestProcessingStrategy {
 
   import RegisterTopologyTransactionResponseResult.State._
 
@@ -497,7 +497,7 @@ private[domain] class DomainTopologyManagerRequestService(
 
 }
 
-object DomainTopologyManagerRequestService {
+private[domain] object DomainTopologyManagerRequestService {
 
   trait Handler {
     def newRequest(

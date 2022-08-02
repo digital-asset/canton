@@ -1,0 +1,30 @@
+// Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package com.digitalasset.canton.protocol.v1;
+
+import "google/protobuf/duration.proto";
+
+import "com/digitalasset/canton/crypto/v0/crypto.proto";
+
+message StaticDomainParameters {
+    uint32 max_rate_per_participant = 1;
+    uint32 max_inbound_message_size = 2;
+    bool unique_contract_keys = 3;
+    repeated com.digitalasset.canton.crypto.v0.SigningKeyScheme required_signing_key_schemes = 4;
+    repeated com.digitalasset.canton.crypto.v0.EncryptionKeyScheme required_encryption_key_schemes = 5;
+    repeated com.digitalasset.canton.crypto.v0.SymmetricKeyScheme required_symmetric_key_schemes = 6;
+    repeated com.digitalasset.canton.crypto.v0.HashAlgorithm required_hash_algorithms = 7;
+    repeated com.digitalasset.canton.crypto.v0.CryptoKeyFormat required_crypto_key_formats = 8;
+    string protocol_version = 9;
+}
+
+message DynamicDomainParameters {
+    google.protobuf.Duration participant_response_timeout = 1;
+    google.protobuf.Duration mediator_reaction_timeout = 2;
+    google.protobuf.Duration transfer_exclusivity_timeout = 3;
+    google.protobuf.Duration topology_change_delay = 4;
+    google.protobuf.Duration ledger_time_record_time_tolerance = 5;
+    google.protobuf.Duration reconciliation_interval = 6;
+}

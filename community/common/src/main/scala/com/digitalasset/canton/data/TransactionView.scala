@@ -31,7 +31,6 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal, NoCopy}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
-  HasProtoV0,
   HasProtocolVersionedWrapper,
   HasVersionedToByteString,
   ProtobufVersion,
@@ -65,7 +64,6 @@ case class TransactionView private (
 )(hashOps: HashOps)
     extends MerkleTreeInnerNode[TransactionView](hashOps)
     with HasVersionedToByteString
-    with HasProtoV0[v0.ViewNode]
     with HasLoggerName
     with NoCopy {
 
@@ -548,7 +546,6 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
     // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
     // the version of the serialized Protobuf message
     with HasProtocolVersionedWrapper[ViewCommonData]
-    with HasProtoV0[v0.ViewCommonData]
     with NoCopy {
 
   // The toProto... methods are deliberately protected, as they could otherwise be abused to bypass memoization.
@@ -560,7 +557,7 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
 
   // We use named parameters, because then the code remains correct even when the ProtoBuf code generator
   // changes the order of parameters.
-  override protected def toProtoV0: v0.ViewCommonData =
+  protected def toProtoV0: v0.ViewCommonData =
     v0.ViewCommonData(
       informees = informees.map(_.toProtoV0).toSeq,
       threshold = threshold.unwrap,

@@ -10,7 +10,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveSeconds}
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -24,7 +24,7 @@ import scala.math.Ordering.Implicits._
 private[participant] class PruneObserver(
     requestJournalStore: RequestJournalStore,
     sequencerCounterTrackerStore: SequencerCounterTrackerStore,
-    reconciliationInterval: PositiveSeconds,
+    sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
     acsCommitmentStore: AcsCommitmentStore,
     acs: ActiveContractStore,
     keyJournal: ContractKeyJournal,
@@ -76,7 +76,7 @@ private[participant] class PruneObserver(
             AcsCommitmentProcessor.safeToPrune(
               requestJournalStore,
               sequencerCounterTrackerStore,
-              reconciliationInterval,
+              sortedReconciliationIntervalsProvider,
               acsCommitmentStore,
               inFlightSubmissionStore,
               domainId,
