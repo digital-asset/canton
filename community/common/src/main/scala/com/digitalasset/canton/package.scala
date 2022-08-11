@@ -51,6 +51,9 @@ package object canton {
   type LfPackageId = Ref.PackageId
   val LfPackageId: Ref.PackageId.type = Ref.PackageId
 
+  type LfInterfaceId = Ref.TypeConName
+  val LfInterfaceId: Ref.TypeConName.type = Ref.TypeConName
+
   // Timestamp used by lf and sync api
   type LfTimestamp = Time.Timestamp
   val LfTimestamp: Time.Timestamp.type = Time.Timestamp
@@ -68,9 +71,8 @@ package object canton {
   type LfCreateCommand = LfCommand.Create
   val LfCreateCommand: LfCommand.Create.type = LfCommand.Create
 
-  @nowarn("cat=deprecation")
-  type LfExerciseCommand = LfCommand.LenientExercise
-  val LfExerciseCommand: LfCommand.LenientExercise.type = LfCommand.LenientExercise
+  type LfExerciseCommand = LfCommand.Exercise
+  val LfExerciseCommand: LfCommand.Exercise.type = LfCommand.Exercise
 
   type LfExerciseByKeyCommand = LfCommand.ExerciseByKey
   val LfExerciseByKeyCommand: LfCommand.ExerciseByKey.type = LfCommand.ExerciseByKey

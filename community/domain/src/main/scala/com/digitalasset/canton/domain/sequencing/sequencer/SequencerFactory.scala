@@ -40,7 +40,6 @@ object SequencerFactory {
           clock: Clock,
           topologyClientMember: Member,
           domainSyncCryptoApi: DomainSyncCryptoClient,
-          // TODO(#8110) consider whether we can make use of this parameter
           initialState: Option[SequencerInitialState],
           localNodeParameters: LocalNodeParameters,
           sequencerProtocolVersion: ProtocolVersion,

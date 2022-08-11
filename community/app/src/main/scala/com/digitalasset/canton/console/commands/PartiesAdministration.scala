@@ -11,7 +11,10 @@ import com.digitalasset.canton.admin.api.client.commands.{
   ParticipantAdminCommands,
   TopologyAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.{ListConnectedDomainsResult, ListPartiesResult}
+import com.digitalasset.canton.admin.api.client.data.console.{
+  ListConnectedDomainsResult,
+  ListPartiesResult,
+}
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.{

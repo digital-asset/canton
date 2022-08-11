@@ -15,6 +15,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Repla
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}
@@ -1211,6 +1212,36 @@ trait TopologyStoreTest
             sub2 shouldBe Seq(rokm1, okm2)
           }
 
+        }
+
+      }
+
+      "store the same topology transaction for different protocol versions" in {
+        val store = mk()
+
+        val baseTx =
+          NamespaceDelegation(
+            Namespace(namespaceKey.fingerprint),
+            namespaceKey,
+            isRootDelegation = true,
+          )
+        val stateUpdateId = TopologyElementId.generate()
+
+        def addTx(protocolVersion: ProtocolVersion) =
+          TopologyStateUpdate(
+            TopologyChangeOp.Add,
+            TopologyStateUpdateElement(stateUpdateId, baseTx),
+          )(protocolVersion)
+
+        val oldTx = factory.mkTrans(addTx(ProtocolVersion.v2_0_0), namespaceKey)
+        val newTx = factory.mkTrans(addTx(ProtocolVersion.unstable_development), namespaceKey)
+
+        for {
+          _ <- append(store, ts, List(oldTx))
+          _ <- append(store, ts.plusMillis(1), List(newTx))
+          txs <- store.allTransactions
+        } yield {
+          txs.result.size shouldEqual 2
         }
 
       }

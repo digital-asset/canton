@@ -148,7 +148,7 @@ class StartableStoppableLedgerApiServer(
 
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
-  )(implicit loggingContext: LoggingContext) = {
+  )(implicit traceContext: TraceContext) = {
     val lfValueTranslationCacheConfig = LfValueTranslationCache.Config(
       eventsMaximumSize = config.serverConfig.maxEventCacheWeight,
       contractsMaximumSize = config.serverConfig.maxContractCacheWeight,
@@ -177,6 +177,9 @@ class StartableStoppableLedgerApiServer(
       enableInMemoryFanOutForLedgerApi = config.serverConfig.enableInMemoryFanOutForLedgerApi,
       apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.duration.toScala,
       inMemoryStateUpdaterParallelism = config.serverConfig.inMemoryStateUpdaterParallelism,
+      inMemoryFanOutThreadPoolSize = config.serverConfig.inMemoryFanOutThreadPoolSize.getOrElse(
+        LedgerApiServerConfig.DefaultInMemoryFanOutThreadPoolSize
+      ),
     )
 
     val indexerConfig = config.indexerConfig.damlConfig(
@@ -251,6 +254,7 @@ class StartableStoppableLedgerApiServer(
         party = PartyConfiguration.Default,
         port = Port(config.serverConfig.port.unwrap),
         portFile = None,
+        rateLimit = config.serverConfig.rateLimit,
         seeding = config.cantonParameterConfig.contractIdSeeding,
         timeProviderType = config.testingTimeService match {
           case Some(_) => TimeProviderType.Static

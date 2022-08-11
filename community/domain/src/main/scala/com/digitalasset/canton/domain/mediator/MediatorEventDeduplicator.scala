@@ -86,10 +86,7 @@ object MediatorEventDeduplicator {
       }
 
     def getDeduplicationTimeout(tracedRequestTime: Traced[CantonTimestamp]): Future[Duration] =
-      // FIXME(i8900): choose the right parameter once it has been introduced
-      getDomainParameters(tracedRequestTime).map(
-        _.ledgerTimeRecordTimeTolerance.duration.multipliedBy(2)
-      )
+      getDomainParameters(tracedRequestTime).map(_.mediatorDeduplicationTimeout.duration)
 
     def getDecisionTime(tracedRequestTime: Traced[CantonTimestamp]): Future[CantonTimestamp] =
       getDomainParameters(tracedRequestTime).map(_.decisionTimeFor(tracedRequestTime.value))

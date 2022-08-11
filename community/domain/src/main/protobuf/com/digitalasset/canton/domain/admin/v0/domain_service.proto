@@ -13,7 +13,8 @@ import "com/digitalasset/canton/protocol/v1/sequencing.proto";
 
 service DomainService {
     rpc ListServiceAgreementAcceptances(google.protobuf.Empty) returns (ServiceAgreementAcceptances);
-    rpc GetDomainParameters(GetDomainParameters.Request) returns (GetDomainParameters.Response);
+    rpc GetDomainParameters(google.protobuf.Empty) returns (com.digitalasset.canton.protocol.v0.StaticDomainParameters);
+    rpc GetDomainParametersVersioned(GetDomainParameters.Request) returns (GetDomainParameters.Response);
 }
 
 message GetDomainParameters {

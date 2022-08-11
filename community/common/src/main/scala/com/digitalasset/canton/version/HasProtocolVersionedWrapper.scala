@@ -11,7 +11,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.google.protobuf.ByteString
-import slick.jdbc.{GetResult, SetParameter}
+import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.collection.immutable
 
@@ -31,6 +31,14 @@ sealed abstract case class RepresentativeProtocolVersion[+ValueClass](
     * for another class.
     */
   def representative: ProtocolVersion = v
+}
+
+object RepresentativeProtocolVersion {
+
+  implicit val setParameterRepresentativeProtocolVersion
+      : SetParameter[RepresentativeProtocolVersion[_]] =
+    (rpv: RepresentativeProtocolVersion[_], pp: PositionedParameters) => pp >> rpv.v
+
 }
 
 final case class ProtobufVersion(v: Int) extends AnyVal
@@ -138,6 +146,13 @@ trait HasSupportedProtoVersions[ValueClass] {
   ): ProtobufVersion =
     supportedProtoVersions.protobufVersionFor(protocolVersion)
 
+  /** Return the Protobuf version corresponding to the protocol version
+    */
+  def protobufVersionFor(
+      protocolVersion: ProtocolVersion
+  ): ProtobufVersion =
+    supportedProtoVersions.protobufVersionFor(protocolVersionRepresentativeFor(protocolVersion))
+
   /** Supported protobuf version
     * @param fromInclusive The protocol version when this protobuf version was introduced
     * @param deserializer Deserialization method
@@ -179,13 +194,6 @@ trait HasSupportedProtoVersions[ValueClass] {
 
     def deserializerFor(protoVersion: ProtobufVersion): Deserializer =
       converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
-
-    def deserializerFor(protocolVersion: ProtocolVersion): Deserializer = converterFor(
-      protocolVersion
-    ).deserializer
-
-    def serializerFor(protocolVersion: RepresentativeProtocolVersion[ValueClass]): Serializer =
-      converterFor(protocolVersion.representative).serializer
 
     def protobufVersionFor(
         protocolVersion: RepresentativeProtocolVersion[ValueClass]

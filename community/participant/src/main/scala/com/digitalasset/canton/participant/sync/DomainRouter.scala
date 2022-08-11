@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
 import com.digitalasset.canton.participant.sync.DomainRouter.{
   AutoTransferDomainRank,
   ContractData,
+  ContractsDomainData,
   TransferArgs,
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.{
@@ -45,7 +46,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, LfTransactionUtil}
 import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId, LfWorkflowId}
 
@@ -130,18 +131,14 @@ class DomainRouter(
         )
         .map(_.toSet)
 
-      inputContractMetadata = LfTransactionUtil.inputContractIdsWithMetadata(wfTransaction.unwrap)
+      inputContractMetadata: Set[WithContractMetadata[LfContractId]] = LfTransactionUtil
+        .inputContractIdsWithMetadata(wfTransaction.unwrap)
 
-      domainOfInputContracts <- EitherT.liftF(inputContractMetadata.toList.traverse { metadata =>
-        val contractId = metadata.unwrap
-        domainOfContract(contractId).value.map(dO =>
-          contractId -> dO.map(d => ContractData(contractId, d, metadata.metadata.stakeholders))
-        )
-      })
+      inputContractsDomainData <- EitherT.liftF(
+        ContractsDomainData.create(domainOfContract, inputContractMetadata)
+      )
 
-      inputDomains = domainOfInputContracts.mapFilter { case (_, contractDataO) =>
-        contractDataO.map(_.domain)
-      }.toSet
+      inputDomains = inputContractsDomainData.domains
       contractsOnOneDomain = inputDomains.sizeCompare(2) < 0
 
       informees = LfTransactionUtil.informees(transaction)
@@ -160,7 +157,7 @@ class DomainRouter(
         if (isMultiDomainTx && autoTransferTransaction) {
           logger.debug(s"Submitting as multi-domain ${submitterInfo.commandId} ")
           checkAndMaybeSubmitMultiDomain(
-            domainOfInputContracts,
+            inputContractsDomainData,
             submitterInfo,
             transactionMeta,
             keyResolver,
@@ -199,7 +196,7 @@ class DomainRouter(
   }
 
   private def checkAndMaybeSubmitMultiDomain(
-      domainOfInputContracts: List[(LfContractId, Option[ContractData])],
+      inputContractsDomainData: ContractsDomainData,
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
@@ -215,12 +212,13 @@ class DomainRouter(
       "multi-domain path called whilst not enabled?",
     )
 
-    val connectedToDomains = domainOfInputContracts.forall {
-      case (_contractId, Some(data)) => this.connectedDomains().contains(data.domain)
-      case _ => false
+    val allContractsHaveDomainData: Boolean = inputContractsDomainData.withoutDomainData.isEmpty
+    val connectedDomains: Set[DomainId] = this.connectedDomains()
+    val contractsDomainNotConnected = inputContractsDomainData.withDomainData.filterNot {
+      contractData => connectedDomains.contains(contractData.domain)
     }
 
-    val contractData = domainOfInputContracts.mapFilter(_._2)
+    val contractData = inputContractsDomainData.withDomainData
 
     // Check that at least one submitter is a stakeholder so that we can transfer the contract if needed. This check
     // is overly strict on behalf of contracts that turn out not to need to be transferred.
@@ -230,42 +228,45 @@ class DomainRouter(
 
     for {
       _atLeastOneQualifyingDomain <- domainsOfSubmittersAndInformees(submitters, informees)
-      transactionSubmitted <-
-        if (submitterNotBeingStakeholder.isEmpty && connectedToDomains)
-          submitTransactionMultiDomain(
-            wfTransaction,
-            contractData,
-            submitterInfo,
-            submitters,
-            transactionMeta,
-            keyResolver,
-            informees,
-          )
-        else {
-          val error = if (submitterNotBeingStakeholder.nonEmpty) {
-            SubmitterAlwaysStakeholder.Error(submitterNotBeingStakeholder.map(_.id))
-          } else {
-            val contractsAndDomains = domainOfInputContracts
-              .mapFilter(
-                _._2
-                  .filterNot(x => connectedDomains().contains(x.domain))
-                  .map(x => show"${x.id}" -> x.domain)
-              )
-              .toMap
 
-            if (contractsAndDomains.nonEmpty) {
-              NotConnectedToAllContractDomains.Error(contractsAndDomains): TransactionRoutingError
-            } else {
-              val ids = domainOfInputContracts.filter(_._2.isEmpty).map(c => show"${c._1}")
-              UnknownContractDomains.Error(ids): TransactionRoutingError
-            }
-          }
-          EitherT.leftT[Future, Future[TransactionSubmitted]](error)
-        }
+      // Check: submitter
+      _ <- EitherTUtil.condUnitET[Future](
+        submitterNotBeingStakeholder.isEmpty,
+        SubmitterAlwaysStakeholder.Error(submitterNotBeingStakeholder.map(_.id)),
+      )
+
+      // Check: all contracts have domain data
+      _ <- EitherTUtil.condUnitET[Future](
+        allContractsHaveDomainData, {
+          val ids = inputContractsDomainData.withoutDomainData.map(_.show)
+          UnknownContractDomains.Error(ids.toList): TransactionRoutingError
+        },
+      )
+
+      // Check: connected domains
+      _ <- EitherTUtil.condUnitET[Future](
+        contractsDomainNotConnected.isEmpty, {
+          val contractsAndDomains: Map[String, DomainId] = contractsDomainNotConnected.map {
+            contractData => contractData.id.show -> contractData.domain
+          }.toMap
+
+          NotConnectedToAllContractDomains.Error(contractsAndDomains): TransactionRoutingError
+        },
+      )
+
+      transactionSubmitted <- submitTransactionMultiDomain(
+        wfTransaction,
+        contractData,
+        submitterInfo,
+        submitters,
+        transactionMeta,
+        keyResolver,
+        informees,
+      )
     } yield transactionSubmitted
   }
 
-  def submitTransactionSingleDomain(
+  private def submitTransactionSingleDomain(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
       keyResolver: LfKeyResolver,
@@ -294,7 +295,7 @@ class DomainRouter(
   private def submitViaDomain(
       targetDomain: DomainId,
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      contracts: List[ContractData],
+      contracts: Seq[ContractData],
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
@@ -324,7 +325,7 @@ class DomainRouter(
   private def submitPickingADomain(
       connected: Set[DomainId],
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      contracts: List[ContractData],
+      contracts: Seq[ContractData],
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
@@ -381,7 +382,7 @@ class DomainRouter(
 
   private def submitTransactionMultiDomain(
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
-      contracts: List[ContractData],
+      contracts: Seq[ContractData],
       submitterInfo: SubmitterInfo,
       submitters: Set[LfPartyId],
       transactionMeta: TransactionMeta,
@@ -428,7 +429,7 @@ class DomainRouter(
 
   // Includes check that submitting party has a participant with submission rights on source and target domain
   private def transfersToDomain(
-      contracts: List[ContractData],
+      contracts: Seq[ContractData],
       targetDomain: DomainId,
       submitters: Set[LfPartyId],
   )(implicit
@@ -436,7 +437,7 @@ class DomainRouter(
       ec: ExecutionContext,
   ): EitherT[Future, String, (DomainId, Map[LfContractId, LfPartyId])] = {
     val ts = snapshot(targetDomain)
-    val maybeTransfers: EitherT[Future, String, List[Option[(LfContractId, LfPartyId)]]] =
+    val maybeTransfers: EitherT[Future, String, Seq[Option[(LfContractId, LfPartyId)]]] =
       contracts.traverse { c =>
         if (c.domain == targetDomain) EitherT.fromEither[Future](Right(None))
         else {
@@ -496,7 +497,7 @@ class DomainRouter(
 
   private def transferThenSubmit(
       targetDomain: DomainId,
-      contracts: List[ContractData],
+      contracts: Seq[ContractData],
       wfTransaction: WellFormedTransaction[WithoutSuffixes],
       submitterInfo: SubmitterInfo,
       transfers: Map[LfContractId, LfPartyId],
@@ -603,7 +604,7 @@ class DomainRouter(
     } yield domainId
 }
 
-object DomainRouter {
+private[sync] object DomainRouter {
   def apply(
       connectedDomainsMap: mutable.Map[DomainId, SyncDomain],
       domainConnectionConfigStore: DomainConnectionConfigStore,
@@ -714,7 +715,10 @@ object DomainRouter {
           (domain, res.forall(_.exists(_.permission == Submission)))
         }
       }
-      .map(_.filter(_._2).map(_._1).toSet)
+      .map(_.collect {
+        case (domainId, allSubmittersAreAllowedToSubmit) if allSubmittersAreAllowedToSubmit =>
+          domainId
+      }.toSet)
 
     EitherT(domainsKnowingAllSubmittersF.map { domainsKnowingAllSubmitters =>
       if (domainsKnowingAllSubmitters.isEmpty) {
@@ -895,4 +899,28 @@ object DomainRouter {
       traceContext: TraceContext,
   )
 
+  case class ContractsDomainData(
+      withDomainData: Seq[ContractData],
+      withoutDomainData: Seq[LfContractId],
+  ) {
+    val domains: Set[DomainId] = withDomainData.map(_.domain).toSet
+  }
+
+  object ContractsDomainData {
+    def create(
+        domainOfContract: LfContractId => OptionT[Future, DomainId],
+        inputContractMetadata: Set[WithContractMetadata[LfContractId]],
+    )(implicit ec: ExecutionContext): Future[ContractsDomainData] = {
+      inputContractMetadata.toSeq
+        .traverse { metadata =>
+          val contractId = metadata.unwrap
+          domainOfContract(contractId).value.map(dO =>
+            dO.toLeft(contractId)
+              .leftMap(d => ContractData(contractId, d, metadata.metadata.stakeholders))
+          )
+        }
+        .map(_.separate)
+        .map((ContractsDomainData.apply _) tupled _)
+    }
+  }
 }

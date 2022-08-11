@@ -352,8 +352,8 @@ object BaseTest {
     protocolVersion = protocolVersion,
   )
 
-  lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.tryGetOptFromEnv
-    .getOrElse(ProtocolVersion.latest)
+  lazy val testedProtocolVersion: ProtocolVersion =
+    ProtocolVersion.tryGetOptFromEnv.getOrElse(ProtocolVersion.latest)
 
   lazy val isTestedProtocolVersionDev: Boolean =
     testedProtocolVersion == ProtocolVersion.unstable_development

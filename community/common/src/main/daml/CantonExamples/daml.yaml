@@ -1,4 +1,4 @@
-sdk-version: 2.4.0-snapshot.20220727.10293.0.1a9dc020
+sdk-version: 2.4.0-snapshot.20220805.10346.0.454fc397
 name: CantonExamples
 exposed-modules: 
 - CantonExamples

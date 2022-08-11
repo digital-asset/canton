@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
+import akka.Done
 import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
@@ -83,7 +84,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] =
       EitherT.rightT[Future, CreateSubscriptionError](
-        Source.empty.viaMat(KillSwitches.single)(Keep.right)
+        Source.empty
+          .viaMat(KillSwitches.single)(Keep.right)
+          .mapMaterializedValue(_ -> Future.successful(Done))
       )
     override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext

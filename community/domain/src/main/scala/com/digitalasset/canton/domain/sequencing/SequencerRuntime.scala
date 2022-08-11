@@ -153,8 +153,6 @@ class SequencerRuntime(
       staticDomainParameters.protocolVersion,
     )
 
-  private val healthManager = new io.grpc.protobuf.services.HealthStatusManager()
-
   private val keyCheckF =
     syncCrypto
       .currentSnapshotApproximation(TraceContext.empty)
@@ -235,7 +233,8 @@ class SequencerRuntime(
           testingConfig,
           staticDomainParameters,
           localNodeParameters.processingTimeouts,
-          _ => _ => EitherT.rightT(()),
+          // Since the sequencer runtime trusts itself, there is no point in validating the events.
+          SequencedEventValidatorFactory.noValidation(domainId, sequencerId, warn = false),
           clock,
           sequencedEventStore,
           new SendTracker(Map(), SendTrackerStore(storage), metrics.sequencerClient, loggerFactory),
@@ -294,6 +293,8 @@ class SequencerRuntime(
     localNodeParameters.processingTimeouts,
     loggerFactory,
   )
+
+  private val healthManager = new io.grpc.protobuf.services.HealthStatusManager()
 
   TraceContext.withNewTraceContext(tc =>
     sequencer.onHealthChange { (status, traceContext) =>

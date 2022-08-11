@@ -11,7 +11,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   ServerEnforcedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data.ListConnectedDomainsResult
+import com.digitalasset.canton.admin.api.client.data.console.ListConnectedDomainsResult
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
 import com.digitalasset.canton.participant.admin.v0.DomainConnectivityServiceGrpc.DomainConnectivityServiceStub

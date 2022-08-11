@@ -5,9 +5,11 @@ package com.digitalasset.canton.resource
 
 import com.digitalasset.canton.config.CommunityDbConfig.Postgres
 import com.digitalasset.canton.config.{CommunityDbConfig, DbConfig, DefaultProcessingTimeouts}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.store.db.DbStorageSetup
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{BaseTest, CloseableTest}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -18,6 +20,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
   def modifyPassword(password: String): DbConfig
   def modifyPort(port: Int): DbConfig
   def modifyDatabaseName(dbName: String): DbConfig
+  val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
 
   "DbStorage" should {
 
@@ -33,6 +36,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
           config,
           connectionPoolForParticipant = false,
           None,
+          clock,
           CommonMockMetrics.dbStorage,
           DefaultProcessingTimeouts.testing,
           loggerFactory,
@@ -48,6 +52,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             config,
             connectionPoolForParticipant = false,
             None,
+            clock,
             CommonMockMetrics.dbStorage,
             DefaultProcessingTimeouts.testing,
             loggerFactory,
@@ -64,6 +69,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             config,
             connectionPoolForParticipant = false,
             None,
+            clock,
             CommonMockMetrics.dbStorage,
             DefaultProcessingTimeouts.testing,
             loggerFactory,
@@ -80,6 +86,7 @@ trait DbStorageSingleTest extends AsyncWordSpec with BaseTest with CloseableTest
             config,
             connectionPoolForParticipant = false,
             None,
+            clock,
             CommonMockMetrics.dbStorage,
             DefaultProcessingTimeouts.testing,
             loggerFactory,

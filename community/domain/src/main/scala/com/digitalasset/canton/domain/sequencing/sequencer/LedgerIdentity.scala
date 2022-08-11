@@ -20,7 +20,7 @@ sealed trait LedgerIdentity {
 object LedgerIdentity {
   def fromProtoV0(
       identityP: v0.LedgerIdentity
-  ): Either[ProtoDeserializationError, LedgerIdentity] = {
+  ): ParsingResult[LedgerIdentity] = {
     identityP.identifier match {
       case v0.LedgerIdentity.Identifier.Empty =>
         Left(FieldNotSet("LedgerIdentity.identifier"))

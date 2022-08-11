@@ -77,7 +77,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 }
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.CommandCompletionService.GrpcErrorStatus
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
-import com.digitalasset.canton.admin.api.client.data.{
+import com.digitalasset.canton.admin.api.client.data.console.{
   LedgerApiUser,
   LedgerMeteringReport,
   ListLedgerApiUsersResult,

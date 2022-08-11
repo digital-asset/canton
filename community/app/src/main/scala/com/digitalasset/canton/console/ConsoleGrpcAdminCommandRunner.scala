@@ -86,7 +86,7 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
       channels.getOrElseUpdate(
         addr,
         new CloseableChannel(
-          ClientChannelBuilder.createChannel(clientConfig),
+          ClientChannelBuilder.createChannelToTrustedServer(clientConfig),
           logger,
           s"ConsoleCommand",
         ),

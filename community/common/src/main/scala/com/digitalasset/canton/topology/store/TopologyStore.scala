@@ -31,6 +31,7 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactor
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -313,7 +314,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: Execution
 
   final def exists(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
-  ): Future[Boolean] = findStored(transaction).map(_.nonEmpty)
+  ): Future[Boolean] = findStored(transaction).map(_.exists(_.transaction == transaction))
 
   def findStored(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
@@ -322,6 +323,13 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit ec: Execution
   def findStoredNoSignature(transaction: TopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
   ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]]
+
+  def findStoredForVersion(
+      transaction: TopologyTransaction[TopologyChangeOp],
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]]
 
   /** Bootstrap a node state from a topology transaction collection */
   def bootstrap(

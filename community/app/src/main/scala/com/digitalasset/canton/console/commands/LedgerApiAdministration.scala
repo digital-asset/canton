@@ -24,7 +24,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.{
+import com.digitalasset.canton.admin.api.client.data.console.{
   LedgerApiUser,
   LedgerMeteringReport,
   ListLedgerApiUsersResult,

@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
 import akka.stream._
-import akka.stream.scaladsl.{BroadcastHub, Keep, Source, SourceQueueWithComplete}
+import akka.stream.scaladsl.{BroadcastHub, Keep, Sink, Source, SourceQueueWithComplete}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.lifecycle.{
@@ -41,12 +41,11 @@ class LocalSequencerStateEventSignaller(
     with FlagCloseableAsync
     with NamedLogging {
 
-  private val ((queue, killSwitch), notificationsHubSource) = AkkaUtil.runSupervised(
+  private val (queue, notificationsHubSource) = AkkaUtil.runSupervised(
     logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty),
     Source
       .queue[WriteNotification](1, OverflowStrategy.backpressure)
       .conflate(_ union _)
-      .viaMat(KillSwitches.single)(Keep.both)
       .toMat(BroadcastHub.sink(1))(Keep.both),
   )
 
@@ -89,8 +88,17 @@ class LocalSequencerStateEventSignaller(
     import TraceContext.Implicits.Empty._
     Seq(
       SyncCloseable("queue.complete", queue.complete()),
-      SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
-      AsyncCloseable("queue.completion", queue.watchCompletion(), timeouts.shutdownShort.unwrap),
+      AsyncCloseable(
+        "queue.completion",
+        // Create a new subscription from the broadcast hub to make sure that
+        // the completion really reaches the hub.
+        // Just watching the queue's completion merely synchronizes on when
+        // the queue's elements have been passed downstream,
+        // not that they have reached the hub.
+        notificationsHubSource.runWith(Sink.ignore),
+        timeouts.shutdownShort.unwrap,
+      ),
+      // Other readers of the broadcast hub should be shut down separately
     )
   }
 }

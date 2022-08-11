@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.store.{CausalityStoresTest, EventLogId}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent}
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
@@ -51,7 +51,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
   }
 
   def persistEvents(
-      events: Seq[(EventLogId, TimestampedEvent, Option[GlobalOffset])]
+      events: Seq[(EventLogId, TimestampedEvent, Boolean)]
   ): Future[Unit] = {
     val theStorage = storage
     import theStorage.api._
@@ -66,7 +66,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
       case (
             id,
             tsEvent @ TimestampedEvent(event, localOffset, requestSequencerCounter, eventId),
-            globalOffsetO,
+            persistToMultiDomainEventLog,
           ) =>
         val writeEventLog = IdempotentInsert.insertIgnoringConflicts(
           storage,
@@ -77,18 +77,19 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
                             $eventId, $event, ${tsEvent.traceContext})""",
         )
 
-        val writeMultiDomainEventLog = globalOffsetO.map { globalOffset =>
+        val writeMultiDomainEventLog =
           IdempotentInsert.insertIgnoringConflicts(
             storage,
-            "linearized_event_log ( global_offset )",
+            "linearized_event_log ( local_offset, log_id )",
             sql""" 
-                            linearized_event_log (global_offset, log_id, local_offset, publication_time)
-                            values (${globalOffset}, ${id.index}, $localOffset, ${CantonTimestamp
+                            linearized_event_log (log_id, local_offset, publication_time)
+                            values (${id.index}, $localOffset, ${CantonTimestamp
               .now()})
             """,
           )
-        }
-        writeEventLog :: writeMultiDomainEventLog.toList
+
+        if (persistToMultiDomainEventLog) Seq(writeEventLog, writeMultiDomainEventLog)
+        else Seq(writeEventLog)
     }
 
     theStorage.update_(DBIOAction.sequence(queries), functionFullName)

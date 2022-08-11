@@ -385,9 +385,8 @@ object SequenceWritesFlow {
               DeliverErrorStoreEvent(
                 sender,
                 messageId,
-                String256M.tryCreate(
-                  s"Invalid signing timestamp $signingTimestamp. The signing timestamp must be before or at $timestamp."
-                ),
+                Sequencer
+                  .signingTimestampAfterSequencingTimestampError(signingTimestamp, timestamp),
                 event.traceContext,
               )
           case other => other

@@ -21,7 +21,6 @@ import com.digitalasset.canton.topology.transaction.{
   TrustLevel,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import monocle.macros.syntax.lens._
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.duration._
@@ -35,9 +34,10 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
     hashOps.build(HashPurposeTest.testHashPurpose).addWithoutLengthPrefix(message).finish()
   def await(eitherT: EitherT[Future, SignatureCheckError, Unit]) = eitherT.value.futureValue
 
-  private def increaseParticipantResponseTimeout(old: DynamicDomainParameters) = old
-    .focus(_.participantResponseTimeout)
-    .modify(value => NonNegativeFiniteDuration.ofSeconds(value.unwrap.getSeconds + 1))
+  private def increaseParticipantResponseTimeout(old: DynamicDomainParameters) =
+    old.tryUpdate(participantResponseTimeout =
+      old.participantResponseTimeout + NonNegativeFiniteDuration.ofSeconds(1)
+    )
 
   private val domainParameters1 = DomainParameters.WithValidity(
     CantonTimestamp.Epoch,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
@@ -23,7 +24,7 @@ object TestDomainParameters {
   ) = TestingIdentityFactory(
     TestingTopology(),
     loggerFactory,
-    transformDefaults(DynamicDomainParameters.initialValues(clock)),
+    transformDefaults(DynamicDomainParameters.initialValues(clock, BaseTest.testedProtocolVersion)),
   )
 
   def domainSyncCryptoApi(
@@ -39,5 +40,8 @@ object TestDomainParameters {
     )
 
   val defaultDynamic: DynamicDomainParameters =
-    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.ofMillis(250))
+    DynamicDomainParameters.initialValues(
+      topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
+      BaseTest.testedProtocolVersion,
+    )
 }

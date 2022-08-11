@@ -309,7 +309,11 @@ class TestingIdentityFactory(
   private def domainParametersChangeTx(ts: CantonTimestamp): DynamicDomainParameters =
     dynamicDomainParameters.collect { case dp if dp.isValidAt(ts) => dp.parameter } match {
       case dp :: Nil => dp
-      case Nil => DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
+      case Nil =>
+        DynamicDomainParameters.initialValues(
+          NonNegativeFiniteDuration.Zero,
+          BaseTest.testedProtocolVersion,
+        )
       case _ => throw new IllegalStateException(s"Multiple domain parameters are valid at $ts")
     }
 
@@ -443,7 +447,6 @@ class TestingOwnerWithKeys(
 ) extends NoTracing {
 
   val cryptoApi = TestingIdentityFactory(loggerFactory).forOwnerAndDomain(keyOwner)
-  private val defaultProtocolVersion = BaseTest.testedProtocolVersion
 
   object SigningKeys {
 
@@ -529,19 +532,19 @@ class TestingOwnerWithKeys(
     val dpc1 = mkDmGov(
       DomainParametersChange(
         DomainId(uid),
-        defaultDomainParameters.copy(participantResponseTimeout =
-          NonNegativeFiniteDuration.ofSeconds(1)
-        ),
+        defaultDomainParameters
+          .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
       ),
       namespaceKey,
     )
     val dpc1Updated = mkDmGov(
       DomainParametersChange(
         DomainId(uid),
-        defaultDomainParameters.copy(
-          participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2),
-          topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100),
-        ),
+        defaultDomainParameters
+          .tryUpdate(
+            participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2),
+            topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100),
+          ),
       ),
       namespaceKey,
     )
@@ -564,7 +567,7 @@ class TestingOwnerWithKeys(
             signingKey,
             cryptoApi.crypto.pureCrypto,
             cryptoApi.crypto.privateCrypto,
-            defaultProtocolVersion,
+            BaseTest.testedProtocolVersion,
           )
           .value,
         10.seconds,
@@ -574,12 +577,12 @@ class TestingOwnerWithKeys(
   def mkAdd(mapping: TopologyStateUpdateMapping, signingKey: SigningPublicKey = SigningKeys.key1)(
       implicit ec: ExecutionContext
   ): SignedTopologyTransaction[TopologyChangeOp.Add] =
-    mkTrans(TopologyStateUpdate.createAdd(mapping, defaultProtocolVersion), signingKey)
+    mkTrans(TopologyStateUpdate.createAdd(mapping, BaseTest.testedProtocolVersion), signingKey)
 
   def mkDmGov(mapping: DomainGovernanceMapping, signingKey: SigningPublicKey)(implicit
       ec: ExecutionContext
   ): SignedTopologyTransaction[TopologyChangeOp.Replace] =
-    mkTrans(DomainGovernanceTransaction(mapping, defaultProtocolVersion), signingKey)
+    mkTrans(DomainGovernanceTransaction(mapping, BaseTest.testedProtocolVersion), signingKey)
 
   def revert(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       ec: ExecutionContext
@@ -666,5 +669,8 @@ object DefaultTestIdentities {
   val (participant3, party3) = createParticipantAndParty(3)
 
   val defaultDynamicDomainParameters =
-    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
+    DynamicDomainParameters.initialValues(
+      NonNegativeFiniteDuration.Zero,
+      BaseTest.testedProtocolVersion,
+    )
 }

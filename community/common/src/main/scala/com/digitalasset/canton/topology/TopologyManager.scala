@@ -17,7 +17,9 @@ import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGr
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.protocol.DynamicDomainParameters
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.topology.TopologyManagerError.IncreaseOfLedgerTimeRecordTimeTolerance
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   IncomingTopologyTransactionAuthorizationValidator,
@@ -40,6 +42,7 @@ import org.slf4j.event.Level
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
+import scala.math.Ordering.Implicits.infixOrderingOps
 
 abstract class TopologyManager[E <: CantonError](
     val clock: Clock,
@@ -248,6 +251,8 @@ abstract class TopologyManager[E <: CantonError](
               )
             },
           )
+        case DomainParametersChange(_, newDomainParameters) if !force =>
+          checkLedgerTimeRecordTimeToleranceNotIncreasing(newDomainParameters)
         case _ => EitherT.rightT(())
       }
     }
@@ -285,6 +290,30 @@ abstract class TopologyManager[E <: CantonError](
         )
       } yield ()): EitherT[Future, TopologyManagerError, Unit]
     }
+
+  private def checkLedgerTimeRecordTimeToleranceNotIncreasing(
+      newDomainParameters: DynamicDomainParameters
+  )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Unit] = {
+    // See i9028 for a detailed design.
+
+    EitherT(for {
+      headTransactions <- store.headTransactions
+    } yield {
+      val domainParameters = headTransactions.toTopologyState
+        .collectFirst { case DomainGovernanceElement(DomainParametersChange(_, domainParameters)) =>
+          domainParameters
+        }
+        .getOrElse(DynamicDomainParameters.initialValues(clock, protocolVersion))
+      Either.cond(
+        domainParameters.ledgerTimeRecordTimeTolerance >= newDomainParameters.ledgerTimeRecordTimeTolerance,
+        (),
+        IncreaseOfLedgerTimeRecordTimeTolerance.TemporarilyInsecure(
+          domainParameters.ledgerTimeRecordTimeTolerance,
+          newDomainParameters.ledgerTimeRecordTimeTolerance,
+        ),
+      )
+    })
+  }
 
   protected def checkNewTransaction(
       transaction: SignedTopologyTransaction[TopologyChangeOp],
@@ -871,6 +900,48 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     ) extends CantonError.Impl(
           cause =
             "Topology transaction would remove a key that creates conflicts and dangling transactions"
+        )
+        with TopologyManagerError
+  }
+
+  @Explanation(
+    """This error indicates that it has been attempted to increase the ``ledgerTimeRecordTimeTolerance`` domain parameter in an insecure manner.
+      |Increasing this parameter may disable security checks and can therefore be a security risk.
+      |"""
+  )
+  @Resolution(
+    """Make sure that the new value of ``ledgerTimeRecordTimeTolerance`` is at most half of the ``mediatorDeduplicationTimeout`` domain parameter.
+      |
+      |Use ``myDomain.service.set_ledger_time_record_time_tolerance`` for securely increasing ledgerTimeRecordTimeTolerance.
+      |
+      |Alternatively, add the ``force = true`` flag to your command, if security is not a concern for you. 
+      |The security checks will be effective again after twice the new value of ``ledgerTimeRecordTimeTolerance``.
+      |"""
+  )
+  object IncreaseOfLedgerTimeRecordTimeTolerance
+      extends ErrorCode(
+        id = "INCREASE_OF_LEDGER_TIME_RECORD_TIME_TOLERANCE",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    case class TemporarilyInsecure(
+        oldValue: NonNegativeFiniteDuration,
+        newValue: NonNegativeFiniteDuration,
+    )(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"The parameter ledgerTimeRecordTimeTolerance can currently not be increased to $newValue."
+        )
+        with TopologyManagerError
+
+    case class PermanentlyInsecure(
+        newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+        mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+    )(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Unable to increase ledgerTimeRecordTimeTolerance to $newLedgerTimeRecordTimeTolerance, because it must not be more than half of mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
         )
         with TopologyManagerError
   }

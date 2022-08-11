@@ -11,9 +11,10 @@ import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.google.protobuf.empty.Empty
-import io.grpc.ManagedChannel
+import io.grpc.{ManagedChannel, Status}
 
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 object DomainAdminCommands {
 
@@ -67,18 +68,40 @@ object DomainAdminCommands {
         .bimap(_.toString, _.toSeq)
   }
 
-  final case object GetDomainParameters
+  final case class GetDomainParameters()(implicit ec: ExecutionContext)
       extends BaseDomainServiceCommand[
-        Empty,
+        adminproto.GetDomainParameters.Request,
         adminproto.GetDomainParameters.Response,
         StaticDomainParameters,
       ] {
-    override def createRequest(): Either[String, Empty] = Right(Empty())
+    override def createRequest(): Either[String, adminproto.GetDomainParameters.Request] = Right(
+      adminproto.GetDomainParameters.Request()
+    )
     override def submitRequest(
         service: adminproto.DomainServiceGrpc.DomainServiceStub,
-        request: Empty,
-    ): Future[adminproto.GetDomainParameters.Response] =
-      service.getDomainParameters(adminproto.GetDomainParameters.Request())
+        request: adminproto.GetDomainParameters.Request,
+    ): Future[adminproto.GetDomainParameters.Response] = {
+      service
+        .getDomainParametersVersioned(adminproto.GetDomainParameters.Request())
+        .transformWith {
+          case Failure(exception: io.grpc.StatusRuntimeException)
+              if exception.getStatus.getCode == Status.Code.UNIMPLEMENTED =>
+            /*
+              The retry here is for backward compatibility reason.
+              The initial GetDomainParameters endpoints was not returning properly versioned
+              responses. If the new endpoint does not respond, we try the old one.
+             */
+            service
+              .getDomainParameters(Empty())
+              .map(adminproto.GetDomainParameters.Response.Parameters.ParametersV0(_))
+              .map(adminproto.GetDomainParameters.Response(_))
+
+          case Failure(exception) => Future.failed(exception)
+
+          case Success(value) => Future.successful(value)
+        }
+    }
+
     override def handleResponse(
         response: adminproto.GetDomainParameters.Response
     ): Either[String, StaticDomainParameters] = {
