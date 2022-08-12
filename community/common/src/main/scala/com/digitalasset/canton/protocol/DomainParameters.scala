@@ -6,11 +6,11 @@ package com.digitalasset.canton.protocol
 import cats.Order
 import cats.syntax.either._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
 import com.digitalasset.canton.protocol.{v0 => protoV0, v1 => protoV1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -22,8 +22,9 @@ import com.digitalasset.canton.time.{
   SimClock,
 }
 import com.digitalasset.canton.version._
+import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
-import scala.Ordered.orderingToOrdered
+import scala.Ordering.Implicits._
 
 object DomainParameters {
 
@@ -317,9 +318,15 @@ object StaticDomainParameters
   *                                      record time of a command.
   *                                      If the absolute difference would be larger for a command,
   *                                      then the command must be rejected.
+  * @param mediatorDeduplicationTimeout the time for how long a request will be stored at the mediator for deduplication
+  *                                     purposes. This must be at least twice the `ledgerTimeRecordTimeTolerance`.
+  *                                     It is fine to choose the minimal value, unless you plan to subsequently
+  *                                     increase `ledgerTimeRecordTimeTolerance.`
   * @param reconciliationInterval The size of the reconciliation interval (minimum duration between two ACS commitments).
   *                               Note: default to [[StaticDomainParameters.defaultReconciliationInterval]] for backward
   *                               compatibility.
+  * @throws DynamicDomainParameters$.InvalidDomainParameters
+  *   if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
   */
 sealed abstract case class DynamicDomainParameters(
     participantResponseTimeout: NonNegativeFiniteDuration,
@@ -327,12 +334,20 @@ sealed abstract case class DynamicDomainParameters(
     transferExclusivityTimeout: NonNegativeFiniteDuration,
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+    mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
     reconciliationInterval: PositiveSeconds,
 )(val representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters])
     extends HasProtocolVersionedWrapper[DynamicDomainParameters]
     with PrettyPrinting {
 
   val companionObj = DynamicDomainParameters
+
+  // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.jtqcu52qpf82
+  if (ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) > mediatorDeduplicationTimeout)
+    throw new InvalidDomainParameters(
+      s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
+        s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
+    )
 
   /** Computes the decision time for the given activeness time.
     *
@@ -375,21 +390,23 @@ sealed abstract case class DynamicDomainParameters(
   def automaticTransferInEnabled: Boolean =
     transferExclusivityTimeout > NonNegativeFiniteDuration.Zero
 
-  def copy(
+  def tryUpdate(
       participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
       mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
       transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
       topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
+      mediatorDeduplicationTimeout: NonNegativeFiniteDuration = mediatorDeduplicationTimeout,
       reconciliationInterval: PositiveSeconds = reconciliationInterval,
-  ) = new DynamicDomainParameters(
+  ): DynamicDomainParameters = DynamicDomainParameters.tryCreate(
     participantResponseTimeout = participantResponseTimeout,
     mediatorReactionTimeout = mediatorReactionTimeout,
     transferExclusivityTimeout = transferExclusivityTimeout,
     topologyChangeDelay = topologyChangeDelay,
     ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+    mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
     reconciliationInterval = reconciliationInterval,
-  )(representativeProtocolVersion) {}
+  )(representativeProtocolVersion)
 
   def toProtoV0: protoV0.DynamicDomainParameters =
     protoV0.DynamicDomainParameters(
@@ -407,6 +424,7 @@ sealed abstract case class DynamicDomainParameters(
       transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
       topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
       ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
+      mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
       reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
     )
 
@@ -421,6 +439,56 @@ sealed abstract case class DynamicDomainParameters(
 }
 
 object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDomainParameters] {
+
+  /** Safely creates DynamicDomainParameters.
+    * @return `Left(...)` if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
+    */
+  def create(
+      participantResponseTimeout: NonNegativeFiniteDuration,
+      mediatorReactionTimeout: NonNegativeFiniteDuration,
+      transferExclusivityTimeout: NonNegativeFiniteDuration,
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+      reconciliationInterval: PositiveSeconds,
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters]
+  ): Either[InvalidDomainParameters, DynamicDomainParameters] =
+    Either.catchOnly[InvalidDomainParameters](
+      tryCreate(
+        participantResponseTimeout,
+        mediatorReactionTimeout,
+        transferExclusivityTimeout,
+        topologyChangeDelay,
+        ledgerTimeRecordTimeTolerance,
+        mediatorDeduplicationTimeout,
+        reconciliationInterval,
+      )(representativeProtocolVersion)
+    )
+
+  /** Creates DynamicDomainParameters
+    * @throws InvalidDomainParameters if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
+    */
+  def tryCreate(
+      participantResponseTimeout: NonNegativeFiniteDuration,
+      mediatorReactionTimeout: NonNegativeFiniteDuration,
+      transferExclusivityTimeout: NonNegativeFiniteDuration,
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
+      reconciliationInterval: PositiveSeconds,
+  )(
+      representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters]
+  ): DynamicDomainParameters = new DynamicDomainParameters(
+    participantResponseTimeout,
+    mediatorReactionTimeout,
+    transferExclusivityTimeout,
+    topologyChangeDelay,
+    ledgerTimeRecordTimeTolerance,
+    mediatorDeduplicationTimeout,
+    reconciliationInterval,
+  )(representativeProtocolVersion) {}
+
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
@@ -458,27 +526,36 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   private val defaultLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(60)
 
+  private val defaultMediatorDeduplicationTimeout: NonNegativeFiniteDuration =
+    defaultLedgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
+
   /** Default dynamic domain parameters for non-static clocks */
-  lazy val defaultValues: DynamicDomainParameters = initialValues(defaultTopologyChangeDelay)
-  private lazy val defaultReconciliationInterval: PositiveSeconds = PositiveSeconds.ofSeconds(60)
+  def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
+    initialValues(defaultTopologyChangeDelay, protocolVersion)
 
-  def initialValues(topologyChangeDelay: NonNegativeFiniteDuration) = new DynamicDomainParameters(
-    participantResponseTimeout = defaultParticipantResponseTimeout,
-    mediatorReactionTimeout = defaultMediatorReactionTimeout,
-    transferExclusivityTimeout = defaultTransferExclusivityTimeout,
-    topologyChangeDelay = topologyChangeDelay,
-    ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
-    reconciliationInterval = defaultReconciliationInterval,
-  )(
-    protocolVersionRepresentativeFor(ProtobufVersion(1))
-  ) {} // TODO(#9900) remove this hardcoded representative protocol version
+  def initialValues(
+      topologyChangeDelay: NonNegativeFiniteDuration,
+      protocolVersion: ProtocolVersion,
+  ) = checked( // safe because default values are safe
+    DynamicDomainParameters.tryCreate(
+      participantResponseTimeout = defaultParticipantResponseTimeout,
+      mediatorReactionTimeout = defaultMediatorReactionTimeout,
+      transferExclusivityTimeout = defaultTransferExclusivityTimeout,
+      topologyChangeDelay = topologyChangeDelay,
+      ledgerTimeRecordTimeTolerance = defaultLedgerTimeRecordTimeTolerance,
+      mediatorDeduplicationTimeout = defaultMediatorDeduplicationTimeout,
+      reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
+    )(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
+  )
 
-  def initialValues(clock: Clock): DynamicDomainParameters = {
+  def initialValues(clock: Clock, protocolVersion: ProtocolVersion): DynamicDomainParameters = {
     val topologyChangeDelay = clock match {
       case _: RemoteClock | _: SimClock => defaultTopologyChangeDelayNonStandardClock
       case _ => defaultTopologyChangeDelay
     }
-    initialValues(topologyChangeDelay)
+    initialValues(topologyChangeDelay, protocolVersion)
   }
 
   // if there is no topology change delay defined (or not yet propagated), we'll use this one
@@ -519,14 +596,17 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       )(
         ledgerTimeRecordTimeToleranceP
       )
-    } yield new DynamicDomainParameters(
-      participantResponseTimeout = participantResponseTimeout,
-      mediatorReactionTimeout = mediatorReactionTimeout,
-      transferExclusivityTimeout = transferExclusivityTimeout,
-      topologyChangeDelay = topologyChangeDelay,
-      ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-      reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    } yield checked( // safe because value for mediatorDeduplicationTimeout is safe
+      DynamicDomainParameters.tryCreate(
+        participantResponseTimeout = participantResponseTimeout,
+        mediatorReactionTimeout = mediatorReactionTimeout,
+        transferExclusivityTimeout = transferExclusivityTimeout,
+        topologyChangeDelay = topologyChangeDelay,
+        ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+        reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
+        mediatorDeduplicationTimeout = ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2),
+      )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )
   }
 
   def fromProtoV1(
@@ -539,6 +619,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       topologyChangeDelayP,
       ledgerTimeRecordTimeToleranceP,
       reconciliationIntervalP,
+      mediatorDeduplicationTimeoutP,
     ) = domainParametersP
 
     for {
@@ -570,13 +651,27 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       )(
         ledgerTimeRecordTimeToleranceP
       )
-    } yield new DynamicDomainParameters(
-      participantResponseTimeout = participantResponseTimeout,
-      mediatorReactionTimeout = mediatorReactionTimeout,
-      transferExclusivityTimeout = transferExclusivityTimeout,
-      topologyChangeDelay = topologyChangeDelay,
-      ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-      reconciliationInterval = reconciliationInterval,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(1))) {}
+      mediatorDeduplicationTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorDeduplicationTimeout"
+      )(
+        mediatorDeduplicationTimeoutP
+      )
+      domainParameters <-
+        create(
+          participantResponseTimeout = participantResponseTimeout,
+          mediatorReactionTimeout = mediatorReactionTimeout,
+          transferExclusivityTimeout = transferExclusivityTimeout,
+          topologyChangeDelay = topologyChangeDelay,
+          ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+          mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
+          reconciliationInterval = reconciliationInterval,
+        )(protocolVersionRepresentativeFor(ProtobufVersion(1)))
+          .leftMap(_.toProtoDeserializationError)
+    } yield domainParameters
+  }
+
+  class InvalidDomainParameters(message: String) extends RuntimeException(message) {
+    lazy val toProtoDeserializationError: ProtoDeserializationError.InvariantViolation =
+      ProtoDeserializationError.InvariantViolation(message)
   }
 }

@@ -83,7 +83,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       topology,
       loggerFactory,
       dynamicDomainParameters =
-        initialDomainParameters.copy(participantResponseTimeout = participantResponseTimeout),
+        initialDomainParameters.tryUpdate(participantResponseTimeout = participantResponseTimeout),
     )
 
     val domainSyncCryptoApi: DomainSyncCryptoClient =

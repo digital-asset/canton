@@ -675,12 +675,8 @@ class DbMultiDomainEventLog private[db] (
     import TraceContext.Implicits.Empty._
     List[AsyncOrSyncCloseable](
       SyncCloseable("eventsQueue.complete", eventsQueue.complete()),
+      // The kill switch ensures that we stop processing the remaining entries in the queue.
       SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
-      AsyncCloseable(
-        "eventsQueue.completion",
-        eventsQueue.watchCompletion(),
-        timeouts.shutdownShort.unwrap,
-      ),
       AsyncCloseable(
         "done",
         done.map(_ => ()).recover {

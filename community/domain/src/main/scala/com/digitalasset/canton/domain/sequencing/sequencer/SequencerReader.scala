@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import akka.NotUsed
 import akka.stream._
-import akka.stream.scaladsl.{Flow, Keep, Sink, Source}
+import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source, WireTap}
+import akka.{Done, NotUsed}
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.option._
@@ -25,11 +25,11 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.AkkaUtil.CombinedKillSwitch
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter, checked}
-import com.google.common.annotations.VisibleForTesting
+import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -147,61 +147,43 @@ class SequencerReader(
         )
     }
 
-    private def validateSigningTimestamp(
-        counter: SequencerCounter,
-        signingTimestamp: CantonTimestamp,
-        sequencingTimestamp: CantonTimestamp,
-        latestTopologyClientTimestamp: Option[CantonTimestamp],
-    )(implicit traceContext: TraceContext): Future[Option[SyncCryptoApi]] = {
-      // The SequencerWriter makes sure that the signing timestamp is at most the sequencing timestamp
-      ErrorUtil.requireArgument(
-        signingTimestamp <= sequencingTimestamp,
-        s"The signing timestamp $signingTimestamp must be before or at the sequencing timestamp $sequencingTimestamp for sequencer counter $counter of member $member",
-      )
-      for {
-        snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
-          syncCryptoApi,
-          signingTimestamp,
-          latestTopologyClientTimestamp,
-          protocolVersion,
-          // This warning should only trigger on unauthenticated members,
-          // but batches addressed to unauthenticated members must not specify a signing key timestamp.
-          warnIfApproximate = true,
-        )
-        dynamicDomainParametersO <- snapshot.ipsSnapshot.findDynamicDomainParameters()
-      } yield {
-        val withinSigningTolerance = dynamicDomainParametersO.exists { dynamicDomainParameters =>
-          import scala.Ordered.orderingToOrdered
-          dynamicDomainParameters.sequencerSigningTolerance.unwrap >= sequencingTimestamp - signingTimestamp
-        }
-        if (withinSigningTolerance) Some(snapshot) else None
-      }
-    }
-
-    private def recordCheckpointSink(implicit
+    /** An Akka flow that passes the [[UnsignedEventData]] untouched from input to output,
+      * but asynchronously records every checkpoint interval.
+      * The materialized future completes when all checkpoints have been recorded
+      * after the kill switch has been pulled.
+      */
+    private def recordCheckpointFlow(implicit
         traceContext: TraceContext
-    ): Sink[UnsignedEventData, NotUsed] = Flow[UnsignedEventData]
-      .map {
-        case UnsignedEventData(
-              event,
-              _signingTimestampAndSnapshotO,
-              previousTopologyClientTimestamp,
-              latestTopologyClientTimestamp,
-              eventTraceContext,
-            ) =>
-          logger.debug(s"Preparing counter checkpoint for $member at ${event.timestamp}")
-          CounterCheckpoint(event, latestTopologyClientTimestamp)
-      }
-      .buffer(1, OverflowStrategy.dropTail) // we only really need one event and can drop others
-      .throttle(1, config.checkpointInterval.toScala)
-      .mapAsync(1) { checkpoint =>
-        performUnlessClosingF(functionFullName) {
-          saveCounterCheckpoint(member, registeredMember.memberId, checkpoint)
-        }.onShutdown {
-          logger.info("Skip saving the counter checkpoint due to shutdown")
-        }
-      }
-      .to(Sink.ignore)
+    ): Flow[UnsignedEventData, UnsignedEventData, (KillSwitch, Future[Done])] = {
+      val recordCheckpointSink: Sink[UnsignedEventData, (KillSwitch, Future[Done])] =
+        Flow[UnsignedEventData]
+          .buffer(1, OverflowStrategy.dropTail) // we only really need one event and can drop others
+          .throttle(1, config.checkpointInterval.toScala)
+          // The kill switch must sit after the throttle because throttle will pass the completion downstream
+          // only after the bucket with unprocessed events has been drained, which happens only every checkpoint interval
+          .viaMat(KillSwitches.single)(Keep.right)
+          .mapAsync(parallelism = 1) { unsignedEventData =>
+            val event = unsignedEventData.event
+            logger.debug(s"Preparing counter checkpoint for $member at ${event.timestamp}")
+            val checkpoint =
+              CounterCheckpoint(event, unsignedEventData.latestTopologyClientTimestamp)
+            performUnlessClosingF(functionFullName) {
+              saveCounterCheckpoint(member, registeredMember.memberId, checkpoint)
+            }.onShutdown {
+              logger.info("Skip saving the counter checkpoint due to shutdown")
+            }
+          }
+          .toMat(Sink.ignore)(Keep.both)
+
+      // Essentially the Source.wireTap implementation except that we return the completion future of the sink
+      Flow.fromGraph(GraphDSL.createGraph(recordCheckpointSink) {
+        implicit b: GraphDSL.Builder[(KillSwitch, Future[Done])] => recordCheckpointShape =>
+          import GraphDSL.Implicits._
+          val bcast = b.add(WireTap[UnsignedEventData]())
+          bcast.out1 ~> recordCheckpointShape
+          FlowShape(bcast.in, bcast.out0)
+      })
+    }
 
     private def signValidatedEvent(
         unsignedEventData: UnsignedEventData
@@ -223,13 +205,13 @@ class SequencerReader(
           Future.successful(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
-            (event.counter > GenesisSequencerCounter) && member.isAuthenticated
+            (event.counter > GenesisSequencerCounter) && member.isAuthenticated &&
+              protocolVersion != ProtocolVersion.v2_0_0
           SyncCryptoClient
             .getSnapshotForTimestamp(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
-              protocolVersion,
               warnIfApproximate = warnIfApproximate,
             )
             .map(None -> _)
@@ -285,61 +267,74 @@ class SequencerReader(
               Some(signingTimestamp),
               eventTraceContext,
             ) =>
-          validateSigningTimestamp(
-            counter,
-            signingTimestamp,
-            sequencingTimestamp,
-            topologyClientTimestampBefore,
-          )(eventTraceContext).flatMap {
-            case Some(snapshot) =>
-              val event =
-                mkSequencedEvent(member, registeredMember.memberId, counter, unvalidatedEvent)
-              validationSuccess(event, Some(signingTimestamp -> snapshot))
-
-            case None =>
-              // The signing timestamp is too old for the sequencing time.
-              // Replace the event with an error that is only sent to the sender
-              // To not introduce gaps in the sequencer counters,
-              // we deliver an empty batch to the member if it is not the sender.
-              // This way, we can avoid revalidating the skipped events after the checkpoint we resubscribe from.
-              val event = if (registeredMember.memberId == sender) {
-                // TODO(#5990) use an error code
-                val reason = SequencerReader.invalidSigningTimestampError(
-                  signingTimestamp,
-                  sequencingTimestamp,
+          implicit val traceContext: TraceContext = eventTraceContext
+          Sequencer
+            .validateSigningTimestamp(
+              syncCryptoApi,
+              signingTimestamp,
+              sequencingTimestamp,
+              topologyClientTimestampBefore,
+              // This warning should only trigger on unauthenticated members,
+              // but batches addressed to unauthenticated members must not specify a signing key timestamp.
+              warnIfApproximate = protocolVersion != ProtocolVersion.v2_0_0,
+            )
+            .valueOr { case Sequencer.SigningTimestampAfterSequencingTime =>
+              // The SequencerWriter makes sure that the signing timestamp is at most the sequencing timestamp
+              ErrorUtil.internalError(
+                new IllegalArgumentException(
+                  s"The signing timestamp $signingTimestamp must be before or at the sequencing timestamp $sequencingTimestamp for sequencer counter $counter of member $member"
                 )
-                DeliverError.create(
-                  counter,
-                  sequencingTimestamp,
-                  domainId,
-                  messageId,
-                  reason,
-                  protocolVersion,
-                )
-              } else
-                Deliver.create(
-                  counter,
-                  sequencingTimestamp,
-                  domainId,
-                  None,
-                  Batch.empty[ClosedEnvelope](protocolVersion),
-                  protocolVersion,
-                )
-              Future.successful(
-                // This event cannot change the topology state of the client
-                // and might not reach the topology client even
-                // if it was originally addressed to it.
-                // So keep the before timestamp
-                topologyClientTimestampBefore ->
-                  UnsignedEventData(
-                    event,
-                    None,
-                    topologyClientTimestampBefore,
-                    topologyClientTimestampBefore,
-                    unvalidatedEvent.traceContext,
-                  )
               )
-          }
+            }
+            .flatMap {
+              case Some(snapshot) =>
+                val event =
+                  mkSequencedEvent(member, registeredMember.memberId, counter, unvalidatedEvent)
+                validationSuccess(event, Some(signingTimestamp -> snapshot))
+
+              case None =>
+                // The signing timestamp is too old for the sequencing time.
+                // Replace the event with an error that is only sent to the sender
+                // To not introduce gaps in the sequencer counters,
+                // we deliver an empty batch to the member if it is not the sender.
+                // This way, we can avoid revalidating the skipped events after the checkpoint we resubscribe from.
+                val event = if (registeredMember.memberId == sender) {
+                  val reason = Sequencer.signingTimestampTooEarlyError(
+                    signingTimestamp,
+                    sequencingTimestamp,
+                  )
+                  DeliverError.create(
+                    counter,
+                    sequencingTimestamp,
+                    domainId,
+                    messageId,
+                    reason,
+                    protocolVersion,
+                  )
+                } else
+                  Deliver.create(
+                    counter,
+                    sequencingTimestamp,
+                    domainId,
+                    None,
+                    Batch.empty[ClosedEnvelope](protocolVersion),
+                    protocolVersion,
+                  )
+                Future.successful(
+                  // This event cannot change the topology state of the client
+                  // and might not reach the topology client even
+                  // if it was originally addressed to it.
+                  // So keep the before timestamp
+                  topologyClientTimestampBefore ->
+                    UnsignedEventData(
+                      event,
+                      None,
+                      topologyClientTimestampBefore,
+                      topologyClientTimestampBefore,
+                      unvalidatedEvent.traceContext,
+                    )
+                )
+            }
 
         case _ =>
           val event =
@@ -357,9 +352,12 @@ class SequencerReader(
         initialReadState.latestTopologyClientRecipientTimestamp,
       )(validateEvent)
       val eventsSource = validatedEventSrc.dropWhile(_.event.counter < startAt)
+
       eventsSource
-        .viaMat(KillSwitches.single)(Keep.right)
-        .wireTap(recordCheckpointSink) // setup a separate sink to periodically record checkpoints
+        .viaMat(recordCheckpointFlow)(Keep.right)
+        .viaMat(KillSwitches.single) { case ((checkpointKillSwitch, checkpointDone), killSwitch) =>
+          (new CombinedKillSwitch(checkpointKillSwitch, killSwitch), checkpointDone)
+        }
         .mapAsync(
           // We technically do not need to process everything sequentially here.
           // Neither do we have evidence that parallel processing helps, as a single sequencer reader
@@ -559,31 +557,4 @@ object SequencerReader {
       latestTopologyClientTimestamp: Option[CantonTimestamp],
       eventTraceContext: TraceContext,
   )
-
-  def getSnapshotForSequencerSigning[T <: SyncCryptoApi](
-      cryptoApi: SyncCryptoClient[T],
-      timestamp: CantonTimestamp,
-  )(implicit
-      traceContext: TraceContext
-  ): T = {
-    // TODO(i4639) improve how we deal with sequencer keys
-    // below code works due to the following convention: we always use the "newest" key for signing.
-    // if we roll sequencer keys, then we add a new key first and then revoke the old one in a subsequent
-    // transaction. therefore, for some time, the sequencer will have two active keys and suddenly
-    // start to use the new key. while the system is racing to update the topology state, the sequencer
-    // will still sign with the old key, which is still valid.
-    checked(
-      cryptoApi.trySnapshot(CantonTimestamp.min(cryptoApi.topologyKnownUntilTimestamp, timestamp))
-    )
-  }
-
-  @VisibleForTesting
-  def invalidSigningTimestampError(
-      signingTimestamp: CantonTimestamp,
-      sequencingTimestamp: CantonTimestamp,
-  ): DeliverErrorReason.BatchRefused = {
-    val errorMsg =
-      s"Invalid signing timestamp $signingTimestamp for sequencing time $sequencingTimestamp."
-    DeliverErrorReason.BatchRefused(errorMsg)
-  }
 }

@@ -74,11 +74,17 @@ trait DomainTopologyManagerIdentityInitialization {
       )
 
       // Setup the legal identity of the domain nodes
-      domainCert <- (new LegalIdentityInit(certificateGenerator, crypto)).getOrGenerateCertificate(
-        uid,
-        Seq(MediatorId(uid), domainTopologyManagerId),
-      )
-      _ <- legalIdentityHook(domainCert)
+      _ <-
+        if (initConfig.generateLegalIdentityCertificate) {
+          (new LegalIdentityInit(certificateGenerator, crypto))
+            .getOrGenerateCertificate(
+              uid,
+              Seq(MediatorId(uid), domainTopologyManagerId),
+            )
+            .flatMap(legalIdentityHook)
+        } else {
+          EitherT.rightT[Future, String](())
+        }
 
     } yield (nodeId, topologyManager, namespaceKey)
 

@@ -102,14 +102,16 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
     val dpc1 = owner.mkDmGov(
       DomainParametersChange(
         DefaultTestIdentities.domainId,
-        defaultDomainParameters.copy(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(10)),
+        defaultDomainParameters
+          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(10)),
       ),
       namespaceKey,
     )
     val dpc2 = owner.mkDmGov(
       DomainParametersChange(
         DefaultTestIdentities.domainId,
-        defaultDomainParameters.copy(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100)),
+        defaultDomainParameters
+          .tryUpdate(topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(100)),
       ),
       namespaceKey,
     )

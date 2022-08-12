@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.{
   Namespace,
   ParticipantId,
   PartyId,
+  SequencerId,
   TestingOwnerWithKeys,
   UniqueIdentifier,
 }
@@ -47,9 +48,9 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
 
   import SigningKeys._
 
-  val domainId = domainManager.domainId
   val ns1 = Namespace(key1.fingerprint)
   val ns6 = Namespace(key6.fingerprint)
+  val domainId = DomainId(UniqueIdentifier(Identifier.tryCreate("domain"), ns1))
   val uid1a = UniqueIdentifier(Identifier.tryCreate("one"), ns1)
   val uid1b = UniqueIdentifier(Identifier.tryCreate("two"), ns1)
   val uid6 = UniqueIdentifier(Identifier.tryCreate("other"), ns6)
@@ -75,6 +76,11 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val okm1ak5_k2 = mkAdd(OwnerToKeyMapping(participant1, key5), key2)
   val okm1bk5_k1 = mkAdd(OwnerToKeyMapping(participant1, key5), key1)
   val okm1bk5_k4 = mkAdd(OwnerToKeyMapping(participant1, key5), key4)
+
+  val sequencer1 = SequencerId(UniqueIdentifier(Identifier.tryCreate("sequencer1"), ns1))
+  val okmS1k7_k1 = mkAdd(OwnerToKeyMapping(sequencer1, key7), key1)
+  val okmS1k9_k1 = mkAdd(OwnerToKeyMapping(sequencer1, key9), key1)
+  val okmS1k7_k1_remove = mkTrans(okmS1k7_k1.transaction.reverse)
 
   val ps1d1T_k3 = mkAdd(
     ParticipantState(
@@ -128,9 +134,8 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val dmp1_k1 = mkDmGov(
     DomainParametersChange(
       DomainId(uid1a),
-      defaultDomainParameters.copy(participantResponseTimeout =
-        NonNegativeFiniteDuration.ofSeconds(1)
-      ),
+      defaultDomainParameters
+        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(1)),
     ),
     key1,
   )
@@ -138,9 +143,8 @@ class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: 
   val dmp1_k1_bis = mkDmGov(
     DomainParametersChange(
       DomainId(uid1a),
-      defaultDomainParameters.copy(participantResponseTimeout =
-        NonNegativeFiniteDuration.ofSeconds(2)
-      ),
+      defaultDomainParameters
+        .tryUpdate(participantResponseTimeout = NonNegativeFiniteDuration.ofSeconds(2)),
     ),
     key1,
   )

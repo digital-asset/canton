@@ -36,4 +36,30 @@ object DatabaseStorageError extends StorageErrorGroup {
            |$messageFromSlick""".stripMargin
         ) {}
   }
+
+  @Explanation(
+    """This error indicates that the connection to the database has been lost."""
+  )
+  @Resolution("Inspect error message for details.")
+  object DatabaseConnectionLost
+      extends ErrorCode(
+        id = "DB_CONNECTION_LOST",
+        ErrorCategory.BackgroundProcessDegradationWarning,
+      ) {
+
+    override protected def exposedViaApi: Boolean = false
+
+    @Resolution(
+      s"""This error indicates that during a database connection health check it was detected that
+         | it is not possible to connect to the database. That is, an attempt has been made to connect
+         | but it either timed out or failed to check that the connection was valid.""".stripMargin
+    )
+    case class DatabaseConnectionLost(messageFromSlick: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s""" It was not possible to establish a valid connection to the database.
+                 |Full error message:
+                 |$messageFromSlick""".stripMargin
+        ) {}
+  }
 }

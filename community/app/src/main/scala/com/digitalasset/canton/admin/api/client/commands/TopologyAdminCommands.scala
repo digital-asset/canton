@@ -10,9 +10,12 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data._
+import com.digitalasset.canton.admin.api.client.data.console._
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0 => idProto}
+import com.digitalasset.canton.protocol.{
+  DynamicDomainParameters => DomainDynamicDomainParameters,
+  v0 => idProto,
+}
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.AuthorizationSuccess
@@ -23,6 +26,7 @@ import com.digitalasset.canton.topology.admin.v0.TopologyManagerWriteServiceGrpc
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.{DomainId, _}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
@@ -361,20 +365,58 @@ object TopologyAdminCommands {
         signedBy: Option[Fingerprint],
         domainId: DomainId,
         newParameters: DynamicDomainParameters,
+        protocolVersion: ProtocolVersion,
         force: Boolean,
     ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
       override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] = {
-        // TODO(#9001) properly choose serialization
-        // Version for the serialization should depend on the internal version
-        val parameters =
-          v0.DomainParametersChangeAuthorization.Parameters.ParametersV1(newParameters.toProtoV1)
+        newParameters.toProto(protocolVersion).map { parameters =>
+          v0.DomainParametersChangeAuthorization(
+            authorization =
+              authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
+            domain = domainId.toProtoPrimitive,
+            parameters = parameters,
+          )
+        }
+      }
 
-        v0.DomainParametersChangeAuthorization(
-          authorization =
-            authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
-          domain = domainId.toProtoPrimitive,
-          parameters = parameters,
-        ).asRight
+      override def submitRequest(
+          service: TopologyManagerWriteServiceStub,
+          request: v0.DomainParametersChangeAuthorization,
+      ): Future[AuthorizationSuccess] = service.authorizeDomainParametersChange(request)
+    }
+
+    case class AuthorizeDomainParametersChangeInternal(
+        signedBy: Option[Fingerprint],
+        domainId: DomainId,
+        newParameters: DomainDynamicDomainParameters,
+        force: Boolean,
+    ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
+      override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] = {
+        val protobufVersion = newParameters.protobufVersion.v
+
+        val parameters = protobufVersion match {
+          case 0 =>
+            Right(
+              v0.DomainParametersChangeAuthorization.Parameters
+                .ParametersV0(newParameters.toProtoV0)
+            )
+          case 1 =>
+            Right(
+              v0.DomainParametersChangeAuthorization.Parameters
+                .ParametersV1(newParameters.toProtoV1)
+            )
+          case _ =>
+            Left(s"Unsupported protobuf version $protobufVersion for dynamic domain parameters")
+        }
+
+        parameters.map { parameters =>
+          v0.DomainParametersChangeAuthorization(
+            authorization =
+              authData(TopologyChangeOp.Replace, signedBy, replaceExisting = false, force = force),
+            domain = domainId.toProtoPrimitive,
+            parameters = parameters,
+          )
+        }
       }
 
       override def submitRequest(

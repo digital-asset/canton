@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
 import cats.syntax.traverse._
-import com.digitalasset.canton.crypto.{Fingerprint, KeyPurpose}
+import com.digitalasset.canton.crypto.{Crypto, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -26,6 +26,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -36,6 +37,7 @@ case class BaseQuery(
     timeQuery: TimeQuery,
     ops: Option[TopologyChangeOp],
     filterSigningKey: String,
+    protocolVersion: Option[ProtocolVersion],
 ) {
   def toProtoV0: adminProto.BaseQuery =
     adminProto.BaseQuery(
@@ -45,6 +47,7 @@ case class BaseQuery(
       ops.nonEmpty,
       timeQuery.toProtoV0,
       filterSigningKey,
+      protocolVersion.map(_.toProtoPrimitive),
     )
 }
 
@@ -57,12 +60,14 @@ object BaseQuery {
       filterSignedKey = baseQuery.filterSignedKey
       timeQuery <- TimeQuery.fromProto(baseQuery.timeQuery, "time_query")
       opsRaw <- TopologyChangeOp.fromProtoV0(baseQuery.operation)
+      protocolVersion <- baseQuery.protocolVersion.traverse(ProtocolVersion.fromProtoPrimitive)
     } yield BaseQuery(
       filterStore,
       useStateStore,
       timeQuery,
       if (baseQuery.filterOperation) Some(opsRaw) else None,
       filterSignedKey,
+      protocolVersion,
     )
 }
 
@@ -75,6 +80,8 @@ object BaseQuery {
 class GrpcTopologyManagerReadService(
     stores: => Future[Seq[TopologyStore[TopologyStoreId]]],
     ips: IdentityProvidingServiceClient,
+    initialProtocolVersion: ProtocolVersion,
+    crypto: Crypto,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends adminProto.TopologyManagerReadServiceGrpc.TopologyManagerReadService
@@ -148,23 +155,41 @@ class GrpcTopologyManagerReadService(
           idFilter = idFilter,
           namespaceOnly,
         )
-        .map { col =>
-          col.result.collect {
-            case tx
-                if tx.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey) =>
-              val result = TransactionSearchResult(
-                storeId,
-                tx.sequenced,
-                tx.validFrom,
-                tx.validUntil,
-                tx.transaction.operation,
-                tx.transaction.getCryptographicEvidence,
-                tx.transaction.key.fingerprint,
-              )
-              (result, tx.transaction.transaction.element.mapping)
-          }
+        .flatMap { col =>
+          col.result
+            .filter(_.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey))
+            .traverse { tx =>
+              val resultE = for {
+                // Re-create the signed topology transaction if necessary
+                signedTx <- baseQuery.protocolVersion
+                  .map { protocolVersion =>
+                    SignedTopologyTransaction
+                      .asVersion(tx.transaction, protocolVersion)(crypto)
+                      .leftMap[Throwable](err =>
+                        new IllegalStateException(s"Failed to convert topology transaction: $err")
+                      )
+                  }
+                  .getOrElse {
+                    // Keep the original transaction in its existing protocol version if no desired protocol version is specified
+                    EitherT.rightT[Future, Throwable](tx.transaction)
+                  }
+
+                result = TransactionSearchResult(
+                  storeId,
+                  tx.sequenced,
+                  tx.validFrom,
+                  tx.validUntil,
+                  signedTx.operation,
+                  signedTx.getCryptographicEvidence,
+                  signedTx.key.fingerprint,
+                )
+              } yield (result, tx.transaction.transaction.element.mapping)
+
+              EitherTUtil.toFuture(resultE)
+            }
         }
     }
+
     for {
       baseQuery <- wrapErr(BaseQuery.fromProto(baseQueryProto))
       stores <- collectStores(baseQuery.filterStore)
@@ -436,8 +461,10 @@ class GrpcTopologyManagerReadService(
 
   override def listDomainParametersChanges(
       request: adminProto.ListDomainParametersChangesRequest
-  ): Future[adminProto.ListDomainParametersChangesResult] = TraceContext.fromGrpcContext {
-    implicit traceContext =>
+  ): Future[adminProto.ListDomainParametersChangesResult] = {
+    import adminProto.ListDomainParametersChangesResult._
+
+    TraceContext.fromGrpcContext { implicit traceContext =>
       val ret = for {
         res <- collectFromStores(
           request.baseQuery,
@@ -448,15 +475,30 @@ class GrpcTopologyManagerReadService(
       } yield {
         val results = res
           .collect { case (context, domainParametersChange: DomainParametersChange) =>
-            adminProto.ListDomainParametersChangesResult.Result(
-              Some(createBaseResult(context)),
-              Some(domainParametersChange.domainParameters.toProtoV0),
-            )
+            val protobufVersion = domainParametersChange.domainParameters.protobufVersion.v
+
+            val parameters =
+              if (protobufVersion == 0)
+                Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
+              else if (protobufVersion == 1)
+                Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
+              else {
+                logger.warn(s"Unable to serialize domain parameters with version $protobufVersion")
+                None
+              }
+
+            parameters.map { parameters =>
+              adminProto.ListDomainParametersChangesResult.Result(
+                Some(createBaseResult(context)),
+                parameters,
+              )
+            }
           }
 
-        adminProto.ListDomainParametersChangesResult(results)
+        adminProto.ListDomainParametersChangesResult(results.flatten)
       }
       EitherTUtil.toFuture(mapErrNew(ret))
+    }
   }
 
   override def listMediatorDomainState(

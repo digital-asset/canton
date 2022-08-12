@@ -7,7 +7,7 @@ import com.daml.ledger.participant.state.v2.Update.PublicPackageUploadRejected
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, RequestCounter}
+import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -33,7 +33,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
   lazy val indexedStringStore: InMemoryIndexedStringStore =
     DbEventLogTestResources.dbCausalityStoresTestIndexedStringStore
 
-  def persistEvents(events: Seq[(EventLogId, TimestampedEvent, Option[GlobalOffset])]): Future[Unit]
+  def persistEvents(events: Seq[(EventLogId, TimestampedEvent, Boolean)]): Future[Unit]
 
   def causalityStores(mk: () => Future[TestedStores], persistence: Boolean): Unit = {
     s"the ${SingleDomainCausalDependencyStore.getClass} and ${MultiDomainCausalityStore.getClass} work together... " must {
@@ -234,11 +234,11 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
           val unpublishedEvents = Seq(writeToDomain -> 6, domain4 -> 7)
 
-          val events = (publishedEventOrder.zipWithIndex.map { case ((id, rc), index) =>
-            (id, timestampedEvent(rc.longValue()), Some(index.longValue()))
+          val events = (publishedEventOrder.map { case (id, rc) =>
+            (id, timestampedEvent(rc.longValue()), true)
           } ++ unpublishedEvents
             .map { case (id, rc) =>
-              (id, timestampedEvent(rc.longValue()), None)
+              (id, timestampedEvent(rc.longValue()), false)
             })
             .map { case (id, x, y) =>
               val eventLogId: EventLogId =

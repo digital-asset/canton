@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.store.{CausalityStoresTest, EventLogId}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 
@@ -11,7 +10,7 @@ import scala.concurrent.Future
 
 class CausalityStoresTestInMemory extends CausalityStoresTest {
   override def persistEvents(
-      events: Seq[(EventLogId, TimestampedEvent, Option[GlobalOffset])]
+      events: Seq[(EventLogId, TimestampedEvent, Boolean)]
   ): Future[Unit] =
     Future.unit // Nothing to do as we don't have persistence
 

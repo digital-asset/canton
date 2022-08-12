@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
+import akka.Done
 import akka.stream.KillSwitch
 import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.RequireTypes.String256M
+import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -16,10 +18,13 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggerFactory, NamedLoggingContext}
 import com.digitalasset.canton.sequencing._
-import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.sequencing.protocol.{
+  DeliverErrorReason,
+  SendAsyncError,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -155,34 +160,83 @@ trait Sequencer extends FlagCloseable with HasCloseContext {
   def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit]
 }
 
-object Sequencer {
-  type EventSource = Source[OrdinarySerializedEvent, KillSwitch]
+object Sequencer extends HasLoggerName {
 
+  /** The materialized future completes when all internal side-flows of the source have completed after the kill switch
+    * was pulled. Termination of the main flow must be awaited separately.
+    */
+  type EventSource = Source[OrdinarySerializedEvent, (KillSwitch, Future[Done])]
+
+  case object SigningTimestampAfterSequencingTime
+  type SigningTimestampAfterSequencingTime = SigningTimestampAfterSequencingTime.type
+
+  /** Validates the requested signing timestamp against the sequencing timestamp and the
+    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]]
+    * of the domain parameters valid at the requested signing timestamp.
+    *
+    * @param latestTopologyClientTimestamp The timestamp of an earlier event sent to the sequencer's topology client
+    *                                      such that no topology update has happened
+    *                                      between this timestamp (exclusive) and the sequencing timestamp (exclusive).
+    * @param warnIfApproximate Whether to emit a warning if an approximate topology snapshot is used
+    * @return [[scala.Left$]] if the signing timestamp is after the sequencing timestamp
+    *         [[scala.Right$]] the topology snapshot at the signing timestamp that can be used for signing the event;
+    *         provided that the snapshot at the signing timestamp defined domain parameters
+    *         and the sequencing time is within the [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]].
+    */
   def validateSigningTimestamp(
-      signingTolerance: NonNegativeFiniteDuration
-  )(now: CantonTimestamp, requestedSigningTimestamp: CantonTimestamp): Either[String256M, Unit] = {
-    val lowerBoundExcl = now.minus(signingTolerance.unwrap)
-    // TODO(i4638): The upper bound is too high. The highest acceptable value is the timestamp of the recent identity snapshot.
-    //  We should distinguish between a point in time that's truly in the future (then the sender is misbehaving) and
-    //  the sequencer not yet having caught up (we can then think about rejecting the SubmissionRequest
-    //  with an appropriate reason so that the sender can resend the request later).
-    val upperBoundIncl = now
+      syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
+      signingTimestamp: CantonTimestamp,
+      sequencingTimestamp: CantonTimestamp,
+      latestTopologyClientTimestamp: Option[CantonTimestamp],
+      warnIfApproximate: Boolean,
+  )(implicit
+      loggingContext: NamedLoggingContext,
+      executionContext: ExecutionContext,
+  ): EitherT[Future, SigningTimestampAfterSequencingTime, Option[SyncCryptoApi]] = {
+    implicit val traceContext: TraceContext = loggingContext.traceContext
 
-    for {
-      _ <- Either.cond(
-        requestedSigningTimestamp > lowerBoundExcl,
-        (),
-        String256M.tryCreate(
-          s"Invalid signing timestamp $requestedSigningTimestamp. The signing timestamp must be strictly after $lowerBoundExcl."
-        ),
-      )
-      _ <- Either.cond(
-        requestedSigningTimestamp <= upperBoundIncl,
-        (),
-        String256M.tryCreate(
-          s"Invalid signing timestamp $requestedSigningTimestamp. The signing timestamp must be before or at $upperBoundIncl."
-        ),
-      )
-    } yield ()
+    if (signingTimestamp > sequencingTimestamp) {
+      EitherT.leftT[Future, Option[SyncCryptoApi]](SigningTimestampAfterSequencingTime)
+    } else
+      EitherT.right[SigningTimestampAfterSequencingTime] {
+        for {
+          snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
+            syncCryptoApi,
+            signingTimestamp,
+            latestTopologyClientTimestamp,
+            warnIfApproximate,
+          )
+          dynamicDomainParametersO <- snapshot.ipsSnapshot.findDynamicDomainParameters()
+        } yield {
+          val withinSigningTolerance = dynamicDomainParametersO.exists { dynamicDomainParameters =>
+            import scala.Ordered.orderingToOrdered
+            dynamicDomainParameters.sequencerSigningTolerance.unwrap >= sequencingTimestamp - signingTimestamp
+          }
+          if (withinSigningTolerance) Some(snapshot) else None
+        }
+      }
   }
+
+  // TODO(#5990) use an error code
+  def signingTimestampAfterSequencingTimestampError(
+      signingTimestamp: CantonTimestamp,
+      sequencingTimestamp: CantonTimestamp,
+  ): String256M =
+    String256M.tryCreate(
+      s"Invalid signing timestamp $signingTimestamp. The signing timestamp must be before or at $sequencingTimestamp."
+    )
+
+  // TODO(#5990) use an error code
+  def signingTimestampTooEarlyError(
+      signingTimestamp: CantonTimestamp,
+      sequencingTimestamp: CantonTimestamp,
+  ): DeliverErrorReason.BatchRefused = {
+    // We can't easily compute a valid signing timestamp because we'd have to scan through
+    // the domain parameter updates to compute a bound, as the signing tolerance is taken
+    // from the domain parameters valid at the signing timestamp, not the sequencing timestamp.
+    val errorMsg =
+      s"Signing timestamp $signingTimestamp is too early for sequencing time $sequencingTimestamp."
+    DeliverErrorReason.BatchRefused(errorMsg)
+  }
+
 }

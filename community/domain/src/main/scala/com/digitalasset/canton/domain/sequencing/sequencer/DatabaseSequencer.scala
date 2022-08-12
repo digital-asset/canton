@@ -258,13 +258,15 @@ class DatabaseSequencer(
   ): EitherT[Future, String, SequencerSnapshot] =
     EitherT.rightT(SequencerSnapshot.Unimplemented)
 
-  override protected def onClosed(): Unit =
+  override def onClosed(): Unit = {
+    super.onClosed()
     Lifecycle.close(
       writer,
       reader,
       eventSignaller,
       store,
     )(logger)
+  }
 
   override def isLedgerIdentityRegistered(identity: LedgerIdentity)(implicit
       traceContext: TraceContext

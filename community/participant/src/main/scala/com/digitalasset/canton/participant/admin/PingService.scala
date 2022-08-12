@@ -304,7 +304,7 @@ class PingService(
     // accept proposals where i'm the next candidate
     proposals.filter(_.value.candidates.headOption.contains(adminParty)).foreach { proposal =>
       logger.debug(s"Accepting ping proposal ${proposal.value.id} from ${proposal.value.initiator}")
-      val command = proposal.contractId.exerciseAccept(adminParty, adminParty).command
+      val command = proposal.contractId.exerciseAccept(adminParty).command
       submitAsync(
         proposal.value.id,
         "ping-proposal-accept",
@@ -325,7 +325,7 @@ class PingService(
       submitAsync(
         p.value.id,
         "explode" + p.value.path,
-        p.contractId.exerciseProcessExplode(adminParty, adminParty).command,
+        p.contractId.exerciseProcessExplode(adminParty).command,
         Some(workflowId),
         NoCommandDeduplicationNeeded,
       )
@@ -369,7 +369,7 @@ class PingService(
             item.merge.value.id,
             s"collapse-${item.merge.value.path}",
             item.merge.contractId
-              .exerciseProcessMerge(adminParty, adminParty, other.contractId, contract.contractId)
+              .exerciseProcessMerge(adminParty, other.contractId, contract.contractId)
               .command,
             Some(workflowId),
             NoCommandDeduplicationNeeded,
@@ -396,7 +396,7 @@ class PingService(
       submitAsync(
         p.value.id,
         "respond",
-        p.contractId.exerciseRespond(adminParty, adminParty).command,
+        p.contractId.exerciseRespond(adminParty).command,
         Some(workflowId),
         NoCommandDeduplicationNeeded,
       )
@@ -442,7 +442,7 @@ class PingService(
         _ <- submitIgnoringErrors(
           p.value.id,
           "ack",
-          p.contractId.exerciseAck(adminParty).command,
+          p.contractId.exerciseAck().command,
           Some(workflowId),
           NoCommandDeduplicationNeeded,
         )

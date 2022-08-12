@@ -4,11 +4,17 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
+import cats.syntax.either._
 import com.digitalasset.canton.crypto.{Hash, SignatureCheckError, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  HasLoggerName,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.{
@@ -25,7 +31,7 @@ import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-sealed trait SequencedEventValidationError
+sealed trait SequencedEventValidationError extends Product with Serializable
 object SequencedEventValidationError {
   case class BadDomainId(expected: DomainId, received: DomainId)
       extends SequencedEventValidationError
@@ -59,10 +65,66 @@ object SequencedEventValidationError {
 }
 
 /** Validate whether a received event is valid for processing. */
-trait ValidateSequencedEvent {
+trait SequencedEventValidator {
 
   /** Validates a sequenced event against the current state of the sequencer client. */
   def validate(event: OrdinarySerializedEvent): EitherT[Future, SequencedEventValidationError, Unit]
+}
+
+object SequencedEventValidator extends HasLoggerName {
+
+  /** Do not validate sequenced events */
+  private case object NoValidation extends SequencedEventValidator {
+    override def validate(
+        event: OrdinarySerializedEvent
+    ): EitherT[Future, SequencedEventValidationError, Unit] =
+      EitherT(Future.successful(Either.right(())))
+  }
+
+  /** Do not validate sequenced events.
+    * Only use it in case of a programming error and the need to unblock a deployment or
+    * if you blindly trust the sequencer.
+    *
+    * @param warn whether to log a warning when used
+    */
+  def noValidation(domainId: DomainId, sequencerId: SequencerId, warn: Boolean = true)(implicit
+      loggingContext: NamedLoggingContext
+  ): SequencedEventValidator = {
+    if (warn) {
+      loggingContext.warn(
+        s"You have opted to skip event validation for domain $domainId using the sequencer $sequencerId. You should not do this unless you know what you are doing."
+      )
+    }
+    NoValidation
+  }
+}
+
+trait SequencedEventValidatorFactory {
+  def create(
+      initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
+      unauthenticated: Boolean,
+  )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator
+}
+
+object SequencedEventValidatorFactory {
+
+  /** Do not validate sequenced events.
+    * Only use it in case of a programming error and the need to unblock a deployment or
+    * if you blindly trust the sequencer.
+    *
+    * @param warn whether to log a warning
+    */
+  def noValidation(
+      domainId: DomainId,
+      sequencerId: SequencerId,
+      warn: Boolean = true,
+  ): SequencedEventValidatorFactory = new SequencedEventValidatorFactory {
+    override def create(
+        initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
+        unauthenticated: Boolean,
+    )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
+      SequencedEventValidator.noValidation(domainId, sequencerId, warn)
+  }
 }
 
 /** Validate whether a received event is valid for processing.
@@ -74,35 +136,22 @@ trait ValidateSequencedEvent {
   *                   the security impact is very marginal (and an adverse scenario only possible in the async ms of
   *                   this node validating a few inflight transactions). therefore, this parameter should be set to
   *                   true due to performance reasons.
-  * @param skipValidation if this flag is set to true, then the sequenced event validation will be skipped entirely.
-  *                       only use it in case of a programming error and the need to unblock a deployment.
   */
-class SequencedEventValidator(
+class SequencedEventValidatorImpl(
     initialPriorEvent: Option[PossiblyIgnoredSerializedEvent],
     unauthenticated: Boolean,
     optimistic: Boolean,
-    skipValidation: Boolean,
     domainId: DomainId,
     sequencerId: SequencerId,
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends ValidateSequencedEvent
+    extends SequencedEventValidator
     with NamedLogging {
 
-  if (skipValidation) {
-    noTracingLogger.warn(
-      "You have opted to skip event validation. You should not do this unless you know what you are doing."
-    )
-  }
-
   import SequencedEventValidationError._
+  import SequencedEventValidatorImpl._
 
-  private type ValidationResult = Either[SequencedEventValidationError, Unit]
-  private case class PriorEvent(
-      event: PossiblyIgnoredSerializedEvent,
-      skipNextSignatureValidation: Boolean,
-  )
   private def invalid(error: SequencedEventValidationError): ValidationResult = Left(error)
   private val valid: ValidationResult = Right(())
 
@@ -135,8 +184,7 @@ class SequencedEventValidator(
     */
   override def validate(
       event: OrdinarySerializedEvent
-  ): EitherT[Future, SequencedEventValidationError, Unit] = if (skipValidation) EitherT.pure(())
-  else {
+  ): EitherT[Future, SequencedEventValidationError, Unit] = {
     implicit val traceContext: TraceContext = event.traceContext
     val priorEventRefO = priorEventRef.get()
     val priorEventO = priorEventRefO.map(_.event)
@@ -333,4 +381,14 @@ class SequencedEventValidator(
           Right(())
         }
     }
+}
+
+object SequencedEventValidatorImpl {
+  private[SequencedEventValidatorImpl] type ValidationResult =
+    Either[SequencedEventValidationError, Unit]
+
+  private[SequencedEventValidatorImpl] case class PriorEvent(
+      event: PossiblyIgnoredSerializedEvent,
+      skipNextSignatureValidation: Boolean,
+  )
 }

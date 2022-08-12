@@ -156,7 +156,7 @@ trait DbMigrations { this: NamedLogging =>
       source: JdbcDataSource,
       processingTimeout: ProcessingTimeout,
   ): EitherT[UnlessShutdown, DbMigrations.Error, Unit] = {
-    (ResourceUtil
+    ResourceUtil
       .withResourceEither(source.createConnection()) { conn =>
         val valid = blocking {
           Either.catchOnly[SQLException](
@@ -173,11 +173,11 @@ trait DbMigrations { this: NamedLogging =>
             )
           }
           .leftMap[DbMigrations.Error](err => DbMigrations.DatabaseError(err))
-      } match {
-      case Right(value) => value
-      case Left(err) =>
+      }
+      .valueOr { err =>
         Left(DbMigrations.DatabaseError(s"failed to create connection ${err.getMessage}"))
-    }).toEitherT[UnlessShutdown]
+      }
+      .toEitherT[UnlessShutdown]
   }
 
   def checkAndMigrate(params: LocalNodeParameters, retryConfig: RetryConfig)(implicit

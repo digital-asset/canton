@@ -8,9 +8,10 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
+import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.ifThenET
@@ -38,11 +39,15 @@ abstract class BaseSequencer(
   private val currentHealth =
     new AtomicReference[SequencerHealthStatus](SequencerHealthStatus(isActive = true))
 
-  healthConfig.foreach(conf =>
-    new SequencerPeriodicHealthCheck(
+  val periodicHealthCheck: Option[PeriodicAction] = healthConfig.map(conf =>
+    // periodically calling the sequencer's health check in order to continuously notify
+    // listeners in case the health status has changed.
+    new PeriodicAction(
       clock,
       conf.backendCheckPeriod,
       loggerFactory,
+      timeouts,
+      "health-check",
     )(tc => health(tc))
   )
 
@@ -152,4 +157,8 @@ abstract class BaseSequencer(
   protected def readInternal(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource]
+
+  override def onClosed(): Unit =
+    periodicHealthCheck.foreach(Lifecycle.close(_)(logger))
+
 }

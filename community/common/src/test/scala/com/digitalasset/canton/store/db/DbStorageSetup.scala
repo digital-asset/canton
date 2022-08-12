@@ -5,6 +5,7 @@ package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.config.CommunityDbConfig.{H2, Postgres}
 import com.digitalasset.canton.config._
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
@@ -16,6 +17,7 @@ import com.digitalasset.canton.resource.{
   DbStorageSingle,
 }
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.NoTracing
 import com.typesafe.config.{Config, ConfigFactory}
 import io.functionmeta.functionFullName
@@ -73,6 +75,7 @@ trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLoggin
   protected final def mkStorage(cfg: DbConfig): DbStorage =
     DbStorageSingle.tryCreate(
       cfg,
+      new SimClock(CantonTimestamp.Epoch, loggerFactory),
       connectionPoolForParticipant =
         false, // can always be false, because this storage is only used for initialization and unit tests
       None,

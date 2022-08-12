@@ -17,6 +17,7 @@ import com.digitalasset.canton.topology.store._
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Positive, Remove}
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
@@ -281,6 +282,19 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
   ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
     allTransactions.map(
       _.result.filter(_.transaction.transaction.element.mapping == transaction.element.mapping)
+    )
+
+  override def findStoredForVersion(
+      transaction: TopologyTransaction[TopologyChangeOp],
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] =
+    allTransactions.map(
+      _.result.find(tx =>
+        tx.transaction.transaction == transaction && tx.transaction.representativeProtocolVersion == TopologyTransaction
+          .protocolVersionRepresentativeFor(protocolVersion)
+      )
     )
 
   override def findPositiveTransactions(

@@ -369,7 +369,7 @@ class RemoteClock(
   // same as wall-clock: we might use the normal execution context if the tasks are guaranteed to be light
   private val scheduler =
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-remoteclock", logger)
-  private val channel = ClientChannelBuilder.createChannel(config)
+  private val channel = ClientChannelBuilder.createChannelToTrustedServer(config)
   private val service = InitializationServiceGrpc.stub(channel)
   private val running = new AtomicBoolean(true)
   private val updating = new AtomicReference[Option[CantonTimestamp]](None)

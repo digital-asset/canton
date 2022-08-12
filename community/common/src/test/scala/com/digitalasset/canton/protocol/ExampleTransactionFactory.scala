@@ -522,7 +522,11 @@ class ExampleTransactionFactory(
     val createdInSubviewArchivedInCore = consumed.intersect(createdInSubviews)
 
     val actionDescription =
-      ActionDescription.tryFromLfActionNode(LfTransactionUtil.lightWeight(node), seed)
+      ActionDescription.tryFromLfActionNode(
+        LfTransactionUtil.lightWeight(node),
+        seed,
+        protocolVersion,
+      )
 
     val viewParticipantData = ViewParticipantData(cryptoOps)(
       coreInputsWithMetadata,

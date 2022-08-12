@@ -5,7 +5,7 @@ package com.digitalasset.canton.util
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{RunnableGraph, Source}
-import akka.stream.{ActorAttributes, Materializer, Supervision}
+import akka.stream.{ActorAttributes, KillSwitch, Materializer, Supervision}
 import com.daml.grpc.adapter.{AkkaExecutionSequencerPool, ExecutionSequencerFactory}
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext, TracedLogger}
@@ -70,5 +70,19 @@ object AkkaUtil extends HasLoggerName {
           ErrorUtil.internalError(new NoSuchElementException("scanAsync did not return an element"))
         )
       )
+  }
+
+  /** Combines two kill switches into one */
+  class CombinedKillSwitch(private val killSwitch1: KillSwitch, private val killSwitch2: KillSwitch)
+      extends KillSwitch {
+    override def shutdown(): Unit = {
+      killSwitch1.shutdown()
+      killSwitch2.shutdown()
+    }
+
+    override def abort(ex: Throwable): Unit = {
+      killSwitch1.abort(ex)
+      killSwitch2.abort(ex)
+    }
   }
 }

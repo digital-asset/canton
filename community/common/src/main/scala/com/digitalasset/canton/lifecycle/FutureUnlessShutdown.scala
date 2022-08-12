@@ -175,6 +175,11 @@ object FutureUnlessShutdownImpl {
     // This method is here so that we don't need to import ```cats.syntax.functor._``` everywhere
     def map[B](f: A => B)(implicit ec: ExecutionContext): FutureUnlessShutdown[B] =
       Functor[FutureUnlessShutdown].map(self)(f)
+
+    def subflatMap[B](f: A => UnlessShutdown[B])(implicit
+        ec: ExecutionContext
+    ): FutureUnlessShutdown[B] =
+      FutureUnlessShutdown(self.unwrap.map(_.flatMap(f)))
   }
 
   /** Cats monad instance for the combination of [[scala.concurrent.Future]] with [[UnlessShutdown]].

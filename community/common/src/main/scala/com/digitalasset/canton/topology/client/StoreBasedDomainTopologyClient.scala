@@ -310,7 +310,7 @@ class StoreBasedDomainTopologyClient(
       traceContext: TraceContext
   ): StoreBasedTopologySnapshot =
     new StoreBasedTopologySnapshot(
-      approximateTimestamp.immediateSuccessor,
+      approximateTimestamp,
       store,
       initKeys,
       useStateTxs = useStateTxs,

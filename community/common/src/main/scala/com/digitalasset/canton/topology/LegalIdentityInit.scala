@@ -29,17 +29,24 @@ class LegalIdentityInit(certificateGenerator: X509CertificateGenerator, crypto: 
   private def generateCertificate(
       uid: UniqueIdentifier,
       alternativeNames: Seq[Member],
-  ): EitherT[Future, String, X509Certificate] =
-    generateCertificate(uid.toProtoPrimitive, alternativeNames.map(_.toProtoPrimitive))
+  ): EitherT[Future, String, X509Certificate] = for {
+    keyName <- KeyName.create(s"${uid.id.unwrap}-legal-identity").toEitherT
+    cert <- generateCertificate(
+      uid.toProtoPrimitive,
+      keyName,
+      alternativeNames.map(_.toProtoPrimitive),
+    )
+  } yield cert
 
   def generateCertificate(
       commonName: String,
+      keyName: KeyName,
       subjectAlternativeNames: Seq[String],
   ): EitherT[Future, String, X509Certificate] =
     for {
       // Generate a signing key for a certificate, uses EC-DSA with NIST P384 for CCF compatibility and "raw" encoding for serialization to/from certificates.
       certKey <- crypto
-        .generateSigningKey(SigningKeyScheme.EcDsaP384)
+        .generateSigningKey(SigningKeyScheme.EcDsaP384, Some(keyName))
         .leftMap(err => s"Failed to generate signing key pair for certificate: $err")
       // generate and store certificate
       cert <- certificateGenerator

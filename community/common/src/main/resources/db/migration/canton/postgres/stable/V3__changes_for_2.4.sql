@@ -20,3 +20,13 @@ create table mediator_deduplication_store (
 );
 
 create index idx_mediator_deduplication_store_expire_after on mediator_deduplication_store(expire_after, mediator_id);
+
+-- Previous topology transactions belong to PV=2
+alter table topology_transactions add representative_protocol_version smallint default 2 not null;
+
+-- Drop the existing unnamed unique constraint (conventional constraint name truncated to 63 bytes)
+alter table topology_transactions drop constraint topology_transactions_store_id_transaction_type_namespace_i_key;
+
+-- Include the protocol version as part of the unique constraint
+alter table topology_transactions add constraint unique_topology_transactions
+ unique (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation, representative_protocol_version);

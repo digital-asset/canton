@@ -36,7 +36,7 @@ The nodes directory contains a set of base configuration files that can be used 
 Start a domain with the following command:
 
 ```
-    ./bin/canton -c examples/03-advanced-configuration/storage/memory.conf,examples/03-advanced-configuration/nodes/domain.conf
+    ./bin/canton -c examples/03-advanced-configuration/storage/memory.conf,examples/03-advanced-configuration/nodes/domain1.conf
 ```
 
 The domain can be started without any bootstrap script, as it self-initialises by default, waiting for incoming connections.

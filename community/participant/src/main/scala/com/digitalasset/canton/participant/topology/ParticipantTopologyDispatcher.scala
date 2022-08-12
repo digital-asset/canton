@@ -3,12 +3,15 @@
 
 package com.digitalasset.canton.participant.topology
 
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
+import cats.syntax.either._
+import cats.syntax.functor._
 import cats.syntax.traverse._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -35,7 +38,7 @@ import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
-import com.digitalasset.canton.util.{DelayUtil, ErrorUtil, FutureUtil, retry}
+import com.digitalasset.canton.util.{DelayUtil, EitherTUtil, ErrorUtil, FutureUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, DomainAlias}
 import io.functionmeta.functionFullName
@@ -309,18 +312,14 @@ private class DomainOutbox(
       // load current authorized timestamp and watermark
       _ <- EitherT.right(loadWatermarksF)
       // run initial flush
-      _ <- flush(initialize = true).leftMap[DomainRegistryError](
-        DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(
-          _
-        )
-      )
+      _ <- flush(initialize = true)
     } yield ()
   }
 
   private def kickOffFlush()(implicit traceContext: TraceContext): Unit = {
     // It's fine to ignore shutdown because we do not await the future anyway.
     if (initialized.get()) {
-      FutureUtil.doNotAwait(flush().value.unwrap, "domain outbox flusher")
+      EitherTUtil.doNotAwait(flush().onShutdown(Either.unit), "domain outbox flusher")
     }
   }
 
@@ -336,7 +335,7 @@ private class DomainOutbox(
 
   private def flush(initialize: Boolean = false)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
     def markDone(delayRetry: Boolean = false): Unit = {
       val updated = watermarks.getAndUpdate(_.done())
       // if anything has been pushed in the meantime, we need to kick off a new flush
@@ -376,12 +375,14 @@ private class DomainOutbox(
           _ = lastDispatched.set(applicable.result.lastOption)
           // Try to convert if necessary the topology transactions for the required protocol version of the domain
           convertedTxs <- performUnlessClosingEitherU(functionFullName) {
-            convertTransactions(applicable)
+            convertTransactions(authorizedStore, applicable)
           }
           // dispatch to domain
           responses <- dispatch(domain, handle, transactions = convertedTxs)
           // update watermark according to responses
-          _ <- EitherT.right[String](updateWatermark(cur, pending, applicable, responses))
+          _ <- EitherT.right[DomainRegistryError](
+            updateWatermark(cur, pending, applicable, responses)
+          )
         } yield ()
         ret.transform {
           case x @ Left(_) =>
@@ -457,7 +458,7 @@ private class DomainOnboardingOutbox(
   private def run()(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Boolean] = (for {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = (for {
     initialTransactions <- loadInitialTransactionsFromStore()
     _ = logger.debug(
       s"Sending ${initialTransactions.size} onboarding transactions to ${domain}"
@@ -472,7 +473,9 @@ private class DomainOnboardingOutbox(
   private def loadInitialTransactionsFromStore()(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, SignedTopologyTransactions[TopologyChangeOp]] =
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, SignedTopologyTransactions[
+    TopologyChangeOp
+  ]] =
     for {
       candidates <- EitherT.right(
         performUnlessClosingF(functionFullName)(
@@ -490,13 +493,13 @@ private class DomainOnboardingOutbox(
       )
       // Try to convert if necessary the topology transactions for the required protocol version of the domain
       convertedTxs <- performUnlessClosingEitherU(functionFullName) {
-        convertTransactions(applicable)
+        convertTransactions(authorizedStore, applicable)
       }
     } yield convertedTxs
 
   private def initializedWith(
       initial: SignedTopologyTransactions[TopologyChangeOp]
-  ): Either[String, Unit] = {
+  )(implicit traceContext: TraceContext): Either[DomainRegistryError, Unit] = {
     val (haveEncryptionKey, haveSigningKey) =
       initial.result.map(_.transaction.element.mapping).foldLeft((false, false)) {
         case ((haveEncryptionKey, haveSigningKey), OwnerToKeyMapping(`participantId`, key)) =>
@@ -504,9 +507,17 @@ private class DomainOnboardingOutbox(
         case (acc, _) => acc
       }
     if (!haveEncryptionKey) {
-      Left("Can not onboard as local participant doesn't have a valid encryption key")
+      Left(
+        DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(
+          "Can not onboard as local participant doesn't have a valid encryption key"
+        )
+      )
     } else if (!haveSigningKey) {
-      Left("Can not onboard as local participant doesn't have a valid signing key")
+      Left(
+        DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(
+          "Can not onboard as local participant doesn't have a valid signing key"
+        )
+      )
     } else Right(())
   }
 
@@ -527,7 +538,7 @@ object DomainOnboardingOutbox {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Boolean] = {
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
     val outbox = new DomainOnboardingOutbox(
       domain,
       domainId,
@@ -596,15 +607,31 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
   }
 
   protected def convertTransactions(
-      transactions: SignedTopologyTransactions[TopologyChangeOp]
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      transactions: SignedTopologyTransactions[TopologyChangeOp],
   )(implicit
-      ec: ExecutionContext
-  ): EitherT[Future, String, SignedTopologyTransactions[TopologyChangeOp]] =
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[Future, DomainRegistryError, SignedTopologyTransactions[TopologyChangeOp]] = {
     transactions.result
-      .traverse(
-        SignedTopologyTransaction.asVersion(_, protocolVersion)(crypto)
-      )
-      .map(SignedTopologyTransactions(_))
+      .traverse { tx =>
+        if (tx.transaction.hasEquivalentVersion(protocolVersion)) {
+          // Transaction already in the correct version, nothing to do here
+          EitherT.rightT[Future, String](tx)
+        } else {
+          // First try to find if the topology transaction already exists in the correct version in the topology store
+          OptionT(authorizedStore.findStoredForVersion(tx.transaction, protocolVersion))
+            .map(_.transaction)
+            .toRight("")
+            .leftFlatMap { _ =>
+              // We did not find a topology transaction with the correct version, so we try to convert and resign
+              SignedTopologyTransaction.asVersion(tx, protocolVersion)(crypto)
+            }
+        }
+      }
+      .map(SignedTopologyTransactions.apply)
+      .leftMap(DomainRegistryError.TopologyConversionError.Error(_))
+  }
 
   protected def dispatch(
       domain: DomainAlias,
@@ -613,9 +640,9 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, String, Seq[RegisterTopologyTransactionResponseResult]] = if (
-    transactions.isEmpty
-  ) EitherT.rightT(Seq.empty)
+  ): EitherT[FutureUnlessShutdown, DomainRegistryError, Seq[
+    RegisterTopologyTransactionResponseResult
+  ]] = if (transactions.isEmpty) EitherT.rightT(Seq.empty)
   else {
     implicit val success = retry.Success.always
     val ret = retry
@@ -649,6 +676,6 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
           s"The domain $domain failed the following topology transactions: $failedResponses",
         )
       }
-    EitherT(ret)
+    EitherT(ret).leftMap(DomainRegistryError.DomainRegistryInternalError.InitialOnboardingError(_))
   }
 }

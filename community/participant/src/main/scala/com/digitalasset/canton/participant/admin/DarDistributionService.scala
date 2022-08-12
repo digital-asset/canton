@@ -186,7 +186,9 @@ class DarDistributionService(
       if (!checkDarHashMatches(hash, content)) {
         // automatically reject
         val rejectCommand =
-          share.contractId.exerciseReject(adminParty, "Hash does not match DAR content").command
+          share.contractId
+            .exerciseReject("Hash does not match DAR content")
+            .command
         submitOrFail(rejectCommand)
       } else
         darValidation(content) match {
@@ -197,7 +199,7 @@ class DarDistributionService(
               _ <- autoAcceptIfWhitelisted(share)
             } yield ()
           case Left(msg) =>
-            val rejectCommand = share.contractId.exerciseReject(adminParty, msg).command
+            val rejectCommand = share.contractId.exerciseReject(msg).command
             logger.warn(s"Shared DAR is invalid. Reason: $msg")
             submitOrFail(rejectCommand)
         }
@@ -235,7 +237,7 @@ class DarDistributionService(
       logger.info(
         s"Dar [${acceptance.value.hash}] has been accepted by [${acceptance.value.recipient}]"
       )
-      val ackCommand = acceptance.contractId.exerciseAcknowledgeAcceptance(adminParty).command
+      val ackCommand = acceptance.contractId.exerciseAcknowledgeAcceptance().command
       submitOrFail(ackCommand)
     } else Future.unit
 
@@ -247,7 +249,7 @@ class DarDistributionService(
       logger.warn(
         s"Dar [${rejection.value.hash}] has been rejected by [${rejection.value.recipient}]: ${rejection.value.reason}"
       )
-      val ackCommand = rejection.contractId.exerciseAcknowledgeRejection(adminParty).command
+      val ackCommand = rejection.contractId.exerciseAcknowledgeRejection().command
       submitOrFail(ackCommand)
     } else Future.unit
   }
@@ -283,7 +285,7 @@ class DarDistributionService(
     import M.ShareDar._
     (for {
       offer <- EitherT.fromOptionF(shareOfferStore.get(shareId), OfferNotFound: AcceptRejectError)
-      rejectCommand = offer.contractId.exerciseReject(adminParty, reason).command
+      rejectCommand = offer.contractId.exerciseReject(reason).command
       _ <- submit[AcceptRejectError](rejectCommand)(AcceptRejectError.SubmissionFailed)
     } yield ()).value
   }
@@ -306,7 +308,7 @@ class DarDistributionService(
         .leftMap(err => AcceptRejectError.InvalidOffer(err.message))
         .toEitherT[Future]
       _ <- appendDar(offer.value.name, decode(offer.value.content))
-      acceptCommand = offer.contractId.exerciseAccept(adminParty).command
+      acceptCommand = offer.contractId.exerciseAccept().command
       _ <- submit[AcceptRejectError](acceptCommand)(AcceptRejectError.SubmissionFailed)
     } yield ()
   }

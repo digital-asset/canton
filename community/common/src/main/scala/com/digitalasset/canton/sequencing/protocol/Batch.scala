@@ -146,7 +146,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
   private def decompress(
       algorithm: v0.CompressedBatch.CompressionAlgorithm,
       compressed: ByteString,
-  ): Either[ProtoDeserializationError, ByteString] = {
+  ): ParsingResult[ByteString] = {
     algorithm match {
       case v0.CompressedBatch.CompressionAlgorithm.None => Right(compressed)
       case v0.CompressedBatch.CompressionAlgorithm.Gzip =>

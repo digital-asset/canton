@@ -419,7 +419,7 @@ class DomainTopologyManager(
   override def addFromRequest(transaction: SignedTopologyTransaction[TopologyChangeOp])(implicit
       traceContext: TraceContext
   ): EitherT[Future, DomainTopologyManagerError, Unit] =
-    add(transaction, force = true, replaceExisting = true, allowDuplicateMappings = true)
+    add(transaction, force = true, replaceExisting = false, allowDuplicateMappings = true)
 }
 
 sealed trait DomainTopologyManagerError extends CantonError

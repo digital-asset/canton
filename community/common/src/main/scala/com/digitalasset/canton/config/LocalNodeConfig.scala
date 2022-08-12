@@ -47,9 +47,7 @@ trait LocalNodeParameters {
   def devVersionSupport: Boolean
   def dontWarnOnDeprecatedPV: Boolean
 
-  /** The initial protocol version before connected to any domain, e.g., when creating the initial topology transactions.
-    * TODO(#9719): Currently this protocol version is also used when writing topology transactions to the authorized store.
-    */
+  /** The initial protocol version before connected to any domain, e.g., when creating the initial topology transactions. */
   def initialProtocolVersion: ProtocolVersion
 
 }

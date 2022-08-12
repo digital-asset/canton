@@ -31,7 +31,7 @@ trait SortedReconciliationIntervalsHelpers {
     DomainParameters.WithValidity(
       fromEpoch(validFrom),
       Some(fromEpoch(validTo)),
-      defaultParameters.copy(reconciliationInterval =
+      defaultParameters.tryUpdate(reconciliationInterval =
         PositiveSeconds.ofSeconds(reconciliationInterval)
       ),
     )
@@ -43,7 +43,7 @@ trait SortedReconciliationIntervalsHelpers {
     DomainParameters.WithValidity(
       fromEpoch(validFrom),
       None,
-      defaultParameters.copy(reconciliationInterval =
+      defaultParameters.tryUpdate(reconciliationInterval =
         PositiveSeconds.ofSeconds(reconciliationInterval)
       ),
     )
@@ -76,7 +76,7 @@ trait SortedReconciliationIntervalsHelpers {
     DomainParameters.WithValidity(
       validFrom,
       None,
-      defaultParameters.copy(reconciliationInterval = reconciliationInterval),
+      defaultParameters.tryUpdate(reconciliationInterval = reconciliationInterval),
     )
 
   protected def fromEpoch(seconds: Long): CantonTimestamp =
