@@ -24,6 +24,9 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
+/** @param timestampOfSigningKey The timestamp of the topology snapshot that was used for signing the content.
+  *                              [[scala.None$]] if the signing timestamp can be derived from the content.
+  */
 case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     content: A,
     signature: Signature,

@@ -30,7 +30,8 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.util.{Failure, Success}
 
 object ParticipantInitializeTopology {
 
@@ -126,10 +127,6 @@ object ParticipantInitializeTopology {
             loggerFactory,
             crypto,
           )
-          .leftMap(
-            DomainRegistryError.DomainRegistryInternalError
-              .InitialOnboardingError(_): DomainRegistryError
-          )
       } yield success
     }
 
@@ -152,16 +149,30 @@ object ParticipantInitializeTopology {
         loggerFactory,
       )
 
-      success <- pushTopologyAndVerify(unauthenticatedSequencerClient, domainTimeTracker)
-      _ = {
-        unauthenticatedSequencerClient.closeSubscription()
-        domainTimeTracker.close()
+      success <- {
+        def closeEverything(): Future[Unit] = {
+          unauthenticatedSequencerClient.closeSubscription()
+          domainTimeTracker.close()
+          unauthenticatedSequencerClient.completion.transform { _ =>
+            Success(unauthenticatedSequencerClient.close())
+          }
+        }
+
+        EitherT {
+          FutureUnlessShutdown {
+            pushTopologyAndVerify(unauthenticatedSequencerClient, domainTimeTracker).value.unwrap
+              .transformWith {
+                case Failure(exception) =>
+                  // Close everything and then return the original failure
+                  closeEverything().flatMap(_ => Future.failed(exception))
+                case Success(value) =>
+                  // Close everything and then return the result
+                  closeEverything().map(_ => value)
+              }
+          }
+        }
       }
-      _ <- EitherT
-        .right(unauthenticatedSequencerClient.completion)
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield {
-      unauthenticatedSequencerClient.close()
       success
     }
   }

@@ -23,7 +23,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
 import com.digitalasset.canton.lifecycle._
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
@@ -135,12 +140,6 @@ object SendType {
   }
 }
 
-/** settings to control the behaviour of the sequenced event validation factory */
-case class EventValidatorFactoryArgs(
-    initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
-    unauthenticated: Boolean,
-)
-
 /** The sequencer client facilitates access to the individual domain sequencer. A client centralizes the
   * message signing operations, as well as the handling and storage of message receipts and delivery proofs,
   * such that this functionality does not have to be duplicated throughout the participant node.
@@ -153,7 +152,7 @@ class SequencerClient(
     testingConfig: TestingConfigInternal,
     val staticDomainParameters: StaticDomainParameters,
     override val timeouts: ProcessingTimeout,
-    eventValidatorFactory: EventValidatorFactoryArgs => ValidateSequencedEvent,
+    eventValidatorFactory: SequencedEventValidatorFactory,
     clock: Clock,
     private val sequencedEventStore: SequencedEventStore,
     sendTracker: SendTracker,
@@ -529,12 +528,14 @@ class SequencerClient(
           .get()
           .map(_.subscription)
           .foreach(_.giveUp(Success(SubscriptionCloseReason.TransportChange)))
-      val subscriptionF = performUnlessClosingF(functionFullName) {
+      val subscriptionF = performUnlessClosingUSF(functionFullName) {
         for {
-          initialPriorEventO <- sequencedEventStore
-            .find(SequencedEventStore.LatestUpto(priorTimestamp))
-            .toOption
-            .value
+          initialPriorEventO <- FutureUnlessShutdown.outcomeF(
+            sequencedEventStore
+              .find(SequencedEventStore.LatestUpto(priorTimestamp))
+              .toOption
+              .value
+          )
           _ = if (initialPriorEventO.isEmpty) {
             logger.info(s"No event found up to $priorTimestamp. Resubscribing from the beginning.")
           }
@@ -554,25 +555,21 @@ class SequencerClient(
             s"Processing events from the SequencedEventStore from ${replayStartTimeInclusive} on"
           )
 
-          replayEvents <- sequencedEventStore
-            .findRange(
-              SequencedEventStore
-                .ByTimestampRange(replayStartTimeInclusive, CantonTimestamp.MaxValue),
-              limit = None,
-            )
-            .valueOr {
-              case SequencedEventRangeOverlapsWithPruning(
-                    _criterion,
-                    pruningStatus,
-                    _foundEvents,
-                  ) =>
+          replayEvents <- FutureUnlessShutdown.outcomeF(
+            sequencedEventStore
+              .findRange(
+                SequencedEventStore
+                  .ByTimestampRange(replayStartTimeInclusive, CantonTimestamp.MaxValue),
+                limit = None,
+              )
+              .valueOr { overlap =>
                 ErrorUtil.internalError(
                   new IllegalStateException(
-                    s"Sequenced event store's pruning at ${pruningStatus.timestamp} is at or after the resubscription at $replayStartTimeInclusive."
+                    s"Sequenced event store's pruning at ${overlap.pruningStatus.timestamp} is at or after the resubscription at $replayStartTimeInclusive."
                   )
                 )
-            }
-
+              }
+          )
           _ <-
             if (!replaceExisting) {
               val resubscriptionStartsAt = replayEvents.headOption.fold(
@@ -583,22 +580,16 @@ class SequencerClient(
                 ResubscriptionStart.ReplayResubscriptionStart(replayEv.timestamp, cleanPreheadTsO)
               )
               for {
-                _ <- eventHandler
-                  .resubscriptionStartsAt(resubscriptionStartsAt)
-                  .onShutdown(
-                    // TODO(#4638) properly propagate the shutdown
-                    ErrorUtil.internalError(
-                      new IllegalStateException("Shutdown during sequencer subscription.")
-                    )
-                  )
+                _ <- eventHandler.resubscriptionStartsAt(resubscriptionStartsAt)
 
                 eventBatches = replayEvents.grouped(config.eventInboxSize.unwrap)
-                _ <- MonadUtil
-                  .sequentialTraverse_(eventBatches)(processEventBatch(eventHandler, _))
-                  .valueOr(err => throw SequencerClientSubscriptionException(err))
+                _ <- FutureUnlessShutdown.outcomeF(
+                  MonadUtil
+                    .sequentialTraverse_(eventBatches)(processEventBatch(eventHandler, _))
+                    .valueOr(err => throw SequencerClientSubscriptionException(err))
+                )
               } yield ()
-            } else Future.unit
-
+            } else FutureUnlessShutdown.unit
         } yield {
           val lastEvent = replayEvents.lastOption
           val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
@@ -613,13 +604,11 @@ class SequencerClient(
               initialCounter
                 .getOrElse(preSubscriptionEvent.fold(GenesisSequencerCounter)(_.counter))
 
-          val eventValidator = eventValidatorFactory(
-            EventValidatorFactoryArgs(
-              preSubscriptionEvent,
-              // we need to inform the validator if this connection is unauthenticated, as unauthenticated connections
-              // do not have the topology data to verify signatures
-              unauthenticated = !requiresAuthentication,
-            )
+          val eventValidator = eventValidatorFactory.create(
+            preSubscriptionEvent,
+            // we need to inform the validator if this connection is unauthenticated, as unauthenticated connections
+            // do not have the topology data to verify signatures
+            unauthenticated = !requiresAuthentication,
           )
 
           logger.info(
@@ -738,7 +727,7 @@ class SequencerClient(
   private class SubscriptionHandler(
       applicationHandler: OrdinaryApplicationHandler[ClosedEnvelope],
       timeoutHandler: SendTimeoutHandler,
-      eventValidator: ValidateSequencedEvent,
+      eventValidator: SequencedEventValidator,
       processingDelay: DelaySequencedEvent,
       initialPriorEventCounter: Option[SequencerCounter],
   ) {
@@ -1186,17 +1175,26 @@ object SequencerClient {
             loggerFactory,
           )
           // pluggable send approach to support transitioning to the new async sends
-          validatorFactory = (args: EventValidatorFactoryArgs) =>
-            new SequencedEventValidator(
-              args.initialLastEventProcessedO,
-              args.unauthenticated,
-              config.optimisticSequencedEventValidation,
-              config.skipSequencedEventValidation,
-              domainId,
-              sequencerId,
-              syncCryptoApi,
-              loggerFactory,
-            )
+          validatorFactory = new SequencedEventValidatorFactory {
+            override def create(
+                initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
+                unauthenticated: Boolean,
+            )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
+              if (config.skipSequencedEventValidation) {
+                SequencedEventValidator.noValidation(domainId, sequencerId)(
+                  NamedLoggingContext(loggerFactory, TraceContext.empty)
+                )
+              } else
+                new SequencedEventValidatorImpl(
+                  initialLastEventProcessedO,
+                  unauthenticated,
+                  config.optimisticSequencedEventValidation,
+                  domainId,
+                  sequencerId,
+                  syncCryptoApi,
+                  loggerFactory,
+                )
+          }
         } yield new SequencerClient(
           domainId,
           member,

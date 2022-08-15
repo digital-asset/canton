@@ -31,6 +31,7 @@ import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
 import com.digitalasset.canton.topology.store._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 import slick.jdbc.canton.SQLActionBuilder
@@ -326,12 +327,13 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
             Some((mapping.participant.uid.id, mapping.participant.uid.namespace))
           case _ => None
         }
+        val representativeProtocolVersion = transaction.transaction.representativeProtocolVersion
         val (secondaryId, secondaryNs) = secondary.unzip
         storage.profile match {
           case _: DbStorage.Profile.Oracle =>
-            sql"SELECT $store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason FROM dual"
+            sql"SELECT $store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason, $representativeProtocolVersion FROM dual"
           case _ =>
-            sql"($store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason)"
+            sql"($store, $sequencedTs, $effectiveTs, $validUntil, $transactionType, $namespace, $identifier, $elementId, $secondaryNs, $secondaryId, $operation, $transaction, $reason, $representativeProtocolVersion)"
         }
       }
 
@@ -345,13 +347,13 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     val insertAction = storage.profile match {
       case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
         (sql"""INSERT INTO topology_transactions (store_id, sequenced, valid_from, valid_until, transaction_type, namespace, 
-                    identifier, element_id, secondary_namespace, secondary_identifier, operation, instance, ignore_reason) VALUES""" ++
+                    identifier, element_id, secondary_namespace, secondary_identifier, operation, instance, ignore_reason, representative_protocol_version) VALUES""" ++
           appendSeq.intercalate(sql", ") ++ sql" ON CONFLICT DO NOTHING").asUpdate
       case _: DbStorage.Profile.Oracle =>
         (sql"""INSERT 
-               /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( TOPOLOGY_TRANSACTIONS (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation) ) */ 
+               /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( TOPOLOGY_TRANSACTIONS (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation, representative_protocol_version) ) */ 
                INTO topology_transactions (store_id, sequenced, valid_from, valid_until, transaction_type, namespace, identifier, element_id, 
-                                           secondary_namespace, secondary_identifier, operation, instance, ignore_reason)
+                                           secondary_namespace, secondary_identifier, operation, instance, ignore_reason, representative_protocol_version)
                WITH UPDATES AS (""" ++
           appendSeq.intercalate(sql" UNION ALL ") ++
           sql") SELECT * FROM UPDATES").asUpdate
@@ -651,14 +653,17 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     queryForTransactions(storeId, query4)
   }
 
-  private def findStoredSql(transaction: TopologyTransaction[TopologyChangeOp])(implicit
+  private def findStoredSql(
+      transaction: TopologyTransaction[TopologyChangeOp],
+      subQuery: SQLActionBuilder = sql"",
+  )(implicit
       traceContext: TraceContext
   ): Future[StoredTopologyTransactions[TopologyChangeOp]] =
     queryForTransactions(
       transactionStoreIdName,
       sql"AND" ++ pathQuery(
         transaction.element.uniquePath
-      ) ++ sql" AND operation = ${transaction.op}",
+      ) ++ sql" AND operation = ${transaction.op}" ++ subQuery,
     )
 
   override def findStored(
@@ -674,6 +679,20 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       traceContext: TraceContext
   ): Future[Seq[StoredTopologyTransaction[TopologyChangeOp]]] =
     findStoredSql(transaction).map(_.result)
+
+  override def findStoredForVersion(
+      transaction: TopologyTransaction[TopologyChangeOp],
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[StoredTopologyTransaction[TopologyChangeOp]]] = {
+    val representativeProtocolVersion =
+      TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+    findStoredSql(
+      transaction,
+      sql" AND representative_protocol_version = $representativeProtocolVersion",
+    ).map(_.result.headOption)
+  }
 
   /** query interface used by [[com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot]] */
   override def findPositiveTransactions(

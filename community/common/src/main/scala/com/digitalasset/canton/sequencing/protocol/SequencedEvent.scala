@@ -267,6 +267,8 @@ sealed abstract case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     prettyOfClass(
       param("counter", _.counter),
       param("timestamp", _.timestamp),
+      paramIfNonEmpty("message id", _.messageId),
+      param("domain id", _.domainId),
       unnamedParam(_.batch),
     )
 }

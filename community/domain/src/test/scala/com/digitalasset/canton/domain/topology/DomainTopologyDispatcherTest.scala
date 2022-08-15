@@ -296,7 +296,7 @@ class DomainTopologyDispatcherTest
           mkDmGov(
             DomainParametersChange(
               DomainId(uid),
-              tdp.copy(topologyChangeDelay =
+              tdp.tryUpdate(topologyChangeDelay =
                 tdp.topologyChangeDelay * NonNegativeInt.tryCreate(factor)
               ),
             ),

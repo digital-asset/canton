@@ -36,6 +36,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
     ActionDescription.tryFromLfActionNode(
       ExampleTransactionFactory.createNode(createdId, contractInst),
       Some(ExampleTransactionFactory.lfHash(5)),
+      testedProtocolVersion,
     )
 
   forEvery(factory.standardHappyCases) { example =>
@@ -178,6 +179,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           actionDescription = ActionDescription.tryFromLfActionNode(
             ExampleTransactionFactory.exerciseNodeWithoutChildren(absoluteId),
             Some(nodeSeed),
+            testedProtocolVersion,
           )
         ).left.value should startWith(
           show"Input contract $absoluteId of the Exercise root action is not declared as core input."
@@ -190,6 +192,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
               Set(ExampleTransactionFactory.submitter),
             ),
             None,
+            testedProtocolVersion,
           )
         ).left.value should startWith(
           show"Input contract $absoluteId of the Fetch root action is not declared as core input."
@@ -202,6 +205,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
               maintainers = Set(ExampleTransactionFactory.submitter),
             ),
             None,
+            testedProtocolVersion,
           )
         ).left.value should startWith(
           show"Key $globalKey of LookupByKey root action is not resolved."

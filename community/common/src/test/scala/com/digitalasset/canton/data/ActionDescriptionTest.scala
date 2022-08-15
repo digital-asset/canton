@@ -4,43 +4,63 @@
 package com.digitalasset.canton.data
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.ActionDescription._
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.util.LfTransactionBuilder
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
+import com.digitalasset.canton.{BaseTest, LfInterfaceId}
 import org.scalatest.wordspec.AnyWordSpec
 
 class ActionDescriptionTest extends AnyWordSpec with BaseTest {
 
-  val unsuffixedId: LfContractId = ExampleTransactionFactory.unsuffixedId(10)
-  val suffixedId: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
-  val seed: LfHash = ExampleTransactionFactory.lfHash(5)
-  val globalKey: LfGlobalKey =
+  private val unsuffixedId: LfContractId = ExampleTransactionFactory.unsuffixedId(10)
+  private val suffixedId: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
+  private val seed: LfHash = ExampleTransactionFactory.lfHash(5)
+  private val globalKey: LfGlobalKey =
     LfGlobalKey(LfTransactionBuilder.defaultTemplateId, Value.ValueInt64(10L))
-  val choiceName: LfChoiceName = LfChoiceName.assertFromString("choice")
-  val dummyVersion: LfTransactionVersion = ExampleTransactionFactory.transactionVersion
+  private val choiceName: LfChoiceName = LfChoiceName.assertFromString("choice")
+  private val dummyVersion: LfTransactionVersion = ExampleTransactionFactory.transactionVersion
+
+  private val representativePV: RepresentativeProtocolVersion[ActionDescription] =
+    ActionDescription.protocolVersionRepresentativeFor(testedProtocolVersion)
 
   "An action description" should {
-    "deserialize to the same value" in {
+    def tryCreateExerciseActionDescription(
+        interface: Option[LfInterfaceId],
+        protocolVersion: ProtocolVersion,
+    ): ExerciseActionDescription =
+      createExerciseActionDescription(interface, protocolVersion).fold(err => throw err, identity)
+
+    def createExerciseActionDescription(
+        interface: Option[LfInterfaceId],
+        protocolVersion: ProtocolVersion,
+    ): Either[InvalidActionDescription, ExerciseActionDescription] =
+      ExerciseActionDescription.create(
+        suffixedId,
+        LfChoiceName.assertFromString("choice"),
+        interface,
+        Value.ValueUnit,
+        Set(ExampleTransactionFactory.submitter),
+        byKey = false,
+        seed,
+        dummyVersion,
+        failed = true,
+        ActionDescription.protocolVersionRepresentativeFor(protocolVersion),
+      )
+
+    val fetchAction = FetchActionDescription(
+      unsuffixedId,
+      Set(ExampleTransactionFactory.signatory, ExampleTransactionFactory.observer),
+      byKey = true,
+      dummyVersion,
+    )(representativePV)
+
+    "deserialize to the same value (V0)" in {
       val tests = Seq(
-        CreateActionDescription(unsuffixedId, seed, dummyVersion),
-        ExerciseActionDescription.tryCreate(
-          suffixedId,
-          LfChoiceName.assertFromString("choice"),
-          Value.ValueUnit,
-          Set(ExampleTransactionFactory.submitter),
-          byKey = false,
-          seed,
-          dummyVersion,
-          failed = true,
-        ),
-        FetchActionDescription(
-          unsuffixedId,
-          Set(ExampleTransactionFactory.signatory, ExampleTransactionFactory.observer),
-          byKey = true,
-          dummyVersion,
-        ),
-        LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion),
+        CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
+        tryCreateExerciseActionDescription(interface = None, ProtocolVersion.v3_0_0),
+        fetchAction,
+        LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
       )
 
       forEvery(tests) { actionDescription =>
@@ -48,17 +68,56 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
       }
     }
 
+    "deserialize to the same value (V1)" in {
+      val tests = Seq(
+        CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
+        tryCreateExerciseActionDescription(
+          Some(LfTransactionBuilder.defaultInterfaceId),
+          ProtocolVersion.unstable_development, // TODO(#9910) migrate to stable
+        ),
+        fetchAction,
+        LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
+      )
+
+      forEvery(tests) { actionDescription =>
+        ActionDescription.fromProtoV1(actionDescription.toProtoV1) shouldBe Right(actionDescription)
+      }
+    }
+
     "reject creation" when {
+      "interfaceId is set and the protocol version is too old" in {
+        def create(
+            protocolVersion: ProtocolVersion
+        ): Either[InvalidActionDescription, ExerciseActionDescription] =
+          createExerciseActionDescription(
+            Some(LfTransactionBuilder.defaultInterfaceId),
+            protocolVersion,
+          )
+
+        val v3 = ProtocolVersion.v3_0_0
+        val v2 = ProtocolVersion.v2_0_0
+        create(v3) shouldBe Left(
+          InvalidActionDescription(
+            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.unstable_development}"
+          )
+        )
+
+        // TODO(#9910) migrate to stable
+        create(ProtocolVersion.unstable_development).value shouldBe a[ExerciseActionDescription]
+      }
+
       "the choice argument cannot be serialized" in {
         ExerciseActionDescription.create(
           suffixedId,
           choiceName,
+          None,
           ExampleTransactionFactory.veryDeepValue,
           Set(ExampleTransactionFactory.submitter),
           byKey = true,
           seed,
           dummyVersion,
           failed = false,
+          representativePV,
         ) shouldBe Left(
           InvalidActionDescription(
             "Failed to serialize chosen value: Provided Daml-LF value to encode exceeds maximum nesting level of 100"
@@ -73,6 +132,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
             ExampleTransactionFactory.veryDeepValue,
           ),
           dummyVersion,
+          representativePV,
         ) shouldBe Left(
           InvalidActionDescription(
             "Failed to serialize key: Provided Daml-LF value to encode exceeds maximum nesting level of 100"
@@ -84,12 +144,14 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         ActionDescription.fromLfActionNode(
           ExampleTransactionFactory.createNode(suffixedId),
           None,
+          testedProtocolVersion,
         ) shouldBe
           Left(InvalidActionDescription("No seed for a Create node given"))
 
         ActionDescription.fromLfActionNode(
           ExampleTransactionFactory.exerciseNodeWithoutChildren(suffixedId),
           None,
+          testedProtocolVersion,
         ) shouldBe
           Left(InvalidActionDescription("No seed for an Exercise node given"))
       }
@@ -98,6 +160,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         ActionDescription.fromLfActionNode(
           ExampleTransactionFactory.fetchNode(suffixedId),
           Some(seed),
+          testedProtocolVersion,
         ) shouldBe
           Left(InvalidActionDescription("No seed should be given for a Fetch node"))
 
@@ -105,6 +168,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
           ExampleTransactionFactory
             .lookupByKeyNode(globalKey, maintainers = Set(ExampleTransactionFactory.observer)),
           Some(seed),
+          testedProtocolVersion,
         ) shouldBe Left(InvalidActionDescription("No seed should be given for a LookupByKey node"))
       }
 
@@ -112,6 +176,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         ActionDescription.fromLfActionNode(
           ExampleTransactionFactory.fetchNode(suffixedId, actingParties = Set.empty),
           None,
+          testedProtocolVersion,
         ) shouldBe Left(InvalidActionDescription("Fetch node without acting parties"))
       }
     }

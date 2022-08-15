@@ -30,6 +30,7 @@ import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.StorageFactory.StorageCreationException
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
@@ -81,6 +82,7 @@ trait StorageFactory {
   def tryCreate(
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
+      clock: Clock,
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -89,13 +91,14 @@ trait StorageFactory {
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Storage =
-    create(connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory)
+    create(connectionPoolForParticipant, logQueryCost, clock, metrics, timeouts, loggerFactory)
       .valueOr(err => throw new StorageCreationException(err))
       .onShutdown(throw new StorageCreationException("Shutdown during storage creation"))
 
   def create(
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
+      clock: Clock,
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -114,6 +117,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
   override def create(
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
+      clock: Clock,
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -126,7 +130,15 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       case CommunityStorageConfig.Memory(_) => EitherT.rightT(new MemoryStorage)
       case db: DbConfig =>
         DbStorageSingle
-          .create(db, connectionPoolForParticipant, logQueryCost, metrics, timeouts, loggerFactory)
+          .create(
+            db,
+            connectionPoolForParticipant,
+            logQueryCost,
+            clock,
+            metrics,
+            timeouts,
+            loggerFactory,
+          )
           .widen[Storage]
     }
 }
@@ -607,7 +619,7 @@ object DbStorage {
     import slick.util.ConfigExtensionMethods._
     try {
       val classLoader: ClassLoader = ClassLoaderUtil.defaultClassLoader
-      val source = JdbcDataSource.forConfig(config, null, "path", classLoader)
+      val source = JdbcDataSource.forConfig(config, null, "", classLoader)
       val poolName = config.getStringOr("poolName", "")
       val numThreads = config.getIntOr("numThreads", 20)
       val maxConnections = source.maxConnections.getOrElse(numThreads)

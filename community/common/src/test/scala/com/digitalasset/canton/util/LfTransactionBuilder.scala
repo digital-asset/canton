@@ -9,7 +9,7 @@ import com.daml.lf.data.Ref.{Location, QualifiedName}
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.{LfChoiceName, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId}
 
 import scala.collection.immutable.HashMap
 
@@ -23,6 +23,7 @@ object LfTransactionBuilder {
   val defaultPackageId: LfPackageId = LfPackageId.assertFromString("pkg")
   val defaultTemplateId: Ref.Identifier =
     Ref.Identifier(defaultPackageId, QualifiedName.assertFromString("module:template"))
+  val defaultInterfaceId: LfInterfaceId = defaultTemplateId
 
   val defaultLocation =
     Location(

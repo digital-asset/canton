@@ -4,6 +4,7 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.util.IterableUtilTest.CompareOnlyFirst
 import org.scalatest.wordspec.AnyWordSpec
 
 class IterableUtilTest extends AnyWordSpec with BaseTest {
@@ -44,5 +45,43 @@ class IterableUtilTest extends AnyWordSpec with BaseTest {
         if (x == y) Some(x -> y) else None
       } shouldBe Seq(1 -> 1)
     }
+  }
+
+  "max" should {
+    "find the max elements of a list" in {
+      IterableUtil.maxList(List(2, 1, 2, 2, 0, 1, 0, 2)) shouldEqual List(2, 2, 2, 2)
+      IterableUtil.maxList(List(1, 2, 3)) shouldEqual List(3)
+      IterableUtil.maxList(List(3, 2, 1)) shouldEqual List(3)
+      IterableUtil.maxList[Int](List.empty) shouldEqual List.empty
+
+      val onlyFirsts =
+        List((2, 2), (4, 2), (4, 1), (4, 3), (2, 1), (3, 5), (0, 4), (4, 4)).map(x =>
+          CompareOnlyFirst(x._1, x._2)
+        )
+      IterableUtil.maxList(onlyFirsts) shouldEqual onlyFirsts
+        .filter(x => x.first == 4)
+        .reverse
+    }
+  }
+
+  "min" should {
+    "find the min elements of a list" in {
+      IterableUtil.minList(List(0, 1, 0, 0, 2, 1, 2, 0)) shouldEqual List(0, 0, 0, 0)
+      IterableUtil.minList(List(3, 2, 1)) shouldEqual List(1)
+      IterableUtil.minList(List(1, 2, 3)) shouldEqual List(1)
+      IterableUtil.minList[Int](List.empty) shouldEqual List.empty
+
+      val onlyFirsts =
+        List((0, 2), (1, 3), (0, 1), (3, 3), (0, 5)).map(x => CompareOnlyFirst(x._1, x._2))
+      IterableUtil.minList(onlyFirsts) shouldEqual onlyFirsts
+        .filter(x => x.first == 0)
+        .reverse
+    }
+  }
+}
+
+object IterableUtilTest {
+  case class CompareOnlyFirst(first: Int, second: Int) extends Ordered[CompareOnlyFirst] {
+    override def compare(that: CompareOnlyFirst): Int = first.compareTo(that.first)
   }
 }

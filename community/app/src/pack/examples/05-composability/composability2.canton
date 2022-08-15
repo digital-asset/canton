@@ -3,12 +3,12 @@
 // architecture-handbook-entry-begin: topology
 
 // update parameters
-iou.service.update_dynamic_parameters(
-  _.copy(transferExclusivityTimeout = TimeoutDuration.Zero)
+iou.service.update_dynamic_domain_parameters(
+  _.update(transferExclusivityTimeout = TimeoutDuration.Zero)
 ) // disables automatic transfer-in
 
-paint.service.update_dynamic_parameters(
-  _.copy(transferExclusivityTimeout = TimeoutDuration.ofSeconds(2))
+paint.service.update_dynamic_domain_parameters(
+  _.update(transferExclusivityTimeout = TimeoutDuration.ofSeconds(2))
 )
 
 // connect participants to the domain

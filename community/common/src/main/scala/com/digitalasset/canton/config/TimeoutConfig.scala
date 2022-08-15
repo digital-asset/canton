@@ -26,6 +26,15 @@ case class TimeoutDuration(duration: Duration) {
   // Make sure that the finite approximation exists.
   asFiniteApproximation
 
+  def minusSeconds(s: Int): TimeoutDuration = TimeoutDuration(
+    duration.minus(Duration.fromNanos(s * 10e9))
+  )
+  def plusSeconds(s: Int): TimeoutDuration = TimeoutDuration(
+    duration.plus(Duration.fromNanos(s * 10e9))
+  )
+
+  def multipliedBy(i: Int): TimeoutDuration = TimeoutDuration(duration * i.toDouble)
+
   def asJavaApproximation: JDuration = JDuration.ofMillis(asFiniteApproximation.toMillis)
 
   def asFiniteApproximation: FiniteDuration = duration match {
@@ -70,6 +79,11 @@ case class TimeoutDuration(duration: Duration) {
       implicit loggingContext: ErrorLoggingContext
   ): Option[T] =
     FutureUtil.valueOrLog(fut, description, duration, level)
+
+  def toProtoPrimitive: com.google.protobuf.duration.Duration = {
+    val d = asJavaApproximation
+    com.google.protobuf.duration.Duration(d.getSeconds, d.getNano)
+  }
 
 }
 

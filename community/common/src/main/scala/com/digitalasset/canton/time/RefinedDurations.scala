@@ -7,6 +7,7 @@ import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
+import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -159,6 +160,8 @@ final case class NonNegativeFiniteDuration(duration: Duration)
   def *(multiplicand: NonNegativeInt): NonNegativeFiniteDuration = NonNegativeFiniteDuration(
     duration.multipliedBy(multiplicand.value.toLong)
   )
+
+  def toTimeout: TimeoutDuration = checked(TimeoutDuration.tryFromJavaDuration(duration))
 }
 
 object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {
@@ -166,6 +169,9 @@ object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFin
     _.duration
   implicit val forgetRefinementFDuration: Transformer[NonNegativeFiniteDuration, FiniteDuration] =
     _.toScala
+
+  implicit val toTimeoutDurationTransformer
+      : Transformer[NonNegativeFiniteDuration, TimeoutDuration] = _.toTimeout
 
   val Zero: NonNegativeFiniteDuration = NonNegativeFiniteDuration(Duration.ZERO)
 }

@@ -123,7 +123,8 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   private val requestSc = 0L
   private val resultSc = 1L
   private val rc = 0L
-  private val parameters = DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero)
+  private val parameters =
+    DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion)
 
   private val protocolMessagePVRepresentative =
     EncryptedViewMessage.protocolVersionRepresentativeFor(testedProtocolVersion)

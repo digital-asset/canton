@@ -8,17 +8,23 @@ import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMon
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
+import com.digitalasset.canton.resource.DatabaseStorageError.DatabaseConnectionLost.DatabaseConnectionLost
 import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationException}
+import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.{ErrorUtil, ResourceUtil}
 import slick.jdbc.JdbcBackend.Database
 
-import scala.concurrent.{ExecutionContext, Future}
+import java.sql.SQLException
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future, blocking}
 
 /** DB Storage implementation that assumes a single process accessing the underlying database. */
 class DbStorageSingle private (
     override val profile: DbStorage.Profile,
     override val dbConfig: DbConfig,
     db: Database,
+    clock: Clock,
     override val metrics: DbStorageMetrics,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -26,6 +32,17 @@ class DbStorageSingle private (
     extends DbStorage
     with FlagCloseable
     with NamedLogging {
+
+  private val isActiveRef = new AtomicReference[Boolean](true)
+
+  private val periodicConnectionCheck = new PeriodicAction(
+    clock,
+    // using the same interval for connection timeout as for periodic check
+    dbConfig.connectionTimeout,
+    loggerFactory,
+    timeouts,
+    "db-connection-check",
+  )(tc => checkConnectivity(tc))
 
   override protected[canton] def runRead[A](
       action: DbAction.ReadTransactional[A],
@@ -42,15 +59,35 @@ class DbStorageSingle private (
     run(operationName, maxRetries)(db.run(action))
 
   override def onClosed(): Unit = {
+    periodicConnectionCheck.close()
     db.close()
   }
 
-  override def isActive: Boolean = true
+  override def isActive: Boolean = isActiveRef.get()
+
+  private def checkConnectivity(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
+    Future(blocking(try {
+      val connection =
+        // this will timeout and throw a SQLException if can't establish a connection
+        db.source.createConnection()
+      ResourceUtil.withResource(connection)(
+        _.isValid(dbConfig.connectionTimeout.duration.toSeconds.toInt)
+      )
+    } catch {
+      case e: SQLException =>
+        DatabaseConnectionLost(ErrorUtil.messageWithStacktrace(e))
+        false
+    })).map(isActiveRef.set)
+  }
+
 }
 
 object DbStorageSingle {
   def tryCreate(
       config: DbConfig,
+      clock: Clock,
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
       metrics: DbStorageMetrics,
@@ -62,6 +99,7 @@ object DbStorageSingle {
       config,
       connectionPoolForParticipant,
       logQueryCost,
+      clock,
       metrics,
       timeouts,
       loggerFactory,
@@ -74,6 +112,7 @@ object DbStorageSingle {
       config: DbConfig,
       connectionPoolForParticipant: Boolean,
       logQueryCost: Option[QueryCostMonitoringConfig],
+      clock: Clock,
       metrics: DbStorageMetrics,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -93,7 +132,7 @@ object DbStorageSingle {
         retryConfig = retryConfig,
       )(loggerFactory)
       profile = DbStorage.profile(config)
-      storage = new DbStorageSingle(profile, config, db, metrics, timeouts, loggerFactory)
+      storage = new DbStorageSingle(profile, config, db, clock, metrics, timeouts, loggerFactory)
     } yield storage
 
 }

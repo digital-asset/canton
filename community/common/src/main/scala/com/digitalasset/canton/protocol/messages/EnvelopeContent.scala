@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.{v0, v1}
@@ -139,7 +138,7 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
 
   def messageFromByteString(protocolVersion: ProtocolVersion, hashOps: HashOps)(
       bytes: ByteString
-  ): Either[ProtoDeserializationError, ProtocolMessage] = {
+  ): ParsingResult[ProtocolMessage] = {
     // Previously the envelope content was not wrapped in a VersionedMessage, therefore we have to explicitly decide to
     // deserialize from a versioned wrapper message or not.
     protocolVersion match {

@@ -133,6 +133,11 @@ trait FlagCloseable extends AutoCloseable {
   )(implicit ec: ExecutionContext, traceContext: TraceContext): FutureUnlessShutdown[A] =
     FutureUnlessShutdown(internalPerformUnlessClosingF(name)(f).sequence)
 
+  def performUnlessClosingUSF[A](name: String)(
+      f: => FutureUnlessShutdown[A]
+  )(implicit ec: ExecutionContext, traceContext: TraceContext): FutureUnlessShutdown[A] =
+    performUnlessClosingF(name)(f.unwrap).subflatMap(Predef.identity)
+
   protected def internalPerformUnlessClosingF[A](name: String)(
       f: => Future[A]
   )(implicit ec: ExecutionContext, traceContext: TraceContext): UnlessShutdown[Future[A]] = {

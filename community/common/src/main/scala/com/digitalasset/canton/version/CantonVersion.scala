@@ -7,7 +7,7 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
 import com.daml.error.{ErrorCode, Explanation, Resolution}
-import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.buildinfo.BuildInfo
@@ -17,12 +17,12 @@ import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.CantonVersion.releaseVersionToProtocolVersions
 import com.digitalasset.canton.version.ProtocolVersion.{
   InvalidProtocolVersion,
   UnsupportedVersion,
   deprecated,
 }
+import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.releaseVersionToProtocolVersions
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
@@ -104,44 +104,16 @@ sealed trait CantonVersion extends Ordered[CantonVersion] with PrettyPrinting {
   }
 }
 
-object CantonVersion {
-
-  import ProtocolVersion._
-  // At some point after Daml 3.0, this Map may diverge for domain and participant because we have
-  // different compatibility guarantees for participants and domains and we will need to add separate maps for each
-  // don't make `releaseVersionToProtocolVersions` private - it's used in `console-reference.canton`
-  val releaseVersionToProtocolVersions: Map[ReleaseVersion, NonEmpty[List[ProtocolVersion]]] = Map(
-    ReleaseVersion.v2_0_0_snapshot -> List(v2_0_0),
-    ReleaseVersion.v2_0_0 -> List(v2_0_0),
-    ReleaseVersion.v2_0_1 -> List(v2_0_0),
-    ReleaseVersion.v2_1_0_snapshot -> List(v2_0_0),
-    ReleaseVersion.v2_1_0 -> List(v2_0_0),
-    ReleaseVersion.v2_1_0_rc1 -> List(v2_0_0),
-    ReleaseVersion.v2_1_1_snapshot -> List(v2_0_0),
-    ReleaseVersion.v2_1_1 -> List(v2_0_0),
-    ReleaseVersion.v2_2_0_snapshot -> List(v2_0_0),
-    ReleaseVersion.v2_2_0 -> List(v2_0_0),
-    ReleaseVersion.v2_2_0_rc1 -> List(v2_0_0),
-    ReleaseVersion.v2_2_1 -> List(v2_0_0),
-    ReleaseVersion.v2_2_0 -> List(v2_0_0),
-    ReleaseVersion.v2_3_0_snapshot -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_0_rc1 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_0 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_1 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_3_2 -> List(v2_0_0, v3_0_0),
-    ReleaseVersion.v2_4_0_snapshot -> List(v2_0_0, v3_0_0),
-  ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
-
-}
-
 sealed trait CompanionTrait {
   protected def createInternal(
-      rawVersion: String
+      rawVersion: String,
+      baseName: String,
   ): Either[String, (Int, Int, Int, Option[String])] = {
-    val dev = ProtocolVersion.unstable_development.fullVersion
-
     // `?:` removes the capturing group, so we get a cleaner pattern-match statement
     val regex = raw"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,4})(?:-(.*))?".r
+    // ignore case for dev version ... scala regex doesn't know case insensitivity ...
+    val devRegex = "^[dD][eE][vV]$".r
+    val devFull = ProtocolVersion.unstable_development.fullVersion
     rawVersion match {
       case regex(rawMajor, rawMinor, rawPatch, suffix) =>
         val parsedDigits = List(rawMajor, rawMinor, rawPatch).traverse(raw =>
@@ -155,11 +127,11 @@ sealed trait CompanionTrait {
         }
 
       // Since dev uses Int.MaxValue, it does not satisfy the regex above
-      case `dev` => Right(ProtocolVersion.unstable_development.raw)
+      case `devFull` | devRegex() => Right(ProtocolVersion.unstable_development.raw)
 
       case _ =>
         Left(
-          s"Unable to convert string $rawVersion to a valid CantonVersion. A CantonVersion is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid CantonVersions."
+          s"Unable to convert string $rawVersion to a valid ${baseName}. A ${baseName} is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid ${baseName}s."
         )
     }
   }
@@ -180,31 +152,14 @@ final case class ReleaseVersion(
 object ReleaseVersion extends CompanionTrait {
 
   def create(rawVersion: String): Either[String, ReleaseVersion] =
-    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
-      new ReleaseVersion(major, minor, patch, optSuffix)
+    createInternal(rawVersion, ReleaseVersion.getClass.getSimpleName).map {
+      case (major, minor, patch, optSuffix) =>
+        new ReleaseVersion(major, minor, patch, optSuffix)
     }
   def tryCreate(rawVersion: String): ReleaseVersion = create(rawVersion).fold(sys.error, identity)
 
   /** The release this process belongs to. */
   val current: ReleaseVersion = ReleaseVersion.tryCreate(BuildInfo.version)
-  lazy val v2_0_0_snapshot: ReleaseVersion = ReleaseVersion(2, 0, 0, Some("SNAPSHOT"))
-  lazy val v2_0_0: ReleaseVersion = ReleaseVersion(2, 0, 0)
-  lazy val v2_0_1: ReleaseVersion = ReleaseVersion(2, 0, 1)
-  lazy val v2_1_0_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("SNAPSHOT"))
-  lazy val v2_1_0: ReleaseVersion = ReleaseVersion(2, 1, 0)
-  lazy val v2_1_0_rc1: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("rc1"))
-  lazy val v2_1_1_snapshot: ReleaseVersion = ReleaseVersion(2, 1, 1, Some("SNAPSHOT"))
-  lazy val v2_1_1: ReleaseVersion = ReleaseVersion(2, 1, 1)
-  lazy val v2_2_0_snapshot: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("SNAPSHOT"))
-  lazy val v2_2_0_rc1: ReleaseVersion = ReleaseVersion(2, 2, 0, Some("rc1"))
-  lazy val v2_2_0: ReleaseVersion = ReleaseVersion(2, 2, 0)
-  lazy val v2_2_1: ReleaseVersion = ReleaseVersion(2, 2, 1)
-  lazy val v2_3_0_snapshot: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("SNAPSHOT"))
-  lazy val v2_3_0_rc1: ReleaseVersion = ReleaseVersion(2, 3, 0, Some("rc1"))
-  lazy val v2_3_0: ReleaseVersion = ReleaseVersion(2, 3, 0)
-  lazy val v2_3_1: ReleaseVersion = ReleaseVersion(2, 3, 1)
-  lazy val v2_3_2: ReleaseVersion = ReleaseVersion(2, 3, 2)
-  lazy val v2_4_0_snapshot: ReleaseVersion = ReleaseVersion(2, 4, 0, Some("SNAPSHOT"))
 }
 
 /** A Canton protocol version is a snapshot of how the Canton protocols, that nodes use to communicate, function at a certain point in time
@@ -307,8 +262,9 @@ object ProtocolVersion extends CompanionTrait {
   else ProtocolVersion(i, 0, 0)
 
   def create(rawVersion: String): Either[String, ProtocolVersion] =
-    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
-      new ProtocolVersion(major, minor, patch, optSuffix)
+    createInternal(rawVersion, ProtocolVersion.getClass.getSimpleName).map {
+      case (major, minor, patch, optSuffix) =>
+        new ProtocolVersion(major, minor, patch, optSuffix)
     }
 
   /** Parse a ProtocolVersion
@@ -337,7 +293,7 @@ object ProtocolVersion extends CompanionTrait {
     releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of a participant of release version $release to `releaseVersionToProtocolVersions` in `CantonVersion.scala`."
+        s"Please add the supported protocol versions of a participant of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ getDevelopmentVersions(includeDevelopmentVersions)
   }
@@ -351,7 +307,7 @@ object ProtocolVersion extends CompanionTrait {
     releaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of domain nodes of release version $release to `releaseVersionToProtocolVersions` in `CantonVersion.scala`."
+        s"Please add the supported protocol versions of domain nodes of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ getDevelopmentVersions(includeDevelopmentVersions)
   }
@@ -445,8 +401,9 @@ final case class EthereumContractVersion(
 object EthereumContractVersion extends CompanionTrait {
 
   def create(rawVersion: String): Either[String, EthereumContractVersion] =
-    createInternal(rawVersion).map { case (major, minor, patch, optSuffix) =>
-      new EthereumContractVersion(major, minor, patch, optSuffix)
+    createInternal(rawVersion, EthereumContractVersion.getClass.getSimpleName).map {
+      case (major, minor, patch, optSuffix) =>
+        new EthereumContractVersion(major, minor, patch, optSuffix)
     }
   def tryCreate(rawVersion: String): EthereumContractVersion =
     create(rawVersion).fold(sys.error, identity)
@@ -455,8 +412,8 @@ object EthereumContractVersion extends CompanionTrait {
   def tryReleaseVersionToEthereumContractVersions(
       v: ReleaseVersion
   ): NonEmpty[List[EthereumContractVersion]] = {
-    assert(CantonVersion.releaseVersionToProtocolVersions.contains(v))
-    if (v < ReleaseVersion.v2_3_0_snapshot)
+    assert(ReleaseVersionToProtocolVersions.releaseVersionToProtocolVersions.contains(v))
+    if (v < ReleaseVersions.v2_3_0_snapshot)
       NonEmpty(List, v1_0_0)
     else
       NonEmpty(List, v1_0_0, v1_0_1)

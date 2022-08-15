@@ -37,6 +37,16 @@ import scala.Ordered.orderingToOrdered
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
+/** Active contracts journal
+  *
+  * This database table has the following indexes to support scaling query performance:
+  * - CREATE index active_contracts_dirty_request_reset_idx ON active_contracts (domain_id, request_counter)
+  *      used on startup of the SyncDomain to delete all dirty requests.
+  * - CREATE index active_contracts_contract_id_idx ON active_contracts (contract_id)
+  *      used in conflict detection for point wise lookup of the contract status.
+  * - CREATE index active_contracts_ts_domain_id_idx ON active_contracts (ts, domain_id)
+  *      used on startup by the SyncDomain to replay ACS changes to the ACS commitment processor.
+  */
 class DbActiveContractStore(
     override protected val storage: DbStorage,
     protected[this] override val domainId: IndexedDomain,

@@ -158,8 +158,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     // We don't update the topology client, so we expect to get a couple of warnings about unknown topology snapshots
     private def ignoreWarningsFromLackOfTopologyUpdates(entries: Seq[LogEntry]): Assertion =
       forEvery(entries) {
-        _.warningMessage should
-          include("Using approximate topology snapshot for desired timestamp")
+        _.warningMessage should fullyMatch regex (".*Using approximate topology snapshot .* for desired timestamp.*")
       }
 
     def pullFromQueue(
@@ -672,10 +671,8 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                       sequencingTimestamp,
                       domainId,
                       messageId,
-                      SequencerReader.invalidSigningTimestampError(
-                        signingTimestamp,
-                        sequencingTimestamp,
-                      ),
+                      Sequencer
+                        .signingTimestampTooEarlyError(signingTimestamp, sequencingTimestamp),
                       testedProtocolVersion,
                     )
                 delivered.signedEvent.content shouldBe expectedSequencedEvent

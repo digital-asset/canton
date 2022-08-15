@@ -136,11 +136,16 @@ object ClientChannelBuilder {
     }
   }
 
-  /** Simple channel construction for test and console clients */
-  def createChannel(clientConfig: ClientConfig)(implicit executor: Executor): ManagedChannel = {
+  /** Simple channel construction for test and console clients.
+    * `maxInboundMessageSize` is 2GB; so don't use this to connect to an untrusted server.
+    */
+  def createChannelToTrustedServer(
+      clientConfig: ClientConfig
+  )(implicit executor: Executor): ManagedChannel = {
     val baseBuilder: NettyChannelBuilder = NettyChannelBuilder
       .forAddress(clientConfig.address, clientConfig.port.unwrap)
       .executor(executor)
+      .maxInboundMessageSize(Int.MaxValue)
 
     // apply keep alive settings
     configureKeepAlive(

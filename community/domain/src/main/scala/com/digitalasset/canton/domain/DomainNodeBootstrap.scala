@@ -103,7 +103,7 @@ class DomainNodeBootstrap(
         initialized <- initializeTopologyManagerIdentity(
           name,
           legalIdentityHook,
-          DynamicDomainParameters.initialValues(clock),
+          DynamicDomainParameters.initialValues(clock, protocolVersion),
           protocolVersion,
         )
         (nodeId, topologyManager, namespaceKey) = initialized

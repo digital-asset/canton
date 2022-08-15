@@ -266,6 +266,21 @@ object DomainRegistryError extends DomainRegistryErrorGroup {
   }
 
   @Explanation(
+    "This error indicates that there was an error converting topology transactions during connecting to a domain."
+  )
+  @Resolution("Contact the operator of the topology management for this node.")
+  object TopologyConversionError
+      extends ErrorCode(
+        id = "TOPOLOGY_CONVERSION_ERROR",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+
+    case class Error(override val cause: String)(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(cause)
+        with DomainRegistryError
+  }
+
+  @Explanation(
     """This error indicates that there has been an internal error noticed by Canton."""
   )
   @Resolution("Contact support and provide the failure reason.")

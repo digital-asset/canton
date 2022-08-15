@@ -3,10 +3,16 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import akka.stream.scaladsl.{Keep, Sink, Source}
-import akka.stream.{KillSwitch, Materializer}
+import akka.stream.Materializer
+import akka.stream.scaladsl.{Keep, Sink}
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
+import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  AsyncOrSyncCloseable,
+  FlagCloseableAsync,
+  SyncCloseable,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
@@ -23,7 +29,7 @@ import scala.util.{Failure, Success}
   */
 private[service] class DirectSequencerSubscription[E](
     member: Member,
-    source: Source[OrdinarySerializedEvent, KillSwitch],
+    source: Sequencer.EventSource,
     handler: SerializedEventHandler[E],
     override protected val timeouts: ProcessingTimeout,
     baseLoggerFactory: NamedLoggerFactory,
@@ -35,7 +41,7 @@ private[service] class DirectSequencerSubscription[E](
   protected val loggerFactory: NamedLoggerFactory =
     baseLoggerFactory.append("member", show"${member}")
 
-  val (killSwitch, done) = AkkaUtil.runSupervised(
+  val ((killSwitch, sourceDone), done) = AkkaUtil.runSupervised(
     logger.error("Fatally failed to handle event", _),
     source
       .mapAsync(1) { event =>
@@ -63,12 +69,16 @@ private[service] class DirectSequencerSubscription[E](
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
+    SyncCloseable(s"killing direct-sequencer-subscription for $member", killSwitch.shutdown()),
     AsyncCloseable(
-      s"direct-sequencer-subscription for $member", {
-        killSwitch.shutdown()
-        done
-      },
+      s"flushing direct-sequencer-subscription for $member",
+      done,
       timeouts.shutdownNetwork.duration,
-    )
+    ),
+    AsyncCloseable(
+      s"flushing other sinks in direct-sequencer-subscription for $member",
+      sourceDone,
+      timeouts.shutdownNetwork.duration,
+    ),
   )
 }

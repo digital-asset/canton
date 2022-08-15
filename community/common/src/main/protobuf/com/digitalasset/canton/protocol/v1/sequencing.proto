@@ -27,4 +27,5 @@ message DynamicDomainParameters {
     google.protobuf.Duration topology_change_delay = 4;
     google.protobuf.Duration ledger_time_record_time_tolerance = 5;
     google.protobuf.Duration reconciliation_interval = 6;
+    google.protobuf.Duration mediator_deduplication_timeout = 7;
 }

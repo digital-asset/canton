@@ -10,6 +10,7 @@ import cats.syntax.functor._
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.daml.platform.apiserver.SeedService.Seeding
+import com.daml.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
   CannotReadFilesError,
@@ -720,6 +721,8 @@ object CantonConfig {
       deriveReader[AuthServiceConfig]
     lazy implicit val postgresDataSourceConfigReader: ConfigReader[PostgresDataSourceConfigCanton] =
       deriveReader[PostgresDataSourceConfigCanton]
+    lazy implicit val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
+      deriveReader[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigReader: ConfigReader[LedgerApiServerConfig] =
       deriveReader[LedgerApiServerConfig]
     lazy implicit val activeContractsServiceConfigReader
@@ -1049,6 +1052,8 @@ object CantonConfig {
       deriveWriter[AuthServiceConfig]
     lazy implicit val postgresDataSourceWriter: ConfigWriter[PostgresDataSourceConfigCanton] =
       deriveWriter[PostgresDataSourceConfigCanton]
+    lazy implicit val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
+      deriveWriter[RateLimitingConfig]
     lazy implicit val ledgerApiServerConfigWriter: ConfigWriter[LedgerApiServerConfig] =
       deriveWriter[LedgerApiServerConfig]
     lazy implicit val activeContractsServiceConfigWriter

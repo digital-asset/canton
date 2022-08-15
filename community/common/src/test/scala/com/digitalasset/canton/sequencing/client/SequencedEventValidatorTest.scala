@@ -42,12 +42,11 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       initialEventMetadata: PossiblyIgnoredSerializedEvent =
         IgnoredSequencedEvent(CantonTimestamp.MinValue, updatedCounter - 1, None)(traceContext),
       syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi,
-  ): SequencedEventValidator = {
-    new SequencedEventValidator(
+  ): SequencedEventValidatorImpl = {
+    new SequencedEventValidatorImpl(
       Some(initialEventMetadata),
       unauthenticated = false,
       optimistic = false,
-      skipValidation = false,
       defaultDomainId,
       sequencerId,
       syncCryptoApi,

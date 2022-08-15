@@ -166,6 +166,7 @@ abstract class CantonNodeBootstrapBase[
       .tryCreate(
         connectionPoolForParticipant,
         parameterConfig.logQueryCost,
+        clock,
         dbStorageMetrics,
         parameterConfig.processingTimeouts,
         loggerFactory,
@@ -246,6 +247,8 @@ abstract class CantonNodeBootstrapBase[
             new GrpcTopologyManagerReadService(
               topologyStoreFactory.allNonDiscriminated,
               ips,
+              parameterConfig.initialProtocolVersion,
+              crypto,
               loggerFactory,
             ),
             executionContext,

@@ -17,7 +17,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.ListConnectedDomainsResult
+import com.digitalasset.canton.admin.api.client.data.console.ListConnectedDomainsResult
 import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,

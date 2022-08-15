@@ -264,13 +264,20 @@ class ParticipantNodeBootstrap(
           OwnerToKeyMapping(participantId, encryptionKey),
           protocolVersion,
         )
-        // initialize certificate
-        _ <- (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
-          uid,
-          Seq(participantId),
-          namespaceKey,
-          protocolVersion,
-        )(topologyManager, authorizedTopologyStore)
+
+        // initialize certificate if enabled
+        _ <-
+          if (config.init.generateLegalIdentityCertificate) {
+            (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
+              uid,
+              Seq(participantId),
+              namespaceKey,
+              protocolVersion,
+            )(topologyManager, authorizedTopologyStore)
+          } else {
+            EitherT.rightT[Future, String](())
+          }
+
         // finally, we store the node id, which means that the node will not be auto-initialised next time when we start
         _ <- storeId(nodeId)
       } yield ()

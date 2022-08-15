@@ -18,7 +18,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.{Hash, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing._
@@ -751,7 +751,11 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
   }
 
   object Env {
-    val eventAlwaysValid: ValidateSequencedEvent = _ => EitherT.rightT(())
+    val eventAlwaysValid: SequencedEventValidator = SequencedEventValidator.noValidation(
+      DefaultTestIdentities.domainId,
+      DefaultTestIdentities.sequencer,
+      warn = false,
+    )
 
     /** @param useParallelExecutionContext Set to true to use a parallel execution context which is handy for
       *                                    verifying close behavior that can involve an Await that would deadlock
@@ -762,7 +766,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     def create(
         storedEvents: Seq[SequencedEvent[ClosedEnvelope]] = Seq.empty,
         cleanPrehead: Option[CursorPrehead[SequencerCounter]] = None,
-        eventValidator: ValidateSequencedEvent = eventAlwaysValid,
+        eventValidator: SequencedEventValidator = eventAlwaysValid,
         options: SequencerClientConfig = SequencerClientConfig(),
         useParallelExecutionContext: Boolean = false,
     ): Future[Env] = {
@@ -788,6 +792,14 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )
       val domainParameters = BaseTest.defaultStaticDomainParameters
 
+      val eventValidatorFactory = new SequencedEventValidatorFactory {
+        override def create(
+            initialLastEventProcessedO: Option[PossiblyIgnoredSerializedEvent],
+            unauthenticated: Boolean,
+        )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
+          eventValidator
+      }
+
       val client = new SequencerClient(
         DefaultTestIdentities.domainId,
         participant1,
@@ -796,7 +808,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         TestingConfigInternal(),
         domainParameters,
         timeouts,
-        _ => eventValidator,
+        eventValidatorFactory,
         clock,
         sequencedEventStore,
         sendTracker,

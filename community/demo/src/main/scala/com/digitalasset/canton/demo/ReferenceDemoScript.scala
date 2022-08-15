@@ -25,6 +25,7 @@ import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicReference
@@ -328,7 +329,7 @@ class ReferenceDemoScript(
           val registerId = aliceLookup(M.MedicalRecord.Register).contractId
           val acceptOffer =
             appointmentEv.contractId
-              .exerciseAcceptAppointment(alice, policyId = policyId, registerId = registerId)
+              .exerciseAcceptAppointment(policyId = policyId, registerId = registerId)
               .command
           val _ = participant1.ledger_api.commands
             .submit(Seq(alice), Seq(acceptOffer), optTimeout = syncTimeout)
@@ -342,7 +343,6 @@ class ReferenceDemoScript(
           import M.Doctor.Appointment._
           val tickOff = doctorLookup(M.Doctor.Appointment).contractId
             .exerciseTickOff(
-              doctor,
               description = "Did a hip replacement",
               treatment = "Hip-replacement",
               fee = M.Bank.Amount(currency = "EUR", quantity = 15),
@@ -359,7 +359,7 @@ class ReferenceDemoScript(
         () => {
           val withdraw = {
             import M.Bank.Cash._
-            insuranceLookup(M.Bank.Cash).contractId.exerciseSplit(insurance, quantity = 15).command
+            insuranceLookup(M.Bank.Cash).contractId.exerciseSplit(quantity = 15).command
           }
           participant3.ledger_api.commands
             .submit(Seq(insurance), Seq(withdraw), optTimeout = syncTimeout)
@@ -373,7 +373,7 @@ class ReferenceDemoScript(
           val settleClaim = {
             import M.HealthInsurance.Claim._
             insuranceLookup(M.HealthInsurance.Claim).contractId
-              .exerciseAcceptAndSettleClaim(insurance, cashId = findCashCid.contractId)
+              .exerciseAcceptAndSettleClaim(cashId = findCashCid.contractId)
               .command
           }
           participant3.ledger_api.commands
@@ -388,7 +388,7 @@ class ReferenceDemoScript(
         "exercise <registerId> TransferRecords with newRegistry = Alice",
         () => {
           val archiveRequest = aliceLookup(M.MedicalRecord.Register).contractId
-            .exerciseTransferRecords(alice, newRegistry = alice)
+            .exerciseTransferRecords(newRegistry = alice)
             .command
           participant1.ledger_api.commands
             .submit(Seq(alice), Seq(archiveRequest), optTimeout = syncTimeout)
@@ -513,7 +513,7 @@ class ReferenceDemoScript(
           import ME.AIAnalysis.OfferAnalysis._
           val registerId = aliceLookup(ME.MedicalRecord.Register)
           val accept = aliceLookup(ME.AIAnalysis.OfferAnalysis).contractId
-            .exerciseAcceptAnalysis(alice, registerId = registerId.contractId)
+            .exerciseAcceptAnalysis(registerId = registerId.contractId)
             .command
           participant1.ledger_api.commands
             .submit(Seq(alice), Seq(accept), optTimeout = syncTimeout)
@@ -526,7 +526,7 @@ class ReferenceDemoScript(
         "exercise records ProcessingDone with diagnosis = ...; exercise pendingAnalysis RecordResult",
         () => {
           val processingDone = processorLookup(ME.AIAnalysis.AnonymizedRecords).contractId
-            .exerciseProcessingDone(processor, diagnosis = "The patient is very healthy.")
+            .exerciseProcessingDone(diagnosis = "The patient is very healthy.")
             .command
 
           participant6.ledger_api.commands
@@ -535,7 +535,7 @@ class ReferenceDemoScript(
 
           val resultId = registryLookup(ME.AIAnalysis.AnalysisResult)
           val recordedResult = registryLookup(ME.AIAnalysis.PendingAnalysis).contractId
-            .exerciseRecordResult(registry, resultId = resultId.contractId)
+            .exerciseRecordResult(resultId = resultId.contractId)
             .command
 
           participant5.ledger_api.commands
@@ -550,8 +550,9 @@ class ReferenceDemoScript(
 
 object ReferenceDemoScript {
   def computeMaxWaitForPruning: Duration = {
-    val defaultDynamicDomainParameters = DynamicDomainParameters.initialValues(topologyChangeDelay =
-      NonNegativeFiniteDuration.ofMillis(250)
+    val defaultDynamicDomainParameters = DynamicDomainParameters.initialValues(
+      topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
+      protocolVersion = ProtocolVersion.latest,
     )
     val mediatorReactionTimeout = defaultDynamicDomainParameters.mediatorReactionTimeout
     val participantResponseTimeout = defaultDynamicDomainParameters.participantResponseTimeout
@@ -584,11 +585,14 @@ object ReferenceDemoScript {
     val loggerFactory = consoleEnvironment.environment.loggerFactory
 
     // update domain parameters
-    Seq(banking, medical).foreach(
-      _.service.update_dynamic_parameters(
-        _.copy(reconciliationInterval = com.digitalasset.canton.time.PositiveSeconds.ofSeconds(1))
+    // TODO(#9800): restore this code
+    /*
+    Seq(banking, medical).foreach {
+      _.service.update_reconciliation_interval(
+        com.digitalasset.canton.time.PositiveSeconds.ofSeconds(1)
       )
-    )
+    }
+     */
 
     val script = new ReferenceDemoScript(
       consoleEnvironment.participants.all,

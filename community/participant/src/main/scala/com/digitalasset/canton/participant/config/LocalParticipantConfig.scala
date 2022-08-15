@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.config
 
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
+import com.daml.platform.apiserver.configuration.RateLimitingConfig
 import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
 import com.daml.platform.configuration.{
   CommandConfiguration,
@@ -18,9 +19,11 @@ import com.daml.platform.store.backend.postgresql.{
 }
 import com.daml.platform.usermanagement.UserManagementConfig
 import com.digitalasset.canton.DiscardOps
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt._
 import com.digitalasset.canton.config.RequireTypes._
 import com.digitalasset.canton.config._
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
 import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton.{
@@ -210,10 +213,13 @@ case class RemoteParticipantConfig(
   * @param maxContractKeyStateCacheSize    maximum caffeine cache size of mutable state cache of contract keys
   * @param maxInboundMessageSize     maximum inbound message size
   * @param databaseConnectionTimeout database connection timeout
-  * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fanout" performance optimization (default false; not tested for production yet)
+  * @param enableInMemoryFanOutForLedgerApi enable the "in-memory fan-out" performance optimization (default false; not tested for production yet)
   * @param maxTransactionsInMemoryFanOutBufferSize maximum number of transactions to hold in the "in-memory fanout" (if enabled)
   * @param additionalMigrationPaths Optional extra paths for the database migrations
   * @param inMemoryStateUpdaterParallelism The processing parallelism of the Ledger API server in-memory state updater
+  * @param inMemoryFanOutThreadPoolSize Size of the thread-pool backing the Ledger API in-memory fan-out.
+  *                                     If not set, defaults to ((number of thread)/4 + 1)
+  * @param rateLimit limit the ledger api server request rates based on system metrics
   */
 case class LedgerApiServerConfig(
     address: String = "127.0.0.1",
@@ -248,6 +254,15 @@ case class LedgerApiServerConfig(
     additionalMigrationPaths: Seq[String] = Seq.empty,
     inMemoryStateUpdaterParallelism: Int =
       LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
+    inMemoryFanOutThreadPoolSize: Option[Int] = None,
+    rateLimit: Option[RateLimitingConfig] = Some(
+      RateLimitingConfig.Default.copy(
+        maxApiServicesQueueSize = 1000,
+        maxApiServicesIndexDbQueueSize = 100,
+        maxUsedHeapSpacePercentage = 80,
+        maxStreams = 100,
+      )
+    ),
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -279,6 +294,12 @@ object LedgerApiServerConfig {
   val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
+
+  def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
+    val numberOfThreads =
+      Threading.detectNumberOfThreads(loggingContext.logger)(loggingContext.traceContext)
+    numberOfThreads / 4 + 1
+  }
 
   /** the following case class match will help us detect any additional configuration options added
     * when we upgrade the Daml code. if the below match fails because there are more config options,
@@ -322,7 +343,8 @@ object LedgerApiServerConfig {
       _maxTransactionsInMemoryFanOutBufferSize,
       _enableInMemoryFanOutForLedgerApi,
       _apiStreamShutdownTimeout, // configured via LedgerApiServerConfig.apiStreamShutdownTimeout
-      _inMemoryStateUpdaterParallelism,
+      inMemoryStateUpdaterParallelism,
+      inMemoryFanOutThreadPoolSize,
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -375,7 +397,8 @@ object LedgerApiServerConfig {
       managementServiceTimeout = NonNegativeFiniteDuration(managementServiceTimeout.toJava),
       apiStreamShutdownTimeout =
         NonNegativeFiniteDuration.ofMillis(_apiStreamShutdownTimeout.toMillis),
-      inMemoryStateUpdaterParallelism = _inMemoryStateUpdaterParallelism,
+      inMemoryStateUpdaterParallelism = inMemoryStateUpdaterParallelism,
+      inMemoryFanOutThreadPoolSize = Some(inMemoryFanOutThreadPoolSize),
     ).discard
   }
 
