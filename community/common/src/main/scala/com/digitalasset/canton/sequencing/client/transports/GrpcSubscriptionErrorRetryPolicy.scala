@@ -9,6 +9,8 @@ import com.digitalasset.canton.sequencing.client.CheckedSubscriptionErrorRetryPo
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 
+import GrpcSubscriptionErrorRetryPolicy._
+
 class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerFactory)
     extends CheckedSubscriptionErrorRetryPolicy[GrpcSubscriptionError]
     with NamedLogging {
@@ -49,25 +51,29 @@ class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerF
         true
 
       case serverError: GrpcError.GrpcServerError
-          if receivedItems && serverError.status.getCode == Status.UNKNOWN.getCode =>
-        serverError.status.getCause match {
-          case _: java.nio.channels.ClosedChannelException =>
-            // In this conversation https://gitter.im/grpc/grpc?at=5f464aa854288c687ee06a25
-            // someone who maintains the grpc codebase explains:
-            // "'Channel closed' is when we have no knowledge as to what went wrong; it could be anything".
-            // In practice, we've seen this peculiar error sometimes appear when the sequencer goes unavailable,
-            // so let's make sure to retry.
-            logger.debug(
-              s"Closed channel exception can appear when the server becomes unavailable. Retrying."
-            )
-            true
-          case _ => false
-        }
-
+          if serverError.status.getCode == Status.UNKNOWN.getCode && serverError.status.hasClosedChannelExceptionCause =>
+        // In this conversation https://gitter.im/grpc/grpc?at=5f464aa854288c687ee06a25
+        // someone who maintains the grpc codebase explains:
+        // "'Channel closed' is when we have no knowledge as to what went wrong; it could be anything".
+        // In practice, we've seen this peculiar error sometimes appear when the sequencer goes unavailable,
+        // so let's make sure to retry.
+        logger.debug(
+          s"Closed channel exception can appear when the server becomes unavailable. Retrying."
+        )
+        true
       case _: GrpcError.GrpcClientGaveUp | _: GrpcError.GrpcClientError |
           _: GrpcError.GrpcServerError =>
         logger.info("Not reconnecting.")
         false
+    }
+  }
+}
+
+object GrpcSubscriptionErrorRetryPolicy {
+  implicit class EnhancedGrpcStatus(val status: io.grpc.Status) extends AnyVal {
+    def hasClosedChannelExceptionCause: Boolean = status.getCause match {
+      case _: java.nio.channels.ClosedChannelException => true
+      case _ => false
     }
   }
 }

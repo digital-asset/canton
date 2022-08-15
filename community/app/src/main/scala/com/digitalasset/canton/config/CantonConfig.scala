@@ -11,6 +11,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
+import com.daml.platform.indexer.PackageMetadataViewConfig
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
   CannotReadFilesError,
@@ -734,6 +735,8 @@ object CantonConfig {
       deriveReader[UserManagementServiceConfig]
     lazy implicit val indexerConfigReader: ConfigReader[IndexerConfig] =
       deriveReader[IndexerConfig]
+    lazy implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
+      deriveReader[PackageMetadataViewConfig]
     lazy implicit val identityConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
     lazy implicit val sequencerConnectionConfigCertificateFileReader
@@ -1063,6 +1066,8 @@ object CantonConfig {
       deriveWriter[CommandServiceConfig]
     lazy implicit val userManagementServiceConfigWriter: ConfigWriter[UserManagementServiceConfig] =
       deriveWriter[UserManagementServiceConfig]
+    lazy implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
+      deriveWriter[PackageMetadataViewConfig]
     lazy implicit val indexerConfigWriter: ConfigWriter[IndexerConfig] =
       deriveWriter[IndexerConfig]
     lazy implicit val identityConfigWriter: ConfigWriter[TopologyConfig] =
