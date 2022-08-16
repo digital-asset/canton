@@ -12,6 +12,7 @@ import com.daml.ledger.api.v1.experimental_features.{
   CommandDeduplicationPeriodSupport,
   CommandDeduplicationType,
 }
+import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWriteService}
 import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.lf.engine.ValueEnricher
 import com.daml.logging.LoggingContext
@@ -202,10 +203,11 @@ class StartableStoppableLedgerApiServer(
           metrics,
           executionContext,
         )
+      timedReadService = new TimedReadService(config.syncService, metrics)
       indexerHealth <- new IndexerServiceOwner(
         config.participantId,
         participantDataSourceConfig,
-        config.syncService,
+        timedReadService,
         overrideIndexerStartupMode
           .map(overrideStartupMode => indexerConfig.copy(startupMode = overrideStartupMode))
           .getOrElse(indexerConfig),
@@ -214,6 +216,7 @@ class StartableStoppableLedgerApiServer(
         inMemoryState,
         inMemoryStateUpdater.flow,
         config.serverConfig.additionalMigrationPaths,
+        executionContext,
       )
       dbSupport <- DbSupport
         .owner(
@@ -265,15 +268,16 @@ class StartableStoppableLedgerApiServer(
         userManagement = config.serverConfig.userManagementService.damlConfig,
       )
 
+      timedWriteService = new TimedWriteService(config.syncService, metrics)
       _ <- ApiServiceOwner(
         indexService = indexService,
         userManagementStore = userManagementStore,
         ledgerId = config.ledgerId,
         participantId = config.participantId,
         config = ledgerApiServerConfig,
-        optWriteService = Some(config.syncService),
+        optWriteService = Some(timedWriteService),
         healthChecks = new HealthChecks(
-          "read" -> config.syncService,
+          "read" -> timedReadService,
           "write" -> (() => config.syncService.currentWriteHealth()),
           "indexer" -> indexerHealth,
         ),

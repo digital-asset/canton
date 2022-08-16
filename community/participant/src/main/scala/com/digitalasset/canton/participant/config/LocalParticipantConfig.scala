@@ -12,7 +12,11 @@ import com.daml.platform.configuration.{
   IndexServiceConfig => DamlIndexServiceConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
-import com.daml.platform.indexer.{IndexerConfig => DamlIndexerConfig, IndexerStartupMode}
+import com.daml.platform.indexer.{
+  IndexerConfig => DamlIndexerConfig,
+  IndexerStartupMode,
+  PackageMetadataViewConfig,
+}
 import com.daml.platform.store.DbSupport.{DataSourceProperties => DamlDataSourceProperties}
 import com.daml.platform.store.backend.postgresql.{
   PostgresDataSourceConfig => DamlPostgresDataSourceConfig
@@ -255,14 +259,7 @@ case class LedgerApiServerConfig(
     inMemoryStateUpdaterParallelism: Int =
       LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
     inMemoryFanOutThreadPoolSize: Option[Int] = None,
-    rateLimit: Option[RateLimitingConfig] = Some(
-      RateLimitingConfig.Default.copy(
-        maxApiServicesQueueSize = 1000,
-        maxApiServicesIndexDbQueueSize = 100,
-        maxUsedHeapSpacePercentage = 80,
-        maxStreams = 100,
-      )
-    ),
+    rateLimit: Option[RateLimitingConfig] = None,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -612,6 +609,10 @@ case class IndexerConfig(
     schemaMigrationAttempts: Int = IndexerStartupMode.DefaultSchemaMigrationAttempts,
     schemaMigrationAttemptBackoff: NonNegativeFiniteDuration =
       IndexerConfig.DefaultSchemaMigrationAttemptBackoff,
+    packageMetadataView: PackageMetadataViewConfig =
+      DamlIndexerConfig.DefaultPackageMetadataViewConfig,
+    maxOutputBatchedBufferSize: Int = DamlIndexerConfig.DefaultMaxOutputBatchedBufferSize,
+    maxTailerBatchSize: Int = DamlIndexerConfig.DefaultMaxTailerBatchSize,
 ) {
   def damlConfig(
       indexerLockIds: Option[IndexerLockIds],
@@ -651,9 +652,12 @@ object IndexerConfig {
       ingestionParallelism,
       inputMappingParallelism,
       maxInputBufferSize,
+      packageMetadataView,
       restartDelay,
       startupMode, // not configurable in canton and decided based on participant-HA replica role
       submissionBatchSize,
+      maxOutputBatchedBufferSize,
+      maxTailerBatchSize,
     ) = config
 
     val (schemaMigrationAttempts, schemaMigrationAttemptBackoff) = (startupMode match {
@@ -683,6 +687,9 @@ object IndexerConfig {
       schemaMigrationAttempts = schemaMigrationAttempts,
       schemaMigrationAttemptBackoff =
         NonNegativeFiniteDuration.ofSeconds(schemaMigrationAttemptBackoff.toSeconds),
+      packageMetadataView = packageMetadataView,
+      maxOutputBatchedBufferSize = maxOutputBatchedBufferSize,
+      maxTailerBatchSize = maxTailerBatchSize,
     ).discard
   }
 
