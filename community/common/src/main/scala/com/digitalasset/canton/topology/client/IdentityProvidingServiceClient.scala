@@ -203,7 +203,7 @@ trait PartyTopologySnapshotClient {
       check: (ParticipantPermission => Boolean) = _.isActive,
   ): EitherT[Future, Set[LfPartyId], Unit]
 
-  /** Returns true if there is at least one participant that can confirm */
+  /** Returns true if there is at least one participant that satisfies the predicate */
   def isHostedByAtLeastOneParticipantF(
       party: LfPartyId,
       check: ParticipantAttributes => Boolean,

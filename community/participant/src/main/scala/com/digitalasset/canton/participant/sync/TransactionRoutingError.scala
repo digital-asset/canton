@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.sync
 
 import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, ErrorResource, Explanation, Resolution}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.RoutingErrorGroup
 import com.digitalasset.canton.error._
@@ -63,6 +64,31 @@ object TransactionRoutingError extends RoutingErrorGroup {
           with TransactionSubmissionError
     }
 
+    object InvalidWorkflowId
+        extends ErrorCode(
+          id = "INVALID_WORKFLOW_ID",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+
+      case class InputContractsNotOnDomain(
+          domainId: DomainId,
+          inputContractDomain: Option[DomainId],
+      ) extends TransactionErrorImpl(
+            cause =
+              s"The needed input contracts are not on $domainId, but on ${inputContractDomain}"
+          )
+          with TransactionRoutingError
+
+      case class NotAllInformeeAreOnDomain(
+          domainId: DomainId,
+          domainsOfAllInformee: NonEmpty[Set[DomainId]],
+      ) extends TransactionErrorImpl(
+            cause =
+              s"Not all informee are on the specified domainID: $domainId, but on $domainsOfAllInformee"
+          )
+          with TransactionRoutingError
+
+    }
   }
 
   object MalformedInputErrors extends ErrorGroup() {

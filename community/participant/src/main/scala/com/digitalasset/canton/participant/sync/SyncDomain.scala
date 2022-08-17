@@ -115,7 +115,7 @@ class SyncDomain(
     participantNodePersistentState: ParticipantNodePersistentState,
     private[sync] val persistent: SyncDomainPersistentState,
     private[sync] val ephemeral: SyncDomainEphemeralState,
-    packageService: PackageService,
+    val packageService: PackageService,
     domainCrypto: DomainSyncCryptoClient,
     partyNotifier: LedgerServerPartyNotifier,
     val topologyClient: DomainTopologyClientWithInit,

@@ -14,7 +14,6 @@ import com.daml.ledger.api.v1.experimental_features.{
 }
 import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWriteService}
 import com.daml.ledger.resources.{Resource, ResourceContext}
-import com.daml.lf.engine.ValueEnricher
 import com.daml.logging.LoggingContext
 import com.daml.metrics.Metrics
 import com.daml.platform.LedgerApiServer
@@ -197,7 +196,7 @@ class StartableStoppableLedgerApiServer(
     )
 
     for {
-      (inMemoryState, inMemoryStateUpdater) <-
+      (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer.createInMemoryStateAndUpdater(
           indexServiceConfig,
           metrics,
@@ -214,7 +213,7 @@ class StartableStoppableLedgerApiServer(
         metrics,
         lfValueTranslationCache,
         inMemoryState,
-        inMemoryStateUpdater.flow,
+        inMemoryStateUpdaterFlow,
         config.serverConfig.additionalMigrationPaths,
         executionContext,
       )
@@ -232,7 +231,7 @@ class StartableStoppableLedgerApiServer(
         metrics = metrics,
         servicesExecutionContext = executionContext,
         lfValueTranslationCache = lfValueTranslationCache,
-        enricher = new ValueEnricher(config.engine),
+        engine = config.engine,
         inMemoryState = inMemoryState,
       )
       userManagementStore =

@@ -20,7 +20,9 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 
-import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ConcurrentLinkedQueue, ConcurrentSkipListMap}
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
@@ -46,6 +48,14 @@ class MediatorState(
   private val pendingRequests =
     new ConcurrentSkipListMap[RequestId, ResponseAggregation](implicitly[Ordering[RequestId]])
 
+  // once requests are finished, we keep em around for a few minutes so we can deal with any
+  // late request, avoiding a database lookup. otherwise, we'll be doing a db lookup in our
+  // main processing stage, slowing things down quite a bit
+  private val finishedRequests = TrieMap[RequestId, ResponseAggregation]()
+  private val evictionQueue = new ConcurrentLinkedQueue[RequestId]()
+  private val evictionQueueCount = new AtomicInteger(0)
+  private val MAX_FINISHED_REQUESTS = 1000
+
   private def updateNumRequests(num: Int): Unit = metrics.outstanding.metric.updateValue(_ + num)
 
   /** Adds an incoming ResponseAggregation */
@@ -69,11 +79,16 @@ class MediatorState(
 
   def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation] =
-    Option(pendingRequests.get(requestId)) match {
+  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation] = {
+    // TODO(#10025): in an overload situation, when participants start to reply late, the fetching
+    //   from the store became punitive in the semi-optimal mediator response processing
+    Option(pendingRequests.get(requestId))
+      .orElse(finishedRequests.get(requestId)) match {
       case Some(cp) => EitherT.rightT[Future, MediatorRequestNotFound](cp)
-      case None => finalizedResponseStore.fetch(requestId)
+      case None =>
+        finalizedResponseStore.fetch(requestId)
     }
+  }
 
   /** Replaces a [[ResponseAggregation]] for the `requestId` if the stored version matches `currentVersion`.
     * You can only use this to update non-finalized aggregations
@@ -91,6 +106,22 @@ class MediatorState(
 
     def storeFinalized: EitherT[Future, StaleVersion, Unit] = EitherT.right {
       finalizedResponseStore.store(newValue) map { _ =>
+        // keep the request around for a while to avoid a database lookup under contention
+        Option(finishedRequests.put(requestId, newValue)) match {
+          case None =>
+            // request was not yet present, remember it for some time and remove an older request
+            evictionQueue.offer(requestId)
+            // if this addition makes the cache exceeding the max size, don't increase it, but remove the head
+            val count = evictionQueueCount.getAndUpdate { x =>
+              if (x >= MAX_FINISHED_REQUESTS) x else x + 1
+            }
+            if (count >= MAX_FINISHED_REQUESTS) {
+              Option(evictionQueue.poll()).fold(
+                logger.error("Removing finished request failed with empty poll!")
+              )(finishedRequests.remove(_).discard)
+            }
+          case Some(_) =>
+        }
         Option(pendingRequests.remove(requestId)) foreach { _ =>
           updateNumRequests(-1)
         }

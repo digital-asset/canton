@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.data.OptionT
 import cats.syntax.either._
 import cats.syntax.functor._
+import cats.syntax.traverse._
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -315,21 +315,6 @@ class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private 
       )
   }
 
-  private[this] def fetchFromStore(
-      id: Key
-  )(implicit traceContext: TraceContext): Future[Option[StateChange[Status]]] = {
-    implicit val ec = executionContext
-    store
-      .fetchState(id)
-      .transform(
-        identity,
-        ConflictDetectionStoreAccessError(
-          s"Conflict detection store error while retrieving ${lockableStatus.kind} $id",
-          _,
-        ),
-      )
-  }
-
   /** Returns the internal state of `id`:
     * <ul>
     *   <li>`Some(state)` if the state is in memory with state `state`.</li>
@@ -343,17 +328,27 @@ class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private 
   /** Returns the state of `id`, fetching it from the [[store]] if it is not in memory.
     * May be called concurrently with any other method. In that case, the returned state may be outdated.
     */
-  def getApproximateState(
-      id: Key
-  )(implicit traceContext: TraceContext): OptionT[Future, StateChange[Status]] =
-    OptionT {
-      states.get(id) match {
-        case None =>
-          // We don't store the state in memory, as it may be outdated when it is stored.
-          fetchFromStore(id)
-        case Some(state) => state.approximateState
-      }
+  def getApproximateStates(
+      ids: Seq[Key]
+  )(implicit traceContext: TraceContext): Future[Map[Key, StateChange[Status]]] = {
+    implicit val ec = executionContext
+    // first, check what we have in cache
+    val cached = ids.map(id => (id, states.get(id).map(_.approximateState)))
+    // We don't store the state in memory, as it may be outdated when it is stored.
+    // So let's fetch it from disk
+    val toFetch = cached.collect {
+      case (id, res) if res.isEmpty => id
     }
+    val fetchedF = store.fetchStates(toFetch)
+    cached
+      .traverse {
+        case (id, None) => fetchedF.map(fetched => (id, fetched.get(id)))
+        case (id, Some(storedF)) => storedF.map((id, _))
+      }
+      .map(_.collect { case (key, Some(value)) =>
+        (key, value)
+      }.toMap)
+  }
 
   /** Evict the state if it is no longer needed in the map.
     *

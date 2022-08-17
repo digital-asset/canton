@@ -196,7 +196,7 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             ).value
           } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
             forEvery(unknownTo) {
-              _.description shouldBe "package missing on submitting participant!"
+              _.description shouldBe "package missing on local participant"
             }
             unknownTo should not be empty
           }

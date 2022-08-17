@@ -50,6 +50,39 @@ class LedgerApiJdbcUrlTest extends AnyWordSpec with BaseTest {
       result.value shouldBe "jdbc:postgresql://localhost:5432/participant2?user=participant2&password=supersafe&currentSchema=ledger_api"
     }
 
+    "propagate all properties" in {
+      val result = forPostgres("""
+                                 |dataSourceClass = "org.postgresql.ds.PGSimpleDataSource"
+                                 |properties = {
+                                 |  serverName = "localhost"
+                                 |  portNumber = "5432"
+                                 |  databaseName = "participant2"
+                                 |  user = "participant2"
+                                 |  password = "supersafe"
+                                 |  ssl = "true"
+                                 |  sslmode = "verify-ca"
+                                 |  sslfactory = "org.postgresql.ssl.jdbc4.LibPQFactory"
+                                 |  sslpassword = "evensafer"
+                                 |  sslcert = "path/to/certificate.crt"
+                                 |  sslrootcert = "path/to/root_certificate.crt"
+                                 |  sslkey = "path/to/key.pk8"
+                                 |}
+                                 |numThreads = 10
+                                 |""".stripMargin)
+
+      result.value shouldBe "jdbc:postgresql://localhost:5432/participant2?" +
+        "sslrootcert=path%2Fto%2Froot_certificate.crt&" +
+        "sslpassword=evensafer&" +
+        "sslkey=path%2Fto%2Fkey.pk8&" +
+        "sslcert=path%2Fto%2Fcertificate.crt&" +
+        "sslmode=verify-ca&" +
+        "sslfactory=org.postgresql.ssl.jdbc4.LibPQFactory&" +
+        "user=participant2&" +
+        "password=supersafe&" +
+        "ssl=true&" +
+        "currentSchema=ledger_api"
+    }
+
     "support postgres jdbc driver configuration" in {
       val result = forPostgres("""
           |url = "jdbc:postgresql://0.0.0.0:5432/participant2"
