@@ -21,8 +21,8 @@ participant1.domains.connect_local(mydomain)
 // and verifying version compatibility.
 participant2.domains.connect("mydomain", "http://localhost:5018")
 
-// above connect operation is asynchronous. it is generally at the discretion of the domain
-// to decide if a participant can join and when. therefore, we need to asynchronously wait here
+// The above connect operation is asynchronous. It is generally at the discretion of the domain
+// to decide if a participant can join and when. Therefore, we need to asynchronously wait here
 // until the participant observes its activation on the domain. As the domain is configured to be
 // permissionless in this example, the approval will be granted immediately.
 utils.retry_until_true {

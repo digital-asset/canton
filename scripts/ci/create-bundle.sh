@@ -110,8 +110,6 @@ done
 
 adjust_startup_scripts
 
-ls -l $RELEASE_DIR
-
 cd $TARGET
 
 # pack releases
