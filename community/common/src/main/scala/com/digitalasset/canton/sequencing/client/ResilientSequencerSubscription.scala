@@ -36,28 +36,25 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
-/* Attempts to create a resilient [[SequencerSubscription]] for the [[SequencerClient]] by
- * creating underlying subscriptions using the [[SequencerClientTransport]] and then recreating them if they fail
- * with a reason that is deemed retryable.
- * If a subscription is closed or fails with a reason that is not retryable the failure will be passed upstream
- * from this subscription.
- * We determine whether an error is retryable by calling the supplied [[SubscriptionErrorRetryPolicy]].
- * We also will delay recreating subscriptions by an interval determined by the [[RetryDelayRule]].
- * As we have to know where to restart a subscription from when it is recreated we use a [[CounterCapture]] handler
- * wrapper to keep track of the last event that was successfully provided by the provided handler, and use this value
- * to restart new subscriptions from.
- * For this subscription [[ResilientSequencerSubscription.start]] must be called for the underlying subscriptions to begin.
- */
+/** Attempts to create a resilient [[SequencerSubscription]] for the [[SequencerClient]] by
+  * creating underlying subscriptions using the [[com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport]]
+  * and then recreating them if they fail with a reason that is deemed retryable.
+  * If a subscription is closed or fails with a reason that is not retryable the failure will be passed upstream
+  * from this subscription.
+  * We determine whether an error is retryable by calling the supplied [[SubscriptionErrorRetryPolicy]].
+  * We also will delay recreating subscriptions by an interval determined by the
+  * [[com.digitalasset.canton.sequencing.client.SubscriptionRetryDelayRule]].
+  * As we have to know where to restart a subscription from when it is recreated
+  * we use a [[com.digitalasset.canton.sequencing.handlers.CounterCapture]] handler
+  * wrapper to keep track of the last event that was successfully provided by the provided handler, and use this value
+  * to restart new subscriptions from.
+  * For this subscription [[ResilientSequencerSubscription.start]] must be called for the underlying subscriptions to begin.
+  */
 class ResilientSequencerSubscription[HandlerError](
     identifier: String,
     startingFrom: SequencerCounter,
     handler: SerializedEventHandler[HandlerError],
-    subscribe: (
-        SequencerCounter,
-        SerializedEventHandler[HandlerError],
-    ) => TraceContext => EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[
-      HandlerError
-    ]],
+    subscriptionFactory: SequencerSubscriptionFactory[HandlerError],
     retryRule: SubscriptionErrorRetryPolicy,
     retryDelayRule: SubscriptionRetryDelayRule,
     override protected val timeouts: ProcessingTimeout,
@@ -77,7 +74,6 @@ class ResilientSequencerSubscription[HandlerError](
   def start(implicit traceContext: TraceContext): Unit = setupNewSubscription()
 
   /** Start a new subscription to the sequencer.
-    * @param expectedCurrentSubscription what are we expecting the previous subscription to be. If this is incorrect it implies there is a bug causing a race condition.
     * @param delayOnRestart If this subscription fails with an error that can be retried, how long should we wait before starting a new subscription?
     */
   private def setupNewSubscription(
@@ -191,7 +187,7 @@ class ResilientSequencerSubscription[HandlerError](
     val (hasReceivedEvent, wrappedHandler) = HasReceivedEvent(counterCapture(handler))
     logger.debug(s"Starting new sequencer subscription from $nextCounter")
 
-    val subscriptionET = subscribe(nextCounter, wrappedHandler)(traceContext)
+    val subscriptionET = subscriptionFactory.create(nextCounter, wrappedHandler)(traceContext)
     nextSubscriptionRef.set(subscriptionET.value.map(_.toOption))
 
     for {
@@ -300,15 +296,18 @@ object ResilientSequencerSubscription extends SequencerSubscriptionErrorGroup {
       member: Member,
       transport: SequencerClientTransport,
       requiresAuthentication: Boolean,
-  )(counter: SequencerCounter, handler: SerializedEventHandler[E])(traceContext: TraceContext)(
-      implicit executionContext: ExecutionContext
-  ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[E]] = {
-    val request = SubscriptionRequest(member, counter)
-    EitherT.pure[Future, SequencerSubscriptionCreationError](
-      if (requiresAuthentication) transport.subscribe(request, handler)(traceContext)
-      else transport.subscribeUnauthenticated(request, handler)(traceContext)
-    )
-  }
+  )(implicit ec: ExecutionContext): SequencerSubscriptionFactory[E] =
+    new SequencerSubscriptionFactory[E] {
+      override def create(startingCounter: SequencerCounter, handler: SerializedEventHandler[E])(
+          implicit traceContext: TraceContext
+      ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[E]] = {
+        val request = SubscriptionRequest(member, startingCounter)
+        EitherT.pure[Future, SequencerSubscriptionCreationError](
+          if (requiresAuthentication) transport.subscribe(request, handler)(traceContext)
+          else transport.subscribeUnauthenticated(request, handler)(traceContext)
+        )
+      }
+    }
 
   @Explanation(
     """This warning is logged when a sequencer subscription is interrupted. The system will keep on retrying to reconnect indefinitely."""
@@ -338,3 +337,12 @@ sealed trait SequencerSubscriptionCreationError extends SubscriptionCloseReason.
   * will not retry the subscription creation. Instead, the subscription will fail.
   */
 case class Fatal(msg: String) extends SequencerSubscriptionCreationError
+
+trait SequencerSubscriptionFactory[HandlerError] {
+  def create(
+      startingCounter: SequencerCounter,
+      handler: SerializedEventHandler[HandlerError],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[HandlerError]]
+}

@@ -42,7 +42,7 @@ trait DbStorageSetup extends FlagCloseable with HasCloseContext with NamedLoggin
   def retryConfig: DbStorage.RetryConfig
 
   // Generous timeout to give the db some time to startup.
-  protected lazy val dbStartupTimeout: TimeoutDuration = TimeoutDuration.ofMinutes(10)
+  protected lazy val dbStartupTimeout: NonNegativeDuration = NonNegativeDuration.ofMinutes(10)
 
   protected def prepareDatabase(): Unit
 

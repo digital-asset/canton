@@ -339,10 +339,6 @@ class DomainSnapshotSyncCryptoApi(
   ): Future[Map[Fingerprint, SigningPublicKey]] =
     ipsSnapshot.signingKeys(owner).map(_.map(x => (x.fingerprint, x)).toMap)
 
-  /** Verify signature of a given owner
-    *
-    * Convenience method to lookup a key of a given owner, domain and timestamp and verify the result.
-    */
   override def verifySignature(
       hash: Hash,
       signer: KeyOwner,
@@ -370,13 +366,6 @@ class DomainSnapshotSyncCryptoApi(
       validKeys.get(signature.signedBy) match {
         case Some(key) =>
           EitherT.fromEither(crypto.pureCrypto.verifySignature(hash, key, signature))
-        case None if signer.uid == domainId.unwrap && signer.code == SequencerId.Code =>
-          // skip signature verification if we are not yet initialized
-          // TODO(i4639) improve the situation such that we don't have to trust TLS upon reconnect/initial connect
-          ownerIsInitialized(keysAsSeq).subflatMap {
-            case false => Right(())
-            case true => signatureCheckFailed(keysAsSeq)
-          }
         case None =>
           EitherT.fromEither(signatureCheckFailed(keysAsSeq))
       }

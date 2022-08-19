@@ -126,7 +126,7 @@ class Mediator(
 
     _ <- sequencerClient.subscribeTracking(
       sequencerCounterTrackerStore,
-      DiscardIgnoredEvents(
+      DiscardIgnoredEvents(loggerFactory)(
         EnvelopeOpener[OrdinaryEnvelopeBox](protocolVersion, syncCrypto.crypto.pureCrypto)(handler)
       ),
       timeTracker,
@@ -221,10 +221,10 @@ class Mediator(
     ], DefaultOpenEnvelope] {
       override def name: String = s"mediator-${mediatorId}"
 
-      override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+      override def subscriptionStartsAt(start: SubscriptionStart)(implicit
           traceContext: TraceContext
       ): FutureUnlessShutdown[Unit] =
-        topologyTransactionProcessor.resubscriptionStartsAt(start)
+        topologyTransactionProcessor.subscriptionStartsAt(start)
 
       override def apply(tracedEvents: Traced[Seq[OrdinaryProtocolEvent]]): HandlerResult = {
         tracedEvents.withTraceContext { implicit traceContext => events =>

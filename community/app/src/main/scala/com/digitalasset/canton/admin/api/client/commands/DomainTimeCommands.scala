@@ -8,7 +8,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   CustomClientTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc.DomainTimeServiceStub
@@ -35,7 +35,7 @@ object DomainTimeCommands {
   final case class FetchTime(
       domainIdO: Option[DomainId],
       freshnessBound: NonNegativeFiniteDuration,
-      timeout: TimeoutDuration,
+      timeout: NonNegativeDuration,
   ) extends BaseDomainTimeCommand[FetchTimeRequest, v0.FetchTimeResponse, FetchTimeResponse] {
 
     override def createRequest(): Either[String, FetchTimeRequest] =
@@ -56,7 +56,7 @@ object DomainTimeCommands {
   final case class AwaitTime(
       domainIdO: Option[DomainId],
       time: CantonTimestamp,
-      timeout: TimeoutDuration,
+      timeout: NonNegativeDuration,
   ) extends BaseDomainTimeCommand[AwaitTimeRequest, Empty, Unit] {
 
     override def createRequest(): Either[String, AwaitTimeRequest] =

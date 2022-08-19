@@ -10,7 +10,7 @@ import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
 import com.digitalasset.canton.admin.api.client.data.console._
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleCommandResult,
@@ -127,7 +127,7 @@ class TopologyAdministrationGroup(
     @Help.Summary("Wait until the topology processing of a node is idle")
     @Help.Description("""This function waits until the `is_idle()` function returns true.""")
     def await_idle(
-        timeout: TimeoutDuration = consoleEnvironment.commandTimeouts.bounded
+        timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded
     ): Unit =
       ConsoleMacros.utils.retry_until_true(timeout)(
         is_idle(),
@@ -135,7 +135,7 @@ class TopologyAdministrationGroup(
       )
 
     /** run a topology change command synchronized and wait until the node becomes idle again */
-    private[console] def run[T](timeout: Option[TimeoutDuration])(func: => T): T = {
+    private[console] def run[T](timeout: Option[NonNegativeDuration])(func: => T): T = {
       val ret = func
       ConsoleMacros.utils.synchronize_topology(timeout)(consoleEnvironment)
       ret
@@ -195,7 +195,7 @@ class TopologyAdministrationGroup(
         authorizedKey: Fingerprint,
         isRootDelegation: Boolean = false,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): ByteString =
@@ -276,7 +276,7 @@ class TopologyAdministrationGroup(
         identifier: UniqueIdentifier,
         authorizedKey: Fingerprint,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): ByteString =
@@ -361,7 +361,7 @@ class TopologyAdministrationGroup(
         key: Fingerprint,
         purpose: KeyPurpose,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         force: Boolean = false,
@@ -486,7 +486,7 @@ class TopologyAdministrationGroup(
         side: RequestSide = RequestSide.Both,
         permission: ParticipantPermission = ParticipantPermission.Submission,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         replaceExisting: Boolean = true,
@@ -896,7 +896,7 @@ class TopologyAdministrationGroup(
         permission: ParticipantPermission = ParticipantPermission.Submission,
         trustLevel: TrustLevel = TrustLevel.Ordinary,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         replaceExisting: Boolean = true,
@@ -1014,7 +1014,7 @@ class TopologyAdministrationGroup(
         mediator: MediatorId,
         side: RequestSide,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         replaceExisting: Boolean = true,
@@ -1155,7 +1155,7 @@ class TopologyAdministrationGroup(
         ops: TopologyChangeOp,
         claim: SignedLegalIdentityClaim,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): ByteString = check(FeatureFlag.Preview) {
@@ -1196,7 +1196,7 @@ class TopologyAdministrationGroup(
         participant: ParticipantId,
         packageIds: Seq[PackageId],
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         force: Boolean = false,
@@ -1274,7 +1274,7 @@ class TopologyAdministrationGroup(
         newParameters: DynamicDomainParameters,
         protocolVersion: ProtocolVersion,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
         force: Boolean = false,
@@ -1300,7 +1300,7 @@ class TopologyAdministrationGroup(
         domainId: DomainId,
         newParameters: DomainDynamicDomainParameters,
         signedBy: Option[Fingerprint] = None,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): ByteString = synchronisation.run(synchronize)(

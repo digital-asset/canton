@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._
-import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.ledger.participant.state.v2.SubmitterInfo
@@ -27,6 +26,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
+import io.scalaland.chimney.dsl._
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
@@ -142,16 +142,26 @@ abstract class TransactionTreeFactoryImpl(
           .leftMap(SubmitterMetadataError)
       )
       rootViewDecompositions <- EitherT.liftF(rootViewDecompositionsF)
-      _ <- checkPackagesAvailable(rootViewDecompositions, topologySnapshot)
+
+      checker = new DomainUsabilityCheckerVetting(
+        domainId = domainId,
+        snapshot = topologySnapshot,
+        requiredPackagesByParty = requiredPackagesByParty(rootViewDecompositions),
+        packageInfoService = packageInfoService,
+        localParticipantId = submitterParticipant,
+      )
+
+      _ <- checker.isUsable.leftMap(_.transformInto[UnknownPackageError])
+
       rootViews <- createRootViews(rootViewDecompositions, state, contractOfId)
-        .map(rootViews => {
+        .map(rootViews =>
           GenTransactionTree(cryptoOps)(
             submitterMetadata,
             commonMetadata,
             participantMetadata,
             MerkleSeq.fromSeq(cryptoOps)(rootViews),
           )
-        })
+        )
     } yield rootViews
   }
 
@@ -256,92 +266,36 @@ abstract class TransactionTreeFactoryImpl(
     salts.result()
   }
 
-  private def checkPackagesAvailable(
-      rootViewDecompositions: Seq[TransactionViewDecomposition.NewView],
-      topologySnapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransactionTreeConversionError, Unit] = {
-    val requiredPerParty = rootViewDecompositions.foldLeft(Map.empty[LfPartyId, Set[PackageId]]) {
-      case (acc, view) =>
-        MapsUtil.mergeMapsOfSets(acc, requiredPackagesByParty(view, Set.empty))
-    }
-
-    def unknownPackages(
-        participantId: ParticipantId,
-        required: Set[PackageId],
-    ): Future[List[PackageUnknownTo]] = {
-      topologySnapshot.findUnvettedPackagesOrDependencies(participantId, required).value.flatMap {
-        case Right(notVetted) =>
-          notVetted.toList.traverse(packageId =>
-            packageInfoService.getDescription(packageId).map { description =>
-              PackageUnknownTo(
-                packageId,
-                description
-                  .map(_.sourceDescription.unwrap)
-                  .getOrElse("package does not exist on local node"),
-                participantId,
-              )
-            }
-          )
-        case Left(missingPackageId) =>
-          Future.successful(
-            List(
-              PackageUnknownTo(
-                missingPackageId,
-                "package missing on submitting participant!",
-                submitterParticipant,
-              )
-            )
-          )
-      }
-    }
-
-    EitherT(for {
-      requiredPerParticipant <- requiredPackagesByParticipant(requiredPerParty, topologySnapshot)
-      unknownPackages <- requiredPerParticipant.toList
-        .flatTraverse { case (participant, packages) =>
-          unknownPackages(participant, packages)
-        }
-    } yield Either.cond(unknownPackages.isEmpty, (), UnknownPackageError(unknownPackages)))
-  }
-
   /** compute set of required packages for each party */
   private def requiredPackagesByParty(
-      rootViewDecomposition: TransactionViewDecomposition.NewView,
-      parentInformeeParticipants: Set[LfPartyId],
+      rootViewDecompositions: Seq[TransactionViewDecomposition.NewView]
   ): Map[LfPartyId, Set[PackageId]] = {
-    val rootInformees = rootViewDecomposition.informees.map(_.party)
-    val allInformees = parentInformeeParticipants ++ rootInformees
-    val childRequirements =
-      rootViewDecomposition.tailNodes.foldLeft(Map.empty[LfPartyId, Set[PackageId]]) {
-        case (acc, newView: TransactionViewDecomposition.NewView) =>
-          MapsUtil.mergeMapsOfSets(acc, requiredPackagesByParty(newView, allInformees))
-        case (acc, _) => acc
-      }
-    val rootPackages = rootViewDecomposition.allNodes.collect {
-      case sameView: TransactionViewDecomposition.SameView =>
-        LfTransactionUtil.nodeTemplate(sameView.lfNode).packageId
-    }.toSet
-
-    allInformees.foldLeft(childRequirements) { case (acc, party) =>
-      acc.updated(party, acc.getOrElse(party, Set()).union(rootPackages))
-    }
-  }
-
-  private def requiredPackagesByParticipant(
-      requiredPackages: Map[LfPartyId, Set[PackageId]],
-      snapshot: TopologySnapshot,
-  ): Future[Map[ParticipantId, Set[PackageId]]] = {
-    requiredPackages.toList.foldM(Map.empty[ParticipantId, Set[PackageId]]) {
-      case (acc, (party, packages)) =>
-        for {
-          // fetch all participants of this party
-          participants <- snapshot.activeParticipantsOf(party)
-        } yield {
-          // add the required packages for this party to the set of required packages of this participant
-          participants.foldLeft(acc) { case (res, (participantId, _)) =>
-            res.updated(participantId, res.getOrElse(participantId, Set()).union(packages))
-          }
+    def requiredPackagesByParty(
+        rootViewDecomposition: TransactionViewDecomposition.NewView,
+        parentInformee: Set[LfPartyId],
+    ): Map[LfPartyId, Set[PackageId]] = {
+      val rootInformees = rootViewDecomposition.informees.map(_.party)
+      val allInformees = parentInformee ++ rootInformees
+      val childRequirements =
+        rootViewDecomposition.tailNodes.foldLeft(Map.empty[LfPartyId, Set[PackageId]]) {
+          case (acc, newView: TransactionViewDecomposition.NewView) =>
+            MapsUtil.mergeMapsOfSets(acc, requiredPackagesByParty(newView, allInformees))
+          case (acc, _) => acc
         }
+      val rootPackages = rootViewDecomposition.allNodes
+        .collect { case sameView: TransactionViewDecomposition.SameView =>
+          LfTransactionUtil.nodeTemplates(sameView.lfNode).map(_.packageId).toSet
+        }
+        .flatten
+        .toSet
+
+      allInformees.foldLeft(childRequirements) { case (acc, party) =>
+        acc.updated(party, acc.getOrElse(party, Set()).union(rootPackages))
+      }
+    }
+
+    rootViewDecompositions.foldLeft(Map.empty[LfPartyId, Set[PackageId]]) { case (acc, view) =>
+      MapsUtil.mergeMapsOfSets(acc, requiredPackagesByParty(view, Set.empty))
     }
   }
 

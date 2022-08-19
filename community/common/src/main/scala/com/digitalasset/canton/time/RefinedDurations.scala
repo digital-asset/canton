@@ -7,7 +7,10 @@ import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.{
+  NonNegativeFiniteDuration => ConfigNonNegativeFiniteDuration,
+  PositiveDurationRoundedSeconds => ConfigPositiveSeconds,
+}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -45,9 +48,6 @@ trait RefinedDurationCompanion[RD <: RefinedDuration] {
 
   def create(duration: Duration): Either[String, RD] =
     Either.catchOnly[IllegalArgumentException](apply(duration)).leftMap(_.getMessage)
-
-  def tryBetween(from: CantonTimestamp, to: CantonTimestamp): RD =
-    apply(Duration.between(from.toInstant, to.toInstant))
 
   def between(from: CantonTimestamp, to: CantonTimestamp): Either[String, RD] =
     create(Duration.between(from.toInstant, to.toInstant))
@@ -161,7 +161,9 @@ final case class NonNegativeFiniteDuration(duration: Duration)
     duration.multipliedBy(multiplicand.value.toLong)
   )
 
-  def toTimeout: TimeoutDuration = checked(TimeoutDuration.tryFromJavaDuration(duration))
+  def toConfig: ConfigNonNegativeFiniteDuration = checked(
+    ConfigNonNegativeFiniteDuration.tryFromJavaDuration(duration)
+  )
 }
 
 object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFiniteDuration] {
@@ -170,8 +172,8 @@ object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFin
   implicit val forgetRefinementFDuration: Transformer[NonNegativeFiniteDuration, FiniteDuration] =
     _.toScala
 
-  implicit val toTimeoutDurationTransformer
-      : Transformer[NonNegativeFiniteDuration, TimeoutDuration] = _.toTimeout
+  implicit val toConfigNonNegativeDuration
+      : Transformer[NonNegativeFiniteDuration, ConfigNonNegativeFiniteDuration] = _.toConfig
 
   val Zero: NonNegativeFiniteDuration = NonNegativeFiniteDuration(Duration.ZERO)
 }
@@ -194,6 +196,11 @@ final case class PositiveSeconds(duration: Duration) extends RefinedDuration wit
   require(duration.getNano == 0, s"Duration $duration must be rounded to the second")
 
   override def pretty: Pretty[PositiveSeconds.this.type] = prettyOfParam(_.duration)
+
+  def toConfig: ConfigPositiveSeconds = checked(ConfigPositiveSeconds.tryFromJavaDuration(duration))
 }
 
-object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds]
+object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds] {
+  implicit val toConfigPositiveSeconds: Transformer[PositiveSeconds, ConfigPositiveSeconds] =
+    _.toConfig
+}

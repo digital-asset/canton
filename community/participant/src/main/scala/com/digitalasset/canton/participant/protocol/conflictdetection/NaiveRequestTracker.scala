@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.data.{EitherT, NonEmptyChain, OptionT}
+import cats.data.{EitherT, NonEmptyChain}
 import cats.syntax.either._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -252,10 +252,10 @@ class NaiveRequestTracker(
     } yield result
   }
 
-  override def getApproximateState(coid: LfContractId)(implicit
+  override def getApproximateStates(coids: Seq[LfContractId])(implicit
       traceContext: TraceContext
-  ): OptionT[Future, ContractState] =
-    conflictDetector.getApproximateState(coid)
+  ): Future[Map[LfContractId, ContractState]] =
+    conflictDetector.getApproximateStates(coids)
 
   /** Returns whether the request is in flight, i.e., in the requests map. */
   @VisibleForTesting

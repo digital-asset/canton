@@ -4,11 +4,9 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import akka.NotUsed
-import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing._
@@ -42,11 +40,7 @@ trait ManagedSubscription extends FlagCloseable with CloseNotification {
   * Any exception thrown by the call to `observer.onNext` will cause the subscription to close.
   */
 private[service] class GrpcManagedSubscription(
-    createSubscription: SerializedEventHandler[NotUsed] => EitherT[
-      Future,
-      CreateSubscriptionError,
-      SequencerSubscription[NotUsed],
-    ],
+    createSubscription: SerializedEventHandler[NotUsed] => SequencerSubscription[NotUsed],
     observer: ServerCallStreamObserver[v0.SubscriptionResponse],
     val member: Member,
     val expireAt: Option[CantonTimestamp],
@@ -108,22 +102,13 @@ private[service] class GrpcManagedSubscription(
   // TODO(#5705) Redo this when revisiting the subscription pool
   withNewTraceContext { implicit traceContext =>
     val shouldClose = performUnlessClosing("grpc-managed-subscription-handler") {
-      val createSub = Try({
-        val subscription = createSubscription(handler)
-        timeouts.unbounded.await(s"Creation of subscription handler")(subscription.value)
-      })
+      val createSub = Try(createSubscription(handler))
       createSub match {
         case Failure(exception) =>
           logger.warn("Creating sequencer subscription failed", exception)
           setCloseSignal(ErrorSignal(exception))
           true
-        case Success(Left(err)) =>
-          logger.warn(s"Creating sequencer subscription returned error: $err")
-          setCloseSignal(
-            ErrorSignal(Status.FAILED_PRECONDITION.withDescription(err.toString).asException())
-          )
-          true
-        case Success(Right(subscription)) =>
+        case Success(subscription) =>
           subscriptionRef.set(Some(subscription))
           logger.debug(
             "Underlying subscription has been successfully created (may still be starting)"

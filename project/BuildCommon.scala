@@ -211,18 +211,16 @@ object BuildCommon {
   }
 
   lazy val bundlePack = settingKey[Seq[String]]("Which pack directories / files to include")
-  lazy val bundleRef = taskKey[Unit]("create a release bundle referenceable task")
 
   lazy val enterpriseGeneratedPack = "release/tmp/pack"
 
   lazy val additionalBundleSources =
     taskKey[Seq[(File, String)]]("Bundle these additional sources")
 
-  /** Generate a release bundle including the demo */
-  lazy val bundleTask = {
-    import CommunityProjects.`community-common`
-    lazy val bundle = taskKey[Unit]("create a release bundle")
-    bundle := {
+  lazy val bundle = taskKey[Unit]("create a release bundle")
+  lazy val bundleTask: Def.Initialize[Task[String]] = Def
+    .task {
+      import CommunityProjects.`community-common`
 
       val log = streams.value.log
       dumpLicenseReport.value
@@ -310,7 +308,6 @@ object BuildCommon {
         log,
       )
     }
-  }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     {
@@ -370,7 +367,7 @@ object BuildCommon {
 
   // applies to all app sub-projects
   lazy val sharedAppSettings = sharedCantonSettings ++ Seq(
-    bundleTask,
+    bundle := bundleTask.value,
     licenseReportTitle := "third-party-licenses",
     licenseReportTypes := Seq(Html),
     assembly / test := {}, // don't run tests during assembly
@@ -704,6 +701,7 @@ object BuildCommon {
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
+          cats,
           mockito_scala % Test,
           scalatestMockito % Test,
           scalatest % Test,

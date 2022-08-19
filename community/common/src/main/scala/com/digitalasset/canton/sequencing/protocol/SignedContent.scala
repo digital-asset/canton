@@ -11,7 +11,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.serialization.{
+  HasCryptographicEvidence,
+  ProtoConverter,
+  ProtocolVersionedMemoizedEvidence,
+}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
@@ -60,6 +65,14 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
       if (newContent eq content) this.asInstanceOf[SignedContent[B]]
       else this.copy(content = newContent)
     }
+
+  def verifySignature(
+      snapshot: SyncCryptoApi,
+      member: Member,
+  ): EitherT[Future, SignatureCheckError, Unit] = {
+    val hash = SignedContent.hashContent(snapshot.pureCrypto, content)
+    snapshot.verifySignature(hash, member, signature)
+  }
 }
 
 object SignedContent {
@@ -95,8 +108,8 @@ object SignedContent {
       .map(signature => SignedContent(event, signature, timestampOfSigningKey))
   }
 
-  def hashContent(cryptoApi: CryptoPureApi, sequencedEvent: SequencedEvent[_]): Hash =
-    cryptoApi.digest(HashPurpose.SequencedEventSignature, sequencedEvent.getCryptographicEvidence)
+  private def hashContent(cryptoApi: CryptoPureApi, content: HasCryptographicEvidence): Hash =
+    cryptoApi.digest(HashPurpose.SequencedEventSignature, content.getCryptographicEvidence)
 
   def tryCreate[Env <: Envelope[_]](
       cryptoApi: CryptoPureApi,

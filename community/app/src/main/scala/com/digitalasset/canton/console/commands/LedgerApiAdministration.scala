@@ -30,7 +30,7 @@ import com.digitalasset.canton.admin.api.client.data.console.{
   ListLedgerApiUsersResult,
   UserRights,
 }
-import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -72,7 +72,11 @@ trait BaseLedgerApiAdministration extends NoTracing {
   protected val name: String
 
   protected def domainOfTransaction(transactionId: String): DomainId
-  protected def optionallyAwait[Tx](tx: Tx, txId: String, optTimeout: Option[TimeoutDuration]): Tx
+  protected def optionallyAwait[Tx](
+      tx: Tx,
+      txId: String,
+      optTimeout: Option[NonNegativeDuration],
+  ): Tx
   protected def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
 
   @Help.Summary("Group of commands that access the ledger-api", FeatureFlag.Testing)
@@ -104,7 +108,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
           endOffset: Option[LedgerOffset] = None,
           verbose: Boolean = true,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[TransactionTree] = check(FeatureFlag.Testing)({
         val observer = new RecordingStreamObserver[TransactionTree](completeAfter)
         val filter = TransactionFilter(partyIds.map(_.toLf -> Filters()).toMap)
@@ -120,7 +124,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           call: => AutoCloseable,
           requestDescription: String,
           observer: RecordingStreamObserver[Res],
-          timeout: TimeoutDuration,
+          timeout: NonNegativeDuration,
       ): Seq[Res] = consoleEnvironment.run {
         try {
           ResourceUtil.withResource(call) { _ =>
@@ -183,7 +187,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
             new LedgerOffset().withBoundary(LedgerOffset.LedgerBoundary.LEDGER_BEGIN),
           endOffset: Option[LedgerOffset] = None,
           verbose: Boolean = true,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[Transaction] = check(FeatureFlag.Testing)({
         val observer = new RecordingStreamObserver[Transaction](completeAfter)
         val filter = TransactionFilter(partyIds.map(_.toLf -> Filters()).toMap)
@@ -341,7 +345,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           commands: Seq[Command],
           workflowId: String = "",
           commandId: String = "",
-          optTimeout: Option[TimeoutDuration] = Some(timeouts.ledgerCommand),
+          optTimeout: Option[NonNegativeDuration] = Some(timeouts.ledgerCommand),
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
@@ -382,7 +386,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           commands: Seq[Command],
           workflowId: String = "",
           commandId: String = "",
-          optTimeout: Option[TimeoutDuration] = Some(timeouts.ledgerCommand),
+          optTimeout: Option[NonNegativeDuration] = Some(timeouts.ledgerCommand),
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
@@ -498,7 +502,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def await_active_contract(
           party: PartyId,
           contractId: LfContractId,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): Unit = check(FeatureFlag.Testing) {
         ConsoleMacros.utils.retry_until_true(timeout) {
           of_party(party, verbose = false)
@@ -516,7 +520,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           partyId: PartyId,
           companion: TemplateCompanion[T],
           predicate: Contract[T] => Boolean = (x: Contract[T]) => true,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): Contract[T] = check(FeatureFlag.Testing)({
         val result = new AtomicReference[Option[Contract[T]]](None)
         ConsoleMacros.utils.retry_until_true(timeout) {
@@ -560,7 +564,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       def find_generic(
           partyId: PartyId,
           filter: WrappedCreatedEvent => Boolean,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): WrappedCreatedEvent = check(FeatureFlag.Testing) {
         def scan: Option[WrappedCreatedEvent] = of_party(partyId).find(filter(_))
 
@@ -640,7 +644,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           atLeastNumCompletions: Int,
           offset: LedgerOffset,
           applicationId: String = LedgerApiCommands.applicationId,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
           filter: Completion => Boolean = _ => true,
       ): Seq[Completion] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
@@ -668,7 +672,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           atLeastNumCompletions: Int,
           offset: LedgerOffset,
           applicationId: String = LedgerApiCommands.applicationId,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
           filter: Completion => Boolean = _ => true,
       ): Seq[(Completion, Option[Checkpoint])] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
@@ -721,7 +725,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
            the expected number of configs was retrieved or the timeout is over.""")
       def list(
           expectedConfigs: Int = 1,
-          timeout: TimeoutDuration = timeouts.ledgerCommand,
+          timeout: NonNegativeDuration = timeouts.ledgerCommand,
       ): Seq[LedgerConfiguration] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -913,7 +917,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
   private def awaitTransaction(
       transactionId: String,
       at: Map[ParticipantReference, PartyId],
-      timeout: TimeoutDuration,
+      timeout: NonNegativeDuration,
   ): Unit = {
     def scan() = {
       at.map { case (participant, party) =>
@@ -996,7 +1000,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
   protected def optionallyAwait[Tx](
       tx: Tx,
       txId: String,
-      optTimeout: Option[TimeoutDuration],
+      optTimeout: Option[NonNegativeDuration],
   ): Tx = {
     optTimeout match {
       case None => tx

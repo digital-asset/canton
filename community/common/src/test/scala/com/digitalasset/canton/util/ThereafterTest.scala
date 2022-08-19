@@ -7,7 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
 import cats.{Applicative, Functor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -130,20 +130,23 @@ object ThereafterTest {
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     implicit val ec: ExecutionContext = null
 
-    EitherT.rightT[Future, Unit]("EitherT Future").thereafter(_ => ())
+    EitherT.rightT[Future, Unit]("EitherT Future").thereafter(_ => ()).discard
     EitherT.rightT[FutureUnlessShutdown, Unit]("EitherT FutureUnlessShutdown").thereafter(_ => ())
-    OptionT.pure[Future]("OptionT Future").thereafter(_ => ())
+    OptionT.pure[Future]("OptionT Future").thereafter(_ => ()).discard
     OptionT.pure[FutureUnlessShutdown]("OptionT FutureUnlessShutdown").thereafter(_ => ())
 
     // Type inference still cannot cope with several Thereafter transformers :-(
     // We explicitly have to summon the instance!
     {
       implicit val thereafter = Thereafter[EitherT[EitherT[Future, Unit, *], Unit, *]].summon
-      EitherT.rightT[EitherT[Future, Unit, *], Unit]("EitherT EitherT Future").thereafter(_ => ())
+      EitherT
+        .rightT[EitherT[Future, Unit, *], Unit]("EitherT EitherT Future")
+        .thereafter(_ => ())
+        .discard
     }
     {
       implicit val thereafter = Thereafter[OptionT[OptionT[Future, *], *]].summon
-      OptionT.pure[OptionT[Future, *]]("OptionT OptionT Future").thereafter(_ => ())
+      OptionT.pure[OptionT[Future, *]]("OptionT OptionT Future").thereafter(_ => ()).discard
     }
 
   }

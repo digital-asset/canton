@@ -7,7 +7,7 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.api.client.data.console.ListPartiesResult.ParticipantDomains
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationRoundedSeconds}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
 import com.digitalasset.canton.protocol.{
@@ -17,7 +17,6 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization
@@ -257,9 +256,9 @@ object ListDomainParametersChangeResult {
 }
 
 sealed trait DynamicDomainParameters {
-  def participantResponseTimeout: TimeoutDuration
-  def mediatorReactionTimeout: TimeoutDuration
-  def transferExclusivityTimeout: TimeoutDuration
+  def participantResponseTimeout: NonNegativeFiniteDuration
+  def mediatorReactionTimeout: NonNegativeFiniteDuration
+  def transferExclusivityTimeout: NonNegativeFiniteDuration
   def topologyChangeDelay: NonNegativeFiniteDuration
   def ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
 
@@ -282,18 +281,18 @@ sealed trait DynamicDomainParameters {
     DomainDynamicDomainParameters.protobufVersionFor(protocolVersion).v
 
   def update(
-      participantResponseTimeout: TimeoutDuration = participantResponseTimeout,
-      mediatorReactionTimeout: TimeoutDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: TimeoutDuration = transferExclusivityTimeout,
+      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
       topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
   ): DynamicDomainParameters
 }
 
 final case class DynamicDomainParametersV0(
-    participantResponseTimeout: TimeoutDuration,
-    mediatorReactionTimeout: TimeoutDuration,
-    transferExclusivityTimeout: TimeoutDuration,
+    participantResponseTimeout: NonNegativeFiniteDuration,
+    mediatorReactionTimeout: NonNegativeFiniteDuration,
+    transferExclusivityTimeout: NonNegativeFiniteDuration,
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
 ) extends DynamicDomainParameters {
@@ -303,9 +302,9 @@ final case class DynamicDomainParametersV0(
   ): Boolean = true // always safe, because we don't have mediatorDeduplicationTimeout
 
   override def update(
-      participantResponseTimeout: TimeoutDuration = participantResponseTimeout,
-      mediatorReactionTimeout: TimeoutDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: TimeoutDuration = transferExclusivityTimeout,
+      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
       topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
   ): DynamicDomainParameters = DynamicDomainParametersV0(
@@ -336,13 +335,13 @@ final case class DynamicDomainParametersV0(
 }
 
 final case class DynamicDomainParametersV1(
-    participantResponseTimeout: TimeoutDuration,
-    mediatorReactionTimeout: TimeoutDuration,
-    transferExclusivityTimeout: TimeoutDuration,
+    participantResponseTimeout: NonNegativeFiniteDuration,
+    mediatorReactionTimeout: NonNegativeFiniteDuration,
+    transferExclusivityTimeout: NonNegativeFiniteDuration,
     topologyChangeDelay: NonNegativeFiniteDuration,
     ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
     mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
-    reconciliationInterval: PositiveSeconds,
+    reconciliationInterval: PositiveDurationRoundedSeconds,
 ) extends DynamicDomainParameters {
 
   if (ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) > mediatorDeduplicationTimeout)
@@ -363,9 +362,9 @@ final case class DynamicDomainParametersV1(
   }
 
   override def update(
-      participantResponseTimeout: TimeoutDuration = participantResponseTimeout,
-      mediatorReactionTimeout: TimeoutDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: TimeoutDuration = transferExclusivityTimeout,
+      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
+      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
+      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
       topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
       ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
   ): DynamicDomainParameters = DynamicDomainParametersV1(

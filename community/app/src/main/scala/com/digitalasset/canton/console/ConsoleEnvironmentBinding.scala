@@ -26,17 +26,16 @@ object ConsoleEnvironmentBinding {
        |import com.digitalasset.canton.crypto._
        |import com.digitalasset.canton.config._
        |import com.digitalasset.canton.admin.api.client.data._
+       |import com.digitalasset.canton.admin.api.client.data.console._
        |import com.digitalasset.canton.participant.domain.DomainConnectionConfig
        |import com.digitalasset.canton.console.ConsoleMacros._
        |import com.digitalasset.canton.console.commands.DomainChoice
        |import com.digitalasset.canton.console.BootstrapScriptException
        |import com.digitalasset.canton.config.RequireTypes._
        |import com.digitalasset.canton.participant.admin.ResourceLimits
-       |import com.digitalasset.canton.protocol.DynamicDomainParameters
        |import java.time.Instant
        |import scala.concurrent.ExecutionContextExecutor
-       |import scala.concurrent.duration.DurationInt
-       |import scala.concurrent.duration.DurationLong
+       |import scala.concurrent.duration._
        |import scala.language.postfixOps
        |implicit val consoleEnvironment = $BindingName
        |implicit val ec: ExecutionContextExecutor = consoleEnvironment.environment.executionContext

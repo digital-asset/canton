@@ -15,8 +15,8 @@ import com.digitalasset.canton.admin.api.client.data.console.{
   ListConnectedDomainsResult,
   ListPartiesResult,
 }
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.config.TimeoutDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
@@ -301,7 +301,7 @@ class LocalParticipantPartiesAdministrationGroup(
   )
   def await_topology_observed[T <: ParticipantReference](
       partyAssignment: Set[(PartyId, T)],
-      timeout: TimeoutDuration = consoleEnvironment.commandTimeouts.bounded,
+      timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.bounded,
   )(implicit env: ConsoleEnvironment): Unit =
     check(FeatureFlag.Preview) {
       access(node =>
@@ -316,7 +316,7 @@ object TopologySynchronisation {
   def awaitTopologyObserved[T <: ParticipantReference](
       reference: ParticipantReference,
       partyAssignment: Set[(PartyId, T)],
-      timeout: TimeoutDuration,
+      timeout: NonNegativeDuration,
   )(implicit env: ConsoleEnvironment): Unit =
     TraceContext.withNewTraceContext { _ =>
       ConsoleMacros.utils.retry_until_true(timeout) {

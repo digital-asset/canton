@@ -41,13 +41,18 @@ class LocalSequencerStateEventSignaller(
     with FlagCloseableAsync
     with NamedLogging {
 
-  private val (queue, notificationsHubSource) = AkkaUtil.runSupervised(
-    logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty),
-    Source
-      .queue[WriteNotification](1, OverflowStrategy.backpressure)
-      .conflate(_ union _)
-      .toMat(BroadcastHub.sink(1))(Keep.both),
-  )
+  private val (((queue, terminateBeforeConflate), terminateAfterConflate), notificationsHubSource) =
+    AkkaUtil.runSupervised(
+      logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty),
+      Source
+        .queue[WriteNotification](1, OverflowStrategy.backpressure)
+        // TODO(#9883) Remove
+        .watchTermination()(Keep.both)
+        .conflate(_ union _)
+        // TODO(#9883) Remove
+        .watchTermination()(Keep.both)
+        .toMat(BroadcastHub.sink(1))(Keep.both),
+    )
 
   override def notifyOfLocalWrite(
       notification: WriteNotification
@@ -89,13 +94,23 @@ class LocalSequencerStateEventSignaller(
     Seq(
       SyncCloseable("queue.complete", queue.complete()),
       AsyncCloseable(
-        "queue.completion",
-        // Create a new subscription from the broadcast hub to make sure that
-        // the completion really reaches the hub.
-        // Just watching the queue's completion merely synchronizes on when
-        // the queue's elements have been passed downstream,
-        // not that they have reached the hub.
-        notificationsHubSource.runWith(Sink.ignore),
+        "queue.completion", {
+          // Create a new subscription from the broadcast hub to make sure that
+          // the completion really reaches the hub.
+          // Just watching the queue's completion merely synchronizes on when
+          // the queue's elements have been passed downstream,
+          // not that they have reached the hub.
+          val newSubscription = notificationsHubSource.runWith(Sink.ignore)
+
+          // Somewhere on the way, we're losing the termination of the source.
+          // Let's monitor it.
+          // TODO(#9883) remove
+          timeouts.shutdownShort.await("queue.completion.before.conflate")(terminateBeforeConflate)
+          logger.debug("queue.completion has terminated before conflate")
+          timeouts.shutdownShort.await("queue.completion.after.conflate")(terminateAfterConflate)
+          logger.debug("queue.completion has terminated after conflate")
+          newSubscription
+        },
         timeouts.shutdownShort.unwrap,
       ),
       // Other readers of the broadcast hub should be shut down separately

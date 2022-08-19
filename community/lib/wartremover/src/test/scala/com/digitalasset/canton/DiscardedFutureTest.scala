@@ -4,6 +4,8 @@
 
 package com.digitalasset.canton
 
+import cats.data.{EitherT, OptionT}
+import cats.syntax.either._
 import com.digitalasset.canton.DiscardedFutureTest.TraitWithFuture
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -54,8 +56,34 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         verify(mocked).returnsFutureOneArg(0)
         verify(mocked).returnsFutureTwoArgs(1)("")
         verify(mocked).returnsFutureThreeArgs(2)("string")(new Object)
+        verify(mocked).returnsFutureTypeArgs("string")
+        ()
       }
       result.errors shouldBe List.empty
+    }
+
+    "detects discarded futures wrapped in an EitherT" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        EitherT(Future.successful(Either.right(())))
+        ()
+      }
+      assertIsError(result)
+    }
+
+    "detects discarded futures wrapped in an OptionT" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        OptionT(Future.successful(Option(())))
+        ()
+      }
+      assertIsError(result)
+    }
+
+    "detects discarded futures that are deeply wrapped" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        OptionT(EitherT(Future.successful(Either.right(Option(())))))
+        ()
+      }
+      assertIsError(result)
     }
   }
 }
@@ -67,5 +95,6 @@ object DiscardedFutureTest {
     def returnsFutureOneArg(x: Int): Future[Int]
     def returnsFutureTwoArgs(x: Int)(y: String): Future[Int]
     def returnsFutureThreeArgs(x: Int)(y: String)(z: Any): Future[Int]
+    def returnsFutureTypeArgs[A](x: A): Future[Unit]
   }
 }

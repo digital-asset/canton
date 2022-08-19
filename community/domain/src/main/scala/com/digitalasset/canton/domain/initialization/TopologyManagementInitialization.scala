@@ -183,7 +183,7 @@ object TopologyManagementInitialization {
             loggerFactory,
           )
         val topologyProcessorHandler = topologyProcessor.createHandler(id)
-        DiscardIgnoredEvents {
+        DiscardIgnoredEvents(loggerFactory) {
           StripSignature {
             EnvelopeOpener[UnsignedEnvelopeBox](
               protocolVersion,

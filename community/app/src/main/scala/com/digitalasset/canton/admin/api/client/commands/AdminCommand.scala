@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultBoundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.config.{ProcessingTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.tracing.TraceContext
@@ -116,7 +116,7 @@ object GrpcAdminCommand {
   sealed trait TimeoutType extends Product with Serializable
 
   /** Custom timeout triggered by the client */
-  case class CustomClientTimeout(timeout: TimeoutDuration) extends TimeoutType
+  case class CustomClientTimeout(timeout: NonNegativeDuration) extends TimeoutType
 
   /** The Server will ensure the operation is timed out so the client timeout is set to an infinite value */
   case object ServerEnforcedTimeout extends TimeoutType

@@ -72,6 +72,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.nio.file.Path
 import java.time.{Duration => JDuration}
+import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ArrayBlockingQueue, BlockingQueue, LinkedBlockingQueue}
 import scala.concurrent._
@@ -96,7 +97,7 @@ import scala.util.{Failure, Success, Try}
   * @param keepAlive keep alive config used for GRPC sequencers
   * @param authToken configuration settings for the authentication token manager
   * @param optimisticSequencedEventValidation if true, sequenced event signatures will be validated first optimistically
-  *                                           and only strict if the optimistical evaluation failed. this means that
+  *                                           and only strict if the optimistic evaluation failed. this means that
   *                                           for a split second, we might still accept an event signed with a key that
   *                                           has just been revoked.
   * @param skipSequencedEventValidation if true, sequenced event validation will be skipped. the default setting is false.
@@ -116,6 +117,7 @@ case class SequencerClientConfig(
     acknowledgementInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(1),
     keepAliveClient: Option[KeepAliveClientConfig] = Some(KeepAliveClientConfig()),
     authToken: AuthenticationTokenManagerConfig = AuthenticationTokenManagerConfig(),
+    // TODO(#10040) remove optimistic validation
     optimisticSequencedEventValidation: Boolean = true,
     skipSequencedEventValidation: Boolean = false,
 )
@@ -523,11 +525,11 @@ class SequencerClient(
         replaceExisting: Boolean,
     )(implicit traceContext: TraceContext): Future[Unit] = {
       // if changing transport, close previous subscription before creating the new one
+      val previousSubscription = currentSubscription.get()
       if (replaceExisting)
-        currentSubscription
-          .get()
-          .map(_.subscription)
-          .foreach(_.giveUp(Success(SubscriptionCloseReason.TransportChange)))
+        previousSubscription.foreach(
+          _.subscription.giveUp(Success(SubscriptionCloseReason.TransportChange))
+        )
       val subscriptionF = performUnlessClosingUSF(functionFullName) {
         for {
           initialPriorEventO <- FutureUnlessShutdown.outcomeF(
@@ -572,15 +574,15 @@ class SequencerClient(
           )
           _ <-
             if (!replaceExisting) {
-              val resubscriptionStartsAt = replayEvents.headOption.fold(
-                cleanPreheadTsO.fold(ResubscriptionStart.FreshSubscription: ResubscriptionStart)(
-                  ResubscriptionStart.CleanHeadResubscriptionStart
+              val subscriptionStartsAt = replayEvents.headOption.fold(
+                cleanPreheadTsO.fold(SubscriptionStart.FreshSubscription: SubscriptionStart)(
+                  SubscriptionStart.CleanHeadResubscriptionStart
                 )
               )(replayEv =>
-                ResubscriptionStart.ReplayResubscriptionStart(replayEv.timestamp, cleanPreheadTsO)
+                SubscriptionStart.ReplayResubscriptionStart(replayEv.timestamp, cleanPreheadTsO)
               )
               for {
-                _ <- eventHandler.resubscriptionStartsAt(resubscriptionStartsAt)
+                _ <- eventHandler.subscriptionStartsAt(subscriptionStartsAt)
 
                 eventBatches = replayEvents.grouped(config.eventInboxSize.unwrap)
                 _ <- FutureUnlessShutdown.outcomeF(
@@ -605,6 +607,8 @@ class SequencerClient(
                 .getOrElse(preSubscriptionEvent.fold(GenesisSequencerCounter)(_.counter))
 
           val eventValidator = eventValidatorFactory.create(
+            // We validate events before we persist them in the SequencedEventStore
+            // so we do not need to revalidate the replayed events.
             preSubscriptionEvent,
             // we need to inform the validator if this connection is unauthenticated, as unauthenticated connections
             // do not have the topology data to verify signatures
@@ -657,39 +661,47 @@ class SequencerClient(
             loggerFactory,
           )
 
+          val newSubscription = SubscriptionAndFactory(subscription, SubscriptionFactory.this)
           if (replaceExisting) {
-            currentSubscription.set(
-              Some(SubscriptionAndFactory(subscription, SubscriptionFactory.this))
-            )
-          } else if (
-            !currentSubscription.compareAndSet(
-              None,
+            val replaced = currentSubscription.compareAndSet(
+              previousSubscription,
               Some(SubscriptionAndFactory(subscription, SubscriptionFactory.this)),
             )
-          ) {
-            // there's an existing subscription!
-            logger.warn(
-              "Cannot create additional subscriptions to the sequencer from the same client"
-            )
-            sys.error("The sequencer client already has a running subscription")
+            if (!replaced) {
+              ErrorUtil.internalError(
+                new ConcurrentModificationException(
+                  "Sequencer subscription must not be modified concurrently"
+                )
+              )
+            }
+          } else {
+            val replaced = currentSubscription.compareAndSet(None, Some(newSubscription))
+            if (!replaced) {
+              // there's an existing subscription!
+              logger.warn(
+                "Cannot create additional subscriptions to the sequencer from the same client"
+              )
+              sys.error("The sequencer client already has a running subscription")
+            }
           }
 
           // periodically acknowledge that we've successfully processed up to the clean counter
-          {
-            val old = periodicAcknowledgementsRef.getAndSet(
-              PeriodicAcknowledgements(
-                member,
+          // We only need to it setup once; the sequencer client will direct the acknowledgements to the
+          // right transport.
+          periodicAcknowledgementsRef.compareAndSet(
+            None,
+            PeriodicAcknowledgements
+              .create(
                 config.acknowledgementInterval.toScala,
                 subscriptionIsHealthy,
-                transport,
+                SequencerClient.this,
                 fetchCleanTimestamp,
                 clock,
                 timeouts,
                 loggerFactory,
-              ).some
-            )
-            old.foreach(_.close())
-          }
+              )
+              .some,
+          )
 
           // pipe the eventual close reason of the subscription to the client itself
           subscription.closeReason onComplete closeWithSubscriptionReason
@@ -771,24 +783,24 @@ class SequencerClient(
         // we'll also see the last event replayed if the resilient sequencer subscription reconnects.
         val isReplayOfPriorEvent = priorEventCounter.get().contains(serializedEvent.counter)
 
-        def validationResultOrErrF: EitherT[Future, SequencerClientSubscriptionError, Unit] =
-          eventValidator
-            .validate(serializedEvent)
-            .leftMap[SequencerClientSubscriptionError](EventValidationError)
-
         if (isReplayOfPriorEvent) {
           // just validate
           logger.debug(
             s"Do not handle event with sequencerCounter ${serializedEvent.counter}, as it is replayed and has already been handled."
           )
-          validationResultOrErrF.value
+          eventValidator
+            .validateOnReconnect(serializedEvent)
+            .leftMap[SequencerClientSubscriptionError](EventValidationError)
+            .value
         } else {
           logger.debug(
             s"Validating sequenced event with counter ${serializedEvent.counter} and timestamp ${serializedEvent.timestamp}"
           )
           (for {
             _unit <- EitherT.liftF(processingDelay.delay(serializedEvent))
-            _ <- validationResultOrErrF
+            _ <- eventValidator
+              .validate(serializedEvent)
+              .leftMap[SequencerClientSubscriptionError](EventValidationError)
             _ <- notifySendTracker(serializedEvent)
           } yield {
             batchAndCallHandler()
@@ -878,9 +890,10 @@ class SequencerClient(
     * or [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]]
     * then [[applicationHandlerFailure]] contains an error.
     */
-  private def processEventBatch[Box[+X <: Envelope[_]] <: PossiblyIgnoredSequencedEvent[
-    X
-  ], Env <: Envelope[_]](
+  private def processEventBatch[
+      Box[+X <: Envelope[_]] <: PossiblyIgnoredSequencedEvent[X],
+      Env <: Envelope[_],
+  ](
       eventHandler: ApplicationHandler[Lambda[`+X <: Envelope[_]` => Traced[Seq[Box[X]]]], Env],
       eventBatch: Seq[Box[Env]],
   ): EitherT[Future, ApplicationHandlerFailure, Unit] =
@@ -1022,6 +1035,14 @@ class SequencerClient(
       }
     }
   }
+
+  /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
+    * The client should then never subscribe for events from before this point.
+    */
+  private[client] def acknowledge(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    transport.acknowledge(member, timestamp)
 
   def changeTransport(
       sequencerClientTransport: SequencerClientTransport
@@ -1184,7 +1205,7 @@ object SequencerClient {
                 SequencedEventValidator.noValidation(domainId, sequencerId)(
                   NamedLoggingContext(loggerFactory, TraceContext.empty)
                 )
-              } else
+              } else {
                 new SequencedEventValidatorImpl(
                   initialLastEventProcessedO,
                   unauthenticated,
@@ -1194,6 +1215,7 @@ object SequencerClient {
                   syncCryptoApi,
                   loggerFactory,
                 )
+              }
           }
         } yield new SequencerClient(
           domainId,

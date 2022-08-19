@@ -160,15 +160,17 @@ class ReplayingSendsSequencerClientTransport(
       item
     }
 
-    underlyingTransport
-      .sendAsync(
-        extendMaxSequencingTime(submission),
-        replaySendsConfig.sendTimeout.toScala,
-        protocolVersion,
-      )
-      .value
-      .map(handleSendResult)
-      .map(updateTimestamps)
+    TraceContext.withNewTraceContext(traceContext =>
+      underlyingTransport
+        .sendAsync(
+          extendMaxSequencingTime(submission),
+          replaySendsConfig.sendTimeout.toScala,
+          protocolVersion,
+        )(traceContext)
+        .value
+        .map(handleSendResult)
+        .map(updateTimestamps)
+    )
   }
 
   def replay(sendParallelism: Int): Future[SendReplayReport] = withNewTraceContext {

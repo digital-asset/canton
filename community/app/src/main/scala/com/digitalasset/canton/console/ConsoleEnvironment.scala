@@ -7,7 +7,13 @@ import ammonite.util.Bind
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
 import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
-import com.digitalasset.canton.config.{ConsoleCommandTimeout, ProcessingTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{
+  ConsoleCommandTimeout,
+  NonNegativeDuration,
+  NonNegativeFiniteDuration,
+  PositiveDurationRoundedSeconds,
+  ProcessingTimeout,
+}
 import com.digitalasset.canton.console.CommandErrors.{
   CantonCommandError,
   CommandInternalError,
@@ -20,16 +26,15 @@ import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnection}
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, SimClock}
+import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.{Identifier, ParticipantId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 
-import java.time.{Duration, Instant}
+import java.time.{Duration => JDuration, Instant}
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{Duration => SDuration}
 import scala.reflect.runtime.{universe => ru}
 import scala.util.control.NonFatal
 
@@ -139,8 +144,8 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
     */
   def commandTimeouts: ConsoleCommandTimeout = commandTimeoutReference.get()
 
-  def setCommandTimeout(newTimeout: TimeoutDuration): Unit = {
-    require(newTimeout.duration > duration.Duration.Zero, "The command timeout must be positive!")
+  def setCommandTimeout(newTimeout: NonNegativeDuration): Unit = {
+    require(newTimeout.duration > SDuration.Zero, "The command timeout must be positive!")
     val _ = commandTimeoutReference.updateAndGet(cur => cur.copy(bounded = newTimeout))
   }
 
@@ -526,31 +531,28 @@ object ConsoleEnvironment {
       */
     implicit def toNonNegativeInt(n: Int): NonNegativeInt = NonNegativeInt.tryCreate(n)
 
-    /** Implicitly convert a duration to a timeout duration
-      * @throws java.lang.IllegalArgumentException if `n` is negative duration
+    /** Implicitly convert a duration to a [[com.digitalasset.canton.config.NonNegativeDuration]]
+      * @throws java.lang.IllegalArgumentException if `duration` is negative
       */
-    implicit val toTimeoutDuration: FiniteDuration => TimeoutDuration =
-      TimeoutDuration.tryFromDuration(_)
+    implicit def durationToNonNegativeDuration(duration: SDuration): NonNegativeDuration =
+      NonNegativeDuration.tryFromDuration(duration)
 
-    implicit def timeoutDurationToNonNegativeFiniteDuration(
-        timeoutDuration: TimeoutDuration
+    /** Implicitly convert a duration to a [[com.digitalasset.canton.config.NonNegativeFiniteDuration]]
+      * @throws java.lang.IllegalArgumentException if `duration` is negative or infinite
+      */
+    implicit def durationToNonNegativeFiniteDuration(
+        duration: SDuration
     ): NonNegativeFiniteDuration =
-      timeoutDuration.duration match {
-        case _: duration.Duration.Infinite =>
-          throw new IllegalArgumentException("Expecting finite duration but Infinite found")
+      NonNegativeFiniteDuration.tryFromDuration(duration)
 
-        case duration: FiniteDuration =>
-          NonNegativeFiniteDuration(duration.asJavaApproximation)
-      }
-
-    implicit def TimeoutDurationToPositiveSeconds(timeoutDuration: TimeoutDuration) =
-      timeoutDuration.duration match {
-        case _: duration.Duration.Infinite =>
-          throw new IllegalArgumentException("Expecting finite duration but Infinite found")
-
-        case duration: FiniteDuration =>
-          PositiveSeconds(duration.asJavaApproximation)
-      }
+    /** Implicitly convert a duration to a [[com.digitalasset.canton.config.PositiveDurationRoundedSeconds]]
+      *
+      * @throws java.lang.IllegalArgumentException if `duration` is not positive or not rounded to the second.
+      */
+    implicit def durationToPositiveDurationRoundedSeconds(
+        duration: SDuration
+    ): PositiveDurationRoundedSeconds =
+      PositiveDurationRoundedSeconds.tryFromDuration(duration)
   }
 
   object Implicits extends Implicits
@@ -569,7 +571,7 @@ class SimClockCommand(clock: SimClock) {
   }
 
   @Help.Description("Advance time by given time-period")
-  def advance(duration: Duration): Unit = TraceContext.withNewTraceContext {
+  def advance(duration: JDuration): Unit = TraceContext.withNewTraceContext {
     implicit traceContext =>
       clock.advance(duration)
   }

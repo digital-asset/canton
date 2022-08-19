@@ -110,7 +110,7 @@ class DefaultMessageDispatcher(
         triggerAcsChangePublication: Boolean,
     ): FutureUnlessShutdown[Unit] =
       for {
-        // Signal to the identity processor that all messages up to timestamp `ts` have arrived
+        // Signal to the topology processor that all messages up to timestamp `ts` have arrived
         // Publish the empty ACS change only afterwards as this may trigger an ACS commitment computation which accesses the topology state.
         _unit <- runAsyncResult(topologyProcessor(sc, ts, Traced(List.empty)))
       } yield {

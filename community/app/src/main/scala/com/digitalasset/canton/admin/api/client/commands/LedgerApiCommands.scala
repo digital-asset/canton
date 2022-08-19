@@ -83,7 +83,7 @@ import com.digitalasset.canton.admin.api.client.data.console.{
   ListLedgerApiUsersResult,
   UserRights,
 }
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -412,7 +412,7 @@ object LedgerApiCommands {
         partyId: LfPartyId,
         offset: LedgerOffset,
         expectedCompletions: Int,
-        timeout: TimeoutDuration,
+        timeout: NonNegativeDuration,
         applicationId: String,
     )(filter: Completion => Boolean, scheduler: ScheduledExecutorService)
         extends BaseCommand[CompletionStreamRequest, Seq[(Completion, Option[Checkpoint])], Seq[

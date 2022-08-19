@@ -1,10 +1,14 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.sync
+package com.digitalasset.canton.participant.protocol.submission.routing
 
-import cats.data.{EitherT, OptionT}
-import cats.implicits._
+import cats.data.EitherT
+import cats.syntax.alternative._
+import cats.syntax.either._
+import cats.syntax.foldable._
+import cats.syntax.traverse._
+import cats.syntax.traverseFilter._
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -15,31 +19,24 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmitted,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps
+import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter.ContractsDomainData
 import com.digitalasset.canton.participant.store.ActiveContractStore.Active
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
-import com.digitalasset.canton.participant.sync.DomainRouter.{
-  ContractData,
-  ContractsDomainData,
-  DomainRank,
-  TransferArgs,
-}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.{
   MultiDomainSupportNotEnabled,
   SubmissionDomainNotReady,
 }
-import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors.InvalidDomainAlias
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.{
   NotConnectedToAllContractDomains,
   SubmitterAlwaysStakeholder,
   UnknownContractDomains,
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
-  AutomaticTransferForTransactionFailure,
   MalformedInputErrors,
   RoutingInternalError,
   TopologyErrors,
 }
+import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingError}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -47,8 +44,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId, LfWorkflowId}
+import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
 
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
@@ -63,14 +59,8 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class DomainRouter(
     participantId: ParticipantId,
-    connectedDomains: () => Set[DomainId],
-    domainOfContract: LfContractId => OptionT[Future, DomainId],
-    recoveredDomainOfAlias: DomainAlias => Option[DomainId],
-    domainsOfSubmittersAndInformees: (
-        Set[LfPartyId],
-        Set[LfPartyId],
-    ) => EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]],
-    priorityOfDomain: DomainId => Int,
+    getConnectedDomains: () => Set[DomainId],
+    domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
     submit: DomainId => (
         SubmitterInfo,
         TransactionMeta,
@@ -78,9 +68,10 @@ class DomainRouter(
         WellFormedTransaction[WithoutSuffixes],
         TraceContext,
     ) => EitherT[Future, TransactionRoutingError, Future[TransactionSubmitted]],
-    transfer: TransferArgs => EitherT[Future, TransactionRoutingError, Unit],
+    contractsTransferer: ContractsTransferer,
     snapshot: DomainId => Option[TopologySnapshot],
     autoTransferTransaction: Boolean,
+    domainSelector: DomainSelector,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -89,12 +80,6 @@ class DomainRouter(
 
   import com.digitalasset.canton.util.ShowUtil._
 
-  /** Submits a transaction to an appropriate domain.
-    * The domain is chosen as follows:
-    * 1. Domain of all input contracts (fail if there is more than one)
-    * 2. Domain whose alias equals the workflow id
-    * 3. An arbitrary domain to which the submitter can submit and on which all informees have active participants
-    */
   def submitTransaction(
       submitterInfo: SubmitterInfo,
       transactionMeta: TransactionMeta,
@@ -135,7 +120,7 @@ class DomainRouter(
         .inputContractIdsWithMetadata(wfTransaction.unwrap)
 
       inputContractsDomainData <- EitherT.liftF(
-        ContractsDomainData.create(domainOfContract, inputContractMetadata)
+        ContractsDomainData.create(domainOfContracts, inputContractMetadata)
       )
 
       inputDomains = inputContractsDomainData.domains
@@ -148,18 +133,20 @@ class DomainRouter(
           logger.debug(
             s"Choosing the domain as single-domain workflow for ${submitterInfo.commandId}"
           )
-          chooseDomainForSingleDomain(
+          domainSelector.forSingleDomain(
             lfSubmitters,
             transactionMeta.workflowId,
             inputContractsDomainData,
             informees,
           )
         } else if (autoTransferTransaction) {
+          val connectedDomains = getConnectedDomains()
           logger.debug(
             s"Choosing the domain as multi-domain workflow for ${submitterInfo.commandId}"
           )
-          chooseDomainIdForMultiDomain(
+          chooseDomainForMultiDomain(
             inputContractsDomainData,
+            connectedDomains,
             lfSubmitters,
             informees,
             transactionMeta,
@@ -171,7 +158,7 @@ class DomainRouter(
             ): TransactionRoutingError
           )
         }
-      _ <- transferContracts(inputContractsDomainData, domainRankTarget)
+      _ <- contractsTransferer.transfer(domainRankTarget)
       _ = logger.info(s"submitting the transaction to the ${domainRankTarget.domainId}")
       transactionSubmittedF <- submit(domainRankTarget.domainId)(
         submitterInfo,
@@ -193,49 +180,23 @@ class DomainRouter(
     }
   }
 
-  private def chooseDomainIdForMultiDomain(
+  private def chooseDomainForMultiDomain(
       inputContractsDomainData: ContractsDomainData,
+      connectedDomains: Set[DomainId],
       submitters: Set[LfPartyId],
       informees: Set[LfPartyId],
       transactionMeta: TransactionMeta,
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, DomainRank] =
     for {
-      _ <- checkValidityOfMultidomain(inputContractsDomainData, submitters, informees)
-      domainRankTarget <- chooseDomainIdForMultiDomain(
+      _ <- checkValidityOfMultiDomain(connectedDomains, inputContractsDomainData, submitters)
+      domainRankTarget <- domainSelector.forMultiDomain(
         transactionMeta,
+        connectedDomains,
         inputContractsDomainData.withDomainData,
         submitters,
         informees,
       )
     } yield domainRankTarget
-
-  private def transferContracts(
-      inputContractsDomainData: ContractsDomainData,
-      domainRankTarget: DomainRank,
-  )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
-    if (domainRankTarget.transfers.nonEmpty) {
-      logger.info(
-        s"Automatic transaction transfer into domain ${domainRankTarget.domainId}"
-      )
-      inputContractsDomainData.withDomainData.traverse_ { case ContractData(cid, domainId, _) =>
-        if (domainId != domainRankTarget.domainId) {
-          transfer(
-            TransferArgs(
-              domainId,
-              domainRankTarget.domainId,
-              domainRankTarget.transfers(cid),
-              cid,
-              traceContext,
-            )
-          )
-        } else {
-          EitherT.pure[Future, TransactionRoutingError](())
-        }
-      }
-    } else {
-      EitherT.pure[Future, TransactionRoutingError](())
-    }
-  }
 
   /** We have a multi-domain transaction if the input contracts are on more than one domain
     * or if the (single) input domain does not host all informees
@@ -253,14 +214,13 @@ class DomainRouter(
         .map(!_.forall(identity))
   }
 
-  private def checkValidityOfMultidomain(
+  private def checkValidityOfMultiDomain(
+      connectedDomains: Set[DomainId],
       inputContractsDomainData: ContractsDomainData,
       submitters: Set[LfPartyId],
-      informees: Set[LfPartyId],
   ): EitherT[Future, TransactionRoutingError, Unit] = {
 
     val allContractsHaveDomainData: Boolean = inputContractsDomainData.withoutDomainData.isEmpty
-    val connectedDomains: Set[DomainId] = this.connectedDomains()
     val contractData = inputContractsDomainData.withDomainData
     val contractsDomainNotConnected = contractData.filterNot { contractData =>
       connectedDomains.contains(contractData.domain)
@@ -273,8 +233,6 @@ class DomainRouter(
     }
 
     for {
-      _atLeastOneQualifyingDomain <- domainsOfSubmittersAndInformees(submitters, informees)
-
       // Check: submitter
       _ <- EitherTUtil.condUnitET[Future](
         submitterNotBeingStakeholder.isEmpty,
@@ -302,223 +260,9 @@ class DomainRouter(
 
     } yield ()
   }
-
-  private def pickingADomainIdWhenNoWorkflowIdAndComputeTransfers(
-      connected: Set[DomainId],
-      contracts: Seq[ContractData],
-      submitters: Set[LfPartyId],
-      informees: Set[LfPartyId],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransactionRoutingError, DomainRank] = {
-    for {
-      // only pick the ones where all informees are connected to
-      domainsWithAllInformee <- EitherT.liftF(connected.toList.filterA { domainId =>
-        allInformeesOnDomain(informees)(domainId)
-      })
-      rankedDomains <- domainsWithAllInformee.traverse(targetDomain =>
-        computeTransfersToDomainId(contracts, targetDomain, submitters)
-      )
-      // Priority of domain
-      // Number of Transfers if we use this domain
-      // pick according to least amount of transfers
-      chosen = rankedDomains.minOption
-      domainRank <- chosen match {
-        case None =>
-          logger.info(
-            s"Unable to find a common domain for the following set of informees ${informees}"
-          )
-          EitherT.leftT[Future, DomainRank](
-            AutomaticTransferForTransactionFailure.Failed(
-              "No domain found for the given informees to perform transaction"
-            ): TransactionRoutingError
-          )
-        case Some(domainRank) => EitherT.rightT[Future, TransactionRoutingError](domainRank)
-      }
-    } yield domainRank
-  }
-
-  private def chooseDomainIdForMultiDomain(
-      transactionMeta: TransactionMeta,
-      contracts: Seq[ContractData],
-      submitters: Set[LfPartyId],
-      informees: Set[LfPartyId],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransactionRoutingError, DomainRank] = {
-    val connected = this.connectedDomains()
-    val maybeWorkflowId = transactionMeta.workflowId
-    for {
-      mybDomainId <- chooseDomainWithAliasEqualToWorkflowId(maybeWorkflowId)
-      res <- mybDomainId
-        .filter(connected.contains) match {
-        case None => // pick a suitable domain id
-          pickingADomainIdWhenNoWorkflowIdAndComputeTransfers(
-            connected,
-            contracts,
-            submitters,
-            informees,
-          )
-        // Use the domain given by the workflow ID
-        case Some(targetDomain) =>
-          computeTransfersToDomainId(contracts, targetDomain, submitters)
-      }
-    } yield res
-  }
-
-  // Includes check that submitting party has a participant with submission rights on source and target domain
-  private def computeTransfersToDomainId(
-      contracts: Seq[ContractData],
-      targetDomain: DomainId,
-      submitters: Set[LfPartyId],
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[Future, TransactionRoutingError, DomainRank] = {
-    val ts = snapshot(targetDomain)
-    val maybeTransfers
-        : EitherT[Future, TransactionRoutingError, Seq[Option[(LfContractId, LfPartyId)]]] =
-      contracts.traverse { c =>
-        if (c.domain == targetDomain) EitherT.fromEither[Future](Right(None))
-        else {
-          for {
-            sourceSnapshot <- EitherT.fromEither[Future](
-              snapshot(c.domain).toRight(
-                AutomaticTransferForTransactionFailure.Failed(s"No snapshot for domain ${c.domain}")
-              )
-            )
-            targetSnapshot <- EitherT.fromEither[Future](
-              ts.toRight(
-                AutomaticTransferForTransactionFailure.Failed(
-                  s"No snapshot for domain $targetDomain"
-                )
-              )
-            )
-            submitter <- findSubmitterThatCanTransferContract(
-              sourceSnapshot,
-              targetSnapshot,
-              c,
-              submitters,
-            )
-          } yield Some(c.id -> submitter)
-        }
-      }
-    maybeTransfers.map(transfers =>
-      DomainRank(
-        transfers.flattenOption.toMap,
-        priorityOfDomain(targetDomain),
-        targetDomain,
-      )
-    )
-  }
-
-  private def findSubmitterThatCanTransferContract(
-      sourceSnapshot: TopologySnapshot,
-      targetSnapshot: TopologySnapshot,
-      c: ContractData,
-      submitters: Set[LfPartyId],
-  )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, LfPartyId] = {
-
-    // Building the transfer out requests lets us check whether contract can be transferred to target domain
-    def go(
-        submitters: List[LfPartyId],
-        errAccum: List[String] = List.empty,
-    ): EitherT[Future, String, LfPartyId] = {
-      submitters match {
-        case Nil =>
-          EitherT.leftT(show"Cannot transfer contract ${c.id}: ${errAccum.mkString(",")}")
-        case submitter :: rest =>
-          TransferOutProcessingSteps
-            .transferOutRequestData(
-              participantId,
-              submitter,
-              c.stakeholders,
-              sourceSnapshot,
-              targetSnapshot,
-              logger,
-            )
-            .biflatMap(
-              left => go(rest, errAccum :+ show"Submitter ${submitter} cannot transfer: $left"),
-              _canTransfer => EitherT.rightT(submitter),
-            )
-      }
-    }
-
-    go(submitters.intersect(c.stakeholders).toList).leftMap(errors =>
-      AutomaticTransferForTransactionFailure.Failed(errors)
-    )
-  }
-
-  private def chooseDomainForSingleDomain(
-      submitters: Set[LfPartyId],
-      maybeWorkflowId: Option[LfWorkflowId],
-      inputContractsDomainData: ContractsDomainData,
-      informees: Set[LfPartyId],
-  ): EitherT[Future, TransactionRoutingError, DomainRank] = {
-    for {
-      domainId1 <- EitherT.fromEither[Future](
-        chooseDomainOfInputContracts(inputContractsDomainData)
-      )
-      domainId2 <- domainId1 match {
-        case None =>
-          chooseDomainWithAliasEqualToWorkflowId(maybeWorkflowId)
-        case Some(_id) => EitherT.rightT[Future, TransactionRoutingError](domainId1)
-      }
-      domainId3 <- domainId2 match {
-        case None => chooseCommonDomainOfInformees(submitters, informees)
-        case Some(domainId2) => EitherT.rightT[Future, TransactionRoutingError](domainId2)
-      }
-    } yield DomainRank(Map.empty, priorityOfDomain(domainId3), domainId3)
-  }
-
-  private def chooseDomainOfInputContracts(
-      inputContractsDomainData: ContractsDomainData
-  ): Either[TransactionRoutingError, Option[DomainId]] = {
-    // Collect domains of input contracts, ignoring contracts that cannot be found in the ACS.
-    // Such contracts need to be ignored, because they could be divulged contracts.
-    val domainIdsOfInputContracts = inputContractsDomainData.withDomainData.map(_.domain).toSet
-    Either.cond(
-      domainIdsOfInputContracts.sizeCompare(1) <= 0,
-      domainIdsOfInputContracts.headOption,
-      RoutingInternalError
-        .InputContractsOnDifferentDomains(domainIdsOfInputContracts): TransactionRoutingError,
-    )
-  }
-
-  private def chooseDomainWithAliasEqualToWorkflowId(
-      maybeWorkflowId: Option[LfWorkflowId]
-  ): EitherT[Future, InvalidDomainAlias.Error, Option[DomainId]] = {
-    for {
-      domainAliasO <- maybeWorkflowId
-        .traverse(DomainAlias.create(_))
-        .toEitherT[Future]
-        .leftMap(InvalidDomainAlias.Error)
-      res = domainAliasO.flatMap(recoveredDomainOfAlias(_))
-    } yield res
-  }
-
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
-  private def chooseCommonDomainOfInformees(
-      submitters: Set[LfPartyId],
-      informees: Set[LfPartyId],
-  ): EitherT[Future, TransactionRoutingError, DomainId] =
-    for {
-      nonEmptyDomainIds <- domainsOfSubmittersAndInformees(submitters, informees): EitherT[
-        Future,
-        TransactionRoutingError,
-        NonEmpty[Set[DomainId]],
-      ]
-      domainId <-
-        EitherT.rightT(
-          nonEmptyDomainIds
-            .map { id => DomainRank(Map.empty, priorityOfDomain(id), id) }
-            .min1
-            .domainId
-        ): EitherT[Future, TransactionRoutingError, DomainId]
-    } yield domainId
 }
 
-private[sync] object DomainRouter {
+object DomainRouter {
   def apply(
       connectedDomainsMap: mutable.Map[DomainId, SyncDomain],
       domainConnectionConfigStore: DomainConnectionConfigStore,
@@ -529,17 +273,35 @@ private[sync] object DomainRouter {
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext, traceContext: TraceContext): DomainRouter = {
 
+    val transfer = new ContractsTransferer(connectedDomainsMap, loggerFactory)
+
+    val domainIdResolver = recoveredDomainOfAlias(connectedDomainsMap, domainAliasManager) _
+
+    val domainRankComputation = new DomainRankComputation(
+      participantId = participantId,
+      priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
+      snapshot = domainSnapshot(connectedDomainsMap),
+      loggerFactory = loggerFactory,
+    )
+
+    val domainSelection = new DomainSelector(
+      domainIdResolver = domainIdResolver,
+      domainsOfSubmittersAndInformees =
+        domainsOfSubmittersAndInformees(participantId, connectedDomainsMap),
+      priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
+      domainRankComputation = domainRankComputation,
+      loggerFactory = loggerFactory,
+    )
+
     new DomainRouter(
       participantId,
       () => getConnectedDomains(connectedDomainsMap),
       domainOfContract(connectedDomainsMap),
-      recoveredDomainOfAlias(connectedDomainsMap, domainAliasManager),
-      domainsOfSubmittersAndInformees(participantId, connectedDomainsMap),
-      priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
       submit(connectedDomainsMap),
-      transfer(connectedDomainsMap),
+      transfer,
       domainSnapshot(connectedDomainsMap),
       autoTransferTransaction = autoTransferTransaction,
+      domainSelection,
       timeouts,
       loggerFactory,
     )
@@ -554,20 +316,31 @@ private[sync] object DomainRouter {
   }
 
   private def domainOfContract(connectedDomains: collection.Map[DomainId, SyncDomain])(
-      coid: LfContractId
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): OptionT[Future, DomainId] = {
+      coids: Seq[LfContractId]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): Future[Map[LfContractId, DomainId]] = {
+    type Acc = (Seq[LfContractId], Map[LfContractId, DomainId])
     connectedDomains
       .collect {
-        case (domainId, syncDomain) if syncDomain.readyForSubmission =>
-          syncDomain.ephemeral.requestTracker
-            .getApproximateState(coid)
-            .filter(_.status == Active)
-            .map(_ => domainId)
+        // only look at domains that are ready for submission
+        case (_, syncDomain: SyncDomain) if syncDomain.readyForSubmission => syncDomain
       }
-      .reduceOption[OptionT[Future, DomainId]] { case (d1, d2) =>
-        d1.orElse(d2)
+      .toList
+      .foldM[Future, Acc]((coids, Map.empty[LfContractId, DomainId]): Acc) {
+        // if there are no more cids for which we don't know the domain, we are done
+        case ((pending, acc), _) if pending.isEmpty => Future.successful((pending, acc))
+        case ((pending, acc), syncDomain) =>
+          // grab the approximate state and check if the contract is currently active on the given domain
+          syncDomain.ephemeral.requestTracker.getApproximateStates(pending).map { res =>
+            val done = acc ++ res.collect {
+              case (cid, status) if status.status == Active => (cid, syncDomain.domainId)
+            }
+            (pending.filterNot(cid => done.contains(cid)), done)
+          }
       }
-      .getOrElse(OptionT.none)
+      .map(_._2)
   }
 
   private def recoveredDomainOfAlias(
@@ -732,88 +505,12 @@ private[sync] object DomainRouter {
       )
     } yield result
 
-  private def transfer(connectedDomains: collection.Map[DomainId, SyncDomain])(
-      args: TransferArgs
-  )(implicit ec: ExecutionContext): EitherT[Future, TransactionRoutingError, Unit] = {
-    val TransferArgs(sourceDomain, targetDomain, submittingParty, contractId, _traceContext) = args
-    implicit val traceContext = _traceContext
-
-    val transfer = for {
-      sourceSyncDomain <- EitherT.fromEither[Future](
-        connectedDomains.get(sourceDomain).toRight("Not connected to the source domain")
-      )
-
-      targetSyncDomain <- EitherT.fromEither[Future](
-        connectedDomains.get(targetDomain).toRight("Not connected to the target domain")
-      )
-
-      _unit <- EitherT
-        .cond[Future](sourceSyncDomain.ready, (), "The source domain is not ready for submissions")
-
-      outResult <- sourceSyncDomain
-        .submitTransferOut(
-          submittingParty,
-          contractId,
-          targetDomain,
-          TargetProtocolVersion(targetSyncDomain.staticDomainParameters.protocolVersion),
-        )
-        .leftMap(_.toString)
-      outStatus <- EitherT.right[String](outResult.transferOutCompletionF)
-      _outApprove <- EitherT.cond[Future](
-        outStatus.code == com.google.rpc.Code.OK_VALUE,
-        (),
-        s"The transfer out for ${outResult.transferId} failed with status $outStatus",
-      )
-
-      _unit <- EitherT
-        .cond[Future](targetSyncDomain.ready, (), "The target domain is not ready for submission")
-
-      inResult <- targetSyncDomain
-        .submitTransferIn(
-          submittingParty,
-          outResult.transferId,
-          SourceProtocolVersion(sourceSyncDomain.staticDomainParameters.protocolVersion),
-        )
-        .leftMap[String](err => s"Transfer in failed with error ${err}")
-
-      inStatus <- EitherT.right[String](inResult.transferInCompletionF)
-      _inApprove <- EitherT.cond[Future](
-        inStatus.code == com.google.rpc.Code.OK_VALUE,
-        (),
-        s"The transfer in for ${outResult.transferId} failed with verdict $inStatus",
-      )
-    } yield ()
-
-    transfer.leftMap[TransactionRoutingError](str =>
-      AutomaticTransferForTransactionFailure.Failed(str)
-    )
-  }
-
   private def wrapSubmissionError[T](domainId: DomainId)(
       eitherT: EitherT[Future, TransactionSubmissionError, T]
   )(implicit ec: ExecutionContext): EitherT[Future, TransactionRoutingError, T] =
     eitherT.leftMap(subm => TransactionRoutingError.SubmissionError(domainId, subm))
 
-  case class DomainRank(
-      transfers: Map[LfContractId, LfPartyId],
-      priority: Int,
-      domainId: DomainId,
-  )
-
-  object DomainRank {
-    //The highest priority domain should be picked first, so negate the priority
-    implicit val domainRanking: Ordering[DomainRank] =
-      Ordering.by(x => (x.transfers.size, -x.priority, x.domainId))
-  }
   case class ContractData(id: LfContractId, domain: DomainId, stakeholders: Set[LfPartyId])
-
-  case class TransferArgs(
-      sourceDomain: DomainId,
-      targetDomain: DomainId,
-      submitter: LfPartyId,
-      contract: LfContractId,
-      traceContext: TraceContext,
-  )
 
   case class ContractsDomainData(
       withDomainData: Seq[ContractData],
@@ -824,19 +521,24 @@ private[sync] object DomainRouter {
 
   object ContractsDomainData {
     def create(
-        domainOfContract: LfContractId => OptionT[Future, DomainId],
+        domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
         inputContractMetadata: Set[WithContractMetadata[LfContractId]],
     )(implicit ec: ExecutionContext): Future[ContractsDomainData] = {
-      inputContractMetadata.toSeq
-        .traverse { metadata =>
-          val contractId = metadata.unwrap
-          domainOfContract(contractId).value.map(dO =>
-            dO.toLeft(contractId)
-              .leftMap(d => ContractData(contractId, d, metadata.metadata.stakeholders))
-          )
+      val inputDataSeq = inputContractMetadata.toSeq
+      domainOfContracts(inputDataSeq.map(_.unwrap))
+        .map { domainMap =>
+          // Collect domains of input contracts, ignoring contracts that cannot be found in the ACS.
+          // Such contracts need to be ignored, because they could be divulged contracts.
+          val (good, bad) = inputDataSeq.map { metadata =>
+            val coid = metadata.unwrap
+            domainMap.get(coid) match {
+              case Some(domainId) =>
+                Left(ContractData(coid, domainId, metadata.metadata.stakeholders))
+              case None => Right(coid)
+            }
+          }.separate
+          ContractsDomainData(good, bad)
         }
-        .map(_.separate)
-        .map((ContractsDomainData.apply _) tupled _)
     }
   }
 }

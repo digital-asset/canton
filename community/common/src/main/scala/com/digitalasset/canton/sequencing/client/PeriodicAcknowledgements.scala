@@ -7,10 +7,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.HasFlushFuture
@@ -87,11 +85,10 @@ object PeriodicAcknowledgements {
   type FetchCleanTimestamp = TraceContext => Future[Option[CantonTimestamp]]
   val noAcknowledgements: FetchCleanTimestamp = _ => Future.successful(None)
 
-  def apply(
-      member: Member,
+  def create(
       interval: FiniteDuration,
       isHealthy: => Boolean,
-      transport: SequencerClientTransport,
+      client: SequencerClient,
       fetchCleanTimestamp: FetchCleanTimestamp,
       clock: Clock,
       timeouts: ProcessingTimeout,
@@ -101,7 +98,7 @@ object PeriodicAcknowledgements {
       isHealthy,
       interval,
       fetchCleanTimestamp,
-      Traced.lift(transport.acknowledge(member, _)(_)),
+      Traced.lift(client.acknowledge(_)(_)),
       clock,
       timeouts,
       loggerFactory,

@@ -5,7 +5,7 @@ package com.digitalasset.canton.console
 
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.{CantonConfig, TimeoutDuration}
+import com.digitalasset.canton.config.{CantonConfig, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.ConsoleTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
@@ -39,7 +39,7 @@ trait AdminCommandRunner {
 }
 
 object AdminCommandRunner {
-  def retryUntilTrue(timeout: TimeoutDuration)(
+  def retryUntilTrue(timeout: NonNegativeDuration)(
       condition: => Boolean
   ): ConsoleCommandResult[Unit] = {
     val deadline = timeout.asFiniteApproximation.fromNow

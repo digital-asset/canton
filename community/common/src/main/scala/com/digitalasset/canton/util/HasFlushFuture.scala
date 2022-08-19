@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.lifecycle.SyncCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
@@ -63,7 +63,7 @@ trait HasFlushFuture
 
   private val directExecutionContext: ExecutionContext = DirectExecutionContext(logger)
 
-  protected def flushCloseable(name: String, timeout: TimeoutDuration): SyncCloseable = {
+  protected def flushCloseable(name: String, timeout: NonNegativeDuration): SyncCloseable = {
     implicit val traceContext: TraceContext = TraceContext.empty
     val snapshot = tasks.readOnlySnapshot().keys
     // It suffices to build the flush future only once,

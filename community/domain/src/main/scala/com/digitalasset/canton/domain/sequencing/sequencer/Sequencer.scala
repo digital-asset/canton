@@ -9,7 +9,6 @@ import akka.stream.scaladsl.Source
 import cats.data.EitherT
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.RequireTypes.String256M
-import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -18,7 +17,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
-import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggerFactory, NamedLoggingContext}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggerFactory}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.protocol.{
   DeliverErrorReason,
@@ -166,56 +165,6 @@ object Sequencer extends HasLoggerName {
     * was pulled. Termination of the main flow must be awaited separately.
     */
   type EventSource = Source[OrdinarySerializedEvent, (KillSwitch, Future[Done])]
-
-  case object SigningTimestampAfterSequencingTime
-  type SigningTimestampAfterSequencingTime = SigningTimestampAfterSequencingTime.type
-
-  /** Validates the requested signing timestamp against the sequencing timestamp and the
-    * [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]]
-    * of the domain parameters valid at the requested signing timestamp.
-    *
-    * @param latestTopologyClientTimestamp The timestamp of an earlier event sent to the sequencer's topology client
-    *                                      such that no topology update has happened
-    *                                      between this timestamp (exclusive) and the sequencing timestamp (exclusive).
-    * @param warnIfApproximate Whether to emit a warning if an approximate topology snapshot is used
-    * @return [[scala.Left$]] if the signing timestamp is after the sequencing timestamp
-    *         [[scala.Right$]] the topology snapshot at the signing timestamp that can be used for signing the event;
-    *         provided that the snapshot at the signing timestamp defined domain parameters
-    *         and the sequencing time is within the [[com.digitalasset.canton.protocol.DynamicDomainParameters.sequencerSigningTolerance]].
-    */
-  def validateSigningTimestamp(
-      syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
-      signingTimestamp: CantonTimestamp,
-      sequencingTimestamp: CantonTimestamp,
-      latestTopologyClientTimestamp: Option[CantonTimestamp],
-      warnIfApproximate: Boolean,
-  )(implicit
-      loggingContext: NamedLoggingContext,
-      executionContext: ExecutionContext,
-  ): EitherT[Future, SigningTimestampAfterSequencingTime, Option[SyncCryptoApi]] = {
-    implicit val traceContext: TraceContext = loggingContext.traceContext
-
-    if (signingTimestamp > sequencingTimestamp) {
-      EitherT.leftT[Future, Option[SyncCryptoApi]](SigningTimestampAfterSequencingTime)
-    } else
-      EitherT.right[SigningTimestampAfterSequencingTime] {
-        for {
-          snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
-            syncCryptoApi,
-            signingTimestamp,
-            latestTopologyClientTimestamp,
-            warnIfApproximate,
-          )
-          dynamicDomainParametersO <- snapshot.ipsSnapshot.findDynamicDomainParameters()
-        } yield {
-          val withinSigningTolerance = dynamicDomainParametersO.exists { dynamicDomainParameters =>
-            import scala.Ordered.orderingToOrdered
-            dynamicDomainParameters.sequencerSigningTolerance.unwrap >= sequencingTimestamp - signingTimestamp
-          }
-          if (withinSigningTolerance) Some(snapshot) else None
-        }
-      }
-  }
 
   // TODO(#5990) use an error code
   def signingTimestampAfterSequencingTimestampError(
