@@ -10,7 +10,7 @@ import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.LoggingConfig
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory._
@@ -41,6 +41,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import monocle.macros.syntax.lens._
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -187,6 +188,22 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
       ledgerTime = ledgerTime,
     )
 
+  // Since the ConfirmationRequestFactory signs the envelopes in parallel,
+  // we cannot predict the counter that SymbolicCrypto uses to randomize the signatures.
+  // So we simply replace them with a fixed empty signature.
+  def stripSignature(request: ConfirmationRequest): ConfirmationRequest =
+    request
+      .focus(_.viewEnvelopes)
+      .modify(_.map(_.focus(_.protocolMessage).modify {
+        case v0: EncryptedViewMessageV0[_] =>
+          v0.focus(_.submitterParticipantSignature)
+            .modify(_.map(_ => SymbolicCrypto.emptySignature))
+        case v1: EncryptedViewMessageV1[_] =>
+          v1.copy(submitterParticipantSignature =
+            v1.submitterParticipantSignature.map(_ => SymbolicCrypto.emptySignature)
+          )(v1.informeeParticipants)
+      }))
+
   // Expected output factory
   def expectedConfirmationRequest(
       example: ExampleTransaction,
@@ -200,7 +217,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
           if (tree.isTopLevel) {
             Some(
               Await
-                .result(privateCryptoApi.sign(tree.transactionId.unwrap).value, 10.seconds)
+                .result(cryptoSnapshot.sign(tree.transactionId.unwrap).value, 10.seconds)
                 .valueOr(err => fail(err.toString))
             )
           } else None
@@ -333,9 +350,10 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
               testedProtocolVersion,
             )
             .value
-            .map(res =>
-              res should equal(Right(expectedConfirmationRequest(example, newCryptoSnapshot)))
-            )
+            .map { res =>
+              val expected = expectedConfirmationRequest(example, newCryptoSnapshot)
+              stripSignature(res.value) shouldBe stripSignature(expected)
+            }
         }
       }
     }

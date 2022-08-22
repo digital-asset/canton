@@ -84,7 +84,7 @@ object ParticipantInitializeTopology {
       val eventHandler = new UnsignedProtocolEventHandler {
         override def name: String = s"participant-initialize-topology-$alias"
 
-        override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+        override def subscriptionStartsAt(start: SubscriptionStart)(implicit
             traceContext: TraceContext
         ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 
@@ -106,7 +106,8 @@ object ParticipantInitializeTopology {
           FutureUnlessShutdown.outcomeF(
             client.subscribeAfterUnauthenticated(
               CantonTimestamp.MinValue,
-              DiscardIgnoredEvents {
+              // There is no point in ignoring events in an unauthenticated subscription
+              DiscardIgnoredEvents(loggerFactory) {
                 StripSignature { EnvelopeOpener(protocolVersion, crypto.pureCrypto)(eventHandler) }
               },
               domainTimeTracker,

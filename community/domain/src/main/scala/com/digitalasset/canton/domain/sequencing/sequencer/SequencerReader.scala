@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
+import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -268,7 +269,7 @@ class SequencerReader(
               eventTraceContext,
             ) =>
           implicit val traceContext: TraceContext = eventTraceContext
-          Sequencer
+          SequencedEventValidator
             .validateSigningTimestamp(
               syncCryptoApi,
               signingTimestamp,
@@ -278,22 +279,26 @@ class SequencerReader(
               // but batches addressed to unauthenticated members must not specify a signing key timestamp.
               warnIfApproximate = protocolVersion != ProtocolVersion.v2_0_0,
             )
-            .valueOr { case Sequencer.SigningTimestampAfterSequencingTime =>
-              // The SequencerWriter makes sure that the signing timestamp is at most the sequencing timestamp
-              ErrorUtil.internalError(
-                new IllegalArgumentException(
-                  s"The signing timestamp $signingTimestamp must be before or at the sequencing timestamp $sequencingTimestamp for sequencer counter $counter of member $member"
-                )
-              )
-            }
+            .value
             .flatMap {
-              case Some(snapshot) =>
+              case Right(snapshot) =>
                 val event =
                   mkSequencedEvent(member, registeredMember.memberId, counter, unvalidatedEvent)
                 validationSuccess(event, Some(signingTimestamp -> snapshot))
 
-              case None =>
-                // The signing timestamp is too old for the sequencing time.
+              case Left(SequencedEventValidator.SigningTimestampAfterSequencingTime) =>
+                // The SequencerWriter makes sure that the signing timestamp is at most the sequencing timestamp
+                ErrorUtil.internalError(
+                  new IllegalArgumentException(
+                    s"The signing timestamp $signingTimestamp must be before or at the sequencing timestamp $sequencingTimestamp for sequencer counter $counter of member $member"
+                  )
+                )
+
+              case Left(
+                    SequencedEventValidator.SigningTimestampTooOld(_) |
+                    SequencedEventValidator.NoDynamicDomainParameters
+                  ) =>
+                // We can't use the signing timestamp for the sequencing time.
                 // Replace the event with an error that is only sent to the sender
                 // To not introduce gaps in the sequencer counters,
                 // we deliver an empty batch to the member if it is not the sender.

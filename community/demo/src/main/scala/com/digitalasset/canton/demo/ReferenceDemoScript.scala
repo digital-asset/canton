@@ -8,7 +8,7 @@ import com.daml.ledger.api.v1.transaction.TransactionTree
 import com.daml.ledger.client.binding.{Contract, Primitive => P, TemplateCompanion}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.commands.DomainChoice
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
@@ -107,9 +107,9 @@ class ReferenceDemoScript(
   private val lookupTimeoutSeconds: Long =
     System.getProperty("canton.demo.lookup-timeout-seconds", "40").toLong
   private val lookupTimeout =
-    TimeoutDuration.tryFromJavaDuration(java.time.Duration.ofSeconds(lookupTimeoutSeconds))
+    NonNegativeDuration.tryFromJavaDuration(java.time.Duration.ofSeconds(lookupTimeoutSeconds))
   private val syncTimeout = Some(
-    TimeoutDuration.tryFromJavaDuration(
+    NonNegativeDuration.tryFromJavaDuration(
       java.time.Duration.ofSeconds(
         System.getProperty("canton.demo.sync-timeout-seconds", "30").toLong
       )

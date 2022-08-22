@@ -15,6 +15,7 @@ class SymbolicPureCrypto() extends CryptoPureApi {
 
   private val symmetricKeyCounter = new AtomicInteger
   private val randomnessCounter = new AtomicInteger
+  private val signatureCounter = new AtomicInteger
 
   // NOTE: The scheme is not really used by Symbolic crypto
   override val defaultSymmetricKeyScheme: SymmetricKeyScheme = SymmetricKeyScheme.Aes128Gcm
@@ -23,7 +24,8 @@ class SymbolicPureCrypto() extends CryptoPureApi {
       bytes: ByteString,
       signingKey: SigningPrivateKey,
   ): Either[SigningError, Signature] = {
-    Right(new Signature(SignatureFormat.Raw, bytes, signingKey.id))
+    val counter = signatureCounter.getAndIncrement()
+    Right(SymbolicPureCrypto.createSignature(bytes, signingKey.id, counter))
   }
 
   override protected[crypto] def verifySignature(
@@ -44,13 +46,22 @@ class SymbolicPureCrypto() extends CryptoPureApi {
           s"Signature was signed by ${signature.signedBy} whereas key is ${publicKey.id}"
         ),
       )
+      signedContent <- Either.cond(
+        signature.unwrap.size() >= 4,
+        signature.unwrap.substring(0, signature.unwrap.size() - 4),
+        SignatureCheckError.InvalidSignature(
+          signature,
+          bytes,
+          s"Symbolic signature ${signature.unwrap} lacks the four randomness bytes at the end",
+        ),
+      )
       _ <- Either.cond(
-        signature.unwrap == bytes,
+        signedContent == bytes,
         (),
         SignatureCheckError.InvalidSignature(
           signature,
           bytes,
-          s"Symbolic signature with ${signature.unwrap} does not match payload $bytes",
+          s"Symbolic signature with ${signedContent} does not match payload $bytes",
         ),
       )
     } yield ()
@@ -246,4 +257,19 @@ class SymbolicPureCrypto() extends CryptoPureApi {
     else
       random
   }
+}
+
+object SymbolicPureCrypto {
+
+  /** Symbolic signatures use the content as the signature, padded with a `counter` to simulate the general non-determinism of signing */
+  private[symbolic] def createSignature(
+      bytes: ByteString,
+      signingKey: Fingerprint,
+      counter: Int,
+  ): Signature =
+    new Signature(
+      SignatureFormat.Raw,
+      bytes.concat(DeterministicEncoding.encodeInt(counter)),
+      signingKey,
+    )
 }

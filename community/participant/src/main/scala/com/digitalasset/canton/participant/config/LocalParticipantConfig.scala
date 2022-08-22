@@ -338,7 +338,6 @@ object LedgerApiServerConfig {
       _maxContractStateCacheSize,
       _maxContractKeyStateCacheSize,
       _maxTransactionsInMemoryFanOutBufferSize,
-      _enableInMemoryFanOutForLedgerApi,
       _apiStreamShutdownTimeout, // configured via LedgerApiServerConfig.apiStreamShutdownTimeout
       inMemoryStateUpdaterParallelism,
       inMemoryFanOutThreadPoolSize,

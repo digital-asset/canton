@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console
 
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.commands.ParticipantCommands
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
@@ -103,7 +103,7 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
     def connect_local(
         domain: InstanceReferenceWithSequencerConnection,
         manualConnect: Boolean = false,
-        synchronize: Option[TimeoutDuration] = Some(
+        synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): Unit = {

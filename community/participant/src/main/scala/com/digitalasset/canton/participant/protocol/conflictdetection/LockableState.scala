@@ -145,10 +145,10 @@ class MutableLockableState[Status <: PrettyPrinting](
     * The promise is completed with the corresponding state.
     *
     * This is an atomic reference rather than a plain `var`
-    * because the [[com.digitalasset.canton.participant.sync.DomainRouter]] reads this state without further synchronization.
+    * because the [[DomainRouter]] reads this state without further synchronization.
     * Since the reference is mutated only by a single writer at a time,
     * we can use [[java.util.concurrent.atomic.AtomicReference.lazySet]] for updating the values in there.
-    * The update will become visible to the [[com.digitalasset.canton.participant.sync.DomainRouter]]
+    * The update will become visible to the [[DomainRouter]]
     * at the latest when the conflict detection thread jumps to another future
     * or a CAS inside of the [[scala.collection.concurrent.TrieMap]] happens as part of inserting or evicting a state.
     * See http://psy-lob-saw.blogspot.com/2012/12/atomiclazyset-is-performance-win-for.html

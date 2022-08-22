@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.data.{EitherT, NonEmptyChain, OptionT}
+import cats.data.{EitherT, NonEmptyChain}
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler}
@@ -293,9 +293,9 @@ trait RequestTracker extends AutoCloseable with NamedLogging {
   }
 
   /** Returns a possibly outdated state of the contract. */
-  def getApproximateState(coid: LfContractId)(implicit
+  def getApproximateStates(coid: Seq[LfContractId])(implicit
       traceContext: TraceContext
-  ): OptionT[Future, ContractState]
+  ): Future[Map[LfContractId, ContractState]]
 
   /** Returns a future that completes after the request has progressed to the given timestamp.
     * If the request tracker has already progressed to the timestamp, [[scala.None]] is returned.

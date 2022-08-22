@@ -4,11 +4,9 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import akka.NotUsed
-import cats.data.EitherT
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerSubscription
@@ -24,8 +22,8 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.stub.ServerCallStreamObserver
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.concurrent.Await
 import scala.concurrent.duration._
-import scala.concurrent.{Await, Future}
 
 class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -46,9 +44,9 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
 
     def createSequencerSubscription(
         newHandler: SerializedEventHandler[NotUsed]
-    ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[NotUsed]] = {
+    ): SequencerSubscription[NotUsed] = {
       handler = Some(newHandler)
-      EitherT.rightT[Future, CreateSubscriptionError](sequencerSubscription)
+      sequencerSubscription
     }
 
     def deliver(): Unit = {

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.Monad
-import cats.data.{NonEmptyChain, OptionT}
+import cats.data.NonEmptyChain
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.functor._
@@ -531,10 +531,10 @@ class ConflictDetector(
   /** Returns the state of a contract, fetching it from the [[com.digitalasset.canton.participant.store.ActiveContractStore]] if it is not in memory.
     * If called concurrently, the state may only be outdated.
     */
-  def getApproximateState(coid: LfContractId)(implicit
+  def getApproximateStates(coids: Seq[LfContractId])(implicit
       traceContext: TraceContext
-  ): OptionT[Future, ContractState] =
-    contractStates.getApproximateState(coid)
+  ): Future[Map[LfContractId, ContractState]] =
+    contractStates.getApproximateStates(coids)
 
   /** Ensures that the thunk `x` executes in the `executionQueue`,
     * i.e., is sequentialized w.r.t. all other calls to `runSequentially`.

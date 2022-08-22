@@ -63,7 +63,7 @@ class DomainTopologyManagerEventHandler(
     )
   }
 
-  override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+  override def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit
 

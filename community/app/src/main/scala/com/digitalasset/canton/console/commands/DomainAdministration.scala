@@ -16,7 +16,12 @@ import com.digitalasset.canton.admin.api.client.data.console.{
   ListParticipantDomainStateResult,
 }
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{ConsoleCommandTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{
+  ConsoleCommandTimeout,
+  NonNegativeDuration,
+  NonNegativeFiniteDuration,
+  PositiveDurationRoundedSeconds,
+}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -31,7 +36,6 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.TopologyManagerError.IncreaseOfLedgerTimeRecordTimeTolerance
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
@@ -96,7 +100,7 @@ trait DomainAdministration {
         participant: ParticipantId,
         permission: ParticipantPermission,
         trustLevel: TrustLevel = TrustLevel.Ordinary,
-        synchronize: Option[TimeoutDuration] = Some(timeouts.bounded),
+        synchronize: Option[NonNegativeDuration] = Some(timeouts.bounded),
     ): Unit = {
       val _ = consoleEnvironment.run {
         adminCommand(
@@ -161,9 +165,10 @@ trait DomainAdministration {
     @Help.Summary("Get the reconciliation interval configured for the domain")
     @Help.Description("""Depending on the protocol version used on the domain, the value will be
         read either from the static domain parameters or the dynamic ones.""")
-    def get_reconciliation_interval: PositiveSeconds = {
+    def get_reconciliation_interval: PositiveDurationRoundedSeconds = {
       get_dynamic_domain_parameters match {
-        case _: DynamicDomainParametersV0 => get_static_domain_parameters.reconciliationInterval
+        case _: DynamicDomainParametersV0 =>
+          get_static_domain_parameters.reconciliationInterval.toConfig
         case v1: DynamicDomainParametersV1 => v1.reconciliationInterval
       }
     }
@@ -238,7 +243,7 @@ trait DomainAdministration {
         - If false, nothing is done.
         """)
     def set_reconciliation_interval(
-        newReconciliationInterval: PositiveSeconds
+        newReconciliationInterval: PositiveDurationRoundedSeconds
     ): Unit =
       check(FeatureFlag.Preview) {
         update_dynamic_domain_parameters_v1(
@@ -324,8 +329,8 @@ trait DomainAdministration {
       if (oldDomainParameters.mediatorDeduplicationTimeout < minMediatorDeduplicationTimeout) {
         val err = IncreaseOfLedgerTimeRecordTimeTolerance
           .PermanentlyInsecure(
-            newLedgerTimeRecordTimeTolerance,
-            oldDomainParameters.mediatorDeduplicationTimeout,
+            newLedgerTimeRecordTimeTolerance.toDomain,
+            oldDomainParameters.mediatorDeduplicationTimeout.toDomain,
           )
         val msg = CantonError.stringFromContext(err)
         consoleEnvironment.run(GenericCommandError(msg))
@@ -380,7 +385,7 @@ trait DomainAdministration {
               case Some(validUntil) => Duration.between(validUntil, lastSequencerTs)
               case None => Duration.ZERO
             }
-            minMediatorDeduplicationTimeout.duration minus elapsedForAtLeast
+            minMediatorDeduplicationTimeout.asJava minus elapsedForAtLeast
           }
           .maxOption
           .getOrElse(Duration.ZERO)

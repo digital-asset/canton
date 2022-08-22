@@ -13,7 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   ServerEnforcedTimeout,
 }
 import com.digitalasset.canton.admin.api.client.commands.HttpAdminCommand
-import com.digitalasset.canton.config.{DomainCcfConfig, TimeoutDuration}
+import com.digitalasset.canton.config.{DomainCcfConfig, NonNegativeDuration}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.sequencing.HttpSequencerConnection
@@ -53,7 +53,7 @@ class ConsoleHttpAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
         case CustomClientTimeout(timeout) => timeout
         // If a custom timeout for a console command is set, it involves some non-gRPC timeout mechanism
         // -> we set the gRPC timeout to Inf, so gRPC never times out before the other timeout mechanism
-        case ServerEnforcedTimeout => TimeoutDuration(Duration.Inf)
+        case ServerEnforcedTimeout => NonNegativeDuration(Duration.Inf)
         case DefaultBoundedTimeout => commandTimeouts.bounded
         case DefaultUnboundedTimeout => commandTimeouts.unbounded
       }

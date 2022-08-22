@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   StoreBasedDomainTopologyClient,
 }
+import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor.subscriptionTimestamp
 import com.digitalasset.canton.topology.store.{
   PositiveSignedTopologyTransactions,
   SignedTopologyTransactions,
@@ -137,58 +138,13 @@ class TopologyTransactionProcessor(
   }
 
   private def initialise(
-      start: ResubscriptionStart
+      start: SubscriptionStart
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     ErrorUtil.requireState(
       !initialised.getAndSet(true),
       "topology processor is already initialised",
     )
-
-    def resubscriptionTs(
-        timestamps: Option[(SequencedTime, EffectiveTime)]
-    ): (CantonTimestamp, Either[SequencedTime, EffectiveTime]) =
-      (start, timestamps) match {
-        // clean-head subscription. this means that the first event we are going to get is > cleanPrehead
-        // and all our stores are clean.
-        // processor: initialise with ts = cleanPrehead
-        // client: approximate time: cleanPrehead, knownUntil = cleanPrehead + epsilon
-        //         plus, there might be "effective times" > cleanPrehead, so we need to schedule the adjustment
-        //         of the approximate time to the effective time
-        case (ResubscriptionStart.CleanHeadResubscriptionStart(cleanPrehead), _) =>
-          (cleanPrehead, Left(SequencedTime(cleanPrehead)))
-        // dirty or replay subscription.
-        // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
-        // client: same as clean-head resubscription
-        case (
-              ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, Some(cleanPrehead)),
-              _,
-            ) =>
-          (firstReplayed.immediatePredecessor, Left(SequencedTime(cleanPrehead)))
-        // dirty re-subscription of a node that crashed before fully processing the first event
-        // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
-        // client: initialise client with firstReplayed (careful: firstReplayed is known, but firstReplayed.immediateSuccessor not)
-        case (ResubscriptionStart.ReplayResubscriptionStart(firstReplayed, None), _) =>
-          (
-            firstReplayed.immediatePredecessor,
-            Right(EffectiveTime(firstReplayed.immediatePredecessor)),
-          )
-
-        // Fresh subscription with an empty domain topology store
-        // processor: init at ts = min
-        // client: init at ts = min
-        case (ResubscriptionStart.FreshSubscription, None) =>
-          (CantonTimestamp.MinValue, Right(EffectiveTime(CantonTimestamp.MinValue)))
-
-        // Fresh subscription with a bootstrapping timestamp
-        // NOTE: we assume that the bootstrapping topology snapshot does not contain the first message
-        // that we are going to receive from the domain
-        // processor: init at max(sequence-time) of bootstrapping transactions
-        // client: init at max(effective-time) of bootstrapping transactions
-        case (ResubscriptionStart.FreshSubscription, Some((sequenced, effective))) =>
-          (sequenced.value, Right(effective))
-
-      }
 
     def initClientFromSequencedTs(
         sequencedTs: SequencedTime
@@ -220,7 +176,7 @@ class TopologyTransactionProcessor(
       stateStoreTsO <- performUnlessClosingF(functionFullName)(
         store.timestamp(useStateStore = true)
       )
-      (processorTs, clientTs) = resubscriptionTs(stateStoreTsO)
+      (processorTs, clientTs) = subscriptionTimestamp(start, stateStoreTsO)
       _ <- TopologyTimestampPlusEpsilonTracker.initialize(timeAdjuster, store, processorTs)
 
       clientInitTimes <- clientTs match {
@@ -565,7 +521,7 @@ class TopologyTransactionProcessor(
       .map(_.protocolMessage)
 
   /** Inform the topology manager where the subscription starts when using [[processEnvelopes]] rather than [[createHandler]] */
-  def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+  def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = initialise(start)
 
@@ -686,10 +642,10 @@ class TopologyTransactionProcessor(
         }
       }
 
-      override def resubscriptionStartsAt(
-          start: ResubscriptionStart
+      override def subscriptionStartsAt(
+          start: SubscriptionStart
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        TopologyTransactionProcessor.this.resubscriptionStartsAt(start)
+        TopologyTransactionProcessor.this.subscriptionStartsAt(start)
     }
 
   override def onClosed(): Unit = Lifecycle.close(timeAdjuster, store)(logger)
@@ -740,4 +696,59 @@ object TopologyTransactionProcessor {
     }
   }
 
+  /** Returns the timestamps for initializing the processor and client for a restarted or fresh subscription. */
+  def subscriptionTimestamp(
+      start: SubscriptionStart,
+      storedTimestamps: Option[(SequencedTime, EffectiveTime)],
+  ): (CantonTimestamp, Either[SequencedTime, EffectiveTime]) = {
+    import SubscriptionStart._
+    start match {
+      case restart: ResubscriptionStart =>
+        resubscriptionTimestamp(restart)
+      case FreshSubscription =>
+        storedTimestamps.fold(
+          // Fresh subscription with an empty domain topology store
+          // processor: init at ts = min
+          // client: init at ts = min
+          (CantonTimestamp.MinValue, Right(EffectiveTime(CantonTimestamp.MinValue)))
+        ) { case (sequenced, effective) =>
+          // Fresh subscription with a bootstrapping timestamp
+          // NOTE: we assume that the bootstrapping topology snapshot does not contain the first message
+          // that we are going to receive from the domain
+          // processor: init at max(sequence-time) of bootstrapping transactions
+          // client: init at max(effective-time) of bootstrapping transactions
+          (sequenced.value, Right(effective))
+        }
+    }
+  }
+
+  /** Returns the timestamps for initializing the processor and client for a restarted subscription. */
+  def resubscriptionTimestamp(
+      start: ResubscriptionStart
+  ): (CantonTimestamp, Either[SequencedTime, EffectiveTime]) = {
+    import SubscriptionStart._
+    start match {
+      // clean-head subscription. this means that the first event we are going to get is > cleanPrehead
+      // and all our stores are clean.
+      // processor: initialise with ts = cleanPrehead
+      // client: approximate time: cleanPrehead, knownUntil = cleanPrehead + epsilon
+      //         plus, there might be "effective times" > cleanPrehead, so we need to schedule the adjustment
+      //         of the approximate time to the effective time
+      case CleanHeadResubscriptionStart(cleanPrehead) =>
+        (cleanPrehead, Left(SequencedTime(cleanPrehead)))
+      // dirty or replay subscription.
+      // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
+      // client: same as clean-head resubscription
+      case ReplayResubscriptionStart(firstReplayed, Some(cleanPrehead)) =>
+        (firstReplayed.immediatePredecessor, Left(SequencedTime(cleanPrehead)))
+      // dirty re-subscription of a node that crashed before fully processing the first event
+      // processor: initialise with firstReplayed.predecessor, as the next message we'll be getting is the firstReplayed
+      // client: initialise client with firstReplayed (careful: firstReplayed is known, but firstReplayed.immediateSuccessor not)
+      case ReplayResubscriptionStart(firstReplayed, None) =>
+        (
+          firstReplayed.immediatePredecessor,
+          Right(EffectiveTime(firstReplayed.immediatePredecessor)),
+        )
+    }
+  }
 }

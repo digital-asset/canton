@@ -68,7 +68,7 @@ object SymbolicCrypto extends LazyLogging {
     encryptionPrivateKey(Fingerprint.tryCreate(keyId))
 
   def signature(signature: ByteString, signedBy: Fingerprint): Signature =
-    new Signature(SignatureFormat.Raw, signature, signedBy)
+    SymbolicPureCrypto.createSignature(signature, signedBy, 0xffffffff)
 
   def emptySignature: Signature =
     signature(ByteString.EMPTY, Fingerprint.create(ByteString.EMPTY, HashAlgorithm.Sha256))
@@ -119,6 +119,8 @@ object SymbolicCrypto extends LazyLogging {
   }
 
   /** Create symbolic crypto and pre-populate with keys using the given fingerprint suffixes, which will be prepended with the type of key (sigK, encK), and the fingerprints used for signing keys. */
+  // TODO(#10059,Soren) Do not discard an EitherT
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   def tryCreate(
       signingFingerprints: Seq[Fingerprint],
       fingerprintSuffixes: Seq[String],

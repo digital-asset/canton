@@ -96,12 +96,6 @@ object CantonOnly {
   def asVersionedValue(value: Value, transactionVersion: LfTransactionVersion): VersionedValue =
     Versioned(transactionVersion, value)
 
-  def assertAsVersionedValue(
-      value: Value,
-      transactionVersion: LfTransactionVersion,
-  ): VersionedValue =
-    asVersionedValue(value, transactionVersion)
-
   def maxTransactionVersion(versions: NonEmpty[Seq[LfTransactionVersion]]): LfTransactionVersion =
     versions.reduceLeft[LfTransactionVersion](LfTransactionVersion.Ordering.max)
 

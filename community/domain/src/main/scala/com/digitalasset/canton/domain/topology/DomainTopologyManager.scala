@@ -265,6 +265,8 @@ class DomainTopologyManager(
   private val signedTopologyTransactionRepresentativeProtocolVersion =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
+  // TODO(#10059,Rafael) Do not discard an EitherT
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private def checkCorrectProtocolVersion(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {

@@ -257,7 +257,7 @@ class SequencerRuntime(
           .await("Failed to subscribe for the identity dispatcher sequencer client")(
             client.subscribeTracking(
               topologyManagerSequencerCounterTrackerStore,
-              DiscardIgnoredEvents {
+              DiscardIgnoredEvents(loggerFactory) {
                 EnvelopeOpener(staticDomainParameters.protocolVersion, crypto.pureCrypto)(
                   eventHandler
                 )

@@ -21,12 +21,12 @@ trait ApplicationHandler[-Box[+_ <: Envelope[_]], -Env <: Envelope[_]]
   def name: String
 
   /** Called by the [[com.digitalasset.canton.sequencing.client.SequencerClient]] before the start of a subscription. */
-  def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+  def subscriptionStartsAt(start: SubscriptionStart)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
   /** Replaces the application handler's processing with `f` and
-    * leaves the [[resubscriptionStartsAt]] logic and the name the same.
+    * leaves the [[subscriptionStartsAt]] logic and the name the same.
     */
   def replace[Box2[+_ <: Envelope[_]], Env2 <: Envelope[_]](
       f: BoxedEnvelope[Box2, Env2] => HandlerResult
@@ -34,10 +34,10 @@ trait ApplicationHandler[-Box[+_ <: Envelope[_]], -Env <: Envelope[_]]
 
     override def name: String = ApplicationHandler.this.name
 
-    override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+    override def subscriptionStartsAt(start: SubscriptionStart)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit] =
-      ApplicationHandler.this.resubscriptionStartsAt(start)
+      ApplicationHandler.this.subscriptionStartsAt(start)
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): HandlerResult =
       f(boxedEnvelope)
@@ -53,12 +53,12 @@ trait ApplicationHandler[-Box[+_ <: Envelope[_]], -Env <: Envelope[_]]
     override def name: String =
       s"${ApplicationHandler.this.name}+${other.name}"
 
-    override def resubscriptionStartsAt(
-        start: ResubscriptionStart
+    override def subscriptionStartsAt(
+        start: SubscriptionStart
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
       for {
-        _ <- ApplicationHandler.this.resubscriptionStartsAt(start)
-        _ <- other.resubscriptionStartsAt(start)
+        _ <- ApplicationHandler.this.subscriptionStartsAt(start)
+        _ <- other.subscriptionStartsAt(start)
       } yield ()
 
     override def apply(boxedEnvelope: BoxedEnvelope[Box2, Env2]): HandlerResult = {
@@ -73,7 +73,7 @@ trait ApplicationHandler[-Box[+_ <: Envelope[_]], -Env <: Envelope[_]]
 object ApplicationHandler {
 
   /** Creates an application handler that runs `f` on the boxed envelopes
-    * and ignores the [[ApplicationHandler.resubscriptionStartsAt]] notifications
+    * and ignores the [[ApplicationHandler.subscriptionStartsAt]] notifications
     */
   def create[Box[+_ <: Envelope[_]], Env <: Envelope[_]](name: String)(
       f: BoxedEnvelope[Box, Env] => HandlerResult
@@ -83,7 +83,7 @@ object ApplicationHandler {
 
       override val name: String = handlerName
 
-      override def resubscriptionStartsAt(start: ResubscriptionStart)(implicit
+      override def subscriptionStartsAt(start: SubscriptionStart)(implicit
           traceContext: TraceContext
       ): FutureUnlessShutdown[Unit] =
         FutureUnlessShutdown.unit
@@ -101,17 +101,20 @@ object ApplicationHandler {
 }
 
 /** Information passed by the [[com.digitalasset.canton.sequencing.client.SequencerClient]]
-  * to the [[ApplicationHandler]] where the resubscription (= processing of events) starts.
+  * to the [[ApplicationHandler]] where the subscription (= processing of events) starts.
   * The [[ApplicationHandler]] can then initialize itself appropriately.
   */
-sealed trait ResubscriptionStart extends Product with Serializable with PrettyPrinting
+sealed trait SubscriptionStart extends Product with Serializable with PrettyPrinting
 
-object ResubscriptionStart {
+/** The subscription is a resubscription. The application handler may have previously been called with an event. */
+sealed trait ResubscriptionStart extends SubscriptionStart
+
+object SubscriptionStart {
 
   /** The subscription is created for the first time.
     * The application handler has never been called with an event.
     */
-  case object FreshSubscription extends ResubscriptionStart {
+  case object FreshSubscription extends SubscriptionStart {
     override def pretty: Pretty[FreshSubscription] = prettyOfObject[FreshSubscription]
   }
   type FreshSubscription = FreshSubscription.type

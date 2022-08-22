@@ -196,15 +196,27 @@ class ResilientSequencerSubscriptionTest
         Promise[
           Either[SequencerSubscriptionCreationError, SequencerSubscription[TestHandlerError]]
         ]()
+
+      val subscriptionFactory =
+        new SequencerSubscriptionFactory[TestHandlerError] {
+          override def create(
+              startingCounter: SequencerCounter,
+              handler: SerializedEventHandler[TestHandlerError],
+          )(implicit traceContext: TraceContext): EitherT[
+            Future,
+            SequencerSubscriptionCreationError,
+            SequencerSubscription[TestHandlerError],
+          ] = {
+            askedForSubscriptionPromise.success(())
+            EitherT(underlyingSubscriptionPromise.future)
+          }
+        }
+
       val resilientSequencerSubscription = new ResilientSequencerSubscription[TestHandlerError](
         "test",
         0L,
         _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
-        (_, _) =>
-          _ => {
-            askedForSubscriptionPromise.success(())
-            EitherT(underlyingSubscriptionPromise.future)
-          },
+        subscriptionFactory,
         TestSubscriptionError.retryRule,
         retryDelay(),
         timeouts,
@@ -291,7 +303,7 @@ trait ResilientSequencerSubscriptionTestUtils {
       "test",
       0L,
       _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
-      subscriptionTestFactory.createET,
+      subscriptionTestFactory,
       TestSubscriptionError.retryRule,
       retryDelayRule,
       DefaultProcessingTimeouts.testing,
@@ -301,20 +313,23 @@ trait ResilientSequencerSubscriptionTestUtils {
     subscription
   }
 
-  trait SubscriptionTestFactory {
-    def create(counter: SequencerCounter, _handler: SerializedEventHandler[TestHandlerError])(
-        traceContext: TraceContext
-    ): SequencerSubscription[TestHandlerError]
+  trait SubscriptionTestFactory extends SequencerSubscriptionFactory[TestHandlerError] {
+    protected def createInternal(
+        counter: SequencerCounter,
+        handler: SerializedEventHandler[TestHandlerError],
+    )(implicit traceContext: TraceContext): SequencerSubscription[TestHandlerError]
 
-    def createET(counter: SequencerCounter, _handler: SerializedEventHandler[TestHandlerError])(
-        traceContext: TraceContext
-    ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[
-      TestHandlerError
-    ]] = {
+    override def create(
+        startingCounter: SequencerCounter,
+        handler: SerializedEventHandler[TestHandlerError],
+    )(implicit traceContext: TraceContext): EitherT[
+      Future,
+      SequencerSubscriptionCreationError,
+      SequencerSubscription[TestHandlerError],
+    ] =
       EitherT.pure[Future, SequencerSubscriptionCreationError](
-        create(counter, _handler)(traceContext)
+        createInternal(startingCounter, handler)
       )
-    }
   }
 
   object SubscriptionTestFactory {
@@ -324,10 +339,10 @@ trait ResilientSequencerSubscriptionTestUtils {
         reason: SubscriptionCloseReason[TestHandlerError]
     ): SubscriptionTestFactory =
       new SubscriptionTestFactory {
-        override def create(
+        override def createInternal(
             counter: SequencerCounter,
-            _handler: SerializedEventHandler[TestHandlerError],
-        )(traceContext: TraceContext) =
+            handler: SerializedEventHandler[TestHandlerError],
+        )(implicit traceContext: TraceContext): SequencerSubscription[TestHandlerError] =
           new SequencerSubscription[TestHandlerError] {
             override protected def loggerFactory: NamedLoggerFactory =
               ResilientSequencerSubscriptionTestUtils.this.loggerFactory
@@ -423,15 +438,16 @@ trait ResilientSequencerSubscriptionTestUtils {
       add(new MockSubscriptionResponse(Some(reason)))
     }
 
-    def add(mockSubscriptionResponse: MockSubscriptionResponse) = {
+    def add(mockSubscriptionResponse: MockSubscriptionResponse): MockedSubscriptions = {
       subscriptions += mockSubscriptionResponse
       this
     }
 
-    def create(counter: SequencerCounter, _handler: SerializedEventHandler[TestHandlerError])(
-        traceContext: TraceContext
-    ): SequencerSubscription[TestHandlerError] =
-      subscriptions(nextSubscription.getAndIncrement()).create(counter, _handler)
+    override def createInternal(
+        counter: SequencerCounter,
+        handler: SerializedEventHandler[TestHandlerError],
+    )(implicit traceContext: TraceContext): SequencerSubscription[TestHandlerError] =
+      subscriptions(nextSubscription.getAndIncrement()).create(counter, handler)
 
     def allShouldHaveBeenUsed: Assertion = nextSubscription.get() shouldBe subscriptions.length
   }

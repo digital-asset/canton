@@ -8,7 +8,7 @@ import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdmin
   Initialize,
   Prune,
 }
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,
@@ -38,7 +38,7 @@ class MediatorTestingGroup(
 
   @Help.Summary("Fetch the current time from the domain", FeatureFlag.Testing)
   def fetch_domain_time(
-      timeout: TimeoutDuration = consoleEnvironment.commandTimeouts.ledgerCommand
+      timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ledgerCommand
   ): CantonTimestamp =
     check(FeatureFlag.Testing) {
       consoleEnvironment.run {
@@ -49,7 +49,7 @@ class MediatorTestingGroup(
     }
 
   @Help.Summary("Await for the given time to be reached on the domain", FeatureFlag.Testing)
-  def await_domain_time(time: CantonTimestamp, timeout: TimeoutDuration): Unit =
+  def await_domain_time(time: CantonTimestamp, timeout: NonNegativeDuration): Unit =
     check(FeatureFlag.Testing) {
       consoleEnvironment.run {
         runner.adminCommand(

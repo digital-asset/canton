@@ -227,7 +227,7 @@ case class EncryptedViewMessageV1[+VT <: ViewType] private (
     override val domainId: DomainId,
     viewEncryptionScheme: SymmetricKeyScheme,
 )(
-    informeeParticipants: Option[Set[ParticipantId]]
+    val informeeParticipants: Option[Set[ParticipantId]]
 ) extends EncryptedViewMessage[VT]
     with ProtocolMessageV1 {
 

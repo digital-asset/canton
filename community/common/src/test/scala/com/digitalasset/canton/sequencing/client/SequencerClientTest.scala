@@ -176,9 +176,18 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(
-          eventValidator = event => {
-            validated.set(true)
-            Env.eventAlwaysValid.validate(event)
+          eventValidator = new SequencedEventValidator {
+            override def validate(
+                event: OrdinarySerializedEvent
+            ): EitherT[Future, SequencedEventValidationError, Unit] = {
+              validated.set(true)
+              Env.eventAlwaysValid.validate(event)
+            }
+
+            override def validateOnReconnect(
+                reconnectEvent: OrdinarySerializedEvent
+            ): EitherT[Future, SequencedEventValidationError, Unit] =
+              validate(reconnectEvent)
           },
           storedEvents = Seq(deliver),
         )

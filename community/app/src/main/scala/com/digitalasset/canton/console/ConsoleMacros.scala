@@ -24,7 +24,7 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.C
 import com.digitalasset.canton.admin.api.client.data.console.ListPartiesResult
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.{ProcessingTimeout, TimeoutDuration}
+import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits._
 import com.digitalasset.canton.external.{BackgroundRunnerHandler, BackgroundRunnerHelpers}
 import com.digitalasset.canton.logging.{LastErrorsAppender, NamedLoggerFactory, NamedLogging}
@@ -89,8 +89,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         |""")
     @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.While"))
     final def retry_until_true(
-        timeout: TimeoutDuration,
-        maxWaitPeriod: TimeoutDuration = 10.seconds,
+        timeout: NonNegativeDuration,
+        maxWaitPeriod: NonNegativeDuration = 10.seconds,
     )(
         condition: => Boolean,
         failure: => String = s"Condition never became true within $timeout",
@@ -114,7 +114,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
     @Help.Summary("Wait until all topology changes have been effected on all accessible nodes")
     def synchronize_topology(
-        timeoutO: Option[TimeoutDuration] = None
+        timeoutO: Option[NonNegativeDuration] = None
     )(implicit env: ConsoleEnvironment): Unit = {
       ConsoleMacros.utils.retry_until_true(timeoutO.getOrElse(env.commandTimeouts.bounded)) {
         env.nodes.all.forall(_.topology.synchronisation.is_idle())
@@ -662,7 +662,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         "When the timeout has elapsed, the console stops waiting for the command result. " +
         "The command will continue running in the background."
     )
-    def command_timeout(implicit env: ConsoleEnvironment): TimeoutDuration =
+    def command_timeout(implicit env: ConsoleEnvironment): NonNegativeDuration =
       env.commandTimeouts.bounded
 
     @Help.Summary("Sets the timeout for running console commands.")
@@ -672,7 +672,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         "The command will continue running in the background. " +
         "The new timeout must be positive."
     )
-    def set_command_timeout(newTimeout: TimeoutDuration)(implicit env: ConsoleEnvironment): Unit =
+    def set_command_timeout(newTimeout: NonNegativeDuration)(implicit
+        env: ConsoleEnvironment
+    ): Unit =
       env.setCommandTimeout(newTimeout)
 
     // this command is intentionally not documented as part of the help system

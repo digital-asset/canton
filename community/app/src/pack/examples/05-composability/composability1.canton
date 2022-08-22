@@ -4,11 +4,11 @@
 
 // update parameters
 iou.service.update_dynamic_domain_parameters(
-  _.update(transferExclusivityTimeout = TimeoutDuration.Zero)
+  _.update(transferExclusivityTimeout = Duration.Zero)
 ) // disables automatic transfer-in
 
 paint.service.update_dynamic_domain_parameters(
-  _.update(transferExclusivityTimeout = TimeoutDuration.ofSeconds(2))
+  _.update(transferExclusivityTimeout = 2.seconds)
 )
 
 // connect participants to the domain

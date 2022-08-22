@@ -68,10 +68,10 @@ class StartableStoppableLedgerApiDependentServices(
 
   def adminWorkflowServices(implicit traceContext: TraceContext): AdminWorkflowServices =
     servicesRef match {
-      case Some((adminWorkFlowServices, _, _)) => adminWorkFlowServices
+      case Some((adminWorkflowServices, _, _)) => adminWorkflowServices
       case None =>
         ErrorUtil.invalidState(
-          "Attempted to access adminWorkFlowServices when it is shutdown"
+          "Attempted to access adminWorkflowServices when it is shutdown"
         )
     }
 

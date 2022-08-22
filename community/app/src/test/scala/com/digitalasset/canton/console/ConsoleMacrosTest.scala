@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.TimeoutDuration
+import com.digitalasset.canton.config.NonNegativeDuration
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Instant
@@ -33,10 +33,11 @@ class ConsoleMacrosTest extends AnyWordSpec with BaseTest {
       val started = Instant.now()
       val counter = new AtomicInteger(0)
       try {
-        ConsoleMacros.utils.retry_until_true(timeout = TimeoutDuration.tryFromDuration(1.second)) {
-          counter.incrementAndGet()
-          false
-        }
+        ConsoleMacros.utils
+          .retry_until_true(timeout = NonNegativeDuration.tryFromDuration(1.second)) {
+            counter.incrementAndGet()
+            false
+          }
         fail("should have bounced")
       } catch {
         case _: IllegalStateException =>

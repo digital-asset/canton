@@ -28,7 +28,6 @@ import io.functionmeta.functionFullName
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
 
 /** This transport is meant to be used to create a sequencer client that connects directly to an in-process sequencer.
   * Needed for cases when the sequencer node itself needs to listen to specific events such as identity events.
@@ -80,23 +79,18 @@ class DirectSequencerClientTransport(
 
     private val subscriptionRef = new AtomicReference[Option[SequencerSubscription[E]]](None)
 
-    subscriptionFactory
-      .create(request.counter, "direct", request.member, handler)
-      .value
-      .onComplete {
-        case Success(Right(subscription)) =>
-          closeReasonPromise.completeWith(subscription.closeReason)
+    {
+      val subscription = subscriptionFactory
+        .create(request.counter, "direct", request.member, handler)
 
-          performUnlessClosing(functionFullName) {
-            subscriptionRef.set(Some(subscription))
-          } onShutdown {
-            subscription.close()
-          }
-        case Success(Left(value)) =>
-          closeReasonPromise.trySuccess(Fatal(value.toString))
-        case Failure(exception) =>
-          closeReasonPromise.tryFailure(exception)
+      closeReasonPromise.completeWith(subscription.closeReason)
+
+      performUnlessClosing(functionFullName) {
+        subscriptionRef.set(Some(subscription))
+      } onShutdown {
+        subscription.close()
       }
+    }
 
     override protected val loggerFactory: NamedLoggerFactory =
       DirectSequencerClientTransport.this.loggerFactory

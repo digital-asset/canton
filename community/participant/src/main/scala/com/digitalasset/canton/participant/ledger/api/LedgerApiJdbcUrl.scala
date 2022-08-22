@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
+import cats.syntax.functor._
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, PostgresDbConfig}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.FailedToConfigureLedgerApiStorage
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStorage.ledgerApiSchemaName
-import com.typesafe.config.Config
+import com.typesafe.config.{Config, ConfigObject, ConfigValueType}
 
 import java.net.URLEncoder
+import scala.jdk.CollectionConverters.SetHasAsScala
 
 /** Canton's storage is configured using Slick's configuration.
   * This offers an expansive set of options allowing you to configure a connection pool, data source, or JDBC driver.
@@ -22,6 +24,21 @@ import java.net.URLEncoder
   * and this will be used instead. This manually configured url **must** specify using the schema of `ledger_api`.
   */
 object LedgerApiJdbcUrl {
+
+  // DB property keys not passed as url parameter in the jdbc url
+  private val serverNameKey = "serverName"
+  private val portNumberKey = "portNumber"
+  private val userKey = "user"
+  private val passwordKey = "password"
+  private val databaseNameKey = "databaseName"
+
+  private val nonParametersProperties = Set(
+    serverNameKey,
+    portNumberKey,
+    userKey,
+    passwordKey,
+    databaseNameKey,
+  )
 
   def fromDbConfig(
       dbConfig: DbConfig
@@ -52,6 +69,9 @@ object LedgerApiJdbcUrl {
     /** Read the properties configuration */
     def getDbProperties: Option[Config] = config.getOptionalConfig("properties")
 
+    /** Read the properties configuration as an object */
+    def getDbPropertiesObject: Option[ConfigObject] = config.getOptionalConfigObject("properties")
+
     /** Read a string value only from the driver properties */
     def getDbProperty(key: String): Option[String] =
       config.getDbProperties.flatMap(_.getOptionalString(key))
@@ -62,6 +82,10 @@ object LedgerApiJdbcUrl {
 
     def getOptionalString(key: String): Option[String] =
       if (config.hasPath(key)) Some(config.getString(key))
+      else None
+
+    def getOptionalConfigObject(key: String): Option[ConfigObject] =
+      if (config.hasPath(key)) Some(config.getObject(key))
       else None
 
     def getOptionalConfig(key: String): Option[Config] =
@@ -79,14 +103,14 @@ object LedgerApiJdbcUrl {
     } yield {
       val h2CantonUrl = UrlBuilder
         .forH2(cantonUrl)
-        .addIfMissing("user", h2Config.getDbConfig("user"))
-        .addIfMissing("password", h2Config.getDbConfig("password"))
+        .addIfMissing(userKey, h2Config.getDbConfig(userKey))
+        .addIfMissing(passwordKey, h2Config.getDbConfig(passwordKey))
         .build
 
       val ledgerApiUrl = UrlBuilder
         .forH2(cantonUrl)
-        .addIfMissing("user", h2Config.getDbConfig("user"))
-        .addIfMissing("password", h2Config.getDbConfig("password"))
+        .addIfMissing(userKey, h2Config.getDbConfig(userKey))
+        .addIfMissing(passwordKey, h2Config.getDbConfig(passwordKey))
         .replace("schema", ledgerApiSchemaName)
         .build
 
@@ -99,17 +123,34 @@ object LedgerApiJdbcUrl {
         .getDbConfig("url")
         .fold(generatePostgresUrl(pgConfig))(Right(_))
     } yield {
+
+      val additionalProperties = pgConfig.getDbPropertiesObject
+        .map(
+          _.entrySet().asScala
+            .filterNot(e => nonParametersProperties.contains(e.getKey))
+            .foldLeft(Map.empty[String, String])({
+              // All properties should be string anyways, but to avoid bad surprises, filter for them here
+              case (parametersMap, configEntry)
+                  if configEntry.getValue.valueType() == ConfigValueType.STRING =>
+                parametersMap.updated(configEntry.getKey, configEntry.getValue.unwrapped.toString)
+              case (parametersMap, _) => parametersMap
+            })
+        )
+        .getOrElse(Map.empty[String, String])
+
       val pgCantonUrl = UrlBuilder
         .forPostgres(cantonUrl)
-        .addIfMissing("user", pgConfig.getDbConfig("user"))
-        .addIfMissing("password", pgConfig.getDbConfig("password"))
+        .addIfMissing(userKey, pgConfig.getDbConfig(userKey))
+        .addIfMissing(passwordKey, pgConfig.getDbConfig(passwordKey))
+        .addAll(additionalProperties)
         .build
 
       val ledgerApiUrl = UrlBuilder
         .forPostgres(cantonUrl)
-        .addIfMissing("user", pgConfig.getDbConfig("user"))
-        .addIfMissing("password", pgConfig.getDbConfig("password"))
+        .addIfMissing(userKey, pgConfig.getDbConfig(userKey))
+        .addIfMissing(passwordKey, pgConfig.getDbConfig(passwordKey))
         .replace("currentSchema", ledgerApiSchemaName)
+        .addAll(additionalProperties)
         .build
 
       ReuseCantonDb(ledgerApiUrl, pgCantonUrl)
@@ -118,10 +159,10 @@ object LedgerApiJdbcUrl {
   /** Generate the simplest postgres url we can create */
   private def generatePostgresUrl(pgConfig: Config): Either[String, String] = {
     // details on jdbc urls can be found here: https://jdbc.postgresql.org/documentation/head/connect.html
-    val host = pgConfig.getDbProperty("serverName")
+    val host = pgConfig.getDbProperty(serverNameKey)
     val port = pgConfig.getDbProperties
-      .flatMap(_.getOptionalInt("portNumber"))
-    val database = pgConfig.getDbProperty("databaseName")
+      .flatMap(_.getOptionalInt(portNumberKey))
+    val database = pgConfig.getDbProperty(databaseNameKey)
 
     /* Mirror generating the base jdbc url using the required forms from the docs above:
       - jdbc:postgresql:database
@@ -171,6 +212,10 @@ object LedgerApiJdbcUrl {
           // https://stackoverflow.com/questions/13984567/how-to-escape-special-characters-in-mysql-jdbc-connection-string
           .map(v => copy(options = options + (key -> URLEncoder.encode(v, "utf-8"))))
           .getOrElse(this)
+    }
+
+    def addAll(values: Map[String, String]): UrlBuilder = {
+      copy(options = options ++ values.fmap(URLEncoder.encode(_, "utf-8")))
     }
 
     def build: String = {

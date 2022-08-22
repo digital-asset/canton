@@ -375,7 +375,7 @@ class ExternalLedgerApiClient(
   override protected def optionallyAwait[Tx](
       tx: Tx,
       txId: String,
-      optTimeout: Option[TimeoutDuration],
+      optTimeout: Option[NonNegativeDuration],
   ): Tx = tx
 
 }

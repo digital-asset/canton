@@ -156,19 +156,21 @@ final case class MonitoringConfig(
   * @param testingBong default bong timeout
   */
 final case class ConsoleCommandTimeout(
-    bounded: TimeoutDuration = ConsoleCommandTimeout.defaultBoundedTimeout,
-    unbounded: TimeoutDuration = ConsoleCommandTimeout.defaultUnboundedTimeout,
-    ledgerCommand: TimeoutDuration = ConsoleCommandTimeout.defaultLedgerCommandsTimeout,
-    ping: TimeoutDuration = ConsoleCommandTimeout.defaultPingTimeout,
-    testingBong: TimeoutDuration = ConsoleCommandTimeout.defaultTestingBongTimeout,
+    bounded: NonNegativeDuration = ConsoleCommandTimeout.defaultBoundedTimeout,
+    unbounded: NonNegativeDuration = ConsoleCommandTimeout.defaultUnboundedTimeout,
+    ledgerCommand: NonNegativeDuration = ConsoleCommandTimeout.defaultLedgerCommandsTimeout,
+    ping: NonNegativeDuration = ConsoleCommandTimeout.defaultPingTimeout,
+    testingBong: NonNegativeDuration = ConsoleCommandTimeout.defaultTestingBongTimeout,
 )
 
 object ConsoleCommandTimeout {
-  val defaultBoundedTimeout: TimeoutDuration = TimeoutDuration.tryFromDuration(1.minute)
-  val defaultUnboundedTimeout: TimeoutDuration = TimeoutDuration.tryFromDuration(Duration.Inf)
-  val defaultLedgerCommandsTimeout: TimeoutDuration = TimeoutDuration.tryFromDuration(1.minute)
-  val defaultPingTimeout: TimeoutDuration = TimeoutDuration.tryFromDuration(20.seconds)
-  val defaultTestingBongTimeout: TimeoutDuration = TimeoutDuration.tryFromDuration(1.minute)
+  val defaultBoundedTimeout: NonNegativeDuration = NonNegativeDuration.tryFromDuration(1.minute)
+  val defaultUnboundedTimeout: NonNegativeDuration =
+    NonNegativeDuration.tryFromDuration(Duration.Inf)
+  val defaultLedgerCommandsTimeout: NonNegativeDuration =
+    NonNegativeDuration.tryFromDuration(1.minute)
+  val defaultPingTimeout: NonNegativeDuration = NonNegativeDuration.tryFromDuration(20.seconds)
+  val defaultTestingBongTimeout: NonNegativeDuration = NonNegativeDuration.tryFromDuration(1.minute)
 }
 
 /** Timeout settings configuration */
@@ -498,15 +500,15 @@ object CantonConfig {
       }
     }
 
-    implicit val timeoutDurationReader: ConfigReader[TimeoutDuration] =
-      ConfigReader.fromString[TimeoutDuration] { str =>
+    implicit val nonNegativeDurationReader: ConfigReader[NonNegativeDuration] =
+      ConfigReader.fromString[NonNegativeDuration] { str =>
         def err(message: String) =
-          CannotConvert(str, TimeoutDuration.getClass.getName, message)
+          CannotConvert(str, NonNegativeDuration.getClass.getName, message)
 
         Either
           .catchOnly[NumberFormatException](Duration.apply(str))
           .leftMap(error => err(error.getMessage))
-          .flatMap(duration => TimeoutDuration.fromDuration(duration).leftMap(err))
+          .flatMap(duration => NonNegativeDuration.fromDuration(duration).leftMap(err))
       }
 
     private def strToFiniteDuration(str: String): Either[String, FiniteDuration] =
@@ -890,12 +892,13 @@ object CantonConfig {
         parent
     }
 
-    implicit val timeoutDurationWriter: ConfigWriter[TimeoutDuration] = ConfigWriter.toString { x =>
-      x.unwrap match {
-        case Duration.Inf => "Inf"
-        case y => y.toString
+    implicit val nonNegativeDurationWriter: ConfigWriter[NonNegativeDuration] =
+      ConfigWriter.toString { x =>
+        x.unwrap match {
+          case Duration.Inf => "Inf"
+          case y => y.toString
+        }
       }
-    }
 
     implicit val lengthLimitedStringWriter: ConfigWriter[LengthLimitedString] =
       ConfigWriter.toString(_.unwrap)

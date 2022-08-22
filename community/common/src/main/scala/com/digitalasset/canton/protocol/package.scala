@@ -33,10 +33,6 @@ package object protocol {
   type LfContractId = Value.ContractId
   val LfContractId: Value.ContractId.type = Value.ContractId
 
-  /** Shorthand for Daml-LF contract id strings that Daml-LF contract ids are based on */
-  type LfContractIdString = Ref.ContractIdString
-  val LfContractIdString: Ref.ContractIdString.type = Ref.ContractIdString
-
   type LfNodeId = NodeId
   val LfNodeId: NodeId.type = NodeId
 

@@ -10,7 +10,7 @@ import cats.syntax.option._
 import cats.syntax.traverse._
 import com.digitalasset.canton._
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
-import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TimeoutDuration}
+import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDuration}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -205,7 +205,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       ParticipantTestMetrics.pruning,
       testedProtocolVersion,
       DefaultProcessingTimeouts.testing
-        .copy(storageMaxRetryInterval = TimeoutDuration.tryFromDuration(1.millisecond)),
+        .copy(storageMaxRetryInterval = NonNegativeDuration.tryFromDuration(1.millisecond)),
       loggerFactory,
     )
 

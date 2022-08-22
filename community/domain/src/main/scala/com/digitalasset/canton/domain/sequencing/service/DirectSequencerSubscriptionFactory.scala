@@ -9,7 +9,6 @@ import cats.syntax.functor._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
-import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client._
@@ -47,17 +46,21 @@ class DirectSequencerSubscriptionFactory(
       handler: SerializedEventHandler[E],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[E]] = {
-    def createSubscription(counter: SequencerCounter, handler: SerializedEventHandler[E])(
-        tc: TraceContext
-    ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[E]] = {
-      val result = for {
-        source <- sequencer.read(member, counter)(tc)
-      } yield new DirectSequencerSubscription[E](member, source, handler, timeouts, loggerFactory)
+  ): SequencerSubscription[E] = {
+    val subscriptionFactory = new SequencerSubscriptionFactory[E] {
+      override def create(startingCounter: SequencerCounter, handler: SerializedEventHandler[E])(
+          implicit traceContext: TraceContext
+      ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[E]] = {
+        val result = for {
+          source <- sequencer.read(member, startingCounter)
+        } yield new DirectSequencerSubscription[E](member, source, handler, timeouts, loggerFactory)
 
-      result.widen[SequencerSubscription[E]].leftMap { err =>
-        logger.warn(s"Reading events for member $member from counter $counter failed with $err")
-        Fatal(err.toString): SequencerSubscriptionCreationError
+        result.widen[SequencerSubscription[E]].leftMap { err =>
+          logger.warn(
+            s"Reading events for member $member from counter $startingCounter failed with $err"
+          )
+          Fatal(err.toString): SequencerSubscriptionCreationError
+        }
       }
     }
 
@@ -67,7 +70,7 @@ class DirectSequencerSubscriptionFactory(
       identifier,
       startingAt,
       handler,
-      createSubscription,
+      subscriptionFactory,
       SubscriptionErrorRetryPolicy.onDbExns,
       // only hard coded values as this subscription is internal and should therefore not flake
       SubscriptionRetryDelayRule(
@@ -84,7 +87,7 @@ class DirectSequencerSubscriptionFactory(
       show"Created sequencer subscription for $member from $startingAt (may still be starting)"
     )
 
-    EitherT.pure(subscription)
+    subscription
   }
 
 }

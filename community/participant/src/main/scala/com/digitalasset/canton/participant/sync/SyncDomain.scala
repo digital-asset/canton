@@ -74,7 +74,7 @@ import com.digitalasset.canton.sequencing.{
   HandlerResult,
   PossiblyIgnoredApplicationHandler,
   PossiblyIgnoredProtocolEvent,
-  ResubscriptionStart,
+  SubscriptionStart,
 }
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
 import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
@@ -114,8 +114,8 @@ class SyncDomain(
     parameters: ParticipantNodeParameters,
     participantNodePersistentState: ParticipantNodePersistentState,
     private[sync] val persistent: SyncDomainPersistentState,
-    private[sync] val ephemeral: SyncDomainEphemeralState,
-    packageService: PackageService,
+    val ephemeral: SyncDomainEphemeralState,
+    val packageService: PackageService,
     domainCrypto: DomainSyncCryptoClient,
     partyNotifier: LedgerServerPartyNotifier,
     val topologyClient: DomainTopologyClientWithInit,
@@ -568,10 +568,10 @@ class SyncDomain(
         ] {
           override def name: String = s"sync-domain-$domainId"
 
-          override def resubscriptionStartsAt(
-              start: ResubscriptionStart
+          override def subscriptionStartsAt(
+              start: SubscriptionStart
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-            topologyProcessor.resubscriptionStartsAt(start)(traceContext)
+            topologyProcessor.subscriptionStartsAt(start)(traceContext)
 
           override def apply(events: Traced[Seq[PossiblyIgnoredProtocolEvent]]): HandlerResult =
             messageDispatcher.handleAll(events)

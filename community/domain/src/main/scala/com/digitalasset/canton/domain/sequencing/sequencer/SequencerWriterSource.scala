@@ -225,6 +225,17 @@ object SequencerWriterSource {
           loggerFactory,
         )
       )
+      // Merge watermark updating in case we are running slow here
+      .conflate[Traced[BatchWritten]] { case (lftT, rghtT) =>
+        lftT.withTraceContext { traceContext => lft =>
+          rghtT.map(rght =>
+            BatchWritten(
+              lft.notifies.union(rght.notifies),
+              CantonTimestamp.max(lft.latestTimestamp, rght.latestTimestamp),
+            )
+          )
+        }
+      }
       .via(UpdateWatermarkFlow(store))
       .via(NotifyEventSignallerFlow(eventSignaller))
   }
