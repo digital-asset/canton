@@ -12,13 +12,14 @@ import com.digitalasset.canton.time.{
   PositiveSeconds => DomainPositiveSeconds,
 }
 import com.digitalasset.canton.util.FutureUtil
+import com.digitalasset.canton.util.FutureUtil.defaultStackTraceFilter
 import io.circe.Encoder
 import org.slf4j.event.Level
 
 import java.time.{Duration => JDuration}
 import java.util.concurrent.TimeUnit
-import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.concurrent.{Future, TimeoutException}
 
 trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends PrettyPrinting {
   this: {
@@ -52,11 +53,15 @@ trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends Pre
   def await[F](
       description: => String = "",
       logFailing: Option[Level] = None,
+      stackTraceFilter: Thread => Boolean = defaultStackTraceFilter,
+      onTimeout: TimeoutException => Unit = _ => (),
   )(fut: Future[F])(implicit loggingContext: ErrorLoggingContext): F = {
     FutureUtil.noisyAwaitResult(
       logFailing.fold(fut)(level => FutureUtil.logOnFailure(fut, description, level = level)),
       description,
       timeout = duration,
+      stackTraceFilter = stackTraceFilter,
+      onTimeout = onTimeout,
     )
   }
 

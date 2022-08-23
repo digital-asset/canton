@@ -6,6 +6,7 @@ package com.digitalasset.canton.lifecycle
 import cats.arrow.FunctionK
 import cats.data.EitherT
 import cats.{FlatMap, Functor, Id, Monad, Monoid, ~>}
+import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil.logOnThrow_
 import com.digitalasset.canton.util.Thereafter
@@ -85,6 +86,7 @@ sealed abstract class FutureUnlessShutdownImpl {
     *
     * The canonical name for this type would be `T`, but `FutureUnlessShutdown` gives better error messages.
     */
+  @DoNotDiscardLikeFuture
   type FutureUnlessShutdown[+A] <: Awaitable[UnlessShutdown[A]]
 
   /** Methods to evidence that [[FutureUnlessShutdown]] and [[scala.concurrent.Future]]`[`[[UnlessShutdown]]`]`

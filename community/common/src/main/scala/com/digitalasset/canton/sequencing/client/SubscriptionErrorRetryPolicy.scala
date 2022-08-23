@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.SubscriptionError
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
 
 import scala.annotation.nowarn
 import scala.reflect.ClassTag
@@ -53,16 +52,5 @@ object SubscriptionErrorRetryPolicy {
     override def retryOnError(subscriptionError: SubscriptionError, receivedItems: Boolean)(implicit
         traceContext: TraceContext
     ): Boolean = false
-  }
-
-  def onDbExns: SubscriptionErrorRetryPolicy = new SubscriptionErrorRetryPolicy {
-    override def retryOnError(subscriptionError: SubscriptionError, receivedItems: Boolean)(implicit
-        traceContext: TraceContext
-    ): Boolean = false
-
-    override def retryOnException(ex: Throwable, logger: TracedLogger)(implicit
-        traceContext: TraceContext
-    ): Boolean =
-      DbExceptionRetryable.retryOKForever(ex, logger)
   }
 }

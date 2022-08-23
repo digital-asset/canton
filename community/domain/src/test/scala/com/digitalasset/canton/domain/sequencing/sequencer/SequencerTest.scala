@@ -29,6 +29,7 @@ import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.version.RepresentativeProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
+import com.typesafe.config.ConfigFactory
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -43,10 +44,27 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
   private val carole: Member = ParticipantId("carole")
   private val topologyClientMember = SequencerId(domainId)
 
+  // Config to turn on Akka logging
+  private lazy val akkaConfig = {
+    import scala.jdk.CollectionConverters._
+    ConfigFactory.parseMap(
+      Map(
+        "akka.loglevel" -> "DEBUG",
+        "akka.stdout-level" -> "OFF",
+        "akka.loggers" -> List("akka.event.slf4j.Slf4jLogger").asJava,
+      ).asJava
+    )
+  }
+
   class Env extends FlagCloseableAsync {
     override val timeouts = SequencerTest.this.timeouts
     protected val logger = SequencerTest.this.logger
-    private implicit val actorSystem = ActorSystem(classOf[SequencerTest].getSimpleName)
+    private implicit val actorSystem = ActorSystem(
+      classOf[SequencerTest].getSimpleName,
+      Some(akkaConfig),
+      None,
+      Some(parallelExecutionContext),
+    )
     private implicit val materializer = implicitly[Materializer]
     val store = new InMemorySequencerStore(loggerFactory)
     val clock = new WallClock(timeouts, loggerFactory = loggerFactory)

@@ -95,8 +95,8 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
 
     "return correct snapshot" in {
 
-      cc.observed(ts1, ts1, 1, Seq(mockTransaction)) // nonempty
       for {
+        _ <- cc.observed(ts1, ts1, 1, Seq(mockTransaction)).failOnShutdown(s"at ${ts1}") // nonempty
         sp0a <- cc.snapshot(ts0)
         sp0b <- cc.snapshot(ts1)
         _ = cc.observed(ts1.plusSeconds(10), ts1.plusSeconds(10), 1, Seq())

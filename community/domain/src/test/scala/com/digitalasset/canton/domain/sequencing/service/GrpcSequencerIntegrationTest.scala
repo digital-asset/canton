@@ -21,6 +21,7 @@ import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncCloseable}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
@@ -213,15 +214,17 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
     )
       .thenAnswer {
         subscribeCallback(())
-        new SequencerSubscription[NotUsed] {
-          override protected def loggerFactory: NamedLoggerFactory = Env.this.loggerFactory
-          override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
-            SyncCloseable(
-              "anonymous-sequencer-subscription",
-              unsubscribeCallback(()),
+        EitherT.rightT[Future, CreateSubscriptionError] {
+          new SequencerSubscription[NotUsed] {
+            override protected def loggerFactory: NamedLoggerFactory = Env.this.loggerFactory
+            override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
+              SyncCloseable(
+                "anonymous-sequencer-subscription",
+                unsubscribeCallback(()),
+              )
             )
-          )
-          override protected def timeouts: ProcessingTimeout = Env.this.timeouts
+            override protected def timeouts: ProcessingTimeout = Env.this.timeouts
+          }
         }
       }
   }

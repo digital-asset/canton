@@ -4,12 +4,14 @@
 package com.digitalasset.canton.sequencing
 
 import cats.Monoid
+import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Try
 
 /** The asynchronous part of processing an event (or of a stage of its processing). */
+@DoNotDiscardLikeFuture
 case class AsyncResult(unwrap: FutureUnlessShutdown[Unit]) {
   def andThenF(
       f: Unit => FutureUnlessShutdown[Unit]

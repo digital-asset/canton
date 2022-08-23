@@ -15,11 +15,11 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
 
-import scala.collection.mutable
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 private[routing] class ContractsTransferer(
-    connectedDomains: mutable.Map[DomainId, SyncDomain],
+    connectedDomains: TrieMap[DomainId, SyncDomain],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {

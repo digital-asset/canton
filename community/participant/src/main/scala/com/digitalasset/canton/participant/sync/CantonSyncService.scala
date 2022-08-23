@@ -221,6 +221,7 @@ class CantonSyncService(
 
   private val domainRouter =
     DomainRouter(
+      packageService,
       connectedDomainsMap,
       domainConnectionConfigStore,
       aliasManager,

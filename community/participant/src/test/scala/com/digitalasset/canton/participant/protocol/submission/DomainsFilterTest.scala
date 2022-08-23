@@ -243,7 +243,7 @@ private[submission] object DomainsFilterTest {
         )
       )
 
-      new DomainsFilter(
+      DomainsFilter(
         localParticipantId = SimpleTopology.submitterParticipantId,
         submittedTransaction = tx,
         domains = domains,
