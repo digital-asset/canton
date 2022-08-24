@@ -49,6 +49,9 @@
   <!-- netty reports ssl errors on DEBUG level ... -->
   <logger name="io.netty.handler.ssl" level="${LOG_LEVEL_CANTON:-DEBUG}"/>
 
+  <!-- Set the logging level for Akka so that if someone configures akka to actually log something, this will end up in the log -->
+  <logger name="akka" level="DEBUG"/>
+
   <!-- Enable for database-relevant debug logs -->
 <!--  <logger name="slick" level="DEBUG"/>-->
 <!--  <logger name="com.zaxxer.hikari" level="DEBUG"/>-->

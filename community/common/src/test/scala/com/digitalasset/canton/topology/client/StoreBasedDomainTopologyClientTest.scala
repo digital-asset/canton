@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.client
 
-import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -43,9 +43,12 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
     override def domainId: DomainId = ???
 
     def advance(ts: CantonTimestamp): Unit = {
-      this.observed(SequencedTime(ts), EffectiveTime(ts), 0, List())
+      this
+        .observed(SequencedTime(ts), EffectiveTime(ts), 0, List())
+        .failOnShutdown(s"advance to $ts")
+        .futureValue
     }
-    override implicit def executionContext: ExecutionContext = ???
+    override implicit val executionContext: ExecutionContext = DirectExecutionContext(logger)
     override protected def loggerFactory: NamedLoggerFactory =
       BaseDomainTopologyClientTest.this.loggerFactory
     override protected def clock: Clock = ???
@@ -145,16 +148,17 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 
         val (adds, removes, _) = SignedTopologyTransactions(transactions).split
 
-        store
-          .updateState(
+        for {
+          _ <- store.updateState(
             SequencedTime(timestamp),
             EffectiveTime(timestamp),
             removes.result.map(_.uniquePath),
             adds.result,
           )
-          .map { _ =>
-            client.observed(timestamp, timestamp, 1, transactions)
-          }
+          _ <- client
+            .observed(timestamp, timestamp, 1, transactions)
+            .failOnShutdown(s"observe timestamp $timestamp")
+        } yield ()
       }
 
     }

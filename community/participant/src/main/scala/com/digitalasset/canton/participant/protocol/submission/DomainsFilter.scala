@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.syntax.alternative._
 import cats.syntax.traverse._
+import com.daml.lf.data.Ref.{PackageId, Party}
 import com.daml.lf.engine.Blinding
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker.DomainNotUsedReason
@@ -17,13 +18,11 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[submission] class DomainsFilter(
     localParticipantId: ParticipantId,
-    submittedTransaction: LfVersionedTransaction,
+    requiredPackagesPerParty: Map[Party, Set[PackageId]],
     domains: List[(DomainId, TopologySnapshot, PackageInfoService)],
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, traceContext: TraceContext)
     extends NamedLogging {
-  private val requiredPackagesPerParty = Blinding.partyPackages(submittedTransaction)
-
   def split: Future[(List[DomainNotUsedReason], List[DomainId])] = domains
     .traverse { case (domainId, snapshot, packageInfoService) =>
       val checker = new DomainUsabilityCheckerFull(
@@ -37,4 +36,18 @@ private[submission] class DomainsFilter(
       checker.isUsable.map(_ => domainId).value
     }
     .map(_.separate)
+}
+
+private[submission] object DomainsFilter {
+  def apply(
+      localParticipantId: ParticipantId,
+      submittedTransaction: LfVersionedTransaction,
+      domains: List[(DomainId, TopologySnapshot, PackageInfoService)],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext, traceContext: TraceContext) = new DomainsFilter(
+    localParticipantId,
+    Blinding.partyPackages(submittedTransaction),
+    domains,
+    loggerFactory,
+  )
 }

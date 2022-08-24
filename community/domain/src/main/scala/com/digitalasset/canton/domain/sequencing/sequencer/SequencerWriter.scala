@@ -274,7 +274,10 @@ class SequencerWriter(
       )
 
       val onlineP = Promise[Unit]()
-      clock.scheduleAt(_ => onlineP.success(()), onlineTimestamp)
+      FutureUtil.doNotAwait(
+        clock.scheduleAt(_ => onlineP.success(()), onlineTimestamp).unwrap,
+        s"wait for becoming online at $onlineTimestamp",
+      )
       onlineP.future
     } else Future.unit
 

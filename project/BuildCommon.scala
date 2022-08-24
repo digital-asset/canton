@@ -59,7 +59,8 @@ object BuildCommon {
         resolvers := Seq(Dependencies.use_custom_daml_version).collect { case true =>
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
         } ++ resolvers.value,
-        // , scalacOptions += "-Ystatistics" // re-enable if you need to debug compile times
+        // scalacOptions += "-Ystatistics", // re-enable if you need to debug compile times
+        // scalacOptions in Test += "-Ystatistics",
       )
     )
 
@@ -75,6 +76,7 @@ object BuildCommon {
         .map(_.toInt)
         .map(Tags.limit(Tags.Test, _))
         .toSeq,
+      //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `functionmeta` / wartremoverErrors,
@@ -460,7 +462,12 @@ object BuildCommon {
     lazy val `community-common` = project
       .in(file("community/common"))
       .enablePlugins(BuildInfoPlugin, DamlPlugin)
-      .dependsOn(blake2b, functionmeta, `slick-fork`, `wartremover-extension`)
+      .dependsOn(
+        blake2b,
+        functionmeta,
+        `slick-fork`,
+        `wartremover-extension` % "compile->compile;test->test",
+      )
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(

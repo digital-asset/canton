@@ -5,10 +5,10 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.functor._
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client._
@@ -16,7 +16,6 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 
-import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Factory for creating resilient subscriptions directly to an in-process [[sequencer.Sequencer]] */
@@ -46,48 +45,18 @@ class DirectSequencerSubscriptionFactory(
       handler: SerializedEventHandler[E],
   )(implicit
       traceContext: TraceContext
-  ): SequencerSubscription[E] = {
-    val subscriptionFactory = new SequencerSubscriptionFactory[E] {
-      override def create(startingCounter: SequencerCounter, handler: SerializedEventHandler[E])(
-          implicit traceContext: TraceContext
-      ): EitherT[Future, SequencerSubscriptionCreationError, SequencerSubscription[E]] = {
-        val result = for {
-          source <- sequencer.read(member, startingCounter)
-        } yield new DirectSequencerSubscription[E](member, source, handler, timeouts, loggerFactory)
-
-        result.widen[SequencerSubscription[E]].leftMap { err =>
-          logger.warn(
-            s"Reading events for member $member from counter $startingCounter failed with $err"
-          )
-          Fatal(err.toString): SequencerSubscriptionCreationError
-        }
-      }
-    }
-
+  ): EitherT[Future, CreateSubscriptionError, SequencerSubscription[E]] = {
     logger.debug(show"Creating subscription for $member from $startingAt...")
-
-    val subscription = new ResilientSequencerSubscription(
-      identifier,
-      startingAt,
-      handler,
-      subscriptionFactory,
-      SubscriptionErrorRetryPolicy.onDbExns,
-      // only hard coded values as this subscription is internal and should therefore not flake
-      SubscriptionRetryDelayRule(
-        initialRetryDelay = 20.millis,
-        warnDelay = 10.seconds,
-        maxRetryDelay = 1.minute,
-      ),
-      timeouts,
-      loggerFactory,
-    )
-
-    subscription.start
-    logger.debug(
-      show"Created sequencer subscription for $member from $startingAt (may still be starting)"
-    )
-
-    subscription
+    for {
+      source <- sequencer.read(member, startingAt)
+    } yield {
+      val subscription =
+        new DirectSequencerSubscription[E](member, source, handler, timeouts, loggerFactory)
+      logger.debug(
+        show"Created sequencer subscription for $member from $startingAt (may still be starting)"
+      )
+      subscription
+    }
   }
 
 }

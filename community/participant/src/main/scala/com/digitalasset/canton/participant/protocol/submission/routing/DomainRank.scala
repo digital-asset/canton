@@ -4,12 +4,10 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.Order._
-import cats.data.EitherT
-import cats.syntax.functorFilter._
+import cats.data.{Chain, EitherT}
 import cats.syntax.traverse._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter.ContractData
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
@@ -23,7 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 private[routing] class DomainRankComputation(
     participantId: ParticipantId,
     priorityOfDomain: DomainId => Int,
-    snapshot: DomainId => Option[TopologySnapshot],
+    snapshotProvider: DomainId => Either[TransactionRoutingError, TopologySnapshot],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -38,39 +36,35 @@ private[routing] class DomainRankComputation(
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[Future, TransactionRoutingError, DomainRank] = {
-    val ts = snapshot(targetDomain)
-    val maybeTransfers: EitherT[Future, TransactionRoutingError, Seq[
-      Option[(LfContractId, (LfPartyId, DomainId))]
-    ]] =
-      contracts.traverse { c =>
-        if (c.domain == targetDomain) EitherT.fromEither[Future](Right(None))
+    // (contract id, (transfer submitter, target domain id))
+    type SingleTransfer = (LfContractId, (LfPartyId, DomainId))
+
+    val targetSnapshotET = EitherT.fromEither[Future](snapshotProvider(targetDomain))
+
+    val transfers: EitherT[Future, TransactionRoutingError, Chain[SingleTransfer]] = {
+      Chain.fromSeq(contracts).flatTraverse { c =>
+        val contractDomain = c.domain
+
+        if (contractDomain == targetDomain) EitherT.pure(Chain.empty)
         else {
           for {
-            sourceSnapshot <- EitherT.fromEither[Future](
-              snapshot(c.domain).toRight(
-                AutomaticTransferForTransactionFailure.Failed(s"No snapshot for domain ${c.domain}")
-              )
-            )
-            targetSnapshot <- EitherT.fromEither[Future](
-              ts.toRight(
-                AutomaticTransferForTransactionFailure.Failed(
-                  s"No snapshot for domain $targetDomain"
-                )
-              )
-            )
+            sourceSnapshot <- EitherT.fromEither[Future](snapshotProvider(contractDomain))
+            targetSnapshot <- targetSnapshotET
             submitter <- findSubmitterThatCanTransferContract(
               sourceSnapshot,
               targetSnapshot,
-              c,
+              c.id,
+              c.stakeholders,
               submitters,
             )
-          } yield Some(c.id -> (submitter, c.domain))
+          } yield Chain(c.id -> (submitter, contractDomain))
         }
       }
+    }
 
-    maybeTransfers.map(transfers =>
+    transfers.map(transfers =>
       DomainRank(
-        transfers.flattenOption.toMap,
+        transfers.toList.toMap,
         priorityOfDomain(targetDomain),
         targetDomain,
       )
@@ -80,7 +74,8 @@ private[routing] class DomainRankComputation(
   private def findSubmitterThatCanTransferContract(
       sourceSnapshot: TopologySnapshot,
       targetSnapshot: TopologySnapshot,
-      c: ContractData,
+      contractId: LfContractId,
+      contractStakeholders: Set[LfPartyId],
       submitters: Set[LfPartyId],
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, LfPartyId] = {
 
@@ -91,13 +86,13 @@ private[routing] class DomainRankComputation(
     ): EitherT[Future, String, LfPartyId] = {
       submitters match {
         case Nil =>
-          EitherT.leftT(show"Cannot transfer contract ${c.id}: ${errAccum.mkString(",")}")
+          EitherT.leftT(show"Cannot transfer contract ${contractId}: ${errAccum.mkString(",")}")
         case submitter :: rest =>
           TransferOutProcessingSteps
             .transferOutRequestData(
               participantId,
               submitter,
-              c.stakeholders,
+              contractStakeholders,
               sourceSnapshot,
               targetSnapshot,
               logger,
@@ -109,7 +104,7 @@ private[routing] class DomainRankComputation(
       }
     }
 
-    go(submitters.intersect(c.stakeholders).toList).leftMap(errors =>
+    go(submitters.intersect(contractStakeholders).toList).leftMap(errors =>
       AutomaticTransferForTransactionFailure.Failed(errors)
     )
   }

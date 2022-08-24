@@ -131,9 +131,12 @@ object ThereafterTest {
     implicit val ec: ExecutionContext = null
 
     EitherT.rightT[Future, Unit]("EitherT Future").thereafter(_ => ()).discard
-    EitherT.rightT[FutureUnlessShutdown, Unit]("EitherT FutureUnlessShutdown").thereafter(_ => ())
+    EitherT
+      .rightT[FutureUnlessShutdown, Unit]("EitherT FutureUnlessShutdown")
+      .thereafter(_ => ())
+      .discard
     OptionT.pure[Future]("OptionT Future").thereafter(_ => ()).discard
-    OptionT.pure[FutureUnlessShutdown]("OptionT FutureUnlessShutdown").thereafter(_ => ())
+    OptionT.pure[FutureUnlessShutdown]("OptionT FutureUnlessShutdown").thereafter(_ => ()).discard
 
     // Type inference still cannot cope with several Thereafter transformers :-(
     // We explicitly have to summon the instance!

@@ -6,7 +6,7 @@ package com.digitalasset.canton
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either._
-import com.digitalasset.canton.DiscardedFutureTest.TraitWithFuture
+import com.digitalasset.canton.DiscardedFutureTest.{TraitWithFuture, WannabeFuture, assertErrors}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -16,19 +16,13 @@ import scala.concurrent.Future
 
 class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.MockitoSugar {
 
-  def assertIsError(result: WartTestTraverser.Result): Assertion = {
-    result.errors.length should be >= 1
-    result.errors.foreach { _ should include(DiscardedFuture.message) }
-    succeed
-  }
-
   "DiscardedFuture" should {
     "detect statements in blocks that discard a future" in {
       val result = WartTestTraverser(DiscardedFuture) {
         Future.successful(())
         ()
       }
-      assertIsError(result)
+      assertErrors(result, 1)
     }
 
     "detect statements in class defs that discard a future" in {
@@ -38,14 +32,14 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         }
         new Foo(5)
       }
-      assertIsError(result)
+      assertErrors(result, 1)
     }
 
     "allow explicit discard calls" in {
       val result = WartTestTraverser(DiscardedFuture) {
         val _ = Future.successful(())
       }
-      result.errors shouldBe List.empty
+      assertErrors(result, 0)
     }
 
     "allow Mockito verify calls" in {
@@ -59,7 +53,7 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         verify(mocked).returnsFutureTypeArgs("string")
         ()
       }
-      result.errors shouldBe List.empty
+      assertErrors(result, 0)
     }
 
     "detects discarded futures wrapped in an EitherT" in {
@@ -67,7 +61,7 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         EitherT(Future.successful(Either.right(())))
         ()
       }
-      assertIsError(result)
+      assertErrors(result, 1)
     }
 
     "detects discarded futures wrapped in an OptionT" in {
@@ -75,7 +69,7 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         OptionT(Future.successful(Option(())))
         ()
       }
-      assertIsError(result)
+      assertErrors(result, 1)
     }
 
     "detects discarded futures that are deeply wrapped" in {
@@ -83,7 +77,23 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
         OptionT(EitherT(Future.successful(Either.right(Option(())))))
         ()
       }
-      assertIsError(result)
+      assertErrors(result, 1)
+    }
+
+    "detects annotated future-like classes" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        new WannabeFuture[Int]()
+        ()
+      }
+      assertErrors(result, 1)
+    }
+
+    "detects nested annotated future-like classes" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        EitherT(new WannabeFuture[Either[String, Int]])
+        ()
+      }
+      assertErrors(result, 1)
     }
   }
 }
@@ -96,5 +106,14 @@ object DiscardedFutureTest {
     def returnsFutureTwoArgs(x: Int)(y: String): Future[Int]
     def returnsFutureThreeArgs(x: Int)(y: String)(z: Any): Future[Int]
     def returnsFutureTypeArgs[A](x: A): Future[Unit]
+  }
+
+  @DoNotDiscardLikeFuture class WannabeFuture[A]
+
+  def assertErrors(result: WartTestTraverser.Result, expectedErrors: Int): Assertion = {
+    import Matchers._
+    result.errors.length shouldBe expectedErrors
+    result.errors.foreach { _ should include(DiscardedFuture.message) }
+    succeed
   }
 }

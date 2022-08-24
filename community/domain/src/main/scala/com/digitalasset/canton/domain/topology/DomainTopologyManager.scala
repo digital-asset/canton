@@ -265,27 +265,27 @@ class DomainTopologyManager(
   private val signedTopologyTransactionRepresentativeProtocolVersion =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
-  // TODO(#10059,Rafael) Do not discard an EitherT
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private def checkCorrectProtocolVersion(
       transaction: SignedTopologyTransaction[TopologyChangeOp]
   )(implicit traceContext: TraceContext): EitherT[Future, DomainTopologyManagerError, Unit] = {
+    val resultE = for {
+      _ <- Either.cond(
+        transaction.representativeProtocolVersion == signedTopologyTransactionRepresentativeProtocolVersion,
+        (),
+        DomainTopologyManagerError.WrongProtocolVersion.Failure(
+          domainProtocolVersion = protocolVersion,
+          transactionProtocolVersion = transaction.representativeProtocolVersion.representative,
+        ),
+      )
 
-    EitherT.cond[Future](
-      transaction.representativeProtocolVersion == signedTopologyTransactionRepresentativeProtocolVersion,
-      (),
-      DomainTopologyManagerError.WrongProtocolVersion.Failure(
-        domainProtocolVersion = protocolVersion,
-        transactionProtocolVersion = transaction.representativeProtocolVersion.representative,
-      ),
-    )
-
-    val domainId = id.domainId
-    transaction.restrictedToDomain match {
-      case None | Some(`domainId`) => EitherT.pure(())
-      case Some(otherDomain) =>
-        EitherT.leftT(DomainTopologyManagerError.WrongDomain.Failure(otherDomain))
-    }
+      domainId = id.domainId
+      _ <- transaction.restrictedToDomain match {
+        case None | Some(`domainId`) => Right(())
+        case Some(otherDomain) =>
+          Left(DomainTopologyManagerError.WrongDomain.Failure(otherDomain))
+      }
+    } yield ()
+    EitherT.fromEither[Future](resultE)
   }
 
   private def checkNotEnablingParticipantWithoutKeys(
@@ -424,7 +424,7 @@ class DomainTopologyManager(
     add(transaction, force = true, replaceExisting = false, allowDuplicateMappings = true)
 }
 
-sealed trait DomainTopologyManagerError extends CantonError
+sealed trait DomainTopologyManagerError extends CantonError with Product with Serializable
 object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup() {
 
   case class TopologyManagerParentError(parent: TopologyManagerError)(implicit

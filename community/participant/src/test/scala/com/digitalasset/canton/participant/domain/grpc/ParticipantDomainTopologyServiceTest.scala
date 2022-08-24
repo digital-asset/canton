@@ -113,13 +113,18 @@ class ParticipantDomainTopologyServiceTest
       val resultF = sut.registerTopologyTransaction(request).unwrap
 
       // after response is processed, the future will be completed
-      sut.processor.apply(
+      val handlerResult = sut.processor.apply(
         Traced(
           List(OpenEnvelope(response, Recipients.cc(response.requestedBy), testedProtocolVersion))
         )
       )
 
-      resultF.map(result => result shouldBe UnlessShutdown.Outcome(response))
+      for {
+        result <- resultF
+        _ = result shouldBe UnlessShutdown.Outcome(response)
+        asyncRes <- handlerResult.failOnShutdown("handler result")
+        _ <- asyncRes.unwrap.failOnShutdown("async result")
+      } yield succeed
     }
     "send request to IDM and handle closing before response arrives" in {
       val sut = new ParticipantDomainTopologyService(

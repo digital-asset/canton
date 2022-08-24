@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.symbolic
 
+import cats.data.EitherT
+import cats.syntax.either._
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto._
@@ -10,13 +12,13 @@ import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPrivateStore,
   InMemoryCryptoPublicStore,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 
 import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 object SymbolicCrypto extends LazyLogging {
 
@@ -119,8 +121,6 @@ object SymbolicCrypto extends LazyLogging {
   }
 
   /** Create symbolic crypto and pre-populate with keys using the given fingerprint suffixes, which will be prepended with the type of key (sigK, encK), and the fingerprints used for signing keys. */
-  // TODO(#10059,Soren) Do not discard an EitherT
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   def tryCreate(
       signingFingerprints: Seq[Fingerprint],
       fingerprintSuffixes: Seq[String],
@@ -128,16 +128,28 @@ object SymbolicCrypto extends LazyLogging {
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    implicit val loggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
 
     val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
+
+    def runStorage[A](op: EitherT[Future, _, A], description: String): A =
+      timeouts.io
+        .await(s"storing $description")(op.value)
+        .valueOr(err => throw new RuntimeException(s"Failed to store $description: $err"))
 
     // Create a keypair for each signing fingerprint
     signingFingerprints.foreach { k =>
       val sigPrivKey = SymbolicCrypto.signingPrivateKey(k)
       val sigPubKey = SymbolicCrypto.signingPublicKey(k)
-
-      crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None)
-      crypto.cryptoPublicStore.storeSigningKey(sigPubKey)
+      runStorage(
+        crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
+        s"private signing key for $k",
+      )
+      runStorage(
+        crypto.cryptoPublicStore.storeSigningKey(sigPubKey),
+        s"public signing key for $k",
+      )
     }
 
     // For the fingerprint suffixes, create both encryption and signing keys with a `encK-` or `sigK-` prefix.
@@ -150,10 +162,22 @@ object SymbolicCrypto extends LazyLogging {
       val encPrivKey = SymbolicCrypto.encryptionPrivateKey(encKeyId)
       val encPubKey = SymbolicCrypto.encryptionPublicKey(encKeyId)
 
-      crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None)
-      crypto.cryptoPublicStore.storeSigningKey(sigPubKey)
-      crypto.cryptoPrivateStore.storeDecryptionKey(encPrivKey, None)
-      crypto.cryptoPublicStore.storeEncryptionKey(encPubKey)
+      runStorage(
+        crypto.cryptoPrivateStore.storeSigningKey(sigPrivKey, None),
+        s"private signing key for $k",
+      )
+      runStorage(
+        crypto.cryptoPublicStore.storeSigningKey(sigPubKey),
+        s"public signign key for $k",
+      )
+      runStorage(
+        crypto.cryptoPrivateStore.storeDecryptionKey(encPrivKey, None),
+        s"decryption key for $k",
+      )
+      runStorage(
+        crypto.cryptoPublicStore.storeEncryptionKey(encPubKey),
+        s"encryption key for $k",
+      )
     }
 
     crypto
