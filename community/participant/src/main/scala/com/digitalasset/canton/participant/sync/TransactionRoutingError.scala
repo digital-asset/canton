@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
-import com.daml.error.{ErrorCategory, ErrorCode, ErrorGroup, ErrorResource, Explanation, Resolution}
+import com.daml.error._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.RoutingErrorGroup

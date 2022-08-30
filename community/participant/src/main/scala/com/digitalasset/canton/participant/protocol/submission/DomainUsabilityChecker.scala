@@ -6,26 +6,31 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.foldable._
 import cats.syntax.traverse._
+import com.daml.lf.transaction.TransactionVersion
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker._
 import com.digitalasset.canton.protocol.PackageInfoService
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}
 
-private[submission] trait DomainUsabilityChecker[E <: DomainNotUsedReason] {
+private[submission] sealed trait DomainUsabilityChecker[E <: DomainNotUsedReason] {
   def isUsable: EitherT[Future, E, Unit]
 }
 
 class DomainUsabilityCheckerFull(
     domainId: DomainId,
+    protocolVersion: ProtocolVersion,
     snapshot: TopologySnapshot,
     requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
     packageInfoService: PackageInfoService,
     localParticipantId: ParticipantId,
+    transactionVersion: TransactionVersion,
 )(implicit
     ec: ExecutionContext,
     traceContext: TraceContext,
@@ -44,7 +49,14 @@ class DomainUsabilityCheckerFull(
     val partiesConnected =
       new DomainUsabilityCheckerPartiesConnected[DomainNotUsedReason](domainId, snapshot, parties)
 
-    val checkers: Seq[DomainUsabilityChecker[DomainNotUsedReason]] = Seq(vetting, partiesConnected)
+    val protocolVersionChecker = new DomainUsabilityCheckProtocolVersion[DomainNotUsedReason](
+      domainId = domainId,
+      protocolVersion = protocolVersion,
+      transactionVersion = transactionVersion,
+    )
+
+    val checkers: Seq[DomainUsabilityChecker[DomainNotUsedReason]] =
+      Seq(vetting, partiesConnected, protocolVersionChecker)
 
     checkers.traverse_(_.isUsable)
   }
@@ -154,8 +166,35 @@ class DomainUsabilityCheckerVetting[E >: UnknownPackage <: DomainNotUsedReason](
   }
 }
 
+class DomainUsabilityCheckProtocolVersion[
+    E >: DomainNotSupportingMinimumProtocolVersion <: DomainNotUsedReason
+](
+    domainId: DomainId,
+    protocolVersion: ProtocolVersion,
+    transactionVersion: TransactionVersion,
+)(implicit
+    ec: ExecutionContext
+) extends DomainUsabilityChecker[E] {
+  override def isUsable: EitherT[Future, E, Unit] = {
+    val minimumPVForTransaction =
+      DamlLfVersionToProtocolVersions.getMinimumSupportedProtocolVersion(
+        transactionVersion
+      )
+
+    EitherTUtil.condUnitET(
+      protocolVersion >= minimumPVForTransaction,
+      DomainNotSupportingMinimumProtocolVersion(
+        domainId,
+        protocolVersion,
+        minimumPVForTransaction,
+        transactionVersion,
+      ),
+    )
+  }
+}
+
 object DomainUsabilityChecker {
-  trait DomainNotUsedReason extends PrettyPrinting {
+  sealed trait DomainNotUsedReason extends PrettyPrinting {
     def domainId: DomainId
   }
 
@@ -182,6 +221,19 @@ object DomainUsabilityChecker {
   ) extends PrettyPrinting {
     override def pretty: Pretty[PackageUnknownTo] = prettyOfString { put =>
       show"Participant $participantId has not vetted ${put.description.doubleQuoted} (${put.packageId})"
+    }
+  }
+
+  case class DomainNotSupportingMinimumProtocolVersion(
+      domainId: DomainId,
+      currentPV: ProtocolVersion,
+      requiredPV: ProtocolVersion,
+      lfVersion: TransactionVersion,
+  ) extends DomainNotUsedReason {
+
+    override def pretty: Pretty[DomainNotSupportingMinimumProtocolVersion] = prettyOfString { _ =>
+      show"The transaction uses a specific LF version $lfVersion that is supported starting protocol version: $requiredPV." +
+        show"Currently the Domain $domainId is using $currentPV"
     }
   }
 }

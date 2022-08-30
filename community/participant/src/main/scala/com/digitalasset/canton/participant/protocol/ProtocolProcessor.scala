@@ -12,6 +12,7 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewTree, ViewType}
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -415,7 +416,7 @@ abstract class ProtocolProcessor[
         steps.removePendingSubmission(steps.pendingSubmissions(ephemeral), submissionId).foreach {
           submissionData =>
             logger.debug(s"Removing sent submission $submissionId without a result.")
-            steps.postProcessResult(Verdict.Timeout, submissionData)
+            steps.postProcessResult(MediatorError.Timeout.Reject(), submissionData)
         }
       }
     } yield ()
@@ -768,15 +769,15 @@ abstract class ProtocolProcessor[
            */
         },
       )
-      _ <- ifThenET(
-        result.merge.verdict == Verdict.Timeout &&
-          ts <= domainParameters.participantResponseDeadlineFor(requestId.unwrap)
-      ) {
-        alarmer.alarm(
-          s"Received mediator timeout message at $ts before response deadline for request ${requestId}"
-        )
-        ephemeral.requestTracker.tick(sc, ts)
-        EitherT.leftT[Future, Unit](steps.embedResultError(TimeoutResultTooEarly(requestId)))
+      _ <- result.merge.verdict match {
+        case _: MediatorError.Timeout.Reject
+            if ts <= domainParameters.participantResponseDeadlineFor(requestId.unwrap) =>
+          alarmer.alarm(
+            s"Received mediator timeout message at $ts before response deadline for request ${requestId}"
+          )
+          ephemeral.requestTracker.tick(sc, ts)
+          EitherT.leftT[Future, Unit](steps.embedResultError(TimeoutResultTooEarly(requestId)))
+        case _ => EitherT.rightT[Future, steps.ResultError](()) // everything ok
       }
 
       _ <- EitherTUtil.ifThenET(!precedesCleanReplay(requestId)) {

@@ -9,7 +9,8 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
-import com.digitalasset.canton.protocol.messages.{InformeeMessage, Verdict}
+import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
@@ -71,7 +72,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       requestId,
       informeeMessage,
       requestId.unwrap,
-      Verdict.Timeout,
+      MediatorError.Timeout.Reject(),
       TraceContext.empty,
     )(loggerFactory)
 

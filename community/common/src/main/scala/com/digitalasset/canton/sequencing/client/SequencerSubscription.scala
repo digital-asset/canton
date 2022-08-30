@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{Future, Promise}
 
@@ -56,6 +57,11 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
     * However if the subscription fails for an unexpected reason at runtime the completion should be failed.
     */
   val closeReason: Future[SubscriptionCloseReason[HandlerError]] = closeReasonPromise.future
+
+  /** Completes the subscription with the given reason and closes it. */
+  private[canton] def complete(reason: SubscriptionCloseReason[HandlerError])(implicit
+      traceContext: TraceContext
+  ): Unit
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._

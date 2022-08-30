@@ -59,7 +59,7 @@ case class LogEntry(
   )(implicit pos: source.Position): Assertion = {
     // first, test the error message
     this.message should include(err.code.id)
-    if (!err.code.category.securitySensitive) {
+    if (!err.code.category.securitySensitive) { // TODO(i10133): we can't just ignore the message!
       this.message should include(err.cause)
     }
     // test context

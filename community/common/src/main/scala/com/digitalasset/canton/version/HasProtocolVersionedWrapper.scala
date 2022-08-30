@@ -51,8 +51,8 @@ object ProtobufVersion {
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
   *
-  * This version of the wrapper is to be used when some attributes of the class
-  * depend on the protocol version (e.g., the signature).
+  * This wrapper is to be used when every instance can be tied to a single protocol version.
+  * Consequently, some attributes of the class may depend on the protocol version (e.g., the signature).
   * The protocol version is then bundled with the instance and does not need to
   * be passed to the toProtoVersioned, toByteString and getCryptographicEvidence
   * methods.

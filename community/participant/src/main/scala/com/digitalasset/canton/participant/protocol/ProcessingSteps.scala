@@ -496,7 +496,7 @@ trait ProcessingSteps[
     *
     * Called after the request reached the state [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Clean]]
     * in the request journal, if the participant is the submitter.
-    * Also called if a timeout occurs with [[com.digitalasset.canton.protocol.messages.Verdict.Timeout]].
+    * Also called if a timeout occurs with [[com.digitalasset.canton.protocol.messages.Verdict.MediatorReject]].
     *
     * @param verdict The verdict on the request
     */

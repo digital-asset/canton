@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.client
+package com.digitalasset.canton.participant.ledger.api.client
 
 import akka.actor.ActorSystem
 import akka.stream.Materializer
@@ -13,7 +13,7 @@ import com.daml.ledger.client.services.commands.CommandSubmission
 import com.daml.util.Ctx
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
-import com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry.CommandsCtx
+import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.CommandsCtx
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
 import org.scalatest._

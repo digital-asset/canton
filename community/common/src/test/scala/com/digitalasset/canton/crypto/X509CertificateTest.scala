@@ -4,7 +4,8 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.CryptoConfig
+import com.digitalasset.canton.config.CommunityCryptoConfig
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import org.scalatest.FutureOutcome
@@ -22,8 +23,9 @@ class X509CertificateTest extends FixtureAsyncWordSpec with BaseTest {
   override def withFixture(test: OneArgAsyncTest): FutureOutcome = {
     val fixtureE = for {
       crypto <- CryptoFactory.create(
-        CryptoConfig(),
+        CommunityCryptoConfig(),
         new MemoryStorage(),
+        new CommunityCryptoPrivateStoreFactory,
         timeouts,
         loggerFactory,
       )

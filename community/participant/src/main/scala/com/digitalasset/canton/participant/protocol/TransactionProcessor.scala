@@ -161,7 +161,7 @@ object TransactionProcessor {
     )
     object PackageNotVettedByRecipients
         extends ErrorCode(
-          id = "PACKAGE_NO_VETTED_BY_RECIPIENTS",
+          id = "PACKAGE_NOT_VETTED_BY_RECIPIENTS",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
         ) {
       case class Error(unknownTo: Seq[PackageUnknownTo])

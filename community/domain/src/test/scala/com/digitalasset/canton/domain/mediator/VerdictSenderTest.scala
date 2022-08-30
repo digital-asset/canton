@@ -5,9 +5,14 @@ package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, FullInformeeTree}
-import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, RequestId, TestDomainParameters}
+import com.digitalasset.canton.protocol.{
+  ExampleTransactionFactory,
+  RequestId,
+  TestDomainParameters,
+  v0,
+}
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.{
@@ -15,6 +20,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   TrustLevel,
 }
+import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
 
 class VerdictSenderTest extends BaseTestWordSpec with HasExecutionContext {
@@ -78,8 +84,10 @@ class VerdictSenderTest extends BaseTestWordSpec with HasExecutionContext {
       val request = sequencerSend.requests.loneElement
       inside(request.batch.envelopes.loneElement.protocolMessage) {
         case SignedProtocolMessage(message: MediatorResult, _) =>
-          message.verdict shouldBe MediatorReject.Topology.InformeesNotHostedOnActiveParticipants
-            .Reject(observer)
+          message.verdict shouldBe MediatorError.InvalidMessage.Reject(
+            show"Rejected transaction due to informees not being hosted on an active participant: $observer",
+            v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
+          )
       }
     }
   }

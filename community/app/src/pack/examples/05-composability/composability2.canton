@@ -54,7 +54,7 @@ participants.all.dars.upload(darPath)
 // architecture-handbook-entry-begin: setup
 import com.digitalasset.canton.examples.Iou.{Amount, Iou}
 import com.digitalasset.canton.examples.Paint.{OfferToPaintHouseByOwner, PaintHouse}
-import com.digitalasset.canton.ledger.api.client.DecodeUtil.decodeAllCreated
+import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil.decodeAllCreated
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 
 val createIouCmd = Iou(

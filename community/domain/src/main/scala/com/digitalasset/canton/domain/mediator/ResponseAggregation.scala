@@ -11,16 +11,16 @@ import cats.syntax.traverseFilter._
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.LocalReject.Malformed
-import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject, RejectReasons}
-import com.digitalasset.canton.protocol.messages.{MediatorRequest, _}
-import com.digitalasset.canton.protocol.{RequestId, ViewHash}
+import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
+import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.{RequestId, ViewHash, v0}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -50,8 +50,10 @@ object ResponseAggregation {
         Either.cond(
           threshold >= minimumThreshold,
           viewHash -> ViewState(confirmingParties, threshold.unwrap, Nil),
-          MediatorReject.MaliciousSubmitter.ViewThresholdBelowMinimumThreshold
-            .Reject(show"viewHash=$viewHash, threshold=$threshold"),
+          MediatorError.MalformedMessage.Reject(
+            s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=$viewHash, threshold=$threshold",
+            v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+          ),
         )
       }
       .map(_.toMap)
@@ -73,7 +75,10 @@ object ResponseAggregation {
           val failed = pending.filterNot { case (_, v) =>
             v.totalAvailableWeight >= v.distanceToThreshold
           }.keys
-          MediatorReject.MaliciousSubmitter.NotEnoughConfirmingParties.Reject(failed.toString)
+          MediatorError.MalformedMessage.Reject(
+            s"Rejected transaction has views with not enough confirming parties: $failed",
+            v0.MediatorRejection.Code.NotEnoughConfirmingParties,
+          )
         },
       )
     } yield pending
@@ -248,7 +253,7 @@ case class ResponseAggregation private (
               nextViewState.distanceToThreshold <= nextViewState.totalAvailableWeight,
               statesOfViews + (viewHash -> nextViewState),
               // TODO(#5337): Don't discard the rejection reasons of the other views.
-              RejectReasons(nextViewState.rejections),
+              ParticipantReject(nextViewState.rejections),
             )
         }
       }
@@ -346,7 +351,7 @@ case class ResponseAggregation private (
       this.requestId,
       this.request,
       version,
-      Left(MediatorReject.Timeout.Reject()),
+      Left(MediatorError.Timeout.Reject()),
     )(requestTraceContext)(loggerFactory)
 
   override def pretty: Pretty[ResponseAggregation] = prettyOfClass(

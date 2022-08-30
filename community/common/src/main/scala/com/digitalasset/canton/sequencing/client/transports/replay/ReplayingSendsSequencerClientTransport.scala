@@ -28,7 +28,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
+import com.digitalasset.canton.{DiscardOps, GenesisSequencerCounter, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import java.io.{ByteArrayOutputStream, PrintStream}
@@ -364,6 +364,10 @@ class ReplayingSendsSequencerClientTransport(
 
     override protected def timeouts: ProcessingTimeout =
       ReplayingSendsSequencerClientTransport.this.timeouts
+
+    override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+        traceContext: TraceContext
+    ): Unit = closeReasonPromise.trySuccess(reason).discard[Boolean]
   }
 
   override def subscribeUnauthenticated[E](

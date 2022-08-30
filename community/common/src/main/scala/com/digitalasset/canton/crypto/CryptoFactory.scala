@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
+import cats.implicits.showInterpolator
 import cats.instances.future._
 import cats.syntax.either._
 import com.daml.nonempty.NonEmpty
@@ -24,7 +25,8 @@ import com.digitalasset.canton.crypto.provider.tink.{
   TinkPrivateCrypto,
   TinkPureCrypto,
 }
-import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
+import com.digitalasset.canton.crypto.store.CryptoPublicStore
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
 import org.bouncycastle.jce.provider.BouncyCastleProvider
@@ -80,14 +82,17 @@ object CryptoFactory {
   def create(
       config: CryptoConfig,
       storage: Storage,
+      cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, String, Crypto] = {
-    val cryptoPrivateStore = CryptoPrivateStore.create(storage, timeouts, loggerFactory)
     val cryptoPublicStore = CryptoPublicStore.create(storage, timeouts, loggerFactory)
     for {
+      cryptoPrivateStore <- cryptoPrivateStoreFactory
+        .create(storage, timeouts, loggerFactory)
+        .leftMap(err => show"Failed to create crypto private store: $err")
       symmetricKeyScheme <- selectSchemes(config.symmetric, config.provider.symmetric)
         .map(_.default)
         .toEitherT

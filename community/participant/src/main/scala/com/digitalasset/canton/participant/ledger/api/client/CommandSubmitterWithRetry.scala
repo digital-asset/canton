@@ -1,7 +1,7 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.ledger.api.client
+package com.digitalasset.canton.participant.ledger.api.client
 
 import akka.NotUsed
 import akka.stream.QueueOfferResult.{Dropped, Enqueued, Failure, QueueClosed}
@@ -13,15 +13,15 @@ import com.daml.ledger.client.services.commands.CommandSubmission
 import com.daml.util.Ctx
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error
-import com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry.{
+import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.{
   CommandResult,
   CommandsCtx,
   Failed,
   retryCommandFlow,
 }
-import com.digitalasset.canton.lifecycle._
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil
 import com.google.rpc.code.Code

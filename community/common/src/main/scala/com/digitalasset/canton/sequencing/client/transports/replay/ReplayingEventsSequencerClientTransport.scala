@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing.client.transports.replay
 
 import cats.data.EitherT
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -123,10 +124,17 @@ class ReplayingEventsSequencerClientTransport(
 
 object ReplayingEventsSequencerClientTransport {
 
-  /** Does nothing until closed. */
+  /** Does nothing until closed or completed. */
   class ReplayingSequencerSubscription[E](
       override protected val timeouts: ProcessingTimeout,
       override protected val loggerFactory: NamedLoggerFactory,
   )(implicit val executionContext: ExecutionContext)
-      extends SequencerSubscription[E]
+      extends SequencerSubscription[E] {
+    override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+        traceContext: TraceContext
+    ): Unit = {
+      closeReasonPromise.trySuccess(reason).discard[Boolean]
+      close()
+    }
+  }
 }

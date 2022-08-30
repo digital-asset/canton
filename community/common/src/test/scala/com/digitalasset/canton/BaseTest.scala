@@ -235,8 +235,8 @@ trait BaseTest
   /** Converts an OptionT into a Future, failing in case of a [[scala.Some$]]. */
   def noneOrFail[A](e: OptionT[Future, A])(
       clue: String
-  )(implicit ec: ExecutionContext, position: Position): Future[Unit] = {
-    e.fold(())(some => fail(s"$clue, value is $some"))
+  )(implicit ec: ExecutionContext, position: Position): Future[Assertion] = {
+    e.fold(succeed)(some => fail(s"$clue, value is $some"))
   }
 
   /** Converts an Either into a B value, failing in case of a [[scala.Left$]]. */

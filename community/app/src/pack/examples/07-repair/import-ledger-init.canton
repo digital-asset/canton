@@ -64,7 +64,7 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, LedgerApiCommands}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.console.ConsoleEnvironment
-import com.digitalasset.canton.ledger.api.client.ValueRemapper
+import com.digitalasset.canton.participant.ledger.api.client.ValueRemapper
 import com.digitalasset.canton.protocol.SerializableContractWithWitnesses
 import io.grpc.stub.AbstractStub
 

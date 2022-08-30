@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.error.{ErrorCategory, ErrorClass, ErrorCode, ErrorGroup}
+import com.daml.error._
 import com.digitalasset.canton.BaseTestWordSpec
-import com.digitalasset.canton.error.TestGroup.NestedGroup.MyCode
 import com.digitalasset.canton.error.TestGroup.NestedGroup.MyCode.MyError
+import com.digitalasset.canton.error.TestGroup.NestedGroup.{MyCode, TestAlarmErrorCode}
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.tracing.TraceContext
+import io.grpc.Status.Code
 import org.slf4j.event.Level
 
 object TestGroup extends ErrorGroup()(ErrorClass.root()) {
@@ -16,6 +18,11 @@ object TestGroup extends ErrorGroup()(ErrorClass.root()) {
       override def logLevel: Level = Level.ERROR
       case class MyError(arg: String)(implicit val loggingContext: ErrorLoggingContext)
           extends CantonError.Impl(cause = "this is my error")
+    }
+
+    object TestAlarmErrorCode extends AlarmErrorCode(id = "TEST_MALICIOUS_BEHAVIOR") {
+      val exception = new RuntimeException("TestAlarmErrorCode exception")
+      case class MyAlarm() extends Alarm(cause = "My alarm cause", throwableO = Some(exception)) {}
     }
   }
 }
@@ -62,4 +69,45 @@ class CantonErrorTest extends BaseTestWordSpec {
     }
   }
 
+  "An alarm" should {
+    "log with level WARN including the error category and details" in {
+      implicit val traceContext: TraceContext = nonEmptyTraceContext1
+      val traceId = traceContext.traceId.value
+      val errorCodeStr = s"TEST_MALICIOUS_BEHAVIOR(5,${traceId.take(8)})"
+
+      loggerFactory.assertLogs(
+        TestAlarmErrorCode.MyAlarm().report(),
+        entry => {
+          entry.warningMessage shouldBe s"$errorCodeStr: My alarm cause"
+
+          withClue(entry.mdc) {
+            entry.mdc.get("location").value should startWith("CantonErrorTest.scala:")
+            entry.mdc
+              .get("err-context")
+              .value should fullyMatch regex "\\{location=CantonErrorTest\\.scala:.*\\}"
+            entry.mdc.get("error-code").value shouldBe errorCodeStr
+            entry.mdc.get("trace-id").value shouldBe traceId
+          }
+          entry.mdc should have size 4
+
+          entry.throwable shouldBe Some(TestAlarmErrorCode.exception)
+        },
+      )
+    }
+
+    "not expose any details through GRPC" in {
+      val myAlarm = TestAlarmErrorCode.MyAlarm()
+
+      val sre = myAlarm.asGrpcError
+      sre.getMessage shouldBe "UNKNOWN: An error occurred. Please contact the operator and inquire about the request <no-correlation-id>"
+
+      val status = sre.getStatus
+      status.getDescription shouldBe "An error occurred. Please contact the operator and inquire about the request <no-correlation-id>"
+      status.getCode shouldBe Code.UNKNOWN
+      Option(status.getCause) shouldBe None
+    }
+  }
+
+  // TODO(i8744): replace MALICIOUS_OR_FAULTY codes by Alarm
+  // TODO(i8744): go over TODO M40 and add missing alarms
 }

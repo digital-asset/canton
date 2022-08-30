@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import cats.syntax.alternative._
 import cats.syntax.traverse._
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.NonEmptyColl._
 import com.daml.nonempty.catsinstances._
@@ -21,10 +22,12 @@ import com.digitalasset.canton.participant.sync.{
   TransactionRoutingError,
   TransactionRoutingErrorWithDomain,
 }
+import com.digitalasset.canton.protocol.PackageInfoService
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -38,7 +41,10 @@ private[routing] class DomainSelectorFactory(
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
     packageService: PackageService,
-    domainStateProvider: DomainId => Either[TransactionRoutingErrorWithDomain, TopologySnapshot],
+    domainStateProvider: DomainId => Either[
+      TransactionRoutingErrorWithDomain,
+      (TopologySnapshot, ProtocolVersion),
+    ],
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext) {
   def create(
@@ -80,8 +86,11 @@ private[routing] class DomainSelector(
     domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]],
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
-    packageService: PackageService,
-    domainStateProvider: DomainId => Either[TransactionRoutingErrorWithDomain, TopologySnapshot],
+    packageService: PackageInfoService,
+    domainStateProvider: DomainId => Either[
+      TransactionRoutingErrorWithDomain,
+      (TopologySnapshot, ProtocolVersion),
+    ],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -101,7 +110,7 @@ private[routing] class DomainSelector(
     transactionData.prescribedDomainO match {
       case Some(prescribedDomain) =>
         for {
-          _ <- validatePrescribedDomain(prescribedDomain)
+          _ <- validatePrescribedDomain(prescribedDomain, transactionData.version)
           domainRank <- domainRankComputation.compute(
             contracts,
             prescribedDomain,
@@ -132,14 +141,22 @@ private[routing] class DomainSelector(
       domainId <- transactionData.prescribedDomainO match {
         case Some(prescribedDomainId) =>
           // If a domain is prescribed, we use the prescribed one
-          singleDomainValidatePrescribedDomain(prescribedDomainId, inputContractsDomainIdO)
+          singleDomainValidatePrescribedDomain(
+            prescribedDomainId,
+            transactionData.version,
+            inputContractsDomainIdO,
+          )
             .map(_ => prescribedDomainId)
 
         case None =>
           inputContractsDomainIdO match {
             case Some(inputContractsDomainId) =>
               // If all the contracts are on a single domain, we use this one
-              singleDomainValidatePrescribedDomain(inputContractsDomainId, inputContractsDomainIdO)
+              singleDomainValidatePrescribedDomain(
+                inputContractsDomainId,
+                transactionData.version,
+                inputContractsDomainIdO,
+              )
                 .map(_ => inputContractsDomainId)
             // TODO(#10088) If validation fails, try to re-submit as multi-domain
 
@@ -161,7 +178,9 @@ private[routing] class DomainSelector(
   ): EitherT[Future, TransactionRoutingError, NonEmpty[Set[DomainId]]] = {
 
     val (unableToFetchStateDomains, domainStates) = domains.forgetNE.toList.map { domainId =>
-      domainStateProvider(domainId).map((domainId, _, packageService))
+      domainStateProvider(domainId).map { case (snapshot, protocolVersion) =>
+        (domainId, protocolVersion, snapshot, packageService)
+      }
     }.separate
 
     val domainsFilter = DomainsFilter(
@@ -200,6 +219,7 @@ private[routing] class DomainSelector(
 
   private def singleDomainValidatePrescribedDomain(
       domainId: DomainId,
+      transactionVersion: TransactionVersion,
       inputContractsDomainIdO: Option[DomainId],
   )(implicit
       traceContext: TraceContext
@@ -224,7 +244,7 @@ private[routing] class DomainSelector(
       _ <- validateContainsInputContractsDomainId
 
       // Generic validations
-      _ <- validatePrescribedDomain(domainId)
+      _ <- validatePrescribedDomain(domainId, transactionVersion)
     } yield ()
   }
 
@@ -237,7 +257,8 @@ private[routing] class DomainSelector(
     * - Checks in [[com.digitalasset.canton.participant.protocol.submission.DomainUsabilityCheckerFull]]
     */
   private def validatePrescribedDomain(
-      domainId: DomainId
+      domainId: DomainId,
+      transactionVersion: TransactionVersion,
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
 
     for {
@@ -254,14 +275,17 @@ private[routing] class DomainSelector(
       )
 
       // Further validations
-      snapshot <- EitherT.fromEither[Future](domainStateProvider(domainId))
+      domainState <- EitherT.fromEither[Future](domainStateProvider(domainId))
+      (snapshot, protocolVersion) = domainState
 
       domainUsabilityChecker = new DomainUsabilityCheckerFull(
         domainId = domainId,
+        protocolVersion = protocolVersion,
         snapshot = snapshot,
         requiredPackagesByParty = transactionData.requiredPackagesPerParty,
         packageInfoService = packageService,
         localParticipantId = participantId,
+        transactionVersion = transactionVersion,
       )
 
       _ <- domainUsabilityChecker.isUsable.leftMap[TransactionRoutingError] { err =>

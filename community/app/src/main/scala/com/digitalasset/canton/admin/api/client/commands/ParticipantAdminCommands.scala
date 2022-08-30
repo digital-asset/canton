@@ -11,7 +11,10 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   ServerEnforcedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data.console.ListConnectedDomainsResult
+import com.digitalasset.canton.admin.api.client.data.console.{
+  DarMetadata,
+  ListConnectedDomainsResult,
+}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
 import com.digitalasset.canton.participant.admin.v0.DomainConnectivityServiceGrpc.DomainConnectivityServiceStub
@@ -193,6 +196,23 @@ object ParticipantAdminCommands {
 
       // might be a big file to download
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
+    }
+
+    final case class ListDarContents(darId: String)
+        extends PackageCommand[ListDarContentsRequest, ListDarContentsResponse, DarMetadata] {
+      override def createRequest() = Right(ListDarContentsRequest(darId))
+
+      override def submitRequest(
+          service: PackageServiceStub,
+          request: ListDarContentsRequest,
+      ): Future[ListDarContentsResponse] =
+        service.listDarContents(request)
+
+      override def handleResponse(
+          response: ListDarContentsResponse
+      ): Either[String, DarMetadata] =
+        DarMetadata.fromProtoV0(response).leftMap(_.toString)
 
     }
 

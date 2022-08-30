@@ -4,11 +4,27 @@
 package com.digitalasset.canton.crypto.store
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
+
+  def toPrivateKeyWithName(
+      storedKeys: Set[StoredPrivateKey]
+  ): Set[ParsingResult[PrivateKeyWithName]] = {
+    storedKeys.map(x => {
+      x.purpose match {
+        case KeyPurpose.Signing =>
+          SigningPrivateKeyWithName.fromStored(x)
+        case KeyPurpose.Encryption =>
+          EncryptionPrivateKeyWithName.fromStored(x)
+      }
+    })
+  }
 
   def cryptoPrivateStore(newStore: => CryptoPrivateStore): Unit = {
 
@@ -27,11 +43,16 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
     "store encryption keys correctly when added incrementally" in {
       val store = newStore
       for {
-        _ <- store.storeDecryptionKey(encKey1, encKey1WithName.name).valueOrFail("store key 1")
+        _ <- store
+          .storeDecryptionKey(encKey1, encKey1WithName.name)
+          .valueOrFail("store key 1")
         _ <- store.storeDecryptionKey(encKey2, None).valueOrFail("store key 2")
-        result <- store.listDecryptionKeys.valueOrFail("list keys")
+        result <- store.listPrivateKeys(Encryption).valueOrFail("list keys")
       } yield {
-        result shouldEqual Set(encKey1WithName, encKey2WithName)
+        toPrivateKeyWithName(result) shouldEqual Set(
+          Right(encKey1WithName),
+          Right(encKey2WithName),
+        )
       }
     }
 
@@ -40,9 +61,12 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
       for {
         _ <- store.storeSigningKey(sigKey1, sigKey1WithName.name).valueOrFail("store key 1")
         _ <- store.storeSigningKey(sigKey2, None).valueOrFail("store key 2")
-        result <- store.listSigningKeys.valueOrFail("list keys")
+        result <- store.listPrivateKeys(Signing).valueOrFail("list keys")
       } yield {
-        result shouldEqual Set(sigKey1WithName, sigKey2WithName)
+        toPrivateKeyWithName(result) shouldEqual Set(
+          Right(sigKey1WithName),
+          Right(sigKey2WithName),
+        )
       }
     }
 
@@ -61,10 +85,10 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         // Should fail due to different name
         failedInsert <- store.storeDecryptionKey(encKey1, None).value
 
-        result <- store.listDecryptionKeys
+        result <- store.listPrivateKeys(Encryption)
       } yield {
         failedInsert.left.value shouldBe a[CryptoPrivateStoreError]
-        result shouldEqual Set(encKey1WithName)
+        toPrivateKeyWithName(result) shouldEqual Set(Right(encKey1WithName))
       }
     }
 
@@ -83,10 +107,10 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         // Should fail due to different name
         failedInsert <- store.storeSigningKey(sigKey1, None).value
 
-        result <- store.listSigningKeys
+        result <- store.listPrivateKeys(Signing)
       } yield {
         failedInsert.left.value shouldBe a[CryptoPrivateStoreError]
-        result shouldEqual Set(sigKey1WithName)
+        toPrivateKeyWithName(result) shouldEqual Set(Right(sigKey1WithName))
       }
     }
 
@@ -100,7 +124,7 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
           .subflatMap(_.toRight(s"Signing key was not stored"))
           .valueOrFail("signing key")
         _ <- store.removePrivateKey(sigKey1.id)
-        result <- store.listSigningKeys
+        result <- store.listPrivateKeys(Signing)
       } yield {
         result shouldBe Set.empty
       }

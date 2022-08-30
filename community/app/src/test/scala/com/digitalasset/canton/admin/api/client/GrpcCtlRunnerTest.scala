@@ -6,7 +6,6 @@ package com.digitalasset.canton.admin.api.client
 import cats.implicits._
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
-import com.sun.tools.corba.se.idl.InvalidArgument
 import io.grpc.stub.AbstractStub
 import io.grpc.{CallOptions, Channel, ManagedChannel}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -47,7 +46,7 @@ class GrpcCtlRunnerTest extends AsyncWordSpec with BaseTest {
       override def createRequest(): Either[String, String] = Right("request")
       override def submitRequest(service: Svc, request: String): Future[String] =
         if (service == service && request == "request") Future.successful("response")
-        else Future.failed(new InvalidArgument("Invalid"))
+        else Future.failed(new Exception("Invalid"))
       override def handleResponse(response: String): Either[String, String] = Right("result")
     }
 

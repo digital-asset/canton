@@ -10,7 +10,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
   * @param bongTestMaxLevel Upper bound on the level of a bong that the participant can initiate.
   *                         The participant can still participate in bongs at higher levels.
   *                         Use this to limit the load the participants can cause by initiating bongs.
-  * @param retries The maximum number of times the [[com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry]]
+  * @param retries The maximum number of times the [[com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry]]
   *                will retry an admin command submitted to the [[com.digitalasset.canton.participant.admin.AdminWorkflowServices]].
   * @param submissionTimeout Defines how long an admin workflow waits until it observes a completion for its command submissions
   *                          before it assumes that the submission is lost and retries.

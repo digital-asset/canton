@@ -9,14 +9,14 @@ import cats.syntax.functorFilter._
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject.MaliciousSubmitter.NonUniqueRequestUuid
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   MediatorRequest,
   ProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, RequestId}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters, RequestId, v0}
 import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -146,8 +146,11 @@ class DefaultMediatorEventDeduplicator(
         }
       case Some(previousUsagesNE) =>
         val expireAfter = previousUsagesNE.map(_.expireAfter).max1
-        val verdict = NonUniqueRequestUuid.Reject(uuid, expireAfter)
-        verdict.logWithContext()
+        val verdict = MediatorError.MalformedMessage.Reject(
+          s"The request uuid ($uuid) must not be used until $expireAfter.",
+          v0.MediatorRejection.Code.NonUniqueRequestUuid,
+        )
+        verdict.report()
 
         for {
           decisionTime <- getDecisionTime(Traced(requestTimestamp))

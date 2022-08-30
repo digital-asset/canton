@@ -9,15 +9,15 @@ import com.daml.ledger.api.v1.commands.{Command => ScalaCommand}
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.client.binding.{Contract, Primitive => P}
 import com.digitalasset.canton.error.ErrorCodeUtils
-import com.digitalasset.canton.ledger.api.client.CommandSubmitterWithRetry.Failed
-import com.digitalasset.canton.ledger.api.client.{
+import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.workflows.{PingPong => M}
+import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.Failed
+import com.digitalasset.canton.participant.ledger.api.client.{
   CommandSubmitterWithRetry,
   DecodeUtil,
   LedgerSubmit,
 }
-import com.digitalasset.canton.lifecycle.Lifecycle
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.workflows.{PingPong => M}
 import com.digitalasset.canton.protocol.messages.LocalReject.ConsistencyRejections.{
   InactiveContracts,
   LockedContracts,

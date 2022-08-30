@@ -30,3 +30,6 @@ alter table topology_transactions drop constraint topology_transactions_store_id
 -- Include the protocol version as part of the unique constraint
 alter table topology_transactions add constraint unique_topology_transactions
  unique (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation, representative_protocol_version);
+
+-- Add a new optional wrapper_key_id field to store the encryption key id for the encrypted private store
+alter table crypto_private_keys add wrapper_key_id varchar(300) collate "C";

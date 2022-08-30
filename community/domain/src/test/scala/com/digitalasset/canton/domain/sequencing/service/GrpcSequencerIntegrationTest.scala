@@ -224,6 +224,9 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
               )
             )
             override protected def timeouts: ProcessingTimeout = Env.this.timeouts
+            override private[canton] def complete(reason: SubscriptionCloseReason[NotUsed])(implicit
+                traceContext: TraceContext
+            ): Unit = closeReasonPromise.trySuccess(reason).discard[Boolean]
           }
         }
       }

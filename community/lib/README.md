@@ -1,5 +1,8 @@
 Forked or extended Daml and third-party libraries:
 
+- [akka](https://github.com/akka/akka/) - Forked some files for adding more debug logging
+  TODO(#9883) remove when no longer needed
+
 - [daml](https://github.com/digital-asset/daml)
   - Explanation and details described in [CONTRIBUTING.md](../CONTRIBUTING.md) under "Managing Daml repo upstream "mismatches""
 

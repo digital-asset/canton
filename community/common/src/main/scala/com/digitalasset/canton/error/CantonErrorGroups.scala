@@ -27,6 +27,8 @@ object CantonErrorGroups {
 
   abstract class SequencerSubscriptionErrorGroup extends ErrorGroup()
 
+  abstract class MediatorErrorGroup extends ErrorGroup()
+
   object ParticipantErrorGroup extends ErrorGroup() {
 
     abstract class DomainConnectivityErrorGroup extends ErrorGroup()
@@ -45,8 +47,6 @@ object CantonErrorGroups {
       abstract class SubmissionErrorGroup extends ErrorGroup()
       // local rejections made by participants during transaction processing
       abstract class LocalRejectionGroup extends ErrorGroup()
-      // rejections made by mediator
-      abstract class MediatorRejectionGroup extends ErrorGroup()
     }
 
     // replicated participant errors

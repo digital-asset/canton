@@ -32,3 +32,21 @@ object ListConnectedDomainsResult {
 
   }
 }
+
+case class DarMetadata(
+    name: String,
+    main: String,
+    packages: Seq[String],
+    dependencies: Seq[String],
+)
+
+object DarMetadata {
+  def fromProtoV0(
+      value: participantAdminV0.ListDarContentsResponse
+  ): ParsingResult[DarMetadata] = {
+    val participantAdminV0.ListDarContentsResponse(description, main, packages, dependencies) =
+      value
+    Right(DarMetadata(description, main, packages, dependencies))
+  }
+
+}

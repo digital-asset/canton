@@ -111,19 +111,30 @@ case class CryptoSchemeConfig[S](
     allowed: Option[NonEmpty[Set[S]]] = None,
 )
 
-/** Cryptography configuration.
-  *
-  * @param provider The crypto provider implementation to use.
-  * @param signing The signing key scheme configuration.
-  * @param encryption The encryption key scheme configuration.
-  * @param symmetric The symmetric key scheme configuration.
-  * @param hash The hash algorithm configuration.
-  */
-case class CryptoConfig(
+/** Cryptography configuration. */
+trait CryptoConfig {
+
+  /** the crypto provider implementation to use */
+  def provider: CryptoProvider
+
+  /** the signing key scheme configuration */
+  def signing: CryptoSchemeConfig[SigningKeyScheme]
+
+  /** the encryption key scheme configuration */
+  def encryption: CryptoSchemeConfig[EncryptionKeyScheme]
+
+  /** the symmetric key scheme configuration */
+  def symmetric: CryptoSchemeConfig[SymmetricKeyScheme]
+
+  /** the hash algorithm configuration */
+  def hash: CryptoSchemeConfig[HashAlgorithm]
+}
+
+case class CommunityCryptoConfig(
     provider: CryptoProvider =
       CryptoProvider.Tink, // TODO(i5100): Choosing Tink as default, as long as JCE occasionally throws exceptions on decryption.
     signing: CryptoSchemeConfig[SigningKeyScheme] = CryptoSchemeConfig(),
     encryption: CryptoSchemeConfig[EncryptionKeyScheme] = CryptoSchemeConfig(),
     symmetric: CryptoSchemeConfig[SymmetricKeyScheme] = CryptoSchemeConfig(),
     hash: CryptoSchemeConfig[HashAlgorithm] = CryptoSchemeConfig(),
-)
+) extends CryptoConfig

@@ -31,6 +31,8 @@ object Dependencies {
 
   lazy val scalatest_version = "3.2.9"
 
+  lazy val aws_kms_version = "2.17.187"
+
   lazy val reflections = "org.reflections" % "reflections" % "0.9.12"
   lazy val pureconfig = "com.github.pureconfig" %% "pureconfig" % pureconfig_version
   lazy val pureconfig_cats = "com.github.pureconfig" %% "pureconfig-cats" % pureconfig_version
@@ -243,4 +245,7 @@ object Dependencies {
     "org.wartremover" % "wartremover" % wartremover.Wart.PluginVersion cross CrossVersion.full
 
   lazy val scala_csv = "com.github.tototoshi" %% "scala-csv" % "1.3.10"
+
+  // AWS SDK for Java API to encrypt/decrypt keys using KMS
+  lazy val aws_kms = "software.amazon.awssdk" % "kms" % aws_kms_version
 }

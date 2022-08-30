@@ -48,6 +48,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submis
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
 
 import scala.collection.concurrent.TrieMap
@@ -114,16 +115,16 @@ class DomainRouter(
           .leftMap(RoutingInternalError.IllformedTransaction)
       )
 
-      inputContractMetadata: Set[WithContractMetadata[LfContractId]] = LfTransactionUtil
+      inputContractsMetadata: Set[WithContractMetadata[LfContractId]] = LfTransactionUtil
         .inputContractIdsWithMetadata(wfTransaction.unwrap)
 
       transactionData <- TransactionData.create(
         submitterInfo,
         transaction,
-        transactionMeta,
+        transactionMeta.workflowId,
         domainOfContracts,
         domainIdResolver,
-        inputContractMetadata,
+        inputContractsMetadata,
       )
 
       domainSelector <- domainSelectorFactory.create(transactionData, getConnectedDomains())
@@ -266,12 +267,14 @@ object DomainRouter {
     val transfer = new ContractsTransferer(connectedDomainsMap, loggerFactory)
 
     val domainIdResolver = recoveredDomainOfAlias(connectedDomainsMap, domainAliasManager) _
-    val topologySnapshotProvider = domainStateProvider(connectedDomainsMap) _
+    val stateProviderWithProtocolVersion = domainStateProvider(connectedDomainsMap) _
+    val stateProvider = (domainId: DomainId) =>
+      domainStateProvider(connectedDomainsMap)(domainId).map(_._1)
 
     val domainRankComputation = new DomainRankComputation(
       participantId = participantId,
       priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
-      snapshotProvider = topologySnapshotProvider,
+      snapshotProvider = stateProvider,
       loggerFactory = loggerFactory,
     )
 
@@ -281,7 +284,7 @@ object DomainRouter {
         domainsOfSubmittersAndInformees(participantId, connectedDomainsMap),
       priorityOfDomain = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
       domainRankComputation = domainRankComputation,
-      domainStateProvider = domainStateProvider(connectedDomainsMap),
+      domainStateProvider = stateProviderWithProtocolVersion,
       packageService = packageService,
       loggerFactory = loggerFactory,
     )
@@ -293,7 +296,7 @@ object DomainRouter {
       domainIdResolver,
       submit(connectedDomainsMap),
       transfer,
-      topologySnapshotProvider,
+      stateProvider,
       autoTransferTransaction = autoTransferTransaction,
       domainSelectorFactory,
       timeouts,
@@ -352,12 +355,15 @@ object DomainRouter {
       domain: DomainId
   )(implicit
       traceContext: TraceContext
-  ): Either[TransactionRoutingErrorWithDomain, TopologySnapshot] =
+  ): Either[TransactionRoutingErrorWithDomain, (TopologySnapshot, ProtocolVersion)] =
     connectedDomains
       .get(domain)
       .toRight(UnableToQueryTopologySnapshot.Failed(domain))
       .map { syncDomain =>
-        syncDomain.topologyClient.currentSnapshotApproximation
+        (
+          syncDomain.topologyClient.currentSnapshotApproximation,
+          syncDomain.staticDomainParameters.protocolVersion,
+        )
       }
 
   private def domainsOfSubmittersAndInformees(

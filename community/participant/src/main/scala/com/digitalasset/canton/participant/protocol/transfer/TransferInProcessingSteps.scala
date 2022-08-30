@@ -721,7 +721,7 @@ private[transfer] class TransferInProcessingSteps(
           )
         )
 
-      case Verdict.RejectReasons(_) | (_: Verdict.MediatorReject) | Verdict.Timeout =>
+      case Verdict.ParticipantReject(_) | (_: Verdict.MediatorReject) =>
         EitherT.pure(CommitAndStoreContractsAndPublishEvent(None, Set(), None, None))
     }
   }
