@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.implicits._
-import com.codahale.metrics.SharedMetricRegistries
 import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
@@ -36,7 +35,6 @@ import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 
 import java.time.{Duration => JDuration}
-import java.util.UUID.randomUUID
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -113,8 +111,6 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     EitherT
       .fromEither[Future](ledgerApiStorageE)
       .flatMap { ledgerApiStorage =>
-        val uniquifier = randomUUID.toString
-
         val connectionPoolConfig = DbSupport.ConnectionPoolConfig(
           connectionPoolSize = config.storageConfig.maxConnectionsLedgerApiServer,
           connectionTimeout = config.serverConfig.databaseConnectionTimeout.toScala,
@@ -132,14 +128,10 @@ object CantonLedgerApiServerWrapper extends NoTracing {
         val startableStoppableLedgerApiServer =
           // Propagate NamedLoggerFactory's properties as map to upstream LoggingContext.
           LoggingContextUtil.createLoggingContext(config.loggerFactory) { implicit loggingContext =>
-            val metrics = new Metrics(
-              SharedMetricRegistries.getOrCreate(s"${config.participantId}-$uniquifier")
-            )
             new StartableStoppableLedgerApiServer(
               config = config,
               participantDataSourceConfig = participantDataSourceConfig,
               dbConfig = dbConfig,
-              metrics = metrics,
             )
           }
 

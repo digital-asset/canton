@@ -16,14 +16,7 @@ import com.daml.lf.data.ImmArray
 import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
-import com.digitalasset.canton.crypto.{
-  DomainSnapshotSyncCryptoApi,
-  DomainSyncCryptoClient,
-  HashOps,
-  HkdfInfo,
-  ProtocolCryptoApi,
-  SecureRandomness,
-}
+import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.ViewPosition.ListIndex
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data._
@@ -44,14 +37,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Submiss
 import com.digitalasset.canton.participant.protocol.TransactionProcessor._
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
-import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.{
-  ConfirmationRequestCreationError,
-  ContractKeyConsistencyError,
-  ContractKeyDuplicateError,
-  MalformedLfTransaction,
-  MalformedSubmitter,
-  TransactionTreeFactoryError,
-}
+import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory._
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.{
   SubmissionAlreadyInFlight,
   TimeoutTooLow,
@@ -62,19 +48,12 @@ import com.digitalasset.canton.participant.protocol.submission._
 import com.digitalasset.canton.participant.protocol.validation.ContractConsistencyChecker.ReferenceToFutureContractError
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.protocol.validation._
-import com.digitalasset.canton.participant.store.{ContractKeyJournal, _}
-import com.digitalasset.canton.participant.sync.{
-  CommandDeduplicationError,
-  LedgerEvent,
-  SyncServiceInjectionError,
-  TimestampedEvent,
-  TransactionRoutingError,
-  UpstreamOffsetConvert,
-}
+import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.sync._
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
+import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol._
@@ -1201,13 +1180,11 @@ class TransactionProcessingSteps(
             LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)
           )
 
-        case (reasons: Verdict.RejectReasons, _) =>
+        case (reasons: Verdict.ParticipantReject, _) =>
           // TODO(M40): Implement checks against malicious rejections and scrutinize the reasons such that an alarm is raised if necessary
           rejected(reasons.keyEvent)
         case (reject: Verdict.MediatorReject, _) =>
           rejected(reject)
-        case (Verdict.Timeout, _) =>
-          rejected(Verdict.MediatorReject.Timeout.Reject())
       }
     }
 

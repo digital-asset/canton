@@ -21,10 +21,11 @@ import com.digitalasset.canton.domain.mediator.store.{
   MediatorState,
 }
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.Verdict.{Approve, MediatorReject, RejectReasons}
+import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.{v0, _}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology._
@@ -126,6 +127,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
     lazy val participant2 = ExampleTransactionFactory.signatoryParticipant
     lazy val participant3 = ParticipantId("participant3")
     lazy val observer = ExampleTransactionFactory.observer
+
+    val view = factory.MultipleRootsAndViewNestings.view0
 
     lazy val topology2 = TestingTopology(
       Set(domainId),
@@ -258,7 +261,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val responseF =
         signedResponse(
           Set(submitter),
-          factory.MultipleRootsAndViewNestings.view0,
+          view,
           LocalApprove,
           reqId,
         )
@@ -350,7 +353,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         // If it nevertheless gets a response, it will complain about the request not being known
         response <- signedResponse(
           Set(submitter),
-          factory.MultipleRootsAndViewNestings.view0,
+          view,
           LocalApprove,
           requestId,
         )
@@ -379,7 +382,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           val signatoryI = Informee.tryCreate(signatory, 1)
           val observerI = Informee.tryCreate(observer, 1)
           Map(
-            factory.MultipleRootsAndViewNestings.view0.viewHash -> (Set(
+            view.viewHash -> (Set(
               submitterI,
               signatoryI,
               observerI,
@@ -568,7 +571,10 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
                 rootHashMessages,
               ),
               _.shouldBeCantonError(
-                MediatorReject.Topology.InvalidRootHashMessages.Reject(msg),
+                MediatorError.InvalidMessage.Reject(
+                  s"Rejected transaction due to invalid root hash messages: $msg",
+                  v0.MediatorRejection.Code.InvalidRootHashMessage,
+                ),
                 strict = false,
               ),
             )
@@ -639,8 +645,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             ),
           ),
           _.shouldBeCantonError(
-            MediatorReject.MaliciousSubmitter.WrongDeclaredMediator.Reject(
-              s"Declared mediator $otherMediatorId is not the processing mediator $mediatorId"
+            MediatorError.MalformedMessage.Reject(
+              show"The declared mediator in the MediatorRequest ($otherMediatorId) is not the mediator that received the request ($mediatorId).",
+              v0.MediatorRejection.Code.WrongDeclaredMediator,
             ),
             strict = false,
           ),
@@ -684,7 +691,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         ts1 = CantonTimestamp.Epoch.plusMillis(1L)
         approvals: Seq[SignedProtocolMessage[MediatorResponse]] <- sequentialTraverse(
           List(
-            factory.MultipleRootsAndViewNestings.view0,
+            view,
             factory.MultipleRootsAndViewNestings.view1,
             factory.MultipleRootsAndViewNestings.view11,
             factory.MultipleRootsAndViewNestings.view110,
@@ -713,7 +720,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             updatedState.value
           assert(
             states === Map(
-              ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view0.rootHash) ->
+              ViewHash.fromRootHash(view.rootHash) ->
                 ResponseAggregation.ViewState(Set.empty, 0, List()),
               ViewHash.fromRootHash(factory.MultipleRootsAndViewNestings.view1.rootHash) ->
                 ResponseAggregation.ViewState(Set(ConfirmingParty(signatory, 1)), 1, List()),
@@ -766,7 +773,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           val signatoryI = Informee.tryCreate(signatory, 1)
           val observerI = Informee.tryCreate(observer, 1)
           Map(
-            factory.MultipleRootsAndViewNestings.view0.viewHash -> (Set(
+            view.viewHash -> (Set(
               submitterI,
               signatoryI,
             ) -> NonNegativeInt.one),
@@ -874,7 +881,12 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         finalState <- sut.mediatorState.fetch(requestId).value
         _ = inside(finalState) {
           case Right(
-                ResponseAggregation(_requestId, _request, _version, Left(RejectReasons(reasons)))
+                ResponseAggregation(
+                  _requestId,
+                  _request,
+                  _version,
+                  Left(ParticipantReject(reasons)),
+                )
               ) =>
             // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
             reasons.length shouldEqual 2
@@ -920,7 +932,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         )
         response <- signedResponse(
           Set(submitter),
-          factory.MultipleRootsAndViewNestings.view0,
+          view,
           LocalApprove,
           requestId,
         )

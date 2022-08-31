@@ -4,8 +4,9 @@
 package com.digitalasset.canton.crypto.provider.jce
 
 import com.digitalasset.canton.config.CryptoProvider.Jce
-import com.digitalasset.canton.config.{CryptoConfig, CryptoProvider}
+import com.digitalasset.canton.config.{CommunityCryptoConfig, CryptoProvider}
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -21,15 +22,17 @@ class JceCryptoTest
 
   "JceCrypto" can {
 
-    def jceCrypto(): Future[Crypto] =
+    def jceCrypto(): Future[Crypto] = {
       CryptoFactory
         .create(
-          CryptoConfig(provider = CryptoProvider.Jce),
+          CommunityCryptoConfig(provider = CryptoProvider.Jce),
           new MemoryStorage,
+          new CommunityCryptoPrivateStoreFactory,
           timeouts,
           loggerFactory,
         )
         .valueOr(err => throw new RuntimeException(s"failed to create crypto: $err"))
+    }
 
     behave like signingProvider(Jce.signing.supported, jceCrypto())
     behave like encryptionProvider(Jce.encryption.supported, Jce.symmetric.supported, jceCrypto())

@@ -29,7 +29,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override val init: InitConfig = InitConfig()
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig()
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory()
-    override val crypto: CryptoConfig = CryptoConfig()
+    override val crypto: CommunityCryptoConfig = CommunityCryptoConfig()
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig()
     override val caching: CachingConfigs = CachingConfigs()
     override val nodeTypeName: String = "test-node"

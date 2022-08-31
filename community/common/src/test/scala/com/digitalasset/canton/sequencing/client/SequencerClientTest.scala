@@ -695,6 +695,12 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
+    override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+        traceContext: TraceContext
+    ): Unit = {
+      closeReasonPromise.success(reason)
+      close()
+    }
     def closeSubscription(reason: E): Unit = this.closeReasonPromise.success(HandlerError(reason))
     def closeSubscription(error: Throwable): Unit =
       this.closeReasonPromise.success(HandlerException(error))

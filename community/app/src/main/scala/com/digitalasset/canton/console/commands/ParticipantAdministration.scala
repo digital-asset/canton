@@ -17,7 +17,10 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.console.ListConnectedDomainsResult
+import com.digitalasset.canton.admin.api.client.data.console.{
+  DarMetadata,
+  ListConnectedDomainsResult,
+}
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -706,8 +709,23 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("List installed DAR files")
-    def list(limit: Option[Int] = None): Seq[v0.DarDescription] = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.Package.ListDars(limit: Option[Int]))
+    @Help.Description("""List DARs installed on this participant
+      |The arguments are:
+      |  filterName: filter by name (source description)
+      |  limit: Limit number of results (default none)
+      """)
+    def list(limit: Option[Int] = None, filterName: String = ""): Seq[v0.DarDescription] =
+      consoleEnvironment
+        .run {
+          adminCommand(ParticipantAdminCommands.Package.ListDars(limit: Option[Int]))
+        }
+        .filter(_.name.startsWith(filterName))
+
+    @Help.Summary("List contents of DAR files")
+    def list_contents(hash: String): DarMetadata = consoleEnvironment.run {
+      adminCommand(
+        ParticipantAdminCommands.Package.ListDarContents(hash)
+      )
     }
 
     @Help.Summary("Upload a Dar to Canton")

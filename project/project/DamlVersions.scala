@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.4.0-snapshot.20220817.10422.0.24c4c058"
+  val version: String = "2.4.0-snapshot.20220830.10494.0.4622de48"
 
   /** Custom Daml artifacts override version.
     */
@@ -24,7 +24,7 @@ object DamlVersions {
   /** The daml-lf language versions supported by canton.
     * (needed to load the corresponding daml-libs dependencies when building packaged dars)
     */
-  val daml_language_versions = Seq("1.14", "1.dev")
+  val daml_language_versions = Seq("1.14", "1.15", "1.dev")
 
   /** The version of the VMBC driver libraries in use.
     */

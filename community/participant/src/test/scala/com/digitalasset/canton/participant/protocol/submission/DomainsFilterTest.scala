@@ -3,20 +3,18 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.daml.lf.data.Ref.QualifiedName
-import com.daml.lf.data.{ImmArray, Ref}
-import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.language.LanguageVersion
+import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits._
-import com.daml.lf.value.Value.ValueRecord
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.ExerciseByInterface
+import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture._
 import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest._
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfVersionedTransaction}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId, LfValue}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -25,7 +23,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
   "DomainsFilter (simple create)" should {
     import SimpleTopology._
 
-    val filter = DomainsFilterForTx(Transactions.Create.tx)
+    val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v3_0_0)
     val correctPackages = Transactions.Create.correctPackages
 
     "keep domains that satisfy all the constraints" in {
@@ -56,12 +54,6 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       val missingPackage = defaultPackageId
       val packages = correctPackages.filterNot(_ == missingPackage)
 
-      def unknownPackageFor(participantId: ParticipantId) = DomainUsabilityChecker.PackageUnknownTo(
-        missingPackage,
-        "package does not exist on local node",
-        participantId,
-      )
-
       val (unusableDomains, usableDomains) =
         filter.split(loggerFactory, correctTopology, packages).futureValue
       usableDomains shouldBe empty
@@ -70,19 +62,41 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
         DomainUsabilityChecker.UnknownPackage(
           DefaultTestIdentities.domainId,
           Set(
-            unknownPackageFor(submitterParticipantId),
-            unknownPackageFor(observerParticipantId),
+            unknownPackageFor(submitterParticipantId, missingPackage),
+            unknownPackageFor(observerParticipantId, missingPackage),
           ),
         )
       )
+    }
+
+    //TODO(i9910) modify v1_dev to v1_15 when available
+    "reject domains when the minimum protocol version is not satisfied " in {
+      import SimpleTopology._
+      val currentDomainPV = ProtocolVersion.v3_0_0
+      val filter =
+        DomainsFilterForTx(Transactions.Create.tx(LanguageVersion.v1_dev), currentDomainPV)
+      val (unusableDomains, usableDomains) =
+        filter
+          .split(loggerFactory, correctTopology, Transactions.Create.correctPackages)
+          .futureValue
+      unusableDomains shouldBe List(
+        DomainUsabilityChecker.DomainNotSupportingMinimumProtocolVersion(
+          DefaultTestIdentities.domainId,
+          currentDomainPV,
+          ProtocolVersion.unstable_development,
+          TransactionVersion.VDev,
+        )
+      )
+      usableDomains shouldBe empty
     }
   }
 
   "DomainsFilter (simple exercise by interface)" should {
     import SimpleTopology._
+    val exerciseByInterface = Transactions.ExerciseByInterface()
 
-    val filter = DomainsFilterForTx(Transactions.ExerciseByInterface.tx)
-    val correctPackages = Transactions.ExerciseByInterface.correctPackages
+    val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v3_0_0)
+    val correctPackages = ExerciseByInterface.correctPackages
 
     "keep domains that satisfy all the constraints" in {
       val (unusableDomains, usableDomains) =
@@ -129,104 +143,10 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
 }
 
 private[submission] object DomainsFilterTest {
-  /*
-  Simple topology, with two parties (signatory, observer) each connected to one
-  participant (submitterParticipantId, observerParticipantId)
-   */
-  object SimpleTopology {
-    val submitterParticipantId: ParticipantId = ParticipantId("submitter")
-    val observerParticipantId: ParticipantId = ParticipantId("counter")
-
-    val signatory: LfPartyId = LfPartyId.assertFromString("signatory::default")
-    val observer: LfPartyId = LfPartyId.assertFromString("observer::default")
-
-    val correctTopology = Map(
-      signatory -> List(submitterParticipantId),
-      observer -> List(observerParticipantId),
-    )
-
-    def defaultTestingIdentityFactory(
-        topology: Map[LfPartyId, List[ParticipantId]],
-        packages: Seq[LfPackageId] = Seq(),
-    ): TopologySnapshot = {
-      val defaultParticipantAttributes = ParticipantAttributes(Submission, TrustLevel.Vip)
-
-      val testingIdentityFactory = TestingTopology(
-        topology = topology.map { case (partyId, participantIds) =>
-          partyId -> participantIds.map(_ -> defaultParticipantAttributes).toMap
-        }
-      ).build()
-
-      testingIdentityFactory.topologySnapshot(packages = packages)
-    }
-  }
-
-  object Transactions {
-    object Create {
-      import SimpleTopology._
-
-      private val builder = TransactionBuilder()
-      private val createNode = builder.create(
-        id = builder.newCid,
-        templateId = "M:T",
-        argument = ValueRecord(None, ImmArray.Empty),
-        signatories = Seq(signatory),
-        observers = Seq(observer),
-        key = None,
-      )
-
-      val tx: LfVersionedTransaction = {
-        builder.add(createNode)
-        builder.build()
-      }
-
-      val correctPackages = Seq(defaultPackageId)
-    }
-
-    object ExerciseByInterface {
-      import SimpleTopology._
-
-      /* To be sure that we have two different package ID (one for the create
-      and the other for the interface id).
-       */
-      val interfacePackageId = s"$defaultPackageId for interface"
-
-      val correctPackages = Seq[LfPackageId](defaultPackageId, interfacePackageId)
-
-      private val builder = TransactionBuilder()
-      private val exerciseNode = {
-        val createNode = builder.create(
-          id = builder.newCid,
-          templateId = "M:T",
-          argument = LfValue.ValueUnit,
-          signatories = List(signatory),
-          observers = List(observer),
-          key = None,
-        )
-
-        val interfaceId: Ref.Identifier =
-          Ref.Identifier(interfacePackageId, QualifiedName.assertFromString("module:template"))
-        builder.exercise(
-          contract = createNode,
-          choice = "someChoice",
-          consuming = true,
-          actingParties = Set(signatory),
-          argument = LfValue.ValueUnit,
-          interfaceId = Some(interfaceId),
-          result = Some(LfValue.ValueUnit),
-          choiceObservers = Set.empty,
-          byKey = false,
-        )
-      }
-
-      val tx = {
-        builder.add(exerciseNode)
-        builder.build()
-      }
-    }
-  }
-
-  case class DomainsFilterForTx(tx: LfVersionedTransaction) {
+  case class DomainsFilterForTx(
+      tx: LfVersionedTransaction,
+      domainProtocolVersion: ProtocolVersion,
+  ) {
     def split(
         loggerFactory: NamedLoggerFactory,
         topology: Map[LfPartyId, List[ParticipantId]],
@@ -238,6 +158,7 @@ private[submission] object DomainsFilterTest {
       val domains = List(
         (
           DefaultTestIdentities.domainId,
+          domainProtocolVersion,
           SimpleTopology.defaultTestingIdentityFactory(topology, packages),
           ExampleTransactionFactory.defaultPackageInfoService,
         )

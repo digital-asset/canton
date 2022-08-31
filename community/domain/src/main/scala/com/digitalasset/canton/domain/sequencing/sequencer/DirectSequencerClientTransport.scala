@@ -5,10 +5,11 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.Materializer
 import cats.data.EitherT
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.service.DirectSequencerSubscriptionFactory
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, SyncCloseable}
+import com.digitalasset.canton.lifecycle.SyncCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client._
@@ -22,6 +23,8 @@ import com.digitalasset.canton.sequencing.protocol.{
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 
@@ -78,28 +81,34 @@ class DirectSequencerClientTransport(
     override protected def timeouts: ProcessingTimeout =
       DirectSequencerClientTransport.this.timeouts
 
-    private val subscriptionRef = new AtomicReference[Option[SequencerSubscription[E]]](None)
-
-    subscriptionFactory
-      .create(request.counter, "direct", request.member, handler)
-      .value
-      .onComplete {
-        case Success(Right(subscription)) =>
-          closeReasonPromise.completeWith(subscription.closeReason)
-
-          performUnlessClosing(functionFullName) {
-            subscriptionRef.set(Some(subscription))
-          } onShutdown {
-            subscription.close()
-          }
-        case Success(Left(value)) =>
-          closeReasonPromise.trySuccess(Fatal(value.toString))
-        case Failure(exception) =>
-          closeReasonPromise.tryFailure(exception)
-      }
-
     override protected val loggerFactory: NamedLoggerFactory =
       DirectSequencerClientTransport.this.loggerFactory
+
+    private val subscriptionRef = new AtomicReference[Option[SequencerSubscription[E]]](None)
+
+    {
+      val subscriptionET =
+        subscriptionFactory
+          .create(request.counter, "direct", request.member, handler)
+          .thereafter {
+            case Success(Right(subscription)) =>
+              closeReasonPromise.completeWith(subscription.closeReason)
+
+              performUnlessClosing(functionFullName) {
+                subscriptionRef.set(Some(subscription))
+              } onShutdown {
+                subscription.close()
+              }
+            case Success(Left(value)) =>
+              closeReasonPromise.trySuccess(Fatal(value.toString)).discard[Boolean]
+            case Failure(exception) =>
+              closeReasonPromise.tryFailure(exception).discard[Boolean]
+          }
+      FutureUtil.doNotAwait(
+        subscriptionET.value,
+        s"creating the direct sequencer subscription for $request",
+      )
+    }
 
     override protected def closeAsync(): Seq[SyncCloseable] = Seq(
       SyncCloseable(
@@ -107,23 +116,24 @@ class DirectSequencerClientTransport(
         subscriptionRef.get().foreach(_.close()),
       )
     )
+
+    override private[canton] def complete(
+        reason: SubscriptionCloseReason[E]
+    )(implicit traceContext: TraceContext): Unit = {
+      subscriptionRef.get().foreach(_.complete(reason))
+      close()
+    }
   }
 
   override def subscribeUnauthenticated[E](
       request: SubscriptionRequest,
       handler: SerializedEventHandler[E],
-  )(implicit traceContext: TraceContext): SequencerSubscription[E] = new SequencerSubscription[E] {
-    override protected def timeouts: ProcessingTimeout =
-      DirectSequencerClientTransport.this.timeouts
-    override protected val loggerFactory: NamedLoggerFactory =
-      DirectSequencerClientTransport.this.loggerFactory
-
-    override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Nil
-
-    closeReasonPromise.tryFailure(
-      new RuntimeException("Direct client does not support unauthenticated subscriptions")
+  )(implicit traceContext: TraceContext): SequencerSubscription[E] =
+    ErrorUtil.internalError(
+      new UnsupportedOperationException(
+        "Direct client does not support unauthenticated subscriptions"
+      )
     )
-  }
 
   override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =
     new SubscriptionErrorRetryPolicy {

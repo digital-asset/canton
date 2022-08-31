@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
-import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
+import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.engine.Blinding
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.MalformedInputErrors
@@ -33,24 +33,46 @@ private[routing] sealed abstract case class TransactionData(
     prescribedDomainO: Option[DomainId],
 ) {
   val informees: Set[LfPartyId] = requiredPackagesPerParty.keySet
+  val version = transaction.version
 }
 
 private[routing] object TransactionData {
   def create(
-      submitterInfo: SubmitterInfo,
+      submitters: Set[LfPartyId],
       transaction: LfVersionedTransaction,
-      transactionMeta: TransactionMeta,
+      workflowIdO: Option[LfWorkflowId],
       domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
       domainIdResolver: DomainAlias => Option[DomainId],
-      inputContractMetadata: Set[WithContractMetadata[LfContractId]],
+      inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
   )(implicit
       ec: ExecutionContext
   ): EitherT[Future, TransactionRoutingError, TransactionData] = {
     for {
-      prescribedDomainO <- EitherT.fromEither[Future](
-        toDomainId(transactionMeta.workflowId, domainIdResolver)
-      )
+      prescribedDomainO <- EitherT.fromEither[Future](toDomainId(workflowIdO, domainIdResolver))
 
+      contractsDomainData <- EitherT.liftF(
+        ContractsDomainData.create(domainOfContracts, inputContractsMetadata)
+      )
+    } yield new TransactionData(
+      transaction = transaction,
+      requiredPackagesPerParty = Blinding.partyPackages(transaction),
+      submitters = submitters,
+      inputContractsDomainData = contractsDomainData,
+      prescribedDomainO = prescribedDomainO,
+    ) {}
+  }
+
+  def create(
+      submitterInfo: SubmitterInfo,
+      transaction: LfVersionedTransaction,
+      workflowIdO: Option[LfWorkflowId],
+      domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
+      domainIdResolver: DomainAlias => Option[DomainId],
+      inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
+  )(implicit
+      ec: ExecutionContext
+  ): EitherT[Future, TransactionRoutingError, TransactionData] = {
+    for {
       submitters <- EitherT.fromEither[Future](
         submitterInfo.actAs
           .traverse(submitter =>
@@ -61,16 +83,15 @@ private[routing] object TransactionData {
           .map(_.toSet)
       )
 
-      contractsDomainData <- EitherT.liftF(
-        ContractsDomainData.create(domainOfContracts, inputContractMetadata)
+      transactionData <- create(
+        submitters,
+        transaction,
+        workflowIdO,
+        domainOfContracts,
+        domainIdResolver,
+        inputContractsMetadata,
       )
-    } yield new TransactionData(
-      transaction = transaction,
-      requiredPackagesPerParty = Blinding.partyPackages(transaction),
-      submitters = submitters,
-      inputContractsDomainData = contractsDomainData,
-      prescribedDomainO = prescribedDomainO,
-    ) {}
+    } yield transactionData
   }
 
   private def toDomainId(

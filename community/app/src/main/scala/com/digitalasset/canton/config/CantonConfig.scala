@@ -662,7 +662,8 @@ object CantonConfig {
       deriveEnumerationReader[CryptoKeyFormat]
     implicit def cryptoSchemeConfig[S: ConfigReader: Order]: ConfigReader[CryptoSchemeConfig[S]] =
       deriveReader[CryptoSchemeConfig[S]]
-    lazy implicit val cryptoReader: ConfigReader[CryptoConfig] = deriveReader[CryptoConfig]
+    lazy implicit val communityCryptoReader: ConfigReader[CommunityCryptoConfig] =
+      deriveReader[CommunityCryptoConfig]
     lazy implicit val apiTypeGrpcConfigReader: ConfigReader[ApiType.Grpc.type] =
       deriveReader[ApiType.Grpc.type]
     lazy implicit val apiTypeHttpConfigReader: ConfigReader[ApiType.Http.type] =
@@ -991,7 +992,8 @@ object CantonConfig {
       deriveEnumerationWriter[CryptoKeyFormat]
     implicit def cryptoSchemeConfigWriter[S: ConfigWriter]: ConfigWriter[CryptoSchemeConfig[S]] =
       deriveWriter[CryptoSchemeConfig[S]]
-    lazy implicit val cryptoWriter: ConfigWriter[CryptoConfig] = deriveWriter[CryptoConfig]
+    lazy implicit val communityCryptoWriter: ConfigWriter[CommunityCryptoConfig] =
+      deriveWriter[CommunityCryptoConfig]
     lazy implicit val clientConfigWriter: ConfigWriter[ClientConfig] = deriveWriter[ClientConfig]
     lazy implicit val remoteDomainConfigWriter: ConfigWriter[RemoteDomainConfig] =
       deriveWriter[RemoteDomainConfig]

@@ -9,7 +9,6 @@ import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.ProtocolVersion
 
 trait NodeConfig {
-  def crypto: CryptoConfig
   def clientAdminApi: ClientConfig
 }
 
@@ -21,6 +20,7 @@ trait LocalNodeConfig extends NodeConfig {
   def init: InitConfigBase
   def adminApi: AdminServerConfig
   def storage: StorageConfig
+  def crypto: CryptoConfig
   def sequencerClient: SequencerClientConfig
 
   /** Various cache sizes */

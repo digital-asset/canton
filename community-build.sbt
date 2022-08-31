@@ -10,6 +10,7 @@ lazy val demo = CommunityProjects.demo
 lazy val blake2b = CommunityProjects.blake2b
 lazy val functionmeta = CommunityProjects.functionmeta
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
+lazy val `akka-fork` = CommunityProjects.`akka-fork`
 lazy val `daml-fork` = CommunityProjects.`daml-fork`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 
@@ -24,6 +25,7 @@ lazy val root = (project in file("."))
     blake2b,
     functionmeta,
     `slick-fork`,
+    `akka-fork`,
     `daml-fork`,
     `wartremover-extension`,
   )

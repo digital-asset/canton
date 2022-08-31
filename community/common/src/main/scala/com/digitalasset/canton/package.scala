@@ -104,8 +104,8 @@ package object canton {
   def checked[A](x: => A): A = x
 
   /** Evaluate the expression and discard the result. */
-  implicit class DiscardOps[A](a: A) {
-    @nowarn("cat=unused")
+  implicit final class DiscardOps[A](private val a: A) extends AnyVal {
+    @nowarn("cat=unused") @inline
     def discard[B](implicit ev: A =:= B): Unit = ()
   }
 

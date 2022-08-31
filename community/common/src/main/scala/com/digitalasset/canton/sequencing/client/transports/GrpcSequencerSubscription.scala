@@ -80,7 +80,9 @@ class GrpcSequencerSubscription[E] private[transports] (
     })
   }
 
-  private def complete(result: SubscriptionCloseReason[E]): Unit = {
+  override private[canton] def complete(
+      result: SubscriptionCloseReason[E]
+  )(implicit traceContext: TraceContext): Unit = {
     // Make sure that result is emitted, once the current processing has completed.
     appendToCurrentProcessing { outcome =>
       val completion = outcome.map(_ => result)

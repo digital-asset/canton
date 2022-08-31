@@ -18,6 +18,9 @@ service PackageService {
     // List all DARs on the participant node - return their hashes and filenames
     rpc ListDars(ListDarsRequest) returns (ListDarsResponse);
 
+    // List content of a Dar
+    rpc ListDarContents(ListDarContentsRequest) returns (ListDarContentsResponse);
+
     // Upload a DAR file and all packages inside to the participant node
     rpc UploadDar (UploadDarRequest) returns (UploadDarResponse);
 
@@ -61,6 +64,17 @@ message ListPackageContentsRequest {
 
 message ListPackageContentsResponse {
     repeated ModuleDescription modules = 1;
+}
+
+message ListDarContentsRequest {
+    string dar_id = 1;
+}
+
+message ListDarContentsResponse {
+    string description = 1;
+    string main = 2;
+    repeated string packages = 3;
+    repeated string dependencies = 4;
 }
 
 message RemovePackageRequest {

@@ -4,9 +4,10 @@
 package com.digitalasset.canton.crypto.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.CryptoConfig
+import com.digitalasset.canton.config.CommunityCryptoConfig
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -28,10 +29,17 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
     val encKey2: EncryptionPublicKey = SymbolicCrypto.encryptionPublicKey("encKey2")
     val encKey2WithName: EncryptionPublicKeyWithName = EncryptionPublicKeyWithName(encKey2, None)
 
-    def newCrypto(): Future[Crypto] =
+    def newCrypto(): Future[Crypto] = {
       CryptoFactory
-        .create(CryptoConfig(), new MemoryStorage, timeouts, loggerFactory)
+        .create(
+          CommunityCryptoConfig(),
+          new MemoryStorage,
+          new CommunityCryptoPrivateStoreFactory,
+          timeouts,
+          loggerFactory,
+        )
         .valueOrFail("create crypto")
+    }
 
     def certificateGenerator(crypto: Crypto) =
       new X509CertificateGenerator(crypto, loggerFactory)

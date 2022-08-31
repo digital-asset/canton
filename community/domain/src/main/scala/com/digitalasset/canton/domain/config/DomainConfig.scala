@@ -129,7 +129,6 @@ trait DomainConfig extends DomainBaseConfig {
   def toRemoteConfig: RemoteDomainConfig = RemoteDomainConfig(
     adminApi = adminApi.clientConfig,
     publicApi = sequencerConnectionConfig,
-    crypto = crypto,
   )
 }
 
@@ -139,7 +138,7 @@ final case class CommunityDomainConfig(
     override val publicApi: CommunityPublicServerConfig = CommunityPublicServerConfig(),
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
-    override val crypto: CryptoConfig = CryptoConfig(),
+    override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
     override val domainParameters: DomainParametersConfig = DomainParametersConfig(),
     sequencer: CommunitySequencerConfig.Database = CommunitySequencerConfig.Database(),
@@ -166,13 +165,10 @@ final case class CommunityDomainConfig(
   * @param adminApi the client settings used to connect to the admin api of the remote process.
   * @param publicApi these details are provided to other nodes to use for how they should
   *                            connect to the sequencer if the domain node has an embedded sequencer
-  * @param crypto determines the algorithms used for signing, hashing, and encryption, used
-  *               on the client side for serialization.
   */
 final case class RemoteDomainConfig(
     adminApi: ClientConfig,
     publicApi: SequencerConnectionConfig.Grpc,
-    crypto: CryptoConfig = CryptoConfig(),
 ) extends NodeConfig {
   override def clientAdminApi: ClientConfig = adminApi
 }

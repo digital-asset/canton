@@ -12,11 +12,12 @@ import com.digitalasset.canton._
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.domain.mediator.store.MediatorState
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{AlarmStreamer, RequestId, RootHash}
+import com.digitalasset.canton.protocol.{AlarmStreamer, RequestId, RootHash, v0}
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.DomainTimeTracker
@@ -36,7 +37,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * result messages to stakeholders.
   */
 class ConfirmationResponseProcessor(
-    domain: DomainId,
+    domainId: DomainId,
     private val mediatorId: MediatorId,
     verdictSender: VerdictSender,
     crypto: DomainSyncCryptoClient,
@@ -167,7 +168,10 @@ class ConfirmationResponseProcessor(
             checkRootHashMessages(request, rootHashMessages, topologySnapshot).value.flatMap {
               case Left(rejectionReason) =>
                 immediatelyReject(
-                  MediatorReject.Topology.InvalidRootHashMessages.Reject(rejectionReason)
+                  MediatorError.InvalidMessage.Reject(
+                    s"Rejected transaction due to invalid root hash messages: $rejectionReason",
+                    v0.MediatorRejection.Code.InvalidRootHashMessage,
+                  )
                 )
               case Right(_) =>
                 val declaredMediator = request.mediatorId
@@ -176,8 +180,9 @@ class ConfirmationResponseProcessor(
                 } else {
                   // The mediator request was meant to be sent to a different mediator.
                   immediatelyReject(
-                    MediatorReject.MaliciousSubmitter.WrongDeclaredMediator.Reject(
-                      s"Declared mediator $declaredMediator is not the processing mediator $mediatorId"
+                    MediatorError.MalformedMessage.Reject(
+                      show"The declared mediator in the MediatorRequest ($declaredMediator) is not the mediator that received the request ($mediatorId).",
+                      v0.MediatorRejection.Code.WrongDeclaredMediator,
                     )
                   )
                 }
@@ -315,7 +320,7 @@ class ConfirmationResponseProcessor(
             val rejection =
               MalformedMediatorRequestResult(
                 requestId,
-                domain,
+                domainId,
                 viewType,
                 rejectionReason,
                 protocolVersion,
@@ -353,12 +358,12 @@ class ConfirmationResponseProcessor(
           .leftMap(err => {
             alarmer
               .alarm(
-                s"$domain (requestId: $ts): invalid signature from ${response.sender} with $err"
+                s"$domainId (requestId: $ts): invalid signature from ${response.sender} with $err"
               )
               .discard
           })
         _ <- EitherT.cond[Future](
-          signedResponse.domainId == domain,
+          signedResponse.domainId == domainId,
           (),
           logger.warn(
             s"Request ${response.requestId}, sender ${response.sender}: Discarding mediator response for wrong domain ${signedResponse.domainId}"

@@ -11,11 +11,11 @@ import com.digitalasset.canton.domain.mediator.store.{
   InMemoryMediatorDeduplicationStore,
   MediatorDeduplicationStore,
 }
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject.MaliciousSubmitter.NonUniqueRequestUuid
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{RequestId, TransferId}
+import com.digitalasset.canton.protocol.{RequestId, TransferId, v0}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.DefaultTestIdentities._
 import com.digitalasset.canton.tracing.TraceContext
@@ -127,8 +127,9 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       decisionTime,
       Some(request),
       Some(
-        NonUniqueRequestUuid.Reject(
-          s"The request uuid (${request.requestUuid}) must not be used until $expireAfter."
+        MediatorError.MalformedMessage.Reject(
+          s"The request uuid (${request.requestUuid}) must not be used until $expireAfter.",
+          v0.MediatorRejection.Code.NonUniqueRequestUuid,
         )
       ),
       None,
@@ -169,7 +170,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       val (uniqueEvents, storeF) = loggerFactory.assertLogs(
         deduplicator.rejectDuplicates(requestTime, requests(0, 1, 0)).futureValue,
         entry => {
-          entry.shouldBeCantonErrorCode(NonUniqueRequestUuid)
+          entry.shouldBeCantonErrorCode(MediatorError.MalformedMessage)
           entry.warningMessage should include(
             s"The request uuid (${uuids(0)}) must not be used until ${requestTime.plus(deduplicationTimeout)}."
           )
@@ -201,7 +202,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       // the deduplication state is cleaned up during initialization.
       val (uniqueEvents2, storeF2) = loggerFactory.assertLogs(
         deduplicator.rejectDuplicates(requestTime, requests(0)).futureValue,
-        _.shouldBeCantonErrorCode(NonUniqueRequestUuid),
+        _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
       )
       uniqueEvents2 shouldBe Seq.empty
 
@@ -214,7 +215,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       // submit same event with increased requestTime
       val (uniqueEvents3, storeF3) = loggerFactory.assertLogs(
         deduplicator.rejectDuplicates(requestTime2, requests(0)).futureValue,
-        _.shouldBeCantonErrorCode(NonUniqueRequestUuid),
+        _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
       )
       uniqueEvents3 shouldBe Seq.empty
 
@@ -251,9 +252,9 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
             ),
           )
           .futureValue,
-        _.shouldBeCantonErrorCode(NonUniqueRequestUuid),
-        _.shouldBeCantonErrorCode(NonUniqueRequestUuid),
-        _.shouldBeCantonErrorCode(NonUniqueRequestUuid),
+        _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
+        _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
+        _.shouldBeCantonErrorCode(MediatorError.MalformedMessage),
       )
       uniqueEvents2 shouldBe Seq(response, request(2), response, causalityEnvelope)
       store

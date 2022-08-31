@@ -15,6 +15,8 @@ import slick.jdbc.{GetResult, SetParameter}
 /** Trait for classes that can be serialized by using ProtoBuf.
   * See "CONTRIBUTING.md" for our guidelines on serialization.
   *
+  * This wrapper is to be used if a single instance needs to be serialized to different proto versions.
+  *
   * The underlying ProtoClass is [[com.digitalasset.canton.version.UntypedVersionedMessage]]
   * but we often specify the typed alias [[com.digitalasset.canton.version.VersionedMessage]]
   * instead.

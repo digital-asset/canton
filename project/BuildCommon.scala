@@ -14,6 +14,7 @@ import sbtassembly.PathList
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport._
 import sbtprotoc.ProtocPlugin.autoImport.PB
+import scalafix.sbt.ScalafixPlugin
 import scoverage.ScoverageKeys._
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport._
@@ -89,6 +90,7 @@ object BuildCommon {
       Global / excludeLintKeys += `demo` / autoAPIMappings,
       Global / excludeLintKeys += `functionmeta` / autoAPIMappings,
       Global / excludeLintKeys += `slick-fork` / autoAPIMappings,
+      Global / excludeLintKeys += `akka-fork` / autoAPIMappings,
       Global / excludeLintKeys += `daml-fork` / autoAPIMappings,
       Global / excludeLintKeys += Global / damlCodeGeneration,
     )
@@ -331,6 +333,10 @@ object BuildCommon {
             "Log4j2Plugins.dat",
           ) =>
         MergeStrategy.first
+      // TODO(#9883) remove when no longer needed
+      case (PathList("akka", "stream", "scaladsl", broadcasthub, _*))
+          if broadcasthub.startsWith("BroadcastHub") =>
+        MergeStrategy.first
       case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
       case path if path.contains("module-info.class") => MergeStrategy.discard
       case PathList("org", "jline", _ @_*) => MergeStrategy.first
@@ -435,7 +441,6 @@ object BuildCommon {
           pureconfig_cats,
           cats,
           ammonite,
-          daml_ledger_rxjava_client % Test,
           better_files,
           toxiproxy_java % Test,
           dropwizard_metrics_jvm, // not used at compile time, but required at runtime to report jvm metrics
@@ -466,6 +471,7 @@ object BuildCommon {
         blake2b,
         functionmeta,
         `slick-fork`,
+        `akka-fork`,
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
@@ -539,6 +545,7 @@ object BuildCommon {
           opentelemetry_zipkin,
           opentelemetry_jaeger,
           scaffeine,
+          aws_kms,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(
@@ -582,7 +589,10 @@ object BuildCommon {
 
     lazy val `community-domain` = project
       .in(file("community/domain"))
-      .dependsOn(`community-common` % "compile->compile;test->test")
+      .dependsOn(
+        `community-common` % "compile->compile;test->test",
+        `akka-fork`,
+      )
       .settings(
         sharedCantonSettings,
         libraryDependencies ++= Seq(
@@ -731,6 +741,22 @@ object BuildCommon {
         ),
         coverageEnabled := false,
         JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    // TODO(#9883) remove when no longer needed
+    lazy val `akka-fork` = project
+      .in(file("community/lib/akka"))
+      .disablePlugins(WartRemover)
+      .disablePlugins(ScalafixPlugin)
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          akka_stream,
+          akka_slf4j,
+        ),
+        // Exclude to apply our license header to any Scala files
+        headerSources / excludeFilter := "*.scala",
+        coverageEnabled := false,
       )
 
     lazy val `demo` = project

@@ -147,7 +147,7 @@ case class ParticipantNodeParameters(
   */
 case class CommunityParticipantConfig(
     override val init: InitConfig = InitConfig(),
-    override val crypto: CryptoConfig = CryptoConfig(),
+    override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val ledgerApi: LedgerApiServerConfig = LedgerApiServerConfig(),
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
@@ -164,7 +164,7 @@ case class CommunityParticipantConfig(
   override def clientLedgerApi: ClientConfig = ledgerApi.clientConfig
 
   def toRemoteConfig: RemoteParticipantConfig =
-    RemoteParticipantConfig(clientAdminApi, clientLedgerApi, crypto)
+    RemoteParticipantConfig(clientAdminApi, clientLedgerApi)
 
   override def withDefaults: CommunityParticipantConfig = {
     import ConfigDefaults._
@@ -180,14 +180,11 @@ case class CommunityParticipantConfig(
   *
   * @param adminApi the configuration to connect the console to the remote admin api
   * @param ledgerApi the configuration to connect the console to the remote ledger api
-  * @param crypto determines the algorithms used for signing, hashing, and encryption, used
-  *               on the client side for serialization.
   * @param token optional bearer token to use on the ledger-api if jwt authorization is enabled
   */
 case class RemoteParticipantConfig(
     adminApi: ClientConfig,
     ledgerApi: ClientConfig,
-    crypto: CryptoConfig = CryptoConfig(),
     token: Option[String] = None,
 ) extends BaseParticipantConfig {
   override def clientAdminApi: ClientConfig = adminApi
@@ -260,6 +257,8 @@ case class LedgerApiServerConfig(
       LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
     inMemoryFanOutThreadPoolSize: Option[Int] = None,
     rateLimit: Option[RateLimitingConfig] = None,
+    preparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
+      LedgerApiServerConfig.DefaultPreparePackageMetadataTimeOutWarning,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
@@ -291,6 +290,8 @@ object LedgerApiServerConfig {
   val DefaultApiStreamShutdownTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.ofSeconds(5)
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
+  val DefaultPreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration(DamlIndexServiceConfig.PreparePackageMetadataTimeOutWarning.toJava)
 
   def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
     val numberOfThreads =
@@ -341,6 +342,7 @@ object LedgerApiServerConfig {
       _apiStreamShutdownTimeout, // configured via LedgerApiServerConfig.apiStreamShutdownTimeout
       inMemoryStateUpdaterParallelism,
       inMemoryFanOutThreadPoolSize,
+      preparePackageMetadataTimeOutWarning,
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
@@ -395,6 +397,8 @@ object LedgerApiServerConfig {
         NonNegativeFiniteDuration.ofMillis(_apiStreamShutdownTimeout.toMillis),
       inMemoryStateUpdaterParallelism = inMemoryStateUpdaterParallelism,
       inMemoryFanOutThreadPoolSize = Some(inMemoryFanOutThreadPoolSize),
+      preparePackageMetadataTimeOutWarning =
+        NonNegativeFiniteDuration(preparePackageMetadataTimeOutWarning.toJava),
     ).discard
   }
 

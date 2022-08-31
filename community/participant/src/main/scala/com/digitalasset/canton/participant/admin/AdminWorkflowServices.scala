@@ -18,7 +18,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
-import com.digitalasset.canton.ledger.api.client.{LedgerConnection, LedgerSubscription}
 import com.digitalasset.canton.lifecycle._
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.{
@@ -26,6 +25,7 @@ import com.digitalasset.canton.participant.config.{
   ParticipantNodeParameters,
 }
 import com.digitalasset.canton.participant.ledger.api.CantonAdminToken
+import com.digitalasset.canton.participant.ledger.api.client.{LedgerConnection, LedgerSubscription}
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.PassiveReplica
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError

@@ -6,15 +6,17 @@ package com.digitalasset.canton.crypto.store
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.store.db.DbCryptoPrivateStore
+import com.digitalasset.canton.config.RequireTypes.String300
+import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
+import com.digitalasset.canton.crypto.store.db.{DbCryptoPrivateStore, StoredPrivateKey}
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
 import com.digitalasset.canton.crypto.{KeyName, _}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
-import slick.jdbc.GetResult
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -30,15 +32,17 @@ case class SigningPrivateKeyWithName(
     override val name: Option[KeyName],
 ) extends PrivateKeyWithName {
   type K = SigningPrivateKey
+
+  def toStored: StoredPrivateKey = privateKey.toStored(name, None)
 }
 
 object SigningPrivateKeyWithName {
-  implicit def getResultSigningPrivateKeyWithName(implicit
-      getResultByteArray: GetResult[Array[Byte]]
-  ): GetResult[SigningPrivateKeyWithName] =
-    GetResult { r =>
-      SigningPrivateKeyWithName(r.<<, r.<<)
+  def fromStored(storedKey: StoredPrivateKey): ParsingResult[PrivateKeyWithName] = {
+    SigningPrivateKey.fromStored(storedKey) match {
+      case Left(parseErr) => Left(parseErr)
+      case Right(spk) => Right(SigningPrivateKeyWithName(spk, storedKey.name))
     }
+  }
 }
 
 case class EncryptionPrivateKeyWithName(
@@ -46,15 +50,16 @@ case class EncryptionPrivateKeyWithName(
     override val name: Option[KeyName],
 ) extends PrivateKeyWithName {
   type K = EncryptionPrivateKey
+
+  def toStored: StoredPrivateKey = privateKey.toStored(name, None)
 }
 
 object EncryptionPrivateKeyWithName {
-  implicit def getResultEncryptionPrivateKeyWithName(implicit
-      getResultByteArray: GetResult[Array[Byte]]
-  ): GetResult[EncryptionPrivateKeyWithName] =
-    GetResult { r =>
-      EncryptionPrivateKeyWithName(r.<<, r.<<)
-    }
+  def fromStored(storedKey: StoredPrivateKey): ParsingResult[PrivateKeyWithName] = {
+    EncryptionPrivateKey
+      .fromStored(storedKey)
+      .map(epk => EncryptionPrivateKeyWithName(epk, storedKey.name))
+  }
 }
 
 /** A store for cryptographic private material such as signing/encryption private keys and hmac secrets.
@@ -71,23 +76,22 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
   protected val decryptionKeyMap: TrieMap[Fingerprint, EncryptionPrivateKeyWithName] = TrieMap.empty
 
   // Write methods that the underlying store has to implement.
-  protected def writeSigningKey(key: SigningPrivateKey, name: Option[KeyName])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit]
-  protected def writeDecryptionKey(key: EncryptionPrivateKey, name: Option[KeyName])(implicit
+  private[crypto] def writePrivateKey(
+      key: StoredPrivateKey
+  )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit]
 
-  @VisibleForTesting
-  private[store] def listSigningKeys(implicit
+  private[crypto] def readPrivateKey(keyId: Fingerprint, purpose: KeyPurpose)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Set[SigningPrivateKeyWithName]]
-  @VisibleForTesting
-  private[store] def listDecryptionKeys(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Set[EncryptionPrivateKeyWithName]]
+  ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]]
 
-  protected def deletePrivateKey(keyId: Fingerprint)(implicit
+  @VisibleForTesting
+  private[store] def listPrivateKeys(purpose: KeyPurpose)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]]
+
+  private[crypto] def deletePrivateKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit]
 
@@ -135,48 +139,109 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
     }
   }
 
+  private def readAndParsePrivateKey[A <: PrivateKey, B <: PrivateKeyWithName](
+      keyPurpose: KeyPurpose,
+      parsingFunc: StoredPrivateKey => ParsingResult[A],
+      buildKeyWithNameFunc: (A, Option[KeyName]) => B,
+  )(keyId: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Option[B]] =
+    readPrivateKey(keyId, keyPurpose)
+      .flatMap {
+        case Some(storedPrivateKey) =>
+          parsingFunc(storedPrivateKey) match {
+            case Left(parseErr) =>
+              EitherT.leftT[Future, Option[B]](
+                CryptoPrivateStoreError
+                  .FailedToReadKey(
+                    keyId,
+                    s"could not parse stored key (it can either be corrupted or encrypted): ${parseErr.toString}",
+                  )
+              )
+            case Right(privateKey) =>
+              EitherT.rightT[Future, CryptoPrivateStoreError](
+                Some(buildKeyWithNameFunc(privateKey, storedPrivateKey.name))
+              )
+          }
+        case None => EitherT.rightT[Future, CryptoPrivateStoreError](None)
+      }
+
   private[crypto] def signingKey(signingKeyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[SigningPrivateKey]] =
-    retrieveAndUpdateCache(signingKeyMap, readSigningKey(_))(signingKeyId)
+    retrieveAndUpdateCache(
+      signingKeyMap,
+      keyFingerprint =>
+        readAndParsePrivateKey[SigningPrivateKey, SigningPrivateKeyWithName](
+          Signing,
+          key => SigningPrivateKey.fromStored(key),
+          (privateKey, name) => SigningPrivateKeyWithName(privateKey, name),
+        )(keyFingerprint),
+    )(signingKeyId)
 
-  protected def readSigningKey(signingKeyId: Fingerprint)(implicit
+  private[crypto] def storeSigningKeyWithWrapperKey(
+      key: SigningPrivateKey,
+      name: Option[KeyName],
+      wrapperKeyId: Option[String300],
+  )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[SigningPrivateKeyWithName]]
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    writePrivateKey(key.toStored(name, wrapperKeyId))
+      .map { _ =>
+        signingKeyMap.put(key.id, SigningPrivateKeyWithName(key, name)).discard
+      }
+
+  def storeSigningKey(
+      key: SigningPrivateKey,
+      name: Option[KeyName],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    storeSigningKeyWithWrapperKey(key, name, None)
 
   def existsSigningKey(signingKeyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Boolean] =
     signingKey(signingKeyId).map(_.nonEmpty)
 
-  def storeSigningKey(key: SigningPrivateKey, name: Option[KeyName])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    writeSigningKey(key, name).map { _ =>
-      val _ = signingKeyMap.put(key.id, SigningPrivateKeyWithName(key, name))
-    }
-
   private[crypto] def decryptionKey(encryptionKeyId: Fingerprint)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[EncryptionPrivateKey]] =
-    retrieveAndUpdateCache(decryptionKeyMap, readDecryptionKey(_))(encryptionKeyId)
+  ): EitherT[Future, CryptoPrivateStoreError, Option[EncryptionPrivateKey]] = {
+    retrieveAndUpdateCache(
+      decryptionKeyMap,
+      keyFingerprint =>
+        readAndParsePrivateKey[EncryptionPrivateKey, EncryptionPrivateKeyWithName](
+          Encryption,
+          key => EncryptionPrivateKey.fromStored(key),
+          (privateKey, name) => EncryptionPrivateKeyWithName(privateKey, name),
+        )(keyFingerprint),
+    )(encryptionKeyId)
+  }
 
-  protected def readDecryptionKey(encryptionKeyId: Fingerprint)(implicit
+  private[crypto] def storeDecryptionKeyWithWrapperKey(
+      key: EncryptionPrivateKey,
+      name: Option[KeyName],
+      wrapperKeyId: Option[String300],
+  )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[EncryptionPrivateKeyWithName]]
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    writePrivateKey(key.toStored(name, wrapperKeyId))
+      .map { _ =>
+        decryptionKeyMap.put(key.id, EncryptionPrivateKeyWithName(key, name)).discard
+      }
+
+  def storeDecryptionKey(
+      key: EncryptionPrivateKey,
+      name: Option[KeyName],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    storeDecryptionKeyWithWrapperKey(key, name, None)
 
   def existsDecryptionKey(decryptionKeyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Boolean] =
     decryptionKey(decryptionKeyId).map(_.nonEmpty)
-
-  def storeDecryptionKey(key: EncryptionPrivateKey, name: Option[KeyName])(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    writeDecryptionKey(key, name)
-      .map { _ =>
-        val _ = decryptionKeyMap.put(key.id, EncryptionPrivateKeyWithName(key, name))
-      }
 
   private def retrieveAndUpdateCache[KN <: PrivateKeyWithName](
       cache: TrieMap[Fingerprint, KN],
@@ -193,13 +258,31 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
 }
 
 object CryptoPrivateStore {
-  def create(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
-  ): CryptoPrivateStore =
-    storage match {
-      case _: MemoryStorage => new InMemoryCryptoPrivateStore(loggerFactory)
-      case jdbc: DbStorage => new DbCryptoPrivateStore(jdbc, timeouts, loggerFactory)
-    }
+  trait CryptoPrivateStoreFactory {
+    def create(
+        storage: Storage,
+        timeouts: ProcessingTimeout,
+        loggerFactory: NamedLoggerFactory,
+    )(implicit ec: ExecutionContext): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore]
+  }
+
+  class CommunityCryptoPrivateStoreFactory extends CryptoPrivateStoreFactory {
+    override def create(
+        storage: Storage,
+        timeouts: ProcessingTimeout,
+        loggerFactory: NamedLoggerFactory,
+    )(implicit ec: ExecutionContext): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore] =
+      storage match {
+        case _: MemoryStorage =>
+          EitherT.rightT[Future, CryptoPrivateStoreError](
+            new InMemoryCryptoPrivateStore(loggerFactory)
+          )
+        case jdbc: DbStorage =>
+          EitherT.rightT[Future, CryptoPrivateStoreError](
+            new DbCryptoPrivateStore(jdbc, timeouts, loggerFactory)
+          )
+      }
+  }
 }
 
 sealed trait CryptoPrivateStoreError extends Product with Serializable with PrettyPrinting
@@ -207,6 +290,12 @@ object CryptoPrivateStoreError {
 
   case class FailedToListKeys(reason: String) extends CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToListKeys] = prettyOfClass(unnamedParam(_.reason.unquoted))
+  }
+
+  case class FailedToGetWrapperKeyId(reason: String) extends CryptoPrivateStoreError {
+    override def pretty: Pretty[FailedToGetWrapperKeyId] = prettyOfClass(
+      unnamedParam(_.reason.unquoted)
+    )
   }
 
   case class FailedToReadKey(keyId: Fingerprint, reason: String) extends CryptoPrivateStoreError {
@@ -230,5 +319,11 @@ object CryptoPrivateStoreError {
   case class FailedToDeleteKey(keyId: Fingerprint, reason: String) extends CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToDeleteKey] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
+  }
+
+  case class EncryptedPrivateStoreError(reason: String) extends CryptoPrivateStoreError {
+    override def pretty: Pretty[EncryptedPrivateStoreError] = prettyOfClass(
+      unnamedParam(_.reason.unquoted)
+    )
   }
 }

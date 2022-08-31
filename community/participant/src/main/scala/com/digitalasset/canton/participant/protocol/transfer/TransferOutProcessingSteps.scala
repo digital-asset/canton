@@ -14,7 +14,7 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.ViewType.TransferOutViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree, ViewType}
-import com.digitalasset.canton.error.BaseCantonError
+import com.digitalasset.canton.error.{BaseCantonError, MediatorError}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{
@@ -539,7 +539,7 @@ class TransferOutProcessingSteps(
           Some(TransferOutUpdate(hostedStakeholders, requestId.unwrap, transferId, requestCounter)),
         )
 
-      case Verdict.RejectReasons(_) | (_: MediatorReject) | Verdict.Timeout =>
+      case Verdict.ParticipantReject(_) | (_: MediatorReject) =>
         for {
           _ <- ifThenET(transferringParticipant) {
             deleteTransfer(targetDomain, requestId)
@@ -1073,7 +1073,7 @@ object TransferOutProcessingSteps {
       def tryAgain(
           previous: com.google.rpc.status.Status
       ): EitherT[Future, StopRetry, com.google.rpc.status.Status] = {
-        if (BaseCantonError.isStatusErrorCode(MediatorReject.Timeout, previous))
+        if (BaseCantonError.isStatusErrorCode(MediatorError.Timeout, previous))
           performAutoInOnce.leftMap(error => StopRetry(Left(error)))
         else EitherT.leftT[Future, com.google.rpc.status.Status](StopRetry(Right(previous)))
       }

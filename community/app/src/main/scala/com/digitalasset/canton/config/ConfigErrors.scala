@@ -38,31 +38,29 @@ object ConfigErrors extends ConfigErrorGroup {
       override val cause: String,
       override val throwableO: Option[Throwable] = None,
   )(implicit override val code: ErrorCode)
-      extends CantonError {
-    override def log(): Unit = {
-      super.log()
-      this match {
-        case (parseError: ExceptionBasedConfigError) =>
-          parseError.exceptions.foreach { e =>
-            loggingContext.logger.debug(
-              code.toMsg(
-                s"Received the following exception while attempting to parse the Canton config files",
-                loggingContext.traceContext.traceId,
-              ),
-              e,
-            )(loggingContext.traceContext)
-          }
-        case _ =>
-      }
-    }
-  }
+      extends CantonError {}
 
   sealed abstract class ExceptionBasedConfigError(
       override val cause: String,
       override val throwableO: Option[Throwable] = None,
   )(implicit override val code: ErrorCode)
       extends CantonConfigError(cause, throwableO)(code) {
+
     def exceptions: Seq[ConfigException]
+
+    override def log(): Unit = {
+      super.log()
+
+      exceptions.foreach { e =>
+        loggingContext.logger.debug(
+          code.toMsg(
+            s"Received the following exception while attempting to parse the Canton config files",
+            loggingContext.traceContext.traceId,
+          ),
+          e,
+        )(loggingContext.traceContext)
+      }
+    }
   }
 
   final case object NoConfigFiles extends ConfigErrorCode("NO_CONFIG_FILES") {
@@ -103,9 +101,9 @@ object ConfigErrors extends ConfigErrorGroup {
   )
   @Resolution("Make sure that all files are in valid HOCON format.")
   final case object CannotParseFilesError extends ConfigErrorCode("CANNOT_PARSE_CONFIG_FILES") {
-    case class Error(exceptions: Seq[ConfigException])(implicit
+    case class Error(override val exceptions: Seq[ConfigException])(implicit
         override val loggingContext: ErrorLoggingContext
-    ) extends CantonConfigError(
+    ) extends ExceptionBasedConfigError(
           s"Received an exception (full stack trace has been logged at DEBUG level) while attempting to parse ${exceptions.length} .conf-file(s)."
         )
   }
@@ -114,9 +112,9 @@ object ConfigErrors extends ConfigErrorGroup {
     "A common cause of this error is attempting to use an environment variable that isn't defined within a config-file. "
   )
   final case object SubstitutionError extends ConfigErrorCode("CONFIG_SUBSTITUTION_ERROR") {
-    case class Error(exceptions: Seq[ConfigException])(implicit
+    case class Error(override val exceptions: Seq[ConfigException])(implicit
         override val loggingContext: ErrorLoggingContext
-    ) extends CantonConfigError(
+    ) extends ExceptionBasedConfigError(
           s"Received an exception (full stack trace has been logged at DEBUG level) while attempting to parse ${exceptions.length} .conf-file(s)."
         )
   }

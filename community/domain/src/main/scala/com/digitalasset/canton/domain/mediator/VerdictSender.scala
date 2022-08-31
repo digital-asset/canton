@@ -10,14 +10,15 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.MediatorMessageId.VerdictMessageId
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   MediatorRequest,
   SignedProtocolMessage,
   Verdict,
 }
+import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.sequencing.client.{
   SendCallback,
   SendResult,
@@ -181,10 +182,12 @@ class DefaultVerdictSender(
       (informeesMap, informeesNoParticipant) = informeesMapAndAnyInformeeNoActiveParticipant
       snapshot <- EitherT.right(crypto.awaitSnapshot(requestId.unwrap))
       verdictWithInformeeCheck = {
-        if (informeesNoParticipant.nonEmpty)
-          Verdict.MediatorReject.Topology.InformeesNotHostedOnActiveParticipants
-            .Reject(show"$informeesNoParticipant")
-        else verdict
+        if (informeesNoParticipant.nonEmpty) {
+          MediatorError.InvalidMessage.Reject(
+            show"Rejected transaction due to informees not being hosted on an active participant: $informeesNoParticipant",
+            v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
+          )
+        } else verdict
       }
       envelopes <- informeesMap.toList
         .traverse { case (participantId, informees) =>

@@ -16,6 +16,10 @@ import com.digitalasset.canton.concurrent.{
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
+  CommunityCryptoPrivateStoreFactory,
+  CryptoPrivateStoreFactory,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.{DomainServiceGrpc, SequencerVersionServiceGrpc}
 import com.digitalasset.canton.domain.admin.{grpc => admingrpc}
@@ -78,6 +82,7 @@ class DomainNodeBootstrap(
     sequencerRuntimeFactory: SequencerRuntimeFactory,
     mediatorFactory: MediatorRuntimeFactory,
     storageFactory: StorageFactory,
+    cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
@@ -89,6 +94,7 @@ class DomainNodeBootstrap(
       clock,
       metrics,
       storageFactory,
+      cryptoPrivateStoreFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
     )
     with DomainTopologyManagerIdentityInitialization {
@@ -526,6 +532,7 @@ object DomainNodeBootstrap {
         new SequencerRuntimeFactory.Community(config.sequencer),
         CommunityMediatorRuntimeFactory,
         new CommunityStorageFactory(config.storage),
+        new CommunityCryptoPrivateStoreFactory,
         futureSupervisor,
       )
 

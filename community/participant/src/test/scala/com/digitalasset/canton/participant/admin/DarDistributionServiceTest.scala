@@ -17,11 +17,14 @@ import com.daml.ledger.client.binding.{Primitive => P}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.ledger.api.client.{CommandSubmitterWithRetry, LedgerSubmit}
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
 import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.participant.ledger.api.client.{
+  CommandSubmitterWithRetry,
+  LedgerSubmit,
+}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString

@@ -7,7 +7,6 @@ import akka.NotUsed
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, SyncCloseable}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -18,8 +17,10 @@ import com.digitalasset.canton.sequencing.client.http.{
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SerializedEventHandler}
-import com.digitalasset.canton.tracing.{NoTracing, Traced}
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
+import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.{AkkaUtil, FutureUtil, SingleUseCell}
+import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.duration._
@@ -42,22 +43,32 @@ class HttpSequencerSubscription[E] private[transports] (
     extends SequencerSubscription[E]
     with NoTracing {
 
+  private val externalCompletionRef: SingleUseCell[SubscriptionCloseReason[E]] =
+    new SingleUseCell[SubscriptionCloseReason[E]]()
+
   private val (killSwitch, done) = AkkaUtil.runSupervised(
     logger.error("Http Sequencer Unexpected Exception", _),
     readEvents(startingFromNextCounter)
       .viaMat(KillSwitches.single)(Keep.right)
       .mapAsync[Either[SubscriptionCloseReason[E], Unit]](1) {
         case Right(event) =>
-          // call handler ensuring that exceptions thrown from calls are lifted into failed Futures
-          val handlerResultEF = Try(handler(event))
-            .fold(Future.failed, identity)
+          // If the subscription was completed externally with a reason,
+          // stop handling events and propagate the reason
+          externalCompletionRef.get match {
+            case None =>
+              // call handler ensuring that exceptions thrown from calls are lifted into failed Futures
+              val handlerResultEF = Try(handler(event))
+                .fold(Future.failed, identity)
 
-          handlerResultEF transform {
-            case Failure(exception) =>
-              Success(Left(SubscriptionCloseReason.HandlerException(exception)))
-            case Success(Left(error)) =>
-              Success(Left(SubscriptionCloseReason.HandlerError(error)))
-            case Success(Right(_)) => Success(Right(()))
+              handlerResultEF transform {
+                case Failure(exception) =>
+                  Success(Left(SubscriptionCloseReason.HandlerException(exception)))
+                case Success(Left(error)) =>
+                  Success(Left(SubscriptionCloseReason.HandlerError(error)))
+                case Success(Right(_)) => Success(Right(()))
+              }
+            case Some(reason) =>
+              Future.successful(Left(reason))
           }
         case Left(error) =>
           Future.successful(Left(SubscriptionReadError(error)))
@@ -65,19 +76,31 @@ class HttpSequencerSubscription[E] private[transports] (
       .collect {
         // collect just the first error
         // with the below headOption this will cause the stream to complete on the first error
-        case Left(error) => error
+        case Left(closeReason) => closeReason
       }
       .toMat(Sink.headOption)(Keep.both),
   )
 
   // pass on why the subscription has been completed/closed
-  done onComplete {
-    case Success(error) =>
-      // the stream will complete on the first error if found
-      // if there is no error it means the stream was closed by the client
-      closeReasonPromise.trySuccess(error getOrElse SubscriptionCloseReason.Closed)
-    case Failure(ex) =>
-      closeReasonPromise.tryFailure(ex)
+  FutureUtil.doNotAwait(
+    done.thereafter {
+      case Success(closeReason) =>
+        // the stream will complete on the first error if found
+        // if there is no reason it means the stream was closed by the client
+        closeReasonPromise
+          .trySuccess(closeReason getOrElse SubscriptionCloseReason.Closed)
+          .discard[Boolean]
+      case Failure(ex) =>
+        closeReasonPromise.tryFailure(ex).discard[Boolean]
+    },
+    s"http sequencer subscription from $startingFromNextCounter failed",
+  )
+
+  override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    externalCompletionRef.putIfAbsent(reason).discard
+    close()
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {

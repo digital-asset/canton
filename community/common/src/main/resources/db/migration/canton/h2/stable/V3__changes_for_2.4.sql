@@ -61,3 +61,6 @@ create table topology_transactions (
     -- index used for idempotency during crash recovery
     unique (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation, representative_protocol_version)
 );
+
+-- Add a new optional wrapper_key_id field to store the encryption key id for the encrypted private store
+alter table crypto_private_keys add wrapper_key_id varchar(300);

@@ -330,12 +330,22 @@ class PackageService(
 
   override def getDar(hash: Hash)(implicit
       traceContext: TraceContext
-  ): Future[Option[PackageService.Dar]] =
+  ): Future[Option[PackageService.Dar]] = {
     packagesDarsStore.getDar(hash)
+  }
 
   override def listDars(limit: Option[Int])(implicit
       traceContext: TraceContext
   ): Future[Seq[PackageService.DarDescriptor]] = packagesDarsStore.listDars(limit)
+
+  def listDarContents(darId: Hash)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, String, (DarDescriptor, archive.Dar[DamlLf.Archive])] =
+    EitherT(
+      packagesDarsStore
+        .getDar(darId)
+        .map(_.toRight(s"No such dar ${darId}").flatMap(PackageService.darToLf))
+    )
 
   private def validateArchives(archives: List[DamlLf.Archive])(implicit
       traceContext: TraceContext

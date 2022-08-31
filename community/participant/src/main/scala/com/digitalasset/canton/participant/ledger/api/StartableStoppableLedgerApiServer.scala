@@ -15,7 +15,6 @@ import com.daml.ledger.api.v1.experimental_features.{
 import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWriteService}
 import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
-import com.daml.metrics.Metrics
 import com.daml.platform.LedgerApiServer
 import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
 import com.daml.platform.configuration.{
@@ -55,14 +54,12 @@ import scala.jdk.DurationConverters._
   * @param config ledger api server configuration
   * @param participantDataSourceConfig configuration for the data source (e.g., jdbc url)
   * @param dbConfig the Index DB config
-  * @param metrics metrics to be used by the indexer and ledger api service
   * @param executionContext the execution context
   */
 class StartableStoppableLedgerApiServer(
     config: CantonLedgerApiServerWrapper.Config,
     participantDataSourceConfig: ParticipantDataSourceConfig,
     dbConfig: DbSupport.DbConfig,
-    metrics: Metrics,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -157,7 +154,7 @@ class StartableStoppableLedgerApiServer(
     val lfValueTranslationCache =
       LfValueTranslationCache.Cache.newInstrumentedInstance(
         config = lfValueTranslationCacheConfig,
-        metrics = metrics,
+        metrics = config.metrics,
       )
 
     val indexServiceConfig = LedgerIndexServiceConfig(
@@ -179,6 +176,8 @@ class StartableStoppableLedgerApiServer(
       inMemoryFanOutThreadPoolSize = config.serverConfig.inMemoryFanOutThreadPoolSize.getOrElse(
         LedgerApiServerConfig.DefaultInMemoryFanOutThreadPoolSize
       ),
+      preparePackageMetadataTimeOutWarning =
+        config.serverConfig.preparePackageMetadataTimeOutWarning.duration.toScala,
     )
 
     val indexerConfig = config.indexerConfig.damlConfig(
@@ -198,10 +197,10 @@ class StartableStoppableLedgerApiServer(
       (inMemoryState, inMemoryStateUpdaterFlow) <-
         LedgerApiServer.createInMemoryStateAndUpdater(
           indexServiceConfig,
-          metrics,
+          config.metrics,
           executionContext,
         )
-      timedReadService = new TimedReadService(config.syncService, metrics)
+      timedReadService = new TimedReadService(config.syncService, config.metrics)
       indexerHealth <- new IndexerServiceOwner(
         config.participantId,
         participantDataSourceConfig,
@@ -209,7 +208,7 @@ class StartableStoppableLedgerApiServer(
         overrideIndexerStartupMode
           .map(overrideStartupMode => indexerConfig.copy(startupMode = overrideStartupMode))
           .getOrElse(indexerConfig),
-        metrics,
+        config.metrics,
         lfValueTranslationCache,
         inMemoryState,
         inMemoryStateUpdaterFlow,
@@ -219,7 +218,7 @@ class StartableStoppableLedgerApiServer(
       dbSupport <- DbSupport
         .owner(
           serverRole = ServerRole.ApiServer,
-          metrics = metrics,
+          metrics = config.metrics,
           dbConfig = dbConfig,
         )
       indexService <- new IndexServiceOwner(
@@ -227,7 +226,7 @@ class StartableStoppableLedgerApiServer(
         initialLedgerId = domain.LedgerId(config.ledgerId),
         config = indexServiceConfig,
         participantId = config.participantId,
-        metrics = metrics,
+        metrics = config.metrics,
         servicesExecutionContext = executionContext,
         lfValueTranslationCache = lfValueTranslationCache,
         engine = config.engine,
@@ -236,7 +235,7 @@ class StartableStoppableLedgerApiServer(
       userManagementStore =
         PersistentUserManagementStore.cached(
           dbSupport = dbSupport,
-          metrics = metrics,
+          metrics = config.metrics,
           timeProvider = TimeProvider.UTC,
           cacheExpiryAfterWriteInSeconds =
             config.serverConfig.userManagementService.cacheExpiryAfterWriteInSeconds,
@@ -266,7 +265,7 @@ class StartableStoppableLedgerApiServer(
         userManagement = config.serverConfig.userManagementService.damlConfig,
       )
 
-      timedWriteService = new TimedWriteService(config.syncService, metrics)
+      timedWriteService = new TimedWriteService(config.syncService, config.metrics)
       _ <- ApiServiceOwner(
         indexService = indexService,
         userManagementStore = userManagementStore,
@@ -279,7 +278,7 @@ class StartableStoppableLedgerApiServer(
           "write" -> (() => config.syncService.currentWriteHealth()),
           "indexer" -> indexerHealth,
         ),
-        metrics = metrics,
+        metrics = config.metrics,
         timeServiceBackend = config.testingTimeService,
         otherServices = Nil,
         otherInterceptors = List(
@@ -314,6 +313,7 @@ class StartableStoppableLedgerApiServer(
           config.adminToken,
           parent = config.serverConfig.authServices.map(_.create()),
         ),
+        jwtTimestampLeeway = None,
       )
     } yield ()
   }

@@ -83,6 +83,7 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Xlint:_,-unused",
             "-Xmacro-settings:materialize-derivations",
             "-Xfatal-warnings",
+            "-Wconf:cat=unused-imports:info", //reports unused-imports without counting them as warnings, and without causing -Werror to fail.
             "-Ywarn-dead-code",
             "-Ywarn-numeric-widen",
             "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value

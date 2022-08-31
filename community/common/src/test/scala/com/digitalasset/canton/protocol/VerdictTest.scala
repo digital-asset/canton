@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.protocol.messages.Verdict.{Approve, RejectReasons, Timeout}
+import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AnyWordSpec
@@ -25,7 +26,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
           ("approve", Approve),
           (
             "reject",
-            RejectReasons(
+            ParticipantReject(
               List(
                 (
                   Set(party("p1"), party("p2")),
@@ -35,7 +36,7 @@ class VerdictTest extends AnyWordSpec with BaseTest {
               )
             ),
           ),
-          ("timeout", Timeout),
+          ("timeout", MediatorError.Timeout.Reject()),
         )
         forAll(exampleResults) { (resultType: String, original: Verdict) =>
           val cycled =

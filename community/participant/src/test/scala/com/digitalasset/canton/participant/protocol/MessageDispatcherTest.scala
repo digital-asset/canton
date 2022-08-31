@@ -9,6 +9,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, HashPurposeTest, TestHash}
 import com.digitalasset.canton.data._
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.RequestCounter
@@ -21,7 +22,6 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
-import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{
   RequestAndRootHashMessage,
@@ -358,7 +358,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
     val commitment = SignedProtocolMessage(rawCommitment, dummySignature, testedProtocolVersion)
 
-    val reject = MediatorReject.Timeout.Reject()
+    val reject = MediatorError.MalformedMessage.Reject("")
     val malformedMediatorRequestResult =
       SignedProtocolMessage(
         MalformedMediatorRequestResult(
@@ -1077,7 +1077,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
       "malformed mediator requests be sent to the right processor" in {
         def malformed(viewType: ViewType, processor: ProcessorOfFixture): Future[Assertion] = {
-          val reject = MediatorReject.Topology.InvalidRootHashMessages.Reject("")
+          val reject = MediatorError.MalformedMessage.Reject("")
           val result =
             SignedProtocolMessage(
               MalformedMediatorRequestResult(

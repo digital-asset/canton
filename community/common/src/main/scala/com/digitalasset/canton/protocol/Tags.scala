@@ -18,6 +18,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
 import slick.jdbc.{GetResult, SetParameter}
 
 /** The root hash of a Merkle tree used as an identifier for requests.
@@ -149,12 +150,17 @@ object ViewHash {
 case class RequestId(private val ts: CantonTimestamp) extends PrettyPrinting {
   def unwrap: CantonTimestamp = ts
 
+  def toProtoPrimitive: ProtoTimestamp = ts.toProtoPrimitive
+
   override def pretty: Pretty[RequestId] = prettyOfClass(unnamedParam(_.ts))
 }
 
 object RequestId {
   implicit val requestIdOrdering = Ordering.by[RequestId, CantonTimestamp](_.unwrap)
   implicit val requestIdOrder = Order.fromOrdering[RequestId]
+
+  def fromProtoPrimitive(requestIdP: ProtoTimestamp): ParsingResult[RequestId] =
+    CantonTimestamp.fromProtoPrimitive(requestIdP).map(RequestId(_))
 }
 
 /** A transfer is identified by the source domain and the sequencer timestamp on the transfer-out request. */

@@ -39,10 +39,17 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
 
   @MetricDoc.Tag(
     summary = "The delay on the event processing",
-    description = """Every message received from the sequencer carries a timestamp. The delay
-        |provides the difference between the sequencing time and the processing time.
-        |The difference can be a result of either clock-skew or if the system is overloaded
-        |and doesn't manage to keep up with processing events.""",
+    description = """Every message received from the sequencer carries a timestamp that was assigned 
+        |by the sequencer when it sequenced the message. This timestamp is called the sequencing timestamp.
+        |The component receiving the message on the participant, mediator or topology manager side, is the sequencer client. 
+        |Upon receiving the message, the sequencer client compares the time difference between the 
+        |sequencing time and the computers local clock and exposes this difference as the given metric.
+        |The difference will include the clock-skew and the processing latency between assigning the timestamp on the 
+        |sequencer and receiving the message by the recipient.
+        |If the difference is large compared to the usual latencies and if clock skew can be ruled out, then 
+        |it means that the node is still trying to catch up with events that were sequenced by the 
+        |sequencer a while ago. This can happen after having been offline for a while or if the node is 
+        |too slow to keep up with the messaging load.""",
   )
   val delay: VarGaugeM[Long] = varGauge(prefix :+ "delay", 0L)
 

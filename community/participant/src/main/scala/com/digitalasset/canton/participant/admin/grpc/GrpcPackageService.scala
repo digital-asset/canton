@@ -133,6 +133,23 @@ class GrpcPackageService(
       })
     }
 
+  override def listDarContents(request: ListDarContentsRequest): Future[ListDarContentsResponse] =
+    TraceContext.fromGrpcContext { implicit traceContext =>
+      val res = for {
+        hash <- EitherT.fromEither[Future](Hash.fromHexString(request.darId)).leftMap(_.toString)
+        result <- service.listDarContents(hash)
+      } yield {
+        val (description, archive) = result
+        ListDarContentsResponse(
+          description = description.name.toProtoPrimitive,
+          main = archive.main.getHash,
+          packages = archive.all.map(_.getHash),
+          dependencies = archive.dependencies.map(_.getHash),
+        )
+      }
+      EitherTUtil.toFuture(res.leftMap(Status.NOT_FOUND.withDescription(_).asRuntimeException()))
+    }
+
   override def listPackageContents(
       request: ListPackageContentsRequest
   ): Future[ListPackageContentsResponse] =
@@ -249,4 +266,5 @@ class GrpcPackageService(
 
   private def contractIdToString(id: P.ContractId[M.ShareDar]): String =
     ApiTypes.ContractId.unwrap(id)
+
 }

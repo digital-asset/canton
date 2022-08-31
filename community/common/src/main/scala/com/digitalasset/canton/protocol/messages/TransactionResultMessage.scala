@@ -9,18 +9,12 @@ import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, v0}
+import com.digitalasset.canton.protocol.{RequestId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWrapper,
-  ProtobufVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version._
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -66,6 +60,13 @@ sealed abstract case class TransactionResultMessage(
       notificationTree = Some(notificationTree.toProtoV0),
     )
 
+  protected def toProtoV1: v1.TransactionResultMessage =
+    v1.TransactionResultMessage(
+      requestId = Some(requestId.toProtoPrimitive),
+      verdict = Some(verdict.toProtoV1),
+      notificationTree = Some(notificationTree.toProtoV0),
+    )
+
   override protected[messages] def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransactionResult =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.TransactionResult(getCryptographicEvidence)
@@ -91,11 +92,14 @@ object TransactionResultMessage
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2_0_0,
-      supportedProtoVersionMemoized(v0.TransactionResultMessage) { case (hashOps, proto) =>
-        fromProtoV0(proto, hashOps)
-      },
+      supportedProtoVersionMemoized(v0.TransactionResultMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.unstable_development, // TODO(i10131): make stable
+      supportedProtoVersionMemoized(v1.TransactionResultMessage)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def apply(
@@ -109,7 +113,7 @@ object TransactionResultMessage
       None,
     ) {}
 
-  private def fromProtoV0(protoResultMessage: v0.TransactionResultMessage, hashOps: HashOps)(
+  private def fromProtoV0(hashOps: HashOps, protoResultMessage: v0.TransactionResultMessage)(
       bytes: ByteString
   ): ParsingResult[TransactionResultMessage] =
     for {
@@ -128,6 +132,26 @@ object TransactionResultMessage
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
     ) {}
+
+  private def fromProtoV1(hashOps: HashOps, protoResultMessage: v1.TransactionResultMessage)(
+      bytes: ByteString
+  ): ParsingResult[TransactionResultMessage] = {
+    val v1.TransactionResultMessage(requestIdPO, verdictPO, notificationTreePO) = protoResultMessage
+    for {
+      requestId <- ProtoConverter
+        .required("request_id", requestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      transactionResult <- ProtoConverter
+        .required("verdict", verdictPO)
+        .flatMap(Verdict.fromProtoV1)
+      notificationTree <- ProtoConverter
+        .required("notification_tree", notificationTreePO)
+        .flatMap(InformeeTree.fromProtoV0(hashOps, _))
+    } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
+      protocolVersionRepresentativeFor(ProtobufVersion(1)),
+      Some(bytes),
+    ) {}
+  }
 
   implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] = {
     case m: TransactionResultMessage => Some(m)

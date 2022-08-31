@@ -65,6 +65,13 @@ import com.daml.ledger.api.v1.ledger_configuration_service.{
   LedgerConfigurationServiceGrpc,
 }
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.testing.time_service.TimeServiceGrpc.TimeServiceStub
+import com.daml.ledger.api.v1.testing.time_service.{
+  GetTimeRequest,
+  GetTimeResponse,
+  SetTimeRequest,
+  TimeServiceGrpc,
+}
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.transaction_service.TransactionServiceGrpc.TransactionServiceStub
@@ -85,10 +92,10 @@ import com.digitalasset.canton.admin.api.client.data.console.{
 }
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.{ForwardingStreamObserver, RecordingStreamObserver}
+import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{DiscardOps, LfPartyId}
@@ -999,6 +1006,81 @@ object LedgerApiCommands {
       ): Either[String, LedgerMeteringReport] =
         LedgerMeteringReport.fromProtoV0(response).leftMap(_.toString)
     }
+  }
+
+  object Time {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = TimeServiceStub
+
+      override def createService(channel: ManagedChannel): TimeServiceStub =
+        TimeServiceGrpc.stub(channel)
+    }
+
+    final case class Get(timeout: FiniteDuration)(scheduler: ScheduledExecutorService)
+        extends BaseCommand[
+          GetTimeRequest,
+          Seq[Either[String, CantonTimestamp]],
+          CantonTimestamp,
+        ] {
+
+      override def submitRequest(
+          service: TimeServiceStub,
+          request: GetTimeRequest,
+      ): Future[Seq[Either[String, CantonTimestamp]]] =
+        streamedResponse[
+          GetTimeRequest,
+          GetTimeResponse,
+          Either[String, CantonTimestamp],
+        ](
+          service.getTime,
+          x => {
+            val tmp = x.currentTime
+              .toRight("Empty timestamp received from ledger Api server")
+              .flatMap(CantonTimestamp.fromProtoPrimitive(_).leftMap(_.message))
+            Seq(tmp)
+          },
+          request,
+          1,
+          timeout: FiniteDuration,
+          scheduler,
+        )
+
+      /** Create the request from configured options
+        */
+      override def createRequest(): Either[String, GetTimeRequest] = Right(GetTimeRequest())
+
+      /** Handle the response the service has provided
+        */
+      override def handleResponse(
+          response: Seq[Either[String, CantonTimestamp]]
+      ): Either[String, CantonTimestamp] =
+        response.headOption.toRight("No timestamp received from ledger Api server").flatten
+    }
+
+    final case class Set(currentTime: CantonTimestamp, newTime: CantonTimestamp)
+        extends BaseCommand[
+          SetTimeRequest,
+          Empty,
+          Unit,
+        ] {
+
+      override def submitRequest(service: TimeServiceStub, request: SetTimeRequest): Future[Empty] =
+        service.setTime(request)
+
+      override def createRequest(): Either[String, SetTimeRequest] =
+        Right(
+          SetTimeRequest(
+            currentTime = Some(currentTime.toProtoPrimitive),
+            newTime = Some(newTime.toProtoPrimitive),
+          )
+        )
+
+      /** Handle the response the service has provided
+        */
+      override def handleResponse(response: Empty): Either[String, Unit] = Either.unit
+
+    }
+
   }
 
   private def streamedResponse[Request, Response, Result](

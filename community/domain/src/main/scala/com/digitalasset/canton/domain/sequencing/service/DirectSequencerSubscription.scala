@@ -5,6 +5,8 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Sink}
+import cats.syntax.either._
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.lifecycle.{
@@ -17,11 +19,12 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.{AkkaUtil, FutureUtil, SingleUseCell}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 /** Subscription connected directly to a [[sequencer.Sequencer]].
@@ -41,14 +44,21 @@ private[service] class DirectSequencerSubscription[E](
   protected val loggerFactory: NamedLoggerFactory =
     baseLoggerFactory.append("member", show"${member}")
 
-  val ((killSwitch, sourceDone), done) = AkkaUtil.runSupervised(
+  private val externalCompletionRef: SingleUseCell[SubscriptionCloseReason[E]] =
+    new SingleUseCell[SubscriptionCloseReason[E]]()
+
+  private val ((killSwitch, sourceDone), done) = AkkaUtil.runSupervised(
     logger.error("Fatally failed to handle event", _),
     source
       .mapAsync(1) { event =>
-        performUnlessClosingF("direct-sequencer-subscription-handler") {
-          handler(event)
-        }.onShutdown {
-          Right(())
+        externalCompletionRef.get match {
+          case None =>
+            performUnlessClosingF("direct-sequencer-subscription-handler") {
+              handler(event)
+            }.onShutdown {
+              Right(())
+            }.map(_.leftMap(SubscriptionCloseReason.HandlerError(_)))
+          case Some(reason) => Future.successful(Left(reason))
         }
       }
       .collect { case Left(err) => err }
@@ -56,16 +66,29 @@ private[service] class DirectSequencerSubscription[E](
       .toMat(Sink.headOption)(Keep.both),
   )
 
-  done onComplete {
-    case Success(Some(error)) =>
-      logger.warn(s"Subscription handler returned error: $error")
-      closeReasonPromise.trySuccess(SubscriptionCloseReason.HandlerError(error))
-    case Success(_) =>
-      logger.debug(show"Subscription flow for $member has completed")
-      closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed)
-    case Failure(ex) =>
-      logger.warn(show"Subscription flow for $member has failed", ex)
-      closeReasonPromise.tryFailure(ex)
+  FutureUtil.doNotAwait(
+    done.thereafter {
+      case Success(None) =>
+        logger.debug(show"Subscription flow for $member has completed")
+        closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard[Boolean]
+      case Success(Some(SubscriptionCloseReason.TransportChange)) =>
+        logger.debug(show"Subscription flow for $member has completed due to transport change")
+        closeReasonPromise.trySuccess(SubscriptionCloseReason.TransportChange).discard[Boolean]
+      case Success(Some(error)) =>
+        logger.warn(s"Subscription handler returned error: $error")
+        closeReasonPromise.trySuccess(error).discard[Boolean]
+      case Failure(ex) =>
+        logger.warn(show"Subscription flow for $member has failed", ex)
+        closeReasonPromise.tryFailure(ex).discard[Boolean]
+    },
+    s"DirectSequencerSubscription for $member failed",
+  )
+
+  override private[canton] def complete(reason: SubscriptionCloseReason[E])(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    externalCompletionRef.putIfAbsent(reason).discard
+    close()
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(

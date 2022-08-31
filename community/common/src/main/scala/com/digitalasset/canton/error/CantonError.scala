@@ -87,6 +87,11 @@ trait BaseCantonError extends BaseError {
       detailsScalapb,
     )
   }
+
+  def log()(implicit loggingContext: ErrorLoggingContext): Unit = logWithContext()(loggingContext)
+
+  def asGrpcError(implicit loggingContext: ErrorLoggingContext): StatusRuntimeException =
+    code.asGrpcError(this)(loggingContext)
 }
 
 object CantonErrorResource {
@@ -152,6 +157,12 @@ trait CantonError extends BaseCantonError {
 }
 
 object BaseCantonError {
+  abstract class Impl(
+      override val cause: String,
+      override val throwableO: Option[Throwable] = None,
+  )(implicit override val code: ErrorCode)
+      extends BaseCantonError {}
+
   private val ignoreFields = Set("cause", "throwable", "loggingContext", "definiteAnswer")
 
   private[error] def extractContext[D](obj: D): Map[String, String] = {

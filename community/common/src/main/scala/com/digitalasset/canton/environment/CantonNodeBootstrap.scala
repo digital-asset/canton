@@ -14,6 +14,7 @@ import com.digitalasset.canton.config.{LocalNodeConfig, LocalNodeParameters, Pro
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
+import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
@@ -95,6 +96,7 @@ abstract class CantonNodeBootstrapBase[
     val clock: Clock,
     nodeMetrics: NodeMetrics,
     storageFactory: StorageFactory,
+    cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     val loggerFactory: NamedLoggerFactory,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
@@ -182,7 +184,7 @@ abstract class CantonNodeBootstrapBase[
 
   override val crypto: Crypto = timeouts.unbounded.await("initialize CryptoFactory")(
     CryptoFactory
-      .create(cryptoConfig, storage, timeouts, loggerFactory)
+      .create(cryptoConfig, storage, cryptoPrivateStoreFactory, timeouts, loggerFactory)
       .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
   )
   val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)

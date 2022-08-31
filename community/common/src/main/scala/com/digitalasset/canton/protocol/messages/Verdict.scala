@@ -4,267 +4,120 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.traverse._
-import com.daml.error.{ErrorCategory, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   NotImplementedYet,
   ValueDeserializationError,
 }
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.MediatorRejectionGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v0
-import com.digitalasset.canton.protocol.v0.MediatorRejection.Code
+import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version._
 import com.google.protobuf.empty
-import org.slf4j.event.Level
 import pprint.Tree
-
-import java.util.UUID
 
 sealed trait Verdict
     extends Product
     with Serializable
     with PrettyPrinting
     with HasVersionedWrapper[VersionedMessage[Verdict]] {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Verdict] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Verdict] = {
+    if (version < ProtocolVersion.unstable_development) // TODO(i10131): replace by stable version
+      VersionedMessage(toProtoV0.toByteString, 0)
+    else
+      VersionedMessage(toProtoV1.toByteString, 1)
+  }
 
   def toProtoV0: v0.Verdict
+
+  def toProtoV1: v1.Verdict
 }
 
 object Verdict extends HasVersionedMessageCompanion[Verdict] {
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.Verdict)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.Verdict)(fromProtoV0),
+    1 -> supportedProtoVersion(v1.Verdict)(fromProtoV1),
   )
 
   case object Approve extends Verdict {
     override def toProtoV0: v0.Verdict =
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Approve(empty.Empty()))
 
+    override def toProtoV1: v1.Verdict =
+      v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.Approve(empty.Empty()))
+
     override def pretty: Pretty[Approve.type] = prettyOfObject[Approve.type]
   }
 
-  sealed trait MediatorReject
-      extends Verdict
-      with TransactionErrorWithEnum[v0.MediatorRejection.Code] {
+  trait MediatorReject extends Verdict with TransactionError {
 
-    def reason: String
+    /** The code from the v0 proto message format.
+      * Implementations should try to choose the most appropriate code (in doubt: TIMEOUT).
+      * DO NOT choose MISSING_CODE, because that will crash during deserialization.
+      */
+    // Name starts with _ to exclude from MDC.
+    def _v0CodeP: v0.MediatorRejection.Code
 
-    def toProtoMediatorRejectV0: v0.MediatorRejection = v0.MediatorRejection(
-      code.protoCode,
-      reason,
-    )
+    override def toProtoV0: v0.Verdict =
+      v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectionV0))
 
-    def toProtoV0: v0.Verdict =
-      v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV0))
+    def toProtoMediatorRejectionV0: v0.MediatorRejection =
+      v0.MediatorRejection(code = _v0CodeP, reason = cause)
 
-    override def pretty: Pretty[this.type] =
-      prettyOfClass(param("id", _.code.id.unquoted), param("reason", _.reason.unquoted))
+    override def toProtoV1: v1.Verdict =
+      v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.MediatorReject(toProtoMediatorRejectV1))
+
+    def toProtoMediatorRejectV1: v1.MediatorReject = {
+      v1.MediatorReject(cause = cause, errorCode = code.id)
+    }
+
+    override def pretty: Pretty[MediatorReject] =
+      prettyOfClass(
+        param("id", _.code.id.unquoted),
+        param("cause", _.cause.unquoted),
+        paramIfDefined("throwable", _.throwableO),
+        param("v0CodeP", _._v0CodeP.name.unquoted),
+      )
   }
 
-  type MediatorRejectErrorCode = ErrorCodeWithEnum[v0.MediatorRejection.Code]
-  abstract class MediatorRejectError(
-      override val cause: String,
-      override val throwableO: Option[Throwable] = None,
-  )(implicit override val code: MediatorRejectErrorCode)
-      extends TransactionErrorWithEnumImpl[v0.MediatorRejection.Code](
-        cause,
-        throwableO,
-        // All mediator rejections are reported asynchronously and are therefore covered by the submission rank guarantee
-        definiteAnswer = true,
-      )
-
-  object MediatorReject extends MediatorRejectionGroup {
+  object MediatorReject {
 
     def fromProtoV0(
         value: v0.MediatorRejection
-    ): ParsingResult[MediatorReject] =
-      (value.code match {
+    ): ParsingResult[MediatorReject] = {
+      val v0.MediatorRejection(codeP, reason) = value
+
+      import v0.MediatorRejection.Code
+      codeP match {
         case Code.MissingCode => Left(FieldNotSet("MediatorReject.code"))
-        case Code.InformeesNotHostedOnActiveParticipant =>
-          Right(Topology.InformeesNotHostedOnActiveParticipants.Reject)
-        case Code.NotEnoughConfirmingParties =>
-          Right(MaliciousSubmitter.NotEnoughConfirmingParties.Reject)
-        case Code.ViewThresholdBelowMinimumThreshold =>
-          Right(MaliciousSubmitter.ViewThresholdBelowMinimumThreshold.Reject)
-        case Code.InvalidRootHashMessage => Right(Topology.InvalidRootHashMessages.Reject)
-        case Code.Timeout => Right(Timeout.Reject)
-        case Code.WrongDeclaredMediator => Right(MaliciousSubmitter.WrongDeclaredMediator.Reject)
-        case Code.NonUniqueRequestUuid =>
-          Right(MaliciousSubmitter.NonUniqueRequestUuid.Reject(_: String))
+        case Code.InformeesNotHostedOnActiveParticipant | Code.InvalidRootHashMessage =>
+          Right(MediatorError.InvalidMessage.Reject(reason, codeP))
+        case Code.NotEnoughConfirmingParties | Code.ViewThresholdBelowMinimumThreshold |
+            Code.WrongDeclaredMediator | Code.NonUniqueRequestUuid =>
+          Right(MediatorError.MalformedMessage.Reject(reason, codeP))
+        case Code.Timeout => Right(MediatorError.Timeout.Reject(reason))
         case Code.Unrecognized(code) =>
           Left(
             ValueDeserializationError(
               "reject",
-              s"Unknown mediator rejection error code ${code} with ${value.reason}",
+              s"Unknown mediator rejection error code ${code} with ${reason}",
             )
           )
-      }).map(rej => rej(value.reason))
-
-    object Topology extends ErrorGroup() {
-
-      @Explanation(
-        """The transaction is referring to informees that are not hosted on any active participant on this domain."""
-      )
-      @Resolution(
-        "This error can happen either if the transaction is racing with a topology state change, or due to malicious or faulty behaviour."
-      )
-      object InformeesNotHostedOnActiveParticipants
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_INFORMEES_NOT_HOSTED_ON_ACTIVE_PARTICIPANTS",
-            ErrorCategory.InvalidGivenCurrentSystemStateOther,
-            v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
-          ) {
-
-        override def logLevel: Level = Level.WARN
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(
-              cause =
-                "Rejected transaction due to informees not being hosted on an active participant"
-            )
-            with MediatorReject
-      }
-
-      @Explanation(
-        """This rejection indicates that a submitter has sent a view with invalid root hash messages."""
-      )
-      @Resolution(
-        "This error can happen either if the transaction is racing with a topology state change, or due to malicious or faulty behaviour."
-      )
-      object InvalidRootHashMessages
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_INVALID_ROOT_HASH_MESSAGES",
-            ErrorCategory.InvalidGivenCurrentSystemStateOther,
-            v0.MediatorRejection.Code.InvalidRootHashMessage,
-          ) {
-
-        override def logLevel: Level = Level.WARN
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(
-              cause = "Rejected transaction due to invalid root hash messages"
-            )
-            with MediatorReject
-
       }
     }
 
-    @Explanation(
-      """This rejection indicates that the transaction has been rejected by the mediator as it didn't receive enough confirmations within the confirmation timeout window."""
-    )
-    @Resolution(
-      "Check that all involved participants are available and not overloaded."
-    )
-    object Timeout
-        extends MediatorRejectErrorCode(
-          id = "MEDIATOR_SAYS_TX_TIMED_OUT",
-          ErrorCategory.ContentionOnSharedResources,
-          v0.MediatorRejection.Code.Timeout,
-        ) {
-
-      case class Reject(reason: String = "")
-          extends MediatorRejectError(
-            cause =
-              "Rejected transaction as the mediator did not receive sufficient confirmations within the expected timeframe"
-          )
-          with MediatorReject
-    }
-
-    object MaliciousSubmitter extends ErrorGroup {
-
-      @Explanation(
-        """This rejection indicates that a submitter has sent a manipulated view."""
-      )
-      @Resolution("Investigate whether the submitter is faulty or malicious.")
-      object ViewThresholdBelowMinimumThreshold
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_VIEW_THRESHOLD_BELOW_MINIMUM_THRESHOLD",
-            ErrorCategory.MaliciousOrFaultyBehaviour,
-            v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-          ) {
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(
-              cause =
-                "Rejected transaction as a view has threshold below the confirmation policy's minimum threshold"
-            )
-            with MediatorReject
-
-      }
-
-      @Explanation(
-        """This rejection indicates that a submitter has sent a manipulated view."""
-      )
-      @Resolution("Investigate whether the submitter is faulty or malicious.")
-      object NotEnoughConfirmingParties
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_NOT_ENOUGH_CONFIRMING_PARTIES",
-            ErrorCategory.MaliciousOrFaultyBehaviour,
-            v0.MediatorRejection.Code.NotEnoughConfirmingParties,
-          ) {
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(
-              cause = "Rejected transaction as a view has not enough confirming parties"
-            )
-            with MediatorReject
-
-      }
-
-      @Explanation(
-        """This rejection indicates that the submitter sent the request to the wrong mediator"""
-      )
-      @Resolution("Investigate whether the submitter is faulty or malicious.")
-      object WrongDeclaredMediator
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_DECLARED_MEDIATOR_IS_WRONG",
-            ErrorCategory.MaliciousOrFaultyBehaviour,
-            v0.MediatorRejection.Code.WrongDeclaredMediator,
-          ) {
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(
-              cause =
-                "The declared mediator in the MediatorRequest is not the mediator that received the request"
-            )
-            with MediatorReject
-
-      }
-
-      @Explanation(
-        """This rejection indicates that the mediator has received several requests within the ``mediatorDeduplicationTimeout`` that use the same uuid.
-          |This may occur because the submitting participant creates insecure uuids with low entropy due to a misconfiguration.
-          |It may also occur because a malicious participant is replaying previous requests or it is reusing previous uuids.
-          |
-          |Note that a participant may reuse the uuid from a previous request, 
-          |if the previous request has been sequenced by more than ``mediatorDeduplicationTimeout`` before the new request or
-          |if the previous request and the new request are sent to different mediators.
-          |A participant may in general not reuse uuids from other participants."""
-      )
-      @Resolution("Investigate whether the submitter is faulty or malicious.")
-      object NonUniqueRequestUuid
-          extends MediatorRejectErrorCode(
-            id = "MEDIATOR_SAYS_UUID_NOT_UNIQUE",
-            ErrorCategory.MaliciousOrFaultyBehaviour,
-            v0.MediatorRejection.Code.NonUniqueRequestUuid,
-          ) {
-
-        case class Reject(override val reason: String)
-            extends MediatorRejectError(cause = reason)
-            with MediatorReject
-
-        object Reject {
-          def apply(uuid: UUID, expireAfter: CantonTimestamp): Reject = Reject(
-            s"The request uuid ($uuid) must not be used until $expireAfter."
-          )
-        }
+    def fromProtoV1(mediatorRejectP: v1.MediatorReject): ParsingResult[MediatorReject] = {
+      val v1.MediatorReject(cause, errorCode) = mediatorRejectP
+      errorCode match {
+        case MediatorError.Timeout.id => Right(MediatorError.Timeout.Reject(cause))
+        case MediatorError.InvalidMessage.id => Right(MediatorError.InvalidMessage.Reject(cause))
+        case MediatorError.MalformedMessage.id =>
+          Right(MediatorError.MalformedMessage.Reject(cause))
+        case _ => Right(MediatorError.GenericError(cause, errorCode))
       }
     }
   }
@@ -272,18 +125,32 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
   /** @param reasons Mapping from the parties of a [[com.digitalasset.canton.protocol.messages.MediatorResponse]]
     *                to the rejection reason from the [[com.digitalasset.canton.protocol.messages.MediatorResponse]]
     */
-  case class RejectReasons(reasons: List[(Set[LfPartyId], LocalReject)]) extends Verdict {
+  case class ParticipantReject(reasons: List[(Set[LfPartyId], LocalReject)]) extends Verdict {
 
-    def toProtoV0: v0.Verdict = {
+    override def toProtoV0: v0.Verdict = {
       val reasonsP = v0.RejectionReasons(reasons.map { case (parties, message) =>
         v0.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV0))
       })
       v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.ValidatorReject(reasonsP))
     }
 
-    override def pretty: Pretty[RejectReasons] = {
-      implicit val pr: Pretty[List[(Set[LfPartyId], LocalReject)]] = prettyReasons
-      prettyOfClass(unnamedParam(_.reasons))
+    override def toProtoV1: v1.Verdict = {
+      val reasonsP = v1.ParticipantReject(reasons.map { case (parties, message) =>
+        v0.RejectionReason(parties.toSeq, Some(message.toLocalRejectProtoV0))
+      })
+      v1.Verdict(someVerdict = v1.Verdict.SomeVerdict.ParticipantReject(reasonsP))
+    }
+
+    override def pretty: Pretty[ParticipantReject] = {
+      import Pretty.PrettyOps
+
+      prettyOfClass(
+        unnamedParam(
+          _.reasons.map { case (parties, reason) =>
+            Tree.Infix(reason.toTree, "- reported by:", parties.toTree)
+          }
+        )
+      )
     }
 
     /** Returns the rejection reason with the highest [[com.daml.error.ErrorCategory]] */
@@ -299,35 +166,47 @@ object Verdict extends HasVersionedMessageCompanion[Verdict] {
     }
   }
 
-  /** Make this an implicit, if you need to pretty print rejection reasons.
-    */
-  val prettyReasons: Pretty[List[(Set[LfPartyId], LocalReject)]] = reasons => {
-    import Pretty._
-    reasons.map { case (parties, reason) =>
-      Tree.Infix(reason.toTree, "- reported by:", parties.toTree)
-    }.toTree
-  }
+  object ParticipantReject {
+    def fromProtoV0(rejectionReasonsP: v0.RejectionReasons): ParsingResult[ParticipantReject] = {
+      val v0.RejectionReasons(reasonsP) = rejectionReasonsP
+      for {
+        reasons <- reasonsP.traverse(fromProtoReason)
+      } yield ParticipantReject(reasons.toList)
+    }
 
-  case object Timeout extends Verdict {
-    def toProtoV0: v0.Verdict =
-      v0.Verdict(someVerdict = v0.Verdict.SomeVerdict.Timeout(empty.Empty()))
-
-    override def pretty: Pretty[Timeout.type] = prettyOfObject[Timeout.type]
+    def fromProtoV1(
+        participantRejectP: v1.ParticipantReject
+    ): ParsingResult[ParticipantReject] = {
+      val v1.ParticipantReject(reasonsP) = participantRejectP
+      for {
+        reasons <- reasonsP.traverse(fromProtoReason)
+      } yield ParticipantReject(reasons.toList)
+    }
   }
 
   override protected def name: String = "verdict"
 
-  def fromProtoV0(protoVerdict: v0.Verdict): ParsingResult[Verdict] = {
+  def fromProtoV0(verdictP: v0.Verdict): ParsingResult[Verdict] = {
+    val v0.Verdict(someVerdictP) = verdictP
     import v0.Verdict.{SomeVerdict => V}
-    protoVerdict match {
-      case v0.Verdict(V.Approve(empty.Empty(_))) => Right(Approve)
-      case v0.Verdict(V.Timeout(empty.Empty(_))) => Right(Timeout)
-      case v0.Verdict(V.MediatorReject(reason)) => MediatorReject.fromProtoV0(reason)
-      case v0.Verdict(V.ValidatorReject(protoReasons)) =>
-        for {
-          reasons <- protoReasons.reasons.toList.traverse(fromProtoReason)
-        } yield RejectReasons(reasons)
-      case unknownError => Left(NotImplementedYet(unknownError.getClass.getName))
+    someVerdictP match {
+      case V.Approve(empty.Empty(_)) => Right(Approve)
+      case V.Timeout(empty.Empty(_)) => Right(MediatorError.Timeout.Reject())
+      case V.MediatorReject(mediatorRejectionP) => MediatorReject.fromProtoV0(mediatorRejectionP)
+      case V.ValidatorReject(rejectionReasonsP) => ParticipantReject.fromProtoV0(rejectionReasonsP)
+      case V.Empty => Left(NotImplementedYet("empty verdict type"))
+    }
+  }
+
+  def fromProtoV1(verdictP: v1.Verdict): ParsingResult[Verdict] = {
+    val v1.Verdict(someVerdictP) = verdictP
+    import v1.Verdict.{SomeVerdict => V}
+    someVerdictP match {
+      case V.Approve(empty.Empty(_)) => Right(Approve)
+      case V.MediatorReject(mediatorRejectP) => MediatorReject.fromProtoV1(mediatorRejectP)
+      case V.ParticipantReject(participantRejectP) =>
+        ParticipantReject.fromProtoV1(participantRejectP)
+      case V.Empty => Left(NotImplementedYet("empty verdict type"))
     }
   }
 

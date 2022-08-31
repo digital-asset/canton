@@ -32,16 +32,9 @@ import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediato
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,
   MediatorReject,
-  RejectReasons,
-  Timeout,
+  ParticipantReject,
 }
-import com.digitalasset.canton.protocol.messages.{
-  DefaultOpenEnvelope,
-  EncryptedViewMessage,
-  EncryptedViewMessageDecryptionError,
-  SignedProtocolMessageContent,
-  Verdict,
-}
+import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
@@ -112,11 +105,9 @@ trait TransferProcessingSteps[
     val status = verdict match {
       case Approve =>
         com.google.rpc.status.Status(com.google.rpc.Code.OK_VALUE)
-      case Timeout =>
-        MediatorReject.Timeout.Reject().rpcStatus()
       case reject: MediatorReject =>
         reject.rpcStatus()
-      case reasons: RejectReasons =>
+      case reasons: ParticipantReject =>
         reasons.keyEvent.rpcStatus()
     }
     pendingSubmission.transferCompletion.success(status)

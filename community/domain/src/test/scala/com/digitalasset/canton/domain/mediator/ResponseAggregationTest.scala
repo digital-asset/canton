@@ -6,23 +6,16 @@ package com.digitalasset.canton.domain.mediator
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
-import com.digitalasset.canton.data.{ConfirmingParty, PlainInformee, _}
+import com.digitalasset.canton.data._
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
-import com.digitalasset.canton.protocol.messages.Verdict.{MediatorReject, RejectReasons}
-import com.digitalasset.canton.protocol.messages.{
-  InformeeMessage,
-  LocalApprove,
-  LocalReject,
-  LocalVerdict,
-  MediatorResponse,
-  Verdict,
-}
-import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash}
+import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.protocol.messages.Verdict.ParticipantReject
+import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.funspec.PathAnyFunSpec
 
@@ -147,8 +140,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         )
 
         sut.state shouldBe Left(
-          MediatorReject.MaliciousSubmitter.ViewThresholdBelowMinimumThreshold
-            .Reject(show"viewHash=${viewThresholdTooLow.viewHash}, threshold=0")
+          MediatorError.MalformedMessage.Reject(
+            s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0",
+            v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+          )
         )
 
       }
@@ -192,7 +187,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId,
               informeeMessage,
               changeTs1,
-              RejectReasons(List(Set(alice.party) -> testReject())),
+              ParticipantReject(List(Set(alice.party) -> testReject())),
               TraceContext.empty,
             )(loggerFactory)
           }
@@ -225,7 +220,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 rejected1.progress(changeTs2, response2, topologySnapshot).value.futureValue
               )("Alice's second rejection")
             val rejection =
-              RejectReasons(List(Set(alice.party) -> testReject(), Set(bob.party) -> testReject()))
+              ParticipantReject(
+                List(Set(alice.party) -> testReject(), Set(bob.party) -> testReject())
+              )
             it("rejects the transaction") {
               rejected2 shouldBe ResponseAggregation(
                 requestId,

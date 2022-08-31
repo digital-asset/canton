@@ -48,10 +48,10 @@ import com.digitalasset.canton.console.{
   RemoteParticipantReference,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.api.client.DecodeUtil
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
+import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
@@ -513,8 +513,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
       @Help.Summary("Wait until a contract becomes available", FeatureFlag.Testing)
       @Help.Description(
         """This function can be used for contracts with a code-generated Scala model.
-                          |You can refine your search using the `filter` function argument.
-                          |The command will wait until the contract appears or throw an exception once it times out."""
+          |You can refine your search using the `filter` function argument.
+          |The command will wait until the contract appears or throw an exception once it times out."""
       )
       def await[T](
           partyId: PartyId,
@@ -543,7 +543,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       )
       @Help.Description(
         """To use this function, ensure a code-generated Scala model for the target template exists.
-                          |You can refine your search using the `predicate` function argument."""
+          |You can refine your search using the `predicate` function argument."""
       )
       def filter[T](
           partyId: PartyId,
@@ -559,7 +559,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       @Help.Summary("Generic search for contracts", FeatureFlag.Testing)
       @Help.Description(
         """This search function returns an untyped ledger-api event.
-                          |The find will wait until the contract appears or throw an exception once it times out."""
+          |The find will wait until the contract appears or throw an exception once it times out."""
       )
       def find_generic(
           partyId: PartyId,
@@ -602,12 +602,12 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
       @Help.Summary("Upload packages from Dar file", FeatureFlag.Testing)
       @Help.Description("""Uploading the Dar can be done either through the ledger Api server or through the Canton admin Api.
-        |The Ledger Api is the portable method across ledgers. The Canton admin Api is more powerful as it allows for
-        |controlling Canton specific behaviour.
-        |In particular, a Dar uploaded using the ledger Api will not be available in the Dar store and can not be downloaded again.
-        |Additionally, Dars uploaded using the ledger Api will be vetted, but the system will not wait
-        |for the Dars to be successfully registered with all connected domains. As such, if a Dar is uploaded and then
-        |used immediately thereafter, a command might bounce due to missing package vettings.""")
+          |The Ledger Api is the portable method across ledgers. The Canton admin Api is more powerful as it allows for
+          |controlling Canton specific behaviour.
+          |In particular, a Dar uploaded using the ledger Api will not be available in the Dar store and can not be downloaded again.
+          |Additionally, Dars uploaded using the ledger Api will be vetted, but the system will not wait
+          |for the Dars to be successfully registered with all connected domains. As such, if a Dar is uploaded and then
+          |used immediately thereafter, a command might bounce due to missing package vettings.""")
       def upload_dar(darPath: String): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(LedgerApiCommands.PackageService.UploadDarFile(darPath))
@@ -637,7 +637,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       @Help.Summary("Lists command completions following the specified offset", FeatureFlag.Testing)
       @Help.Description(
         """If the participant has been pruned via `pruning.prune` and if `offset` is lower than
-                          |the pruning offset, this command fails with a `NOT_FOUND` error."""
+          |the pruning offset, this command fails with a `NOT_FOUND` error."""
       )
       def list(
           partyId: PartyId,
@@ -665,7 +665,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       )
       @Help.Description(
         """If the participant has been pruned via `pruning.prune` and if `offset` is lower than
-                          |the pruning offset, this command fails with a `NOT_FOUND` error."""
+          |the pruning offset, this command fails with a `NOT_FOUND` error."""
       )
       def list_with_checkpoint(
           partyId: PartyId,
@@ -896,6 +896,31 @@ trait BaseLedgerApiAdministration extends NoTracing {
         })
     }
 
+    @Help.Summary("Interact with the time service", FeatureFlag.Testing)
+    @Help.Group("Time")
+    object time {
+      @Help.Summary("Get the participants time", FeatureFlag.Testing)
+      @Help.Description("""Returns the current timestamp of the participant which is either the
+                         system clock or the static time""")
+      def get(): CantonTimestamp =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Time.Get(timeouts.ledgerCommand.asFiniteApproximation)(
+              consoleEnvironment.environment.scheduler
+            )
+          )
+        })
+
+      @Help.Summary("Set the participants time", FeatureFlag.Testing)
+      @Help.Description(
+        """Sets the participants time if the participant is running in static time mode"""
+      )
+      def set(currentTime: CantonTimestamp, nextTime: CantonTimestamp): Unit =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(LedgerApiCommands.Time.Set(currentTime, nextTime))
+        })
+
+    }
   }
 
 }

@@ -7,8 +7,8 @@ import cats.syntax.option._
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{
   CommunityAdminServerConfig,
+  CommunityCryptoConfig,
   CommunityStorageConfig,
-  CryptoConfig,
   InitConfig,
 }
 import com.digitalasset.canton.domain.config.CommunityDomainConfig
@@ -21,7 +21,7 @@ object ConfigStubs {
   def participant: CommunityParticipantConfig =
     CommunityParticipantConfig(
       InitConfig(),
-      CryptoConfig(),
+      CommunityCryptoConfig(),
       null,
       adminApi,
       CommunityStorageConfig.Memory(),
@@ -34,7 +34,7 @@ object ConfigStubs {
       null,
       null,
       CommunityStorageConfig.Memory(),
-      CryptoConfig(),
+      CommunityCryptoConfig(),
     )
 
   def adminApi: CommunityAdminServerConfig =
