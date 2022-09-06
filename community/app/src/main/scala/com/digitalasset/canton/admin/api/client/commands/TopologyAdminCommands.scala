@@ -10,10 +10,10 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data.console._
+import com.digitalasset.canton.admin.api.client.data._
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters => DomainDynamicDomainParameters,
+  DynamicDomainParameters => DynamicDomainParametersInternal,
   v0 => idProto,
 }
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
@@ -388,7 +388,7 @@ object TopologyAdminCommands {
     case class AuthorizeDomainParametersChangeInternal(
         signedBy: Option[Fingerprint],
         domainId: DomainId,
-        newParameters: DomainDynamicDomainParameters,
+        newParameters: DynamicDomainParametersInternal,
         force: Boolean,
     ) extends BaseCommand[v0.DomainParametersChangeAuthorization] {
       override def createRequest(): Either[String, v0.DomainParametersChangeAuthorization] = {

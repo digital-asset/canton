@@ -309,7 +309,7 @@ class DomainTopologyManagerRequestServiceTest
         all(request6, 5, Failed)
         all(request8, 6, Failed)
         // excess transactions only rejected since PV=3
-        if (testedProtocolVersion >= ProtocolVersion.v3_0_0) {
+        if (testedProtocolVersion >= ProtocolVersion.v3) {
           all(request7, 7, Failed)
           stored should have length (if (config.open) 0 else 1)
         } else {

@@ -15,13 +15,13 @@ import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
   * structure so the [[ConfirmationResponseProcessor]] processes these events without having to perform the same extraction
   * and error handling of the original SequencerEvent.
   */
-sealed trait MediatorEvent {
+private[mediator] sealed trait MediatorEvent {
   val requestId: RequestId
   val counter: SequencerCounter
   val timestamp: CantonTimestamp
 }
 
-object MediatorEvent {
+private[mediator] object MediatorEvent {
   case class Request(
       counter: SequencerCounter,
       timestamp: CantonTimestamp,

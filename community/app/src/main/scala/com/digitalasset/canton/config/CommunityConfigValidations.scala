@@ -183,7 +183,7 @@ object CommunityConfigValidations
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     developmentProtocolSafetyCheck(config.domains.toSeq.map { case (k, v) =>
-      (k, v.domainParameters)
+      (k, v.init.domainParameters)
     })
   }
 
@@ -193,7 +193,7 @@ object CommunityConfigValidations
     config.participants.toSeq.map { case (name, config) =>
       val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
       val isMinimumDeprecatedVersion =
-        ProtocolVersion.deprecated.contains(minimum.getOrElse(ProtocolVersion.v2_0_0))
+        ProtocolVersion.deprecated.contains(minimum.getOrElse(ProtocolVersion.v2))
 
       if (isMinimumDeprecatedVersion && !config.parameters.dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnParticipant(name, minimum)
@@ -205,8 +205,8 @@ object CommunityConfigValidations
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     config.domains.toSeq.foreach { case (name, config) =>
-      val pv = config.domainParameters.protocolVersion.unwrap
-      if (pv.isDeprecated && !config.domainParameters.dontWarnOnDeprecatedPV)
+      val pv = config.init.domainParameters.protocolVersion.unwrap
+      if (pv.isDeprecated && !config.init.domainParameters.dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnDomain(name, pv)
 
       logger.info(s"Domain $name is using protocol version $pv")
@@ -223,7 +223,7 @@ object CommunityConfigValidations
         flag: Boolean,
     ): Validated[NonEmpty[Seq[String]], Unit] = {
       Validated.cond(
-        protocolVersion != ProtocolVersion.unstable_development || flag,
+        protocolVersion != ProtocolVersion.dev || flag,
         (),
         NonEmpty(
           Seq,

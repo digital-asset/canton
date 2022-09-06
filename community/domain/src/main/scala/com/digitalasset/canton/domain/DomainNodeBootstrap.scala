@@ -14,7 +14,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.TestingConfigInternal
+import com.digitalasset.canton.config.{InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
   CommunityCryptoPrivateStoreFactory,
@@ -101,9 +101,11 @@ class DomainNodeBootstrap(
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var topologyManager: Option[DomainTopologyManager] = None
-  private val protocolVersion = config.domainParameters.protocolVersion.unwrap
+  private val protocolVersion = config.init.domainParameters.protocolVersion.unwrap
 
-  override protected def autoInitializeIdentity(): EitherT[Future, String, Unit] =
+  override protected def autoInitializeIdentity(
+      initConfigBase: InitConfigBase
+  ): EitherT[Future, String, Unit] =
     withNewTraceContext { implicit traceContext =>
       for {
         initialized <- initializeTopologyManagerIdentity(
@@ -111,6 +113,7 @@ class DomainNodeBootstrap(
           legalIdentityHook,
           DynamicDomainParameters.initialValues(clock, protocolVersion),
           protocolVersion,
+          initConfigBase,
         )
         (nodeId, topologyManager, namespaceKey) = initialized
         domainId = DomainId(nodeId.identity)
@@ -133,7 +136,7 @@ class DomainNodeBootstrap(
   }
 
   private lazy val staticDomainParameters: Either[String, StaticDomainParameters] =
-    config.domainParameters.toStaticDomainParameters(config.crypto)
+    config.init.domainParameters.toStaticDomainParameters(config.crypto, logger)
 
   private def initializeMediator(
       domainId: DomainId,

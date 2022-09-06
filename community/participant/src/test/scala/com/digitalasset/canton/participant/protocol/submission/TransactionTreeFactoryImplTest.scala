@@ -210,6 +210,6 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
   }
 
   "TransactionTreeFactoryImpl@V2" should {
-    behave like transactionTreeFactory(ProtocolVersion.v2_0_0)
+    behave like transactionTreeFactory(ProtocolVersion.v2)
   }
 }

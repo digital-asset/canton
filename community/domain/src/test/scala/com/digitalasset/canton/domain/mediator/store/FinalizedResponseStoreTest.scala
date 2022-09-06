@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data._
-import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
+import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash}
@@ -72,16 +72,17 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       requestId,
       informeeMessage,
       requestId.unwrap,
-      MediatorError.Timeout.Reject(),
+      MediatorError.Timeout.Reject.create(testedProtocolVersion),
+      testedProtocolVersion,
       TraceContext.empty,
     )(loggerFactory)
 
-  def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
+  private[mediator] def finalizedResponseStore(mk: () => FinalizedResponseStore): Unit = {
     "when storing responses" should {
       "get error message if trying to fetch a non existing response" in {
         val sut = mk()
         sut.fetch(requestId).value.map { result =>
-          result shouldBe Left(MediatorRequestNotFound(requestId))
+          result shouldBe None
         }
       }
       "should be able to fetch previously stored response" in {
@@ -89,7 +90,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         for {
           _ <- sut.store(currentVersion)
           result <- sut.fetch(requestId).value
-        } yield result shouldBe Right(currentVersion)
+        } yield result shouldBe Some(currentVersion)
       }
       "should allow the same response to be stored more than once" in {
         // can happen after a crash and event replay
@@ -105,22 +106,15 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       "remove all responses up and including timestamp" in {
         val sut = mk()
 
-        val requests = (1 to 3).map(n =>
-          currentVersion.copy(requestId = requestIdTs(n))(currentVersion.requestTraceContext)(
-            loggerFactory
-          )
-        )
+        val requests = (1 to 3).map(n => currentVersion.copy(requestId = requestIdTs(n)))
 
         for {
           _ <- requests.toList.traverse(sut.store)
           _ <- sut.prune(ts(2))
-          error1 <- leftOrFail(sut.fetch(requestIdTs(1)))("fetch(ts1)")
-          error2 <- leftOrFail(sut.fetch(requestIdTs(2)))("fetch(ts2)")
+          _ <- noneOrFail(sut.fetch(requestIdTs(1)))("fetch(ts1)")
+          _ <- noneOrFail(sut.fetch(requestIdTs(2)))("fetch(ts2)")
           _ <- valueOrFail(sut.fetch(requestIdTs(3)))("fetch(ts3)")
-        } yield {
-          error1 shouldBe MediatorRequestNotFound(requestIdTs(1))
-          error2 shouldBe MediatorRequestNotFound(requestIdTs(2))
-        }
+        } yield succeed
       }
     }
   }

@@ -68,5 +68,5 @@ message ViewParticipantMessage {
 
 message InformeeMessage {
     v0.FullInformeeTree full_informee_tree = 1;
-    string protocol_version = 2; // added in v1 // TODO(#9312) change to int
+    int32 protocol_version = 2; // added in v1
 }

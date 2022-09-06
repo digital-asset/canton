@@ -707,7 +707,7 @@ object SubmitterMetadata
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.SubmitterMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -868,7 +868,7 @@ object CommonMetadata
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.CommonMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -963,7 +963,7 @@ object ParticipantMetadata
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ParticipantMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

@@ -49,7 +49,7 @@ import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
+import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.time.TimeProof
@@ -66,11 +66,8 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.version.{
-  ProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
-}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import org.slf4j.event.Level
 
@@ -143,9 +140,9 @@ class TransferOutProcessingSteps(
         In DEV, we introduced the sourceProtocolVersion in TransferInView, which is needed for
         proper deserialization. Hence, we disallow some transfers
        */
-      missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3_0_0
+      missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3
       isSourceProtocolVersionRequired =
-        sourceDomainProtocolVersion.v == ProtocolVersion.unstable_development
+        sourceDomainProtocolVersion.v == ProtocolVersion.dev
 
       _ <- condUnitET[FutureUnlessShutdown](
         !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),
@@ -506,7 +503,7 @@ class TransferOutProcessingSteps(
 
     import scala.util.Either.MergeableEither
     MergeableEither[MediatorResult](result).merge.verdict match {
-      case Verdict.Approve =>
+      case _: Verdict.Approve =>
         val commitSet = CommitSet(
           archivals = Map.empty,
           creations = Map.empty,
@@ -536,7 +533,15 @@ class TransferOutProcessingSteps(
           commitSetFO,
           Set(),
           None,
-          Some(TransferOutUpdate(hostedStakeholders, requestId.unwrap, transferId, requestCounter)),
+          Some(
+            TransferOutUpdate(
+              hostedStakeholders,
+              requestId.unwrap,
+              transferId,
+              requestCounter,
+              sourceDomainProtocolVersion,
+            )
+          ),
         )
 
       case Verdict.ParticipantReject(_) | (_: MediatorReject) =>
@@ -684,8 +689,11 @@ class TransferOutProcessingSteps(
         if (transferringParticipant) Set(participantId.adminParty.toLf) else Set.empty[LfPartyId]
       val confirmingParties = confirmingStakeholders union adminPartySet
       val localVerdict =
-        if (activenessResult.isSuccessful) LocalApprove
-        else LocalReject.TransferOutRejects.ActivenessCheckFailed.Reject(s"$activenessResult")
+        if (activenessResult.isSuccessful) LocalApprove()(sourceDomainProtocolVersion.v)
+        else
+          LocalReject.TransferOutRejects.ActivenessCheckFailed.Reject(s"$activenessResult")(
+            sourceDomainProtocolVersion.v
+          )
       val response = checked(
         MediatorResponse.tryCreate(
           requestId,

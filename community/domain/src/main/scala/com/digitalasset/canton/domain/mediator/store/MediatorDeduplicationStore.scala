@@ -27,7 +27,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 
-trait MediatorDeduplicationStore extends NamedLogging {
+private[mediator] trait MediatorDeduplicationStore extends NamedLogging {
 
   /** Stores deduplication data for a given uuid.
     */
@@ -156,7 +156,7 @@ trait MediatorDeduplicationStore extends NamedLogging {
   ): Future[Unit]
 }
 
-object MediatorDeduplicationStore {
+private[mediator] object MediatorDeduplicationStore {
   def apply(
       mediatorId: MediatorId,
       storage: Storage,
@@ -206,8 +206,9 @@ object MediatorDeduplicationStore {
   }
 }
 
-class InMemoryMediatorDeduplicationStore(override protected val loggerFactory: NamedLoggerFactory)
-    extends MediatorDeduplicationStore
+private[mediator] class InMemoryMediatorDeduplicationStore(
+    override protected val loggerFactory: NamedLoggerFactory
+) extends MediatorDeduplicationStore
     with NamedLogging {
 
   override protected def doInitialize(deleteFromInclusive: CantonTimestamp)(implicit
@@ -223,7 +224,7 @@ class InMemoryMediatorDeduplicationStore(override protected val loggerFactory: N
   ): Future[Unit] = Future.unit
 }
 
-class DbMediatorDeduplicationStore(
+private[mediator] class DbMediatorDeduplicationStore(
     mediatorId: MediatorId,
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,

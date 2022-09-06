@@ -13,6 +13,7 @@ import com.digitalasset.canton.domain.mediator.store.{
   MediatorState,
 }
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.topology.DefaultTestIdentities
@@ -62,7 +63,8 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
       )
     }
     val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
-    val currentVersion = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
+    val currentVersion =
+      ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
 
     def mediatorState: MediatorState = {
       val sut =
@@ -102,8 +104,8 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           progress <- sut.fetch(requestId).value
           noItem <- sut.fetch(RequestId(CantonTimestamp.MinValue)).value
         } yield {
-          progress shouldBe Right(currentVersion)
-          noItem shouldBe Left(MediatorRequestNotFound(RequestId(CantonTimestamp.MinValue)))
+          progress shouldBe Some(currentVersion)
+          noItem shouldBe None
         }
       }
     }
@@ -111,21 +113,26 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
     "updating items" should {
       val sut = mediatorState
       val newVersionTs = currentVersion.version.plusSeconds(1)
-      val newVersion = currentVersion.copy(version = newVersionTs)(
-        currentVersion.requestTraceContext
-      )(loggerFactory)
+      val newVersion = currentVersion.copy(version = newVersionTs)
 
       // this should be handled by the processor that shouldn't be requesting the replacement
       "prevent updating to the same version" in {
-        sut.replace(newVersion, newVersion).value.map { result =>
-          result shouldBe Left(StaleVersion(requestId, newVersionTs, currentVersion.version))
-        }
+        for {
+          result <- loggerFactory.assertLogs(
+            sut.replace(newVersion, newVersion).value,
+            _.shouldBeCantonError(
+              MediatorError.InternalError.Reject(
+                s"Request ${currentVersion.requestId} has an unexpected version ${currentVersion.requestId.unwrap} (expected version: $newVersion, new version: $newVersion)."
+              )
+            ),
+          )
+        } yield result shouldBe None
       }
 
       "allow updating to a newer version" in {
         for {
           result <- sut.replace(currentVersion, newVersion).value
-        } yield result shouldBe Right(())
+        } yield result shouldBe Some(())
       }
     }
   }

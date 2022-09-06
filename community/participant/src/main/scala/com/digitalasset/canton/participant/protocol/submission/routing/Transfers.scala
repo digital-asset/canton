@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingE
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}

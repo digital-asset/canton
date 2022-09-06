@@ -91,12 +91,12 @@ object TransactionResultMessage
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransactionResultMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development, // TODO(i10131): make stable
+      ProtocolVersion.dev, // TODO(i10131): make stable
       supportedProtoVersionMemoized(v1.TransactionResultMessage)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

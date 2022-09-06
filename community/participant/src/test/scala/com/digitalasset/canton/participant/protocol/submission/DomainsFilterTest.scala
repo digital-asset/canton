@@ -23,7 +23,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
   "DomainsFilter (simple create)" should {
     import SimpleTopology._
 
-    val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v3_0_0)
+    val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v3)
     val correctPackages = Transactions.Create.correctPackages
 
     "keep domains that satisfy all the constraints" in {
@@ -72,7 +72,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
     //TODO(i9910) modify v1_dev to v1_15 when available
     "reject domains when the minimum protocol version is not satisfied " in {
       import SimpleTopology._
-      val currentDomainPV = ProtocolVersion.v3_0_0
+      val currentDomainPV = ProtocolVersion.v3
       val filter =
         DomainsFilterForTx(Transactions.Create.tx(LanguageVersion.v1_dev), currentDomainPV)
       val (unusableDomains, usableDomains) =
@@ -83,7 +83,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
         DomainUsabilityChecker.DomainNotSupportingMinimumProtocolVersion(
           DefaultTestIdentities.domainId,
           currentDomainPV,
-          ProtocolVersion.unstable_development,
+          ProtocolVersion.dev,
           TransactionVersion.VDev,
         )
       )
@@ -95,7 +95,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
     import SimpleTopology._
     val exerciseByInterface = Transactions.ExerciseByInterface()
 
-    val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v3_0_0)
+    val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v3)
     val correctPackages = ExerciseByInterface.correctPackages
 
     "keep domains that satisfy all the constraints" in {

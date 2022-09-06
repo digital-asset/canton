@@ -9,7 +9,6 @@ import com.digitalasset.canton.protobuf.{VersionedMessageV0, VersionedMessageV1,
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.HasProtocolVersionedWrapperTest.{
   Message,
-  protocolVersion,
   protocolVersionRepresentative,
 }
 import com.google.protobuf.ByteString
@@ -54,20 +53,19 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     }
 
     "return the protocol representative" in {
-      protocolVersionRepresentative(2).representative shouldBe protocolVersion(2)
-      protocolVersionRepresentative(3).representative shouldBe protocolVersion(2)
-      protocolVersionRepresentative(4).representative shouldBe protocolVersion(4)
-      protocolVersionRepresentative(5).representative shouldBe protocolVersion(5)
-      protocolVersionRepresentative(6).representative shouldBe protocolVersion(5)
-      protocolVersionRepresentative(7).representative shouldBe protocolVersion(5)
+      protocolVersionRepresentative(2).representative shouldBe ProtocolVersion(2)
+      protocolVersionRepresentative(3).representative shouldBe ProtocolVersion(2)
+      protocolVersionRepresentative(4).representative shouldBe ProtocolVersion(4)
+      protocolVersionRepresentative(5).representative shouldBe ProtocolVersion(5)
+      protocolVersionRepresentative(6).representative shouldBe ProtocolVersion(5)
+      protocolVersionRepresentative(7).representative shouldBe ProtocolVersion(5)
     }
   }
 }
 
 object HasProtocolVersionedWrapperTest {
-  private def protocolVersion(i: Int): ProtocolVersion = ProtocolVersion(i, 0, 0)
   private def protocolVersionRepresentative(i: Int): RepresentativeProtocolVersion[Message] =
-    Message.protocolVersionRepresentativeFor(protocolVersion(i))
+    Message.protocolVersionRepresentativeFor(ProtocolVersion(i))
 
   case class Message(
       msg: String,
@@ -94,17 +92,17 @@ object HasProtocolVersionedWrapperTest {
      */
     val supportedProtoVersions = SupportedProtoVersions(
       ProtobufVersion(1) -> VersionedProtoConverter(
-        protocolVersion(4),
+        ProtocolVersion(4),
         supportedProtoVersionMemoized(VersionedMessageV1)(fromProtoV1),
         _.toProtoV1.toByteString,
       ),
       ProtobufVersion(0) -> VersionedProtoConverter(
-        protocolVersion(2),
+        ProtocolVersion(2),
         supportedProtoVersionMemoized(VersionedMessageV0)(fromProtoV0),
         _.toProtoV0.toByteString,
       ),
       ProtobufVersion(2) -> VersionedProtoConverter(
-        protocolVersion(5),
+        ProtocolVersion(5),
         supportedProtoVersionMemoized(VersionedMessageV2)(fromProtoV2),
         _.toProtoV2.toByteString,
       ),

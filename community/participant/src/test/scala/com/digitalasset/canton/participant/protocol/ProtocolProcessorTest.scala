@@ -114,10 +114,11 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
     )
   when(mockSequencerClient.domainId).thenReturn(domain)
+  when(mockSequencerClient.staticDomainParameters).thenReturn(defaultStaticDomainParameters)
 
   private val trm = mock[TransactionResultMessage]
   when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[TransactionResultMessage])
-  when(trm.verdict).thenAnswer(Verdict.Approve)
+  when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
 
   private val requestId = RequestId(CantonTimestamp.Epoch)
   private val requestSc = 0L

@@ -36,8 +36,9 @@ class SequencerAdministrationGroup(
 ) extends Helpful
     with FeatureFlagFilter
     with NamedLogging {
+
   @Help.Summary("Pruning of the sequencer")
-  object pruning {
+  object pruning extends Helpful {
     @Help.Summary("Status of the sequencer and its connected clients")
     @Help.Description(
       """Provides a detailed breakdown of information required for pruning:

@@ -9,18 +9,21 @@ import com.digitalasset.canton.admin.api.client.commands.{
   DomainAdminCommands,
   TopologyAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.console.{
+import com.digitalasset.canton.admin.api.client.data.{
   DynamicDomainParameters,
   DynamicDomainParametersV0,
   DynamicDomainParametersV1,
   ListParticipantDomainStateResult,
+  StaticDomainParameters,
+  StaticDomainParametersV0,
+  StaticDomainParametersV1,
 }
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   ConsoleCommandTimeout,
   NonNegativeDuration,
   NonNegativeFiniteDuration,
-  PositiveDurationRoundedSeconds,
+  PositiveDurationSeconds,
 }
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
@@ -35,7 +38,6 @@ import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.TopologyManagerError.IncreaseOfLedgerTimeRecordTimeTolerance
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
@@ -162,16 +164,47 @@ trait DomainAdministration {
       }
     }
 
+    /*
+      Get a parameter that was static in V0 and dynamic from V1
+     */
+    private def getParameterStaticV0DynamicV1[P](
+        operation: String,
+        fromStaticV0: StaticDomainParametersV0 => P,
+        fromDynamicV1: DynamicDomainParametersV1 => P,
+    ): P = get_dynamic_domain_parameters match {
+      case _: DynamicDomainParametersV0 =>
+        get_static_domain_parameters match {
+          case staticV0: StaticDomainParametersV0 =>
+            fromStaticV0(staticV0)
+
+          case _: StaticDomainParametersV1 =>
+            throw new IllegalStateException(
+              s"Error when trying to get $operation: versions of static and dynamic domains parameters should be consistent but got 1 and 0 respectively"
+            )
+        }
+
+      case dynamicV1: DynamicDomainParametersV1 => fromDynamicV1(dynamicV1)
+    }
+
     @Help.Summary("Get the reconciliation interval configured for the domain")
     @Help.Description("""Depending on the protocol version used on the domain, the value will be
         read either from the static domain parameters or the dynamic ones.""")
-    def get_reconciliation_interval: PositiveDurationRoundedSeconds = {
-      get_dynamic_domain_parameters match {
-        case _: DynamicDomainParametersV0 =>
-          get_static_domain_parameters.reconciliationInterval.toConfig
-        case v1: DynamicDomainParametersV1 => v1.reconciliationInterval
-      }
-    }
+    def get_reconciliation_interval: PositiveDurationSeconds =
+      getParameterStaticV0DynamicV1(
+        "reconciliation interval",
+        _.reconciliationInterval,
+        _.reconciliationInterval,
+      )
+
+    @Help.Summary("Get the max rate per participant")
+    @Help.Description("""Depending on the protocol version used on the domain, the value will be
+        read either from the static domain parameters or the dynamic ones.""")
+    def get_max_rate_per_participant: NonNegativeInt =
+      getParameterStaticV0DynamicV1(
+        "max rate per participant",
+        _.maxRatePerParticipant,
+        _.maxRatePerParticipant,
+      )
 
     @Help.Summary("Get the mediator deduplication timeout", FeatureFlag.Preview)
     @Help.Description(
@@ -238,17 +271,31 @@ trait DomainAdministration {
     @Help.Summary("Try to update the reconciliation interval for the domain")
     @Help.Description("""If the reconciliation interval is dynamic, update the value.
         If the reconciliation interval is not dynamic (i.e., if the domain is running
-        on protocol version lower than DEV), then the behavior depends on the `failIfStatic` flag:
-        - If true, an error is thrown.
-        - If false, nothing is done.
+        on protocol version lower than `dev`), then it will throw an error.
         """)
     def set_reconciliation_interval(
-        newReconciliationInterval: PositiveDurationRoundedSeconds
+        newReconciliationInterval: PositiveDurationSeconds
     ): Unit =
       check(FeatureFlag.Preview) {
         update_dynamic_domain_parameters_v1(
           _.copy(reconciliationInterval = newReconciliationInterval),
           "update reconciliation interval",
+        )
+      }
+
+    // TODO(#9800) Change reference to dev, remove preview
+    @Help.Summary("Try to update the max rate per participant for the domain")
+    @Help.Description("""If the max rate per participant is dynamic, update the value.
+        If the max rate per participant is not dynamic (i.e., if the domain is running
+        on protocol version lower than DEV),  then it will throw an error.
+        """)
+    def set_max_rate_per_participant(
+        maxRatePerParticipant: NonNegativeInt
+    ): Unit =
+      check(FeatureFlag.Preview) {
+        update_dynamic_domain_parameters_v1(
+          _.copy(maxRatePerParticipant = maxRatePerParticipant),
+          "update maxRatePerParticipant",
         )
       }
 
@@ -323,14 +370,13 @@ trait DomainAdministration {
       // Compute new parameters
       val oldLedgerTimeRecordTimeTolerance = oldDomainParameters.ledgerTimeRecordTimeTolerance
 
-      val minMediatorDeduplicationTimeout =
-        newLedgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2)
+      val minMediatorDeduplicationTimeout = newLedgerTimeRecordTimeTolerance * 2
 
       if (oldDomainParameters.mediatorDeduplicationTimeout < minMediatorDeduplicationTimeout) {
         val err = IncreaseOfLedgerTimeRecordTimeTolerance
           .PermanentlyInsecure(
-            newLedgerTimeRecordTimeTolerance.toDomain,
-            oldDomainParameters.mediatorDeduplicationTimeout.toDomain,
+            newLedgerTimeRecordTimeTolerance.toInternal,
+            oldDomainParameters.mediatorDeduplicationTimeout.toInternal,
           )
         val msg = CantonError.stringFromContext(err)
         consoleEnvironment.run(GenericCommandError(msg))

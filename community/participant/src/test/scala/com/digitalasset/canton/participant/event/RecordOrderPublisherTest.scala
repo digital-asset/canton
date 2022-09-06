@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{BaseTest, DefaultDamlValues, HasExecutionContext, LfPartyId}
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
@@ -106,13 +107,27 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
 
       val recover1 = PendingTransferPublish(
         0L,
-        (TransferOutUpdate(Set(alice), id.requestTimestamp, id, 0L)),
+        (TransferOutUpdate(
+          Set(alice),
+          id.requestTimestamp,
+          id,
+          0L,
+          SourceProtocolVersion(testedProtocolVersion),
+        )),
         id.requestTimestamp,
         eventLogId,
       )
 
       val recover2 = PendingEventPublish(
-        Some(TransactionUpdate(Set(alice), tse.timestamp, domain1, tse.localOffset)),
+        Some(
+          TransactionUpdate(
+            Set(alice),
+            tse.timestamp,
+            domain1,
+            tse.localOffset,
+            testedProtocolVersion,
+          )
+        ),
         tse,
         tse.timestamp,
         eventLogId,
@@ -138,7 +153,15 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
 
       val tse = timestampedEvent(domain2Ts1)
       val publishTx = PendingEventPublish(
-        Some(TransactionUpdate(Set(alice), tse.timestamp, domain2, tse.localOffset)),
+        Some(
+          TransactionUpdate(
+            Set(alice),
+            tse.timestamp,
+            domain2,
+            tse.localOffset,
+            testedProtocolVersion,
+          )
+        ),
         tse,
         tse.timestamp,
         eventLog2Id,
@@ -147,7 +170,14 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
       val publishTransferIn =
         PendingTransferPublish(
           1L,
-          TransferInUpdate(Set(alice), domain2Ts2, domain2, 1L, id),
+          TransferInUpdate(
+            Set(alice),
+            domain2Ts2,
+            domain2,
+            1L,
+            id,
+            TargetProtocolVersion(testedProtocolVersion),
+          ),
           domain2Ts2,
           eventLog2Id,
         )

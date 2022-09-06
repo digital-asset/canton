@@ -313,5 +313,6 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     ResponseAggregation(
       requestId,
       InformeeMessage(fullInformeeTree)(testedProtocolVersion),
+      testedProtocolVersion,
     )(loggerFactory)
 }

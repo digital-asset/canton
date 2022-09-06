@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages.{LocalReject, Verdict}
@@ -23,25 +24,31 @@ class VerdictTest extends AnyWordSpec with BaseTest {
       "result in an equal object" in {
         val exampleResults = Table(
           ("type", "value"),
-          ("approve", Approve),
+          ("approve", Approve(testedProtocolVersion)),
           (
             "reject",
             ParticipantReject(
-              List(
+              NonEmpty(
+                List,
                 (
                   Set(party("p1"), party("p2")),
-                  LocalReject.MalformedRejects.Payloads.Reject("some error"),
+                  LocalReject.MalformedRejects.Payloads.Reject("some error")(testedProtocolVersion),
                 ),
-                (Set(party("p3")), LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())),
-              )
+                (
+                  Set(party("p3")),
+                  LocalReject.ConsistencyRejections.LockedContracts
+                    .Reject(Seq())(testedProtocolVersion),
+                ),
+              ),
+              testedProtocolVersion,
             ),
           ),
-          ("timeout", MediatorError.Timeout.Reject()),
+          ("timeout", MediatorError.Timeout.Reject.create(testedProtocolVersion)),
         )
         forAll(exampleResults) { (resultType: String, original: Verdict) =>
           val cycled =
             Verdict.fromProtoVersioned(
-              original.toProtoVersioned(testedProtocolVersion)
+              original.toProtoVersioned
             ) match {
               case Left(err) => fail(err.toString)
               case Right(verdict) => verdict

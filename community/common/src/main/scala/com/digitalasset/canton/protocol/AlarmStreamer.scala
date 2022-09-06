@@ -12,11 +12,7 @@ import scala.concurrent.Future
   * https://engineering.da-int.net/docs/platform-architecture-handbook/arch/ledger-sync/api.html?highlight=alarm#alarms-stream
   */
 trait AlarmStreamer {
-
-  /** Stream alarm event signaling that the referred error happened
-    * @param throwable The Throwable that caused the abnormal behavior
-    */
-  def alarm(throwable: Throwable)(implicit traceContext: TraceContext): Future[Unit]
+  // TODO(i8744): remove this class
 
   def alarm(message: String)(implicit traceContext: TraceContext): Future[Unit]
 

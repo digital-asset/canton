@@ -22,6 +22,7 @@ import com.digitalasset.canton.domain.mediator.store.{
 }
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
+import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages._
@@ -184,6 +185,13 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       )
     }
 
+    lazy val alarmViewThresholdBelowMinimumThreshold: MalformedMessage.Reject =
+      MediatorError.MalformedMessage.Reject(
+        "Rejected transaction as a view has threshold below the confirmation policy's minimum threshold.",
+        v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+        testedProtocolVersion,
+      )
+
     "timestamp of mediator request is propagated" in {
       val sut = Fixture()
       val testMediatorRequest = new InformeeMessage(fullInformeeTree)(testedProtocolVersion) {
@@ -197,13 +205,16 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       }
       val requestTimestamp = CantonTimestamp.Epoch.plusSeconds(120)
       for {
-        _ <- sut.processor.processRequest(
-          RequestId(requestTimestamp),
-          0L,
-          requestTimestamp.plusSeconds(60),
-          requestTimestamp.plusSeconds(120),
-          testMediatorRequest,
-          List.empty,
+        _ <- loggerFactory.assertLogs(
+          sut.processor.processRequest(
+            RequestId(requestTimestamp),
+            0L,
+            requestTimestamp.plusSeconds(60),
+            requestTimestamp.plusSeconds(120),
+            testMediatorRequest,
+            List.empty,
+          ),
+          _.shouldBeCantonError(alarmViewThresholdBelowMinimumThreshold),
         )
 
       } yield {
@@ -262,20 +273,23 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         signedResponse(
           Set(submitter),
           view,
-          LocalApprove,
+          LocalApprove()(testedProtocolVersion),
           reqId,
         )
 
       def handleEvents(sut: ConfirmationResponseProcessor): Future[Unit] =
         for {
           response <- responseF
-          _ <- sut.processRequest(
-            reqId,
-            notSignificantCounter,
-            requestTimestamp.plusSeconds(60),
-            requestTimestamp.plusSeconds(120),
-            informeeMessage,
-            List.empty,
+          _ <- loggerFactory.assertLogs(
+            sut.processRequest(
+              reqId,
+              notSignificantCounter,
+              requestTimestamp.plusSeconds(60),
+              requestTimestamp.plusSeconds(120),
+              informeeMessage,
+              List.empty,
+            ),
+            _.shouldBeCantonError(alarmViewThresholdBelowMinimumThreshold),
           )
           _ <- sut.processResponse(
             CantonTimestamp.Epoch,
@@ -354,7 +368,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         response <- signedResponse(
           Set(submitter),
           view,
-          LocalApprove,
+          LocalApprove()(testedProtocolVersion),
           requestId,
         )
         _ <- loggerFactory.assertLogs(
@@ -364,8 +378,14 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             ts.plusSeconds(60),
             ts.plusSeconds(120),
             response,
-          ),
-          _.warningMessage should include(show"$requestId no corresponding request"),
+          ), {
+            _.shouldBeCantonError(
+              MediatorError.MalformedMessage.Reject(
+                show"Unknown request $requestId: received mediator response by $participant for view hash ${view.viewHash} for root hash ${view.rootHash}",
+                testedProtocolVersion,
+              )
+            )
+          },
         )
       } yield {
         succeed
@@ -571,9 +591,10 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
                 rootHashMessages,
               ),
               _.shouldBeCantonError(
-                MediatorError.InvalidMessage.Reject(
+                MediatorError.InvalidMessage.Reject.create(
                   s"Rejected transaction due to invalid root hash messages: $msg",
                   v0.MediatorRejection.Code.InvalidRootHashMessage,
+                  testedProtocolVersion,
                 ),
                 strict = false,
               ),
@@ -648,6 +669,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             MediatorError.MalformedMessage.Reject(
               show"The declared mediator in the MediatorRequest ($otherMediatorId) is not the mediator that received the request ($mediatorId).",
               v0.MediatorRejection.Code.WrongDeclaredMediator,
+              testedProtocolVersion,
             ),
             strict = false,
           ),
@@ -684,7 +706,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         // should record the request
         requestState <- sut.mediatorState.fetch(requestId).value.map(_.value)
         _ = {
-          val responseAggregation = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
+          val responseAggregation =
+            ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
           assert(requestState === responseAggregation)
         }
         // receiving the confirmation response
@@ -697,7 +720,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             factory.MultipleRootsAndViewNestings.view110,
           )
         )(view => {
-          signedResponse(Set(submitter), view, LocalApprove, requestId)
+          signedResponse(Set(submitter), view, LocalApprove()(testedProtocolVersion), requestId)
         })
         _ <- sequentialTraverse_(approvals)(
           sut.processor.processResponse(
@@ -712,7 +735,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         updatedState <- sut.mediatorState.fetch(requestId).value
         _ = {
           updatedState should matchPattern {
-            case Right(
+            case Some(
                   ResponseAggregation(`requestId`, `informeeMessage`, `ts1`, Right(_states))
                 ) =>
           }
@@ -741,7 +764,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             factory.MultipleRootsAndViewNestings.view10,
             factory.MultipleRootsAndViewNestings.view11,
           )
-        )(view => signedResponse(Set(signatory), view, LocalApprove, requestId))
+        )(view =>
+          signedResponse(Set(signatory), view, LocalApprove()(testedProtocolVersion), requestId)
+        )
         _ <- sequentialTraverse_(approvals)(
           sut.processor.processResponse(
             ts2,
@@ -755,8 +780,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         finalState <- sut.mediatorState.fetch(requestId).value
         _ = {
           inside(finalState) {
-            case Right(ResponseAggregation(`requestId`, `informeeMessage`, `ts2`, state)) =>
-              assert(state === Left(Approve))
+            case Some(ResponseAggregation(`requestId`, `informeeMessage`, `ts2`, state)) =>
+              assert(state === Left(Approve(testedProtocolVersion)))
           }
         }
       } yield succeed
@@ -802,7 +827,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val malformedMsg = "this is a test malformed response"
       def isMalformedWarn(participant: ParticipantId)(logEntry: LogEntry): Assertion = {
         logEntry.shouldBeCantonError(
-          LocalReject.MalformedRejects.Payloads.Reject(malformedMsg),
+          LocalReject.MalformedRejects.Payloads.Reject(malformedMsg)(testedProtocolVersion),
           Map("reportedBy" -> s"$participant"),
         )
       }
@@ -815,7 +840,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
           requestId,
           participant,
           viewHashO,
-          LocalReject.MalformedRejects.Payloads.Reject(malformedMsg),
+          LocalReject.MalformedRejects.Payloads.Reject(malformedMsg)(testedProtocolVersion),
           Some(fullInformeeTree.transactionId.toRootHash),
           Set.empty,
           factory.domainId,
@@ -880,7 +905,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
 
         finalState <- sut.mediatorState.fetch(requestId).value
         _ = inside(finalState) {
-          case Right(
+          case Some(
                 ResponseAggregation(
                   _requestId,
                   _request,
@@ -891,7 +916,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             // TODO(#5337) These are only the rejections for the first view because this view happens to be finalized first.
             reasons.length shouldEqual 2
             reasons.foreach { case (party, reject) =>
-              reject shouldBe LocalReject.MalformedRejects.Payloads.Reject(malformedMsg)
+              reject shouldBe LocalReject.MalformedRejects.Payloads.Reject(malformedMsg)(
+                testedProtocolVersion
+              )
               party should (contain(submitter) or contain(signatory))
             }
         }
@@ -933,7 +960,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         response <- signedResponse(
           Set(submitter),
           view,
-          LocalApprove,
+          LocalApprove()(testedProtocolVersion),
           requestId,
         )
         _ <- loggerFactory.assertLogs(

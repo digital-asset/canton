@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
@@ -36,7 +36,7 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Scalable service to check the received Stakeholder Trees and Confirmation Responses, derive a verdict and post
   * result messages to stakeholders.
   */
-class ConfirmationResponseProcessor(
+private[mediator] class ConfirmationResponseProcessor(
     domainId: DomainId,
     private val mediatorId: MediatorId,
     verdictSender: VerdictSender,
@@ -116,13 +116,12 @@ class ConfirmationResponseProcessor(
         .debug(s"Request ${requestId}: Timeout in state ${responseAggregation.state} at $timestamp")
 
       val timeout = responseAggregation.timeout(version = timestamp)
-      mediatorState.replace(responseAggregation, timeout).value.flatMap {
-        case Left(e) =>
-          logger.error(e.toString)
-          Future.unit
-        case Right(()) =>
+      mediatorState
+        .replace(responseAggregation, timeout)
+        .semiflatMap { _ =>
           sendResultIfDone(timeout, decisionTime)
-      }
+        }
+        .getOrElse(())
     }
   }
 
@@ -149,7 +148,7 @@ class ConfirmationResponseProcessor(
       }
 
       def processNormally(): Future[Unit] = {
-        val aggregation = ResponseAggregation(requestId, request)(loggerFactory)
+        val aggregation = ResponseAggregation(requestId, request, protocolVersion)(loggerFactory)
         logger.debug(
           show"$requestId: registered informee message. Initial state: ${aggregation.state.showMerged}"
         )
@@ -171,7 +170,7 @@ class ConfirmationResponseProcessor(
                   MediatorError.InvalidMessage.Reject(
                     s"Rejected transaction due to invalid root hash messages: $rejectionReason",
                     v0.MediatorRejection.Code.InvalidRootHashMessage,
-                  )
+                  )(Verdict.protocolVersionRepresentativeFor(protocolVersion))
                 )
               case Right(_) =>
                 val declaredMediator = request.mediatorId
@@ -183,13 +182,13 @@ class ConfirmationResponseProcessor(
                     MediatorError.MalformedMessage.Reject(
                       show"The declared mediator in the MediatorRequest ($declaredMediator) is not the mediator that received the request ($mediatorId).",
                       v0.MediatorRejection.Code.WrongDeclaredMediator,
+                      protocolVersion,
                     )
                   )
                 }
             }
 
           case false =>
-            // TODO(M40) Decide whether we want the mediator to nevertheless analyze the message for maliciousness
             logger.info(show"Ignoring mediator request $requestId because I'm not active.")
             Future.unit
         }
@@ -352,42 +351,57 @@ class ConfirmationResponseProcessor(
       val bytes = response.getCryptographicEvidence
       val hash = crypto.pureCrypto.digest(response.hashPurpose, bytes)
       (for {
-        snapshot <- EitherT.right(crypto.awaitSnapshot(response.requestId.unwrap))
+        snapshot <- OptionT.liftF(crypto.awaitSnapshot(response.requestId.unwrap))
         _ <- snapshot
           .verifySignature(hash, response.sender, signedResponse.signature)
-          .leftMap(err => {
-            alarmer
-              .alarm(
-                s"$domainId (requestId: $ts): invalid signature from ${response.sender} with $err"
+          .leftMap(err =>
+            MediatorError.MalformedMessage
+              .Reject(
+                s"$domainId (requestId: $ts): invalid signature from ${response.sender} with $err",
+                protocolVersion,
               )
-              .discard
-          })
-        _ <- EitherT.cond[Future](
-          signedResponse.domainId == domainId,
-          (),
-          logger.warn(
-            s"Request ${response.requestId}, sender ${response.sender}: Discarding mediator response for wrong domain ${signedResponse.domainId}"
-          ),
-        )
-        _ <- EitherT.cond[Future](
-          ts <= participantResponseDeadline,
-          (),
-          logger.warn(
-            s"Response ${ts} is too late as request ${response.requestId} has already exceeded the participant response deadline [$participantResponseDeadline]"
-          ),
-        )
-        responseAggregation <- mediatorState.fetch(response.requestId).leftMap { _ =>
+              .report()
+          )
+          .toOption
+        _ <-
+          if (signedResponse.domainId == domainId) OptionT.some[Future](())
+          else {
+            MediatorError.MalformedMessage
+              .Reject(
+                s"Request ${response.requestId}, sender ${response.sender}: Discarding mediator response for wrong domain ${signedResponse.domainId}",
+                protocolVersion,
+              )
+              .report()
+            OptionT.none[Future, Unit]
+          }
+
+        _ <-
+          if (ts <= participantResponseDeadline) OptionT.some[Future](())
+          else {
+            logger.warn(
+              s"Response ${ts} is too late as request ${response.requestId} has already exceeded the participant response deadline [$participantResponseDeadline]"
+            )
+            OptionT.none[Future, Unit]
+          }
+
+        responseAggregation <- mediatorState.fetch(response.requestId).orElse {
           //we assume that informee message has already been persisted in mediatorStorage before any participant responds
-          logger.warn(s"${response.requestId} no corresponding request")
+          ResponseAggregation
+            .alarmMediatorRequestNotFound(
+              response.requestId,
+              response.sender,
+              response.viewHash,
+              response.rootHash,
+              protocolVersion,
+            )
+          OptionT.none
         }
-        snapshot <- EitherT.right(crypto.ips.awaitSnapshot(response.requestId.unwrap))
-        nextResponseAggregation <- responseAggregation
-          .progress(ts, response, snapshot)
-          .leftMap(_.alarm(response.sender, alarmer))
-        _unit <- mediatorState
-          .replace(responseAggregation, nextResponseAggregation)
-          .leftMap(e => logger.error(e.toString))
-        _ <- EitherT.right[Unit](sendResultIfDone(nextResponseAggregation, decisionTime))
+
+        snapshot <- OptionT.liftF(crypto.ips.awaitSnapshot(response.requestId.unwrap))
+        nextResponseAggregation <- responseAggregation.progress(ts, response, snapshot)
+        _unit <- mediatorState.replace(responseAggregation, nextResponseAggregation)
+
+        _ <- OptionT.liftF(sendResultIfDone(nextResponseAggregation, decisionTime))
       } yield ()).value.map(_ => ())
     }
 

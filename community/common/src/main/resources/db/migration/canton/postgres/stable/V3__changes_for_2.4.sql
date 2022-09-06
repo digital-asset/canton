@@ -1,7 +1,7 @@
 -- Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
-ALTER TABLE transfers ADD source_protocol_version smallint DEFAULT 2 NOT NULL;
+ALTER TABLE transfers ADD source_protocol_version integer DEFAULT 2 NOT NULL;
 
 -- The column latest_topology_client_ts denotes the sequencing timestamp of an event
 -- addressed to the sequencer's topology client such that
@@ -22,7 +22,7 @@ create table mediator_deduplication_store (
 create index idx_mediator_deduplication_store_expire_after on mediator_deduplication_store(expire_after, mediator_id);
 
 -- Previous topology transactions belong to PV=2
-alter table topology_transactions add representative_protocol_version smallint default 2 not null;
+alter table topology_transactions add representative_protocol_version integer default 2 not null;
 
 -- Drop the existing unnamed unique constraint (conventional constraint name truncated to 63 bytes)
 alter table topology_transactions drop constraint topology_transactions_store_id_transaction_type_namespace_i_key;

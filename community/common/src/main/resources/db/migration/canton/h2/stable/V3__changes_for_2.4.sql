@@ -1,7 +1,7 @@
 -- Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 
-ALTER TABLE transfers ADD source_protocol_version smallint DEFAULT 2 NOT NULL;
+ALTER TABLE transfers ADD source_protocol_version integer DEFAULT 2 NOT NULL;
 
 -- The column latest_topology_client_ts denotes the sequencing timestamp of an event
 -- addressed to the sequencer's topology client such that
@@ -57,7 +57,7 @@ create table topology_transactions (
     ignore_reason varchar null,
     sequenced bigint null,
     -- the representative protocol version that was used to serialize the topology transaction
-    representative_protocol_version smallint not null,
+    representative_protocol_version integer not null,
     -- index used for idempotency during crash recovery
     unique (store_id, transaction_type, namespace, identifier, element_id, valid_from, operation, representative_protocol_version)
 );

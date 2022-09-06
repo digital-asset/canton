@@ -59,7 +59,7 @@ class DbInFlightSubmissionStore(
     storage.metrics.loadGaugeM("in-flight-submission-store")
 
   private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
-    SubmissionTrackingData.getVersionedSetParameter(ProtocolVersion.v2_0_0_Todo_i8793)
+    SubmissionTrackingData.getVersionedSetParameter(ProtocolVersion.v2Todo_i8793)
 
   override def lookup(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
@@ -300,7 +300,7 @@ object DbInFlightSubmissionStore {
 
     override def kind: String = "in-flight submission"
 
-    private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+    private val protocolVersion = ProtocolVersion.v2Todo_i8793
     private implicit val setParameterTraceContext: SetParameter[TraceContext] =
       TraceContext.getVersionedSetParameter(protocolVersion)
     private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =

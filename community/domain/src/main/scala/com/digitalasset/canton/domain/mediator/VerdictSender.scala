@@ -40,7 +40,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait VerdictSender {
+private[mediator] trait VerdictSender {
   def sendResult(
       requestId: RequestId,
       request: MediatorRequest,
@@ -55,7 +55,7 @@ trait VerdictSender {
   )(implicit traceContext: TraceContext): Future[Unit]
 }
 
-object VerdictSender {
+private[mediator] object VerdictSender {
   def apply(
       sequencerSend: SequencerClientSend,
       crypto: DomainSyncCryptoClient,
@@ -65,7 +65,7 @@ object VerdictSender {
     new DefaultVerdictSender(sequencerSend, crypto, protocolVersion, loggerFactory)
 }
 
-class DefaultVerdictSender(
+private[mediator] class DefaultVerdictSender(
     sequencerSend: SequencerClientSend,
     crypto: DomainSyncCryptoClient,
     protocolVersion: ProtocolVersion,
@@ -88,7 +88,7 @@ class DefaultVerdictSender(
 
     // we don't want to halt the mediator if an individual send fails or if we're unable to create a batch, so just log
     resultET
-      .leftMap(err => logger.warn(s"Failed to send verdict for $requestId: $err"))
+      .leftMap(err => logger.warn(s"Failed to create or send result message for $requestId: $err"))
       .value
       .map(_.merge)
   }
@@ -106,15 +106,15 @@ class DefaultVerdictSender(
         reason match {
           case _: DeliverErrorReason.BatchRefused =>
             logger.warn(
-              s"Sequencing result was refused for request ${requestId.unwrap}: ${reason.toString}"
+              s"Result message was refused for $requestId: $reason"
             )
           case _ =>
             logger.error(
-              s"Failed to sequence result for request ${requestId.unwrap}: ${reason.toString}"
+              s"Failed to send result message for $requestId: $reason"
             )
         }
       case _: SendResult.Timeout =>
-        logger.warn("Sequencing result timed out")
+        logger.warn("Sequencing result message timed out.")
     }
 
     // the result of send request will be logged within the returned future however any error is effectively
@@ -186,7 +186,7 @@ class DefaultVerdictSender(
           MediatorError.InvalidMessage.Reject(
             show"Rejected transaction due to informees not being hosted on an active participant: $informeesNoParticipant",
             v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
-          )
+          )(verdict.representativeProtocolVersion)
         } else verdict
       }
       envelopes <- informeesMap.toList

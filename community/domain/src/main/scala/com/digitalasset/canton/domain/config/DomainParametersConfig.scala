@@ -7,8 +7,10 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
 
 /** Configuration of domain parameters that all members connecting to a domain must adhere to.
@@ -55,8 +57,11 @@ final case class DomainParametersConfig(
     * Sets the required crypto schemes based on the provided crypto config if they are unset in the config.
     */
   def toStaticDomainParameters(
-      cryptoConfig: CryptoConfig
-  ): Either[String, StaticDomainParameters] = {
+      cryptoConfig: CryptoConfig,
+      logger: TracedLogger,
+  )(implicit traceContext: TraceContext): Either[String, StaticDomainParameters] = {
+
+    warnOnNonDefaultValues(logger)
 
     def selectSchemes[S](
         configuredRequired: Option[NonEmpty[Set[S]]],
@@ -108,5 +113,34 @@ final case class DomainParametersConfig(
         protocolVersion = protocolVersion.unwrap,
       )
     }
+  }
+
+  /** We emit a warning for the domain parameters that are dynamic
+    * for which we ignore the configured value in the configuration file.
+    */
+  private def warnOnNonDefaultValues(
+      logger: TracedLogger
+  )(implicit traceContext: TraceContext): Unit = {
+    val currentPV = protocolVersion.version
+    // TODO(#9800) Change references to protocol version 4
+    if (currentPV >= ProtocolVersion.dev) {
+      if (reconciliationInterval != StaticDomainParameters.defaultReconciliationInterval) {
+        logger.warn(
+          s"""|Starting from protocol version ${ProtocolVersion.dev}, reconciliation-interval is a dynamic parameter that cannot be configured within the configuration file.
+              |The configured value "reconciliation-interval = $reconciliationInterval" is ignored. The default value is ${StaticDomainParameters.defaultReconciliationInterval}.
+              |Please use the admin api to set this parameter: domain-name.service.set_reconciliation_interval($reconciliationInterval)
+              |""".stripMargin
+        )
+      }
+      if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant) {
+        logger.warn(
+          s"""|Starting from protocol version ${ProtocolVersion.dev}, max-rate-per-participant is a dynamic parameter that cannot be configured within the configuration file.
+                |The configured value "max-rate-per-participant = $maxRatePerParticipant" is ignored. The default value is ${StaticDomainParameters.defaultMaxRatePerParticipant}.
+                |Please use the admin api to set this parameter: domain-name.service.set_max_rate_per_participant($maxRatePerParticipant)
+                |""".stripMargin
+        )
+      }
+    }
+
   }
 }

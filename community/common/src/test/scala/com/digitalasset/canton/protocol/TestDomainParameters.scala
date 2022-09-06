@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
@@ -43,5 +44,14 @@ object TestDomainParameters {
     DynamicDomainParameters.initialValues(
       topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
       BaseTest.testedProtocolVersion,
+    )
+
+  def defaultDynamic(
+      maxRatePerParticipant: NonNegativeInt
+  ): DynamicDomainParameters =
+    DynamicDomainParameters.initialValues(
+      topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
+      protocolVersion = BaseTest.testedProtocolVersion,
+      maxRatePerParticipant = maxRatePerParticipant,
     )
 }

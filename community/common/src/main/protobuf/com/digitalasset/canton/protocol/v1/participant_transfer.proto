@@ -18,7 +18,7 @@ message TransferOutCommonData {
     repeated string admin_parties = 4;
     string uuid = 5;
     string source_mediator = 6;
-    string source_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+    int32 source_protocol_version = 7; // added in v1
 }
 
 message TransferOutView {
@@ -27,7 +27,7 @@ message TransferOutView {
     string contract_id = 3;
     string target_domain = 4;
     com.digitalasset.canton.time.v0.TimeProof target_time_proof = 5;
-    string target_protocol_version = 6; // added in v1 // TODO(#9312) change to int
+    int32 target_protocol_version = 6; // added in v1
 }
 
 message TransferInCommonData {
@@ -36,7 +36,7 @@ message TransferInCommonData {
     repeated string stakeholders = 3;
     string uuid = 4;
     string target_mediator = 6;
-    string target_protocol_version = 7; // added in v1 // TODO(#9312) change to int
+    int32 target_protocol_version = 7; // added in v1
 }
 
 message TransferInView {
@@ -45,5 +45,5 @@ message TransferInView {
     v0.SerializableContract contract = 3;
     v0.SignedContent transfer_out_result_event = 4;
     bytes creating_transaction_id = 5;
-    string source_protocol_version = 6; // added in v1 // TODO(#9312) change to int
+    int32 source_protocol_version = 6; // added in v1
 }

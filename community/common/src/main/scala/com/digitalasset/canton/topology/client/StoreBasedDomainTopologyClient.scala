@@ -292,7 +292,7 @@ class StoreBasedDomainTopologyClient(
   )(implicit traceContext: TraceContext): StoreBasedTopologySnapshot = {
     ErrorUtil.requireArgument(
       timestamp <= topologyKnownUntilTimestamp,
-      s"requested snapshot=$timestamp, topology known until =$topologyKnownUntilTimestamp",
+      s"requested snapshot=$timestamp, topology known until=$topologyKnownUntilTimestamp",
     )
     new StoreBasedTopologySnapshot(
       timestamp,

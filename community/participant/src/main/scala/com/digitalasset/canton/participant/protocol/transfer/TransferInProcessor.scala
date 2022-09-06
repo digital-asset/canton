@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.messages.TransferInResult
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.version.TargetProtocolVersion
+import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 
 import scala.concurrent.ExecutionContext
 

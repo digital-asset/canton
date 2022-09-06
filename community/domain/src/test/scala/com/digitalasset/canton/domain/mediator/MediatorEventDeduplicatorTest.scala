@@ -51,6 +51,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       verdictSender,
       _ => delayed(deduplicationTimeout),
       _ => delayed(decisionTime),
+      testedProtocolVersion,
       loggerFactory,
     )
     (deduplicator, verdictSender, store)
@@ -130,6 +131,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
         MediatorError.MalformedMessage.Reject(
           s"The request uuid (${request.requestUuid}) must not be used until $expireAfter.",
           v0.MediatorRejection.Code.NonUniqueRequestUuid,
+          testedProtocolVersion,
         )
       ),
       None,
@@ -379,6 +381,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
       verdictSender,
       _ => Future.successful(deduplicationTimeout),
       _ => Future.successful(decisionTime),
+      testedProtocolVersion,
       loggerFactory,
     )
   }

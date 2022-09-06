@@ -7,6 +7,7 @@ import akka.NotUsed
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton._
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
@@ -31,7 +32,12 @@ import com.digitalasset.canton.protocol.messages.{
   ProtocolMessageV0,
   ProtocolMessageV1,
 }
-import com.digitalasset.canton.protocol.{v0 => protocolV0, v1 => protocolV1}
+import com.digitalasset.canton.protocol.{
+  DomainParametersLookup,
+  TestDomainParameters,
+  v0 => protocolV0,
+  v1 => protocolV1,
+}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
@@ -44,6 +50,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
 import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.version.{
@@ -79,6 +86,24 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val clock = new SimClock(loggerFactory = loggerFactory)
   private val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
   def timeouts = DefaultProcessingTimeouts.testing
+  private val topologyClient = mock[DomainTopologyClient]
+  private val mockTopologySnapshot = mock[TopologySnapshot]
+  when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
+    .thenReturn(mockTopologySnapshot)
+  when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
+    .thenReturn(
+      Future.successful(
+        TestDomainParameters.defaultDynamic(maxRatePerParticipant = NonNegativeInt.tryCreate(100))
+      )
+    )
+
+  private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
+    DomainParametersLookup.forMaxRatePerParticipant(
+      BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant = 100),
+      topologyClient,
+      FutureSupervisor.Noop,
+      loggerFactory,
+    )
   private val service =
     new GrpcSequencerService(
       sequencer,
@@ -98,7 +123,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         loggerFactory,
       ),
       sequencerSubscriptionFactory,
-      NonNegativeInt.tryCreate(100),
+      maxRatePerParticipantLookup,
       NonNegativeInt.tryCreate(10000000),
       timeouts,
     )
@@ -177,7 +202,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         LoggingConfig(),
         loggerFactory,
         ProtocolVersion.supportedProtocolsParticipant(
-          includeDevelopmentVersions = BaseTest.isTestedProtocolVersionDev
+          includeDevelopmentVersions = BaseTest.testedProtocolVersion.isDev
         ),
         Some(BaseTest.testedProtocolVersion),
       ).create(

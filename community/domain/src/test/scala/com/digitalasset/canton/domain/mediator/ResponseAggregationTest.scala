@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
@@ -86,7 +87,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       )
 
     describe("under the Signatory policy") {
-      def testReject() = LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())
+      def testReject() =
+        LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())(testedProtocolVersion)
       val fullInformeeTree =
         FullInformeeTree(
           GenTransactionTree(hashOps)(
@@ -102,7 +104,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       val someOtherRootHash = Some(RootHash(TestHash.digest(12345)))
 
       val topologySnapshot: TopologySnapshot = mock[TopologySnapshot]
-      val sut = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
+      val sut =
+        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
 
       it("should have initially all pending confirming parties listed") {
         sut.state shouldBe Right(
@@ -132,20 +135,22 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           )
         )
 
-        val sut = ResponseAggregation(
-          requestId,
-          InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion),
-        )(
-          loggerFactory
+        val alarm = MediatorError.MalformedMessage.Reject(
+          s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0",
+          v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+          testedProtocolVersion,
         )
 
-        sut.state shouldBe Left(
-          MediatorError.MalformedMessage.Reject(
-            s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0",
-            v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-          )
+        val sut = loggerFactory.assertLogs(
+          ResponseAggregation(
+            requestId,
+            InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion),
+            testedProtocolVersion,
+          )(loggerFactory),
+          _.shouldBeCantonError(alarm),
         )
 
+        sut.state shouldBe Left(alarm)
       }
 
       it("should reject responses with the wrong root hash") {
@@ -153,20 +158,25 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           requestId,
           solo,
           Some(view1.viewHash),
-          LocalApprove,
+          LocalApprove()(testedProtocolVersion),
           someOtherRootHash,
           Set(alice.party),
           domainId,
           testedProtocolVersion,
         )
-        val result =
+        val result = loggerFactory.assertLogs(
           sut
             .progress(requestId.unwrap.plusSeconds(1), responseWithWrongRootHash, topologySnapshot)
             .value
-            .futureValue
-        result shouldBe Left(
-          MediatorRequestNotFound(requestId, Some(view1.viewHash), someOtherRootHash)
+            .futureValue,
+          _.shouldBeCantonError(
+            MediatorError.MalformedMessage.Reject(
+              s"Unknown request $requestId: received mediator response by $solo for view hash ${view1.viewHash} for root hash ${view1.rootHash}",
+              testedProtocolVersion,
+            )
+          ),
         )
+        result shouldBe None
       }
 
       when(topologySnapshot.canConfirm(eqTo(solo), any[LfPartyId], any[TrustLevel]))
@@ -187,7 +197,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId,
               informeeMessage,
               changeTs1,
-              ParticipantReject(List(Set(alice.party) -> testReject())),
+              ParticipantReject(
+                NonEmpty(List, Set(alice.party) -> testReject()),
+                testedProtocolVersion,
+              ),
+              testedProtocolVersion,
               TraceContext.empty,
             )(loggerFactory)
           }
@@ -221,7 +235,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               )("Alice's second rejection")
             val rejection =
               ParticipantReject(
-                List(Set(alice.party) -> testReject(), Set(bob.party) -> testReject())
+                NonEmpty(List, Set(alice.party) -> testReject(), Set(bob.party) -> testReject()),
+                testedProtocolVersion,
               )
             it("rejects the transaction") {
               rejected2 shouldBe ResponseAggregation(
@@ -229,6 +244,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 informeeMessage,
                 changeTs2,
                 rejection,
+                testedProtocolVersion,
                 TraceContext.empty,
               )(loggerFactory)
             }
@@ -239,17 +255,22 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               lazy val rejected3 =
                 rejected2.progress(changeTs3, response3, topologySnapshot).value.futureValue
               it("should not rejection after finalization") {
-                rejected3 shouldBe Left(MediatorRequestAlreadyFinalized(requestId, rejection))
+                rejected3 shouldBe None
               }
             }
 
             describe("further approval") {
               val changeTs3 = changeTs2.plusSeconds(1)
-              val response3 = mkResponse(view1.viewHash, LocalApprove, Set(alice.party), rootHash)
+              val response3 = mkResponse(
+                view1.viewHash,
+                LocalApprove()(testedProtocolVersion),
+                Set(alice.party),
+                rootHash,
+              )
               lazy val rejected3 =
                 rejected2.progress(changeTs3, response3, topologySnapshot).value.futureValue
               it("should not allow approval after finalization") {
-                rejected3 shouldBe Left(MediatorRequestAlreadyFinalized(requestId, rejection))
+                rejected3 shouldBe None
               }
             }
           }
@@ -258,7 +279,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       describe("approval") {
         lazy val changeTs = requestId.unwrap.plusSeconds(1)
-        val response1 = mkResponse(view1.viewHash, LocalApprove, Set(bob.party), rootHash)
+        val response1 = mkResponse(
+          view1.viewHash,
+          LocalApprove()(testedProtocolVersion),
+          Set(bob.party),
+          rootHash,
+        )
         lazy val result =
           valueOrFail(sut.progress(changeTs, response1, topologySnapshot).value.futureValue)(
             "Bob's approval"
@@ -274,12 +300,22 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             )
         }
         describe("if approvals meet the threshold") {
-          val response2 = mkResponse(view1.viewHash, LocalApprove, Set(alice.party), rootHash)
+          val response2 = mkResponse(
+            view1.viewHash,
+            LocalApprove()(testedProtocolVersion),
+            Set(alice.party),
+            rootHash,
+          )
           lazy val step2 =
             valueOrFail(result.progress(changeTs, response2, topologySnapshot).value.futureValue)(
               "Alice's approval"
             )
-          val response3 = mkResponse(view2.viewHash, LocalApprove, Set(bob.party), rootHash)
+          val response3 = mkResponse(
+            view2.viewHash,
+            LocalApprove()(testedProtocolVersion),
+            Set(bob.party),
+            rootHash,
+          )
           lazy val step3 =
             valueOrFail(step2.progress(changeTs, response3, topologySnapshot).value.futureValue)(
               "Bob's approval for view 2"
@@ -289,7 +325,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId,
               informeeMessage,
               changeTs,
-              Verdict.Approve,
+              Verdict.Approve(testedProtocolVersion),
+              testedProtocolVersion,
               TraceContext.empty,
             )(loggerFactory)
           }
@@ -298,7 +335,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             val response4 =
               mkResponse(
                 view1.viewHash,
-                LocalReject.MalformedRejects.Payloads.Reject("test4"),
+                LocalReject.MalformedRejects.Payloads.Reject("test4")(testedProtocolVersion),
                 Set.empty,
                 rootHash,
               )
@@ -308,19 +345,24 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 .value
                 .futureValue
             it("should not allow repeated rejection") {
-              result shouldBe Left(MediatorRequestAlreadyFinalized(requestId, Verdict.Approve))
+              result shouldBe None
             }
           }
 
           describe("further redundant approval") {
-            val response4 = mkResponse(view1.viewHash, LocalApprove, Set(alice.party), rootHash)
+            val response4 = mkResponse(
+              view1.viewHash,
+              LocalApprove()(testedProtocolVersion),
+              Set(alice.party),
+              rootHash,
+            )
             lazy val result =
               step3
                 .progress(requestId.unwrap.plusSeconds(2), response4, topologySnapshot)
                 .value
                 .futureValue
             it("should not allow repeated rejection") {
-              result shouldBe Left(MediatorRequestAlreadyFinalized(requestId, Verdict.Approve))
+              result shouldBe None
             }
           }
         }
@@ -363,9 +405,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       when(topologySnapshot.canConfirm(eqTo(solo), eqTo(alice.party), any[TrustLevel]))
         .thenReturn(Future.successful(false))
 
-      val sut = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
+      val sut =
+        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
       lazy val changeTs = requestId.unwrap.plusSeconds(1)
-      def testReject(reason: String) = LocalReject.MalformedRejects.Payloads.Reject(reason)
+      def testReject(reason: String) =
+        LocalReject.MalformedRejects.Payloads.Reject(reason)(testedProtocolVersion)
 
       describe("for a single view") {
         it("should update the pending confirming parties set for all hosted parties") {
@@ -464,7 +508,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       when(topologySnapshotVip.canConfirm(eqTo(nonVip), any[LfPartyId], eqTo(TrustLevel.Ordinary)))
         .thenReturn(Future.successful(true))
 
-      val sut = ResponseAggregation(requestId, informeeMessage)(loggerFactory)
+      val sut =
+        ResponseAggregation(requestId, informeeMessage, testedProtocolVersion)(loggerFactory)
       val initialState =
         Map(
           view1.viewHash -> ViewState(Set(alice, bob), 3, Nil),
@@ -477,24 +522,30 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       it("should reject non-VIP responses") {
         val response =
-          mkResponse(view1.viewHash, LocalApprove, Set(alice.party, bob.party), rootHash)
-        val result =
-          leftOrFail(
-            sut
-              .progress(requestId.unwrap.plusSeconds(1), response, topologySnapshotVip)
-              .value
-              .futureValue
-          )("solo confirms without VIP trust level for bob")
-        result shouldBe UnauthorizedMediatorResponse(
-          requestId,
-          view1.viewHash,
-          solo,
-          Set(bob.party),
+          mkResponse(
+            view1.viewHash,
+            LocalApprove()(testedProtocolVersion),
+            Set(alice.party, bob.party),
+            rootHash,
+          )
+
+        loggerFactory.assertLogs(
+          sut
+            .progress(requestId.unwrap.plusSeconds(1), response, topologySnapshotVip)
+            .value
+            .futureValue shouldBe None,
+          _.shouldBeCantonError(
+            MediatorError.MalformedMessage.Reject(
+              s"Request $requestId: unauthorized mediator response for view ${view1.viewHash} by $solo on behalf of ${Set(bob.party)}",
+              testedProtocolVersion,
+            )
+          ),
         )
       }
 
       it("should ignore malformed non-VIP responses") {
-        val reject = LocalReject.MalformedRejects.Payloads.Reject("malformed request")
+        val reject =
+          LocalReject.MalformedRejects.Payloads.Reject("malformed request")(testedProtocolVersion)
         val response =
           MediatorResponse.tryCreate(
             requestId,
@@ -523,7 +574,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       it("should accept VIP responses") {
         val changeTs = requestId.unwrap.plusSeconds(1)
-        val response = mkResponse(view1.viewHash, LocalApprove, Set(alice.party), rootHash)
+        val response = mkResponse(
+          view1.viewHash,
+          LocalApprove()(testedProtocolVersion),
+          Set(alice.party),
+          rootHash,
+        )
         val result = valueOrFail(
           sut.progress(changeTs, response, topologySnapshotVip).value.futureValue
         )("solo confirms with VIP trust level for alice")

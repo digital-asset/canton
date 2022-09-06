@@ -34,7 +34,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * All mediator request related events that can be processed concurrently grouped by requestId.
   */
-case class MediatorEventStage(
+private[mediator] case class MediatorEventStage(
     requests: NonEmpty[Map[RequestId, NonEmpty[Seq[Traced[MediatorEvent]]]]]
 ) {
   def mergeNewEvents(newEvents: MediatorEventStage): MediatorEventStage = {
@@ -51,7 +51,7 @@ case class MediatorEventStage(
   }
 }
 
-object MediatorEventStage {
+private[mediator] object MediatorEventStage {
 
   def apply(
       events: NonEmpty[Seq[MediatorEvent]]
@@ -84,7 +84,7 @@ object MediatorEventStage {
   * Crashes can occur at any point during this processing (or even afterwards as it's the persistence in the sequencer
   * client that would move us to following events). Processing should be effectively idempotent to handle this.
   */
-class MediatorEventsProcessor(
+private[mediator] class MediatorEventsProcessor(
     state: MediatorState,
     crypto: DomainSyncCryptoClient,
     identityClientEventHandler: UnsignedProtocolEventHandler,
@@ -316,7 +316,7 @@ class MediatorEventsProcessor(
   }
 }
 
-object MediatorEventsProcessor {
+private[mediator] object MediatorEventsProcessor {
   def apply(
       state: MediatorState,
       crypto: DomainSyncCryptoClient,

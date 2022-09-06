@@ -297,13 +297,23 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   val requestId = RequestId(CantonTimestamp.Epoch)
   val testMediatorResult =
     SignedProtocolMessage(
-      TestRegularMediatorResult(TestViewType, domainId, Verdict.Approve, requestId),
+      TestRegularMediatorResult(
+        TestViewType,
+        domainId,
+        Verdict.Approve(testedProtocolVersion),
+        requestId,
+      ),
       dummySignature,
       testedProtocolVersion,
     )
   val otherTestMediatorResult =
     SignedProtocolMessage(
-      TestRegularMediatorResult(OtherTestViewType, domainId, Verdict.Approve, requestId),
+      TestRegularMediatorResult(
+        OtherTestViewType,
+        domainId,
+        Verdict.Approve(testedProtocolVersion),
+        requestId,
+      ),
       dummySignature,
       testedProtocolVersion,
     )
@@ -358,7 +368,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
     val commitment = SignedProtocolMessage(rawCommitment, dummySignature, testedProtocolVersion)
 
-    val reject = MediatorError.MalformedMessage.Reject("")
+    val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
     val malformedMediatorRequestResult =
       SignedProtocolMessage(
         MalformedMediatorRequestResult(
@@ -682,7 +692,12 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
       val sut = mk(initRc = -11L)
       val unknownTestMediatorResult =
         SignedProtocolMessage(
-          TestRegularMediatorResult(UnknownTestViewType, domainId, Verdict.Approve, requestId),
+          TestRegularMediatorResult(
+            UnknownTestViewType,
+            domainId,
+            Verdict.Approve(testedProtocolVersion),
+            requestId,
+          ),
           dummySignature,
           testedProtocolVersion,
         )
@@ -1077,7 +1092,8 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
       "malformed mediator requests be sent to the right processor" in {
         def malformed(viewType: ViewType, processor: ProcessorOfFixture): Future[Assertion] = {
-          val reject = MediatorError.MalformedMessage.Reject("")
+          val reject = MediatorError.MalformedMessage.Reject("", testedProtocolVersion)
+
           val result =
             SignedProtocolMessage(
               MalformedMediatorRequestResult(
@@ -1207,7 +1223,7 @@ private[protocol] object MessageDispatcherTest {
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
       ProtobufVersion(0) -> VersionedProtoConverter(
-        ProtocolVersion.v2_0_0,
+        ProtocolVersion.v2,
         (),
         _ => throw new NotImplementedError("Serialization is not implemented"),
       )

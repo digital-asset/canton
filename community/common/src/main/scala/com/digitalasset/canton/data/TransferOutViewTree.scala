@@ -16,6 +16,7 @@ import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedM
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.{EitherUtil, NoCopy}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWithContextCompanion,
@@ -25,8 +26,6 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -73,7 +72,7 @@ object TransferOutViewTree
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     )
@@ -180,13 +179,13 @@ object TransferOutCommonData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TransferOutCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -263,7 +262,7 @@ object TransferOutCommonData
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       adminParties <- adminPartiesP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion = ProtocolVersion(protocolVersionP)
     } yield new TransferOutCommonData(
       salt,
       sourceDomain,
@@ -341,13 +340,13 @@ object TransferOutView
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TransferOutView)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -420,9 +419,7 @@ object TransferOutView
       contractId <- LfContractId.fromProtoPrimitive(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
 
-      targetProtocolVersion <- ProtocolVersion
-        .fromProtoPrimitive(targetProtocolVersionP)
-        .map(TargetProtocolVersion(_))
+      targetProtocolVersion = TargetProtocolVersion(ProtocolVersion(targetProtocolVersionP))
 
       targetTimeProof <- ProtoConverter
         .required("targetTimeProof", targetTimeProofP)

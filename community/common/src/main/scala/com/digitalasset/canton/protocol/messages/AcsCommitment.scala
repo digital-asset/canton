@@ -167,7 +167,7 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -178,14 +178,6 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
     DbStorage.Implicits.getResultByteString
   implicit val setCommitmentType: SetParameter[CommitmentType] =
     DbStorage.Implicits.setParameterByteString
-
-  sealed trait AcsCommitmentError
-
-  case class IllegalCommitmentPeriod(after: CantonTimestamp, beforeAndAt: CantonTimestamp)
-      extends AcsCommitmentError {
-    override val toString: String =
-      s"Illegal commitment: the after timestamp $after must precede the beforeAndAt timestamp $beforeAndAt"
-  }
 
   def commitmentTypeToProto(commitment: CommitmentType): ByteString = commitment
   def commitmentTypeFromByteString(bytes: ByteString): CommitmentType = bytes

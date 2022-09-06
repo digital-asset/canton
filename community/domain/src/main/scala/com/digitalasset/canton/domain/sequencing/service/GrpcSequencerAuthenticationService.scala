@@ -138,7 +138,7 @@ class GrpcSequencerAuthenticationService(
           { case (nonce, fingerprints) =>
             Challenge.Response.Value.Success(
               Challenge.Success(
-                protocolVersion.fullVersion,
+                protocolVersion.toProtoPrimitiveS,
                 nonce.toProtoPrimitive,
                 fingerprints.map(_.unwrap).toList,
               )

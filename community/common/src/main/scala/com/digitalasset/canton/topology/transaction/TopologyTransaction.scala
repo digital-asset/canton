@@ -240,13 +240,13 @@ object TopologyTransaction
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(#9694): Move topology transaction changes to PV4
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TopologyTransaction)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

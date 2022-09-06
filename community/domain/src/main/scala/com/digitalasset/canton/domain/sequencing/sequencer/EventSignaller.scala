@@ -54,5 +54,7 @@ trait EventSignaller extends AutoCloseable {
   def notifyOfLocalWrite(notification: WriteNotification)(implicit
       traceContext: TraceContext
   ): Future[Unit]
-  def readSignalsForMember(member: Member, memberId: SequencerMemberId): Source[ReadSignal, NotUsed]
+  def readSignalsForMember(member: Member, memberId: SequencerMemberId)(implicit
+      traceContext: TraceContext
+  ): Source[ReadSignal, NotUsed]
 }

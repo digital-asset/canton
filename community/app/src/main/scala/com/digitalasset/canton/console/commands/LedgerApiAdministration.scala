@@ -24,7 +24,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.console.{
+import com.digitalasset.canton.admin.api.client.data.{
   LedgerApiUser,
   LedgerMeteringReport,
   ListLedgerApiUsersResult,
@@ -550,7 +550,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           templateCompanion: TemplateCompanion[T],
           predicate: Contract[T] => Boolean = (x: Contract[T]) => true,
       ): Seq[Contract[T]] = check(FeatureFlag.Testing)(
-        of_party(partyId)
+        of_party(partyId, filterTemplates = Seq(templateCompanion.id.asInstanceOf[P.TemplateId[_]]))
           .map(_.event)
           .flatMap(DecodeUtil.decodeCreated(templateCompanion)(_).toList)
           .filter(predicate)

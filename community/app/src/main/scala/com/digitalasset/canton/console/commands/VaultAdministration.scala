@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.admin.api.client.commands.{TopologyAdminCommands, VaultAdminCommands}
-import com.digitalasset.canton.admin.api.client.data.console.ListKeyOwnersResult
+import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}

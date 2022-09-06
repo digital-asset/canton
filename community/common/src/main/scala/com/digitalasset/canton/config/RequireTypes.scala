@@ -96,6 +96,7 @@ object RequireTypes {
     import num._
 
     def +(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value + other.value)
+    def *(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value * other.value)
     def tryAdd(other: T) = NonNegativeNumeric.tryCreate(value + other)
   }
 

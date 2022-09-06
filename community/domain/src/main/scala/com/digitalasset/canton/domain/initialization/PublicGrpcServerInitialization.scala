@@ -52,7 +52,7 @@ object PublicGrpcServerInitialization {
         cantonParameterConfig.tracing,
       )
       // Overriding the dummy setting from PublicServerConfig.
-      .maxInboundMessageSize(config.domainParameters.maxInboundMessageSize)
+      .maxInboundMessageSize(config.init.domainParameters.maxInboundMessageSize)
       .addService(ProtoReflectionService.newInstance(), withLogging = false)
 
     // the server builder is mutable

@@ -44,7 +44,7 @@ class DbCommandDeduplicationStore(
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("command-deduplication-store")
 
-  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private val protocolVersion = ProtocolVersion.v2Todo_i8793
   private implicit val setParameterStoredParties: SetParameter[StoredParties] =
     StoredParties.getVersionedSetParameter(protocolVersion)
   private implicit val setParameterTraceContext: SetParameter[TraceContext] =

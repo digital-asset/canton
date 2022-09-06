@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.initialization
 
 import cats.data.EitherT
 import cats.syntax.either._
+import com.digitalasset.canton.config.InitConfigBase
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
 import com.digitalasset.canton.domain.config.DomainNodeParameters
@@ -30,12 +31,15 @@ trait DomainTopologyManagerIdentityInitialization {
       legalIdentityHook: X509Certificate => EitherT[Future, String, Unit],
       initialDynamicDomainParameters: DynamicDomainParameters,
       protocolVersion: ProtocolVersion,
+      initConfigBase: InitConfigBase,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] =
+  ): EitherT[Future, String, (NodeId, DomainTopologyManager, SigningPublicKey)] = {
     // initialize domain with local keys
+    val idName =
+      initConfigBase.identity.flatMap(_.nodeIdentifier.identifierName).getOrElse(name.unwrap)
     for {
-      id <- Identifier.create(name.unwrap).toEitherT[Future]
+      id <- Identifier.create(idName).toEitherT[Future]
       // first, we create the namespace key for this node
       namespaceKey <- getOrCreateSigningKey(s"$name-namespace")
       // then, we create the topology manager signing key
@@ -75,7 +79,7 @@ trait DomainTopologyManagerIdentityInitialization {
 
       // Setup the legal identity of the domain nodes
       _ <-
-        if (initConfig.generateLegalIdentityCertificate) {
+        if (initConfig.identity.exists(_.generateLegalIdentityCertificate)) {
           (new LegalIdentityInit(certificateGenerator, crypto))
             .getOrGenerateCertificate(
               uid,
@@ -87,6 +91,7 @@ trait DomainTopologyManagerIdentityInitialization {
         }
 
     } yield (nodeId, topologyManager, namespaceKey)
+  }
 
   protected def initializeIdentityManagerAndServices(
       nodeId: NodeId

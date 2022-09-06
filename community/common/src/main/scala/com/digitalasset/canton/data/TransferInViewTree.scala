@@ -27,6 +27,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.{EitherUtil, NoCopy}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
@@ -35,8 +36,6 @@ import com.digitalasset.canton.version.{
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -156,13 +155,13 @@ object TransferInCommonData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TransferInCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -220,7 +219,7 @@ object TransferInCommonData
       targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion = ProtocolVersion(protocolVersionP)
     } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
       TargetProtocolVersion(protocolVersion),
@@ -294,13 +293,13 @@ object TransferInView
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TransferInView)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -399,9 +398,7 @@ object TransferInView
         .required("contract", contractP)
         .flatMap(SerializableContract.fromProtoV0)
 
-      sourceProtocolVersion <- ProtocolVersion
-        .fromProtoPrimitive(sourceProtocolVersionP)
-        .map(SourceProtocolVersion(_))
+      sourceProtocolVersion = SourceProtocolVersion(ProtocolVersion(sourceProtocolVersionP))
 
       // TransferOutResultEvent deserialization
       transferOutResultEventP <- ProtoConverter

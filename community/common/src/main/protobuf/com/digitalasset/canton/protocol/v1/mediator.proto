@@ -37,6 +37,7 @@ message MediatorReject {
     reserved 1; // removed "code" field
     string cause = 2; // renamed reason -> cause
     string error_code = 3;
+    uint32 error_category = 4;
 }
 
 message MalformedMediatorRequestResult {

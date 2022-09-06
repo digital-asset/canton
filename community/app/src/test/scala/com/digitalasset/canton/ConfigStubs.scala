@@ -9,10 +9,12 @@ import com.digitalasset.canton.config.{
   CommunityAdminServerConfig,
   CommunityCryptoConfig,
   CommunityStorageConfig,
-  InitConfig,
 }
-import com.digitalasset.canton.domain.config.CommunityDomainConfig
-import com.digitalasset.canton.participant.config.CommunityParticipantConfig
+import com.digitalasset.canton.domain.config.{CommunityDomainConfig, DomainInitConfig}
+import com.digitalasset.canton.participant.config.{
+  CommunityParticipantConfig,
+  ParticipantInitConfig,
+}
 
 /** Utilities for creating config objects for tests
   */
@@ -20,7 +22,7 @@ import com.digitalasset.canton.participant.config.CommunityParticipantConfig
 object ConfigStubs {
   def participant: CommunityParticipantConfig =
     CommunityParticipantConfig(
-      InitConfig(),
+      ParticipantInitConfig(),
       CommunityCryptoConfig(),
       null,
       adminApi,
@@ -29,7 +31,7 @@ object ConfigStubs {
 
   def domain: CommunityDomainConfig =
     CommunityDomainConfig(
-      InitConfig(),
+      DomainInitConfig(),
       false,
       null,
       null,

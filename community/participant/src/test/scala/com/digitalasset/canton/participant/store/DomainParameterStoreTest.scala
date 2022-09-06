@@ -27,7 +27,7 @@ trait DomainParameterStoreTest { this: AsyncWordSpec with BaseTest =>
 
       "be idempotent" in {
         val store = mk(domainId)
-        val params = BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant = 100)
+        val params = BaseTest.defaultStaticDomainParametersWith(maxInboundMessageSize = 100)
         for {
           _ <- store.setParameters(params)
           _ <- store.setParameters(params)

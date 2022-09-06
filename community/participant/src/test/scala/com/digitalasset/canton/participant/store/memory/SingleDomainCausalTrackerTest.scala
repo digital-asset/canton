@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId, RepeatableTestSuiteTest}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -48,8 +49,14 @@ class SingleDomainCausalTrackerTest
         )
 
       val updates = List(
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain1, 0),
-        TransactionUpdate(Set(bob), CantonTimestamp.Epoch.plusSeconds(1), domain1, 1),
+        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain1, 0, testedProtocolVersion),
+        TransactionUpdate(
+          Set(bob),
+          CantonTimestamp.Epoch.plusSeconds(1),
+          domain1,
+          1,
+          testedProtocolVersion,
+        ),
       )
 
       val events = runUpdates(sut, updates)
@@ -81,15 +88,22 @@ class SingleDomainCausalTrackerTest
       val outTime = CantonTimestamp.Epoch.plusSeconds(5)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0),
+        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0, testedProtocolVersion),
         TransferInUpdate(
           Set(alice),
           CantonTimestamp.Epoch.plusSeconds(1),
           domain2,
           1,
           id,
+          TargetProtocolVersion(testedProtocolVersion),
         ),
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch.plusSeconds(2), domain2, 2),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch.plusSeconds(2),
+          domain2,
+          2,
+          testedProtocolVersion,
+        ),
       )
 
       val cm =
@@ -140,14 +154,21 @@ class SingleDomainCausalTrackerTest
       val id = TransferId(sourceDomain = domain2, requestTimestamp = outTime)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0),
+        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0, testedProtocolVersion),
         TransferOutUpdate(
           Set(alice),
           outTime,
           id,
           1,
+          SourceProtocolVersion(testedProtocolVersion),
         ),
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch.plusSeconds(2), domain2, 2),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch.plusSeconds(2),
+          domain2,
+          2,
+          testedProtocolVersion,
+        ),
       )
 
       val events = runUpdates(sut, updates)
@@ -190,21 +211,35 @@ class SingleDomainCausalTrackerTest
 
       // Represents a transfer in to domain d4 followed by a transfer out
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain4, 0),
+        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain4, 0, testedProtocolVersion),
         TransferInUpdate(
           Set(alice, bob),
           CantonTimestamp.Epoch.plusSeconds(1),
           domain4,
           1,
           transfer1ID,
+          TargetProtocolVersion(testedProtocolVersion),
         ),
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch.plusSeconds(2), domain4, 2),
-        TransactionUpdate(Set(bob), CantonTimestamp.Epoch.plusSeconds(3), domain4, 3),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch.plusSeconds(2),
+          domain4,
+          2,
+          testedProtocolVersion,
+        ),
+        TransactionUpdate(
+          Set(bob),
+          CantonTimestamp.Epoch.plusSeconds(3),
+          domain4,
+          3,
+          testedProtocolVersion,
+        ),
         TransferOutUpdate(
           Set(alice, bob),
           outTime,
           transfer2ID,
           4,
+          SourceProtocolVersion(testedProtocolVersion),
         ),
       )
 
@@ -251,10 +286,10 @@ class SingleDomainCausalTrackerTest
         ) { case ((events, perPartyCausalDependencies), causalityUpdate) =>
           val delta: Map[LfPartyId, Map[DomainId, CantonTimestamp]] = causalityUpdate match {
 
-            case TransactionUpdate(parties, ts, domain, rc) =>
+            case TransactionUpdate(parties, ts, domain, _rc) =>
               parties.toList.map(p => p -> Map(domain -> ts)).toMap
 
-            case TransferInUpdate(parties, ts, domain, rc, transferId) =>
+            case TransferInUpdate(_parties, ts, domain, _rc, _transferId) =>
               Map(
                 alice -> Map(domain1 -> outTime, domain3 -> aliceD3Time, domain -> ts),
                 bob -> Map(domain1 -> outTime, domain2 -> bobD2Time, domain -> ts),

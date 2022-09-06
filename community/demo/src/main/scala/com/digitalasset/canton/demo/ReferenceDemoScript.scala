@@ -494,7 +494,7 @@ class ReferenceDemoScript(
                 }
               }
             )
-          sf.foreach(_ => {
+          execute(Seq(sf.map(_ => {
             val offer = ME.AIAnalysis
               .OfferAnalysis(registry = registry, owner = alice, analyser = processor)
               .create
@@ -502,7 +502,7 @@ class ReferenceDemoScript(
             participant5.ledger_api.commands
               .submit(Seq(registry), Seq(offer), optTimeout = syncTimeout)
               .discard[TransactionTree]
-          })
+          }))).discard
         },
       ),
       Action(

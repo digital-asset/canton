@@ -75,7 +75,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       (),
       _.toProtoV0.toByteString,
     )

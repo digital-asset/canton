@@ -512,7 +512,7 @@ object TransactionTreeFactoryImpl {
       uniqueContractKeys: Boolean,
       loggerFactory: NamedLoggerFactory,
   )(implicit ex: ExecutionContext): TransactionTreeFactoryImpl = {
-    if (protocolVersion >= ProtocolVersion.v3_0_0) {
+    if (protocolVersion >= ProtocolVersion.v3) {
       new TransactionTreeFactoryImplV3(
         submitterParticipant,
         domainId,

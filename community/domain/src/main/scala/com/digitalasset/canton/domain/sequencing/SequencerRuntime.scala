@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -43,7 +44,7 @@ import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, Topolog
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.handlers.{
@@ -282,13 +283,21 @@ class SequencerRuntime(
   private val timeoutScheduler: ScheduledExecutorService =
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
 
+  private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
+    DomainParametersLookup.forMaxRatePerParticipant(
+      staticDomainParameters,
+      topologyClient,
+      futureSupervisor,
+      loggerFactory,
+    )
+
   private val sequencerService = GrpcSequencerService(
     sequencer,
     metrics,
     auditLogger,
     authenticationConfig.check,
     clock,
-    staticDomainParameters.maxRatePerParticipant,
+    maxRatePerParticipantLookup,
     staticDomainParameters.maxBatchMessageSize,
     localNodeParameters.processingTimeouts,
     loggerFactory,

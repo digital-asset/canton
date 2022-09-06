@@ -227,7 +227,7 @@ object MerkleTree {
       case Left(h) => v0.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
       case Right(n) =>
         v0.BlindableNode.BlindedOrNot.Unblinded(
-          n.toByteString(ProtocolVersion.v2_0_0_Todo_i8793)
+          n.toByteString(ProtocolVersion.v2Todo_i8793)
         )
     })
 

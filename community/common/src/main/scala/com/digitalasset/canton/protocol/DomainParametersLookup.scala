@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.PositiveSeconds
@@ -29,6 +30,11 @@ sealed trait DomainParametersLookup[+P] {
       traceContext: TraceContext
   ): Future[P]
 
+  /** If the parameter is static, return its value.
+    *       If the parameter is dynamic, return the value of the topology snapshot approximation.
+    */
+  def getApproximate(implicit traceContext: TraceContext): Future[P]
+
   /** Return a list of parameters, together with their validity interval,
     * @param warnOnUsingDefaults Log a warning if dynamic domain parameters are not set
     *                            and default value is used.
@@ -50,6 +56,9 @@ class StaticDomainParametersLookup[P](parameters: P) extends DomainParametersLoo
   def get(validAt: CantonTimestamp, warnOnUsingDefaults: Boolean)(implicit
       traceContext: TraceContext
   ): Future[P] = Future.successful(parameters)
+
+  def getApproximate(implicit traceContext: TraceContext): Future[P] =
+    Future.successful(parameters)
 
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -77,6 +86,14 @@ class DynamicDomainParametersLookup[P](
     .flatMap(_.findDynamicDomainParametersOrDefault(warnOnUsingDefaults))
     .map(projector)
 
+  def getApproximate(implicit
+      traceContext: TraceContext
+  ): Future[P] = {
+    topologyClient.currentSnapshotApproximation
+      .findDynamicDomainParametersOrDefault()
+      .map(projector)
+  }
+
   def getAll(validAt: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Seq[DomainParameters.WithValidity[P]]] =
@@ -100,7 +117,7 @@ object DomainParametersLookup {
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): DomainParametersLookup[PositiveSeconds] = {
     // TODO(#9800) migrate to stable version
-    if (staticDomainParameters.protocolVersion < ProtocolVersion.unstable_development)
+    if (staticDomainParameters.protocolVersion < ProtocolVersion.dev)
       new StaticDomainParametersLookup(staticDomainParameters.reconciliationInterval)
     else
       new DynamicDomainParametersLookup(
@@ -109,5 +126,24 @@ object DomainParametersLookup {
         futureSupervisor,
         loggerFactory,
       )
+  }
+
+  def forMaxRatePerParticipant(
+      staticDomainParameters: StaticDomainParameters,
+      topologyClient: DomainTopologyClient,
+      futureSupervisor: FutureSupervisor,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit ec: ExecutionContext): DomainParametersLookup[NonNegativeInt] = {
+    // TODO(#9800) migrate to stable version
+    if (staticDomainParameters.protocolVersion < ProtocolVersion.dev)
+      new StaticDomainParametersLookup(staticDomainParameters.maxRatePerParticipant)
+    else {
+      new DynamicDomainParametersLookup(
+        _.maxRatePerParticipant,
+        topologyClient,
+        futureSupervisor,
+        loggerFactory,
+      )
+    }
   }
 }

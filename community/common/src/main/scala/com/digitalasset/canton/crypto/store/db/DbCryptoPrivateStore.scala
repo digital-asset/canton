@@ -69,7 +69,7 @@ class DbCryptoPrivateStore(
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
 
-  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private val protocolVersion = ProtocolVersion.v2Todo_i8793
   private implicit val setParameterEncryptionPrivateKey: SetParameter[EncryptionPrivateKey] =
     EncryptionPrivateKey.getVersionedSetParameter(protocolVersion)
   private implicit val setParameterSigningPrivateKey: SetParameter[SigningPrivateKey] =

@@ -16,12 +16,13 @@ import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityCon
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.protocol.DomainParametersLookup
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.{Clock, TimeProof}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
-import com.digitalasset.canton.util.RateLimiter
+import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.empty.Empty
 import io.functionmeta.functionFullName
@@ -80,7 +81,7 @@ object GrpcSequencerService {
       auditLogger: TracedLogger,
       authenticationCheck: AuthenticationCheck,
       clock: Clock,
-      maxRatePerParticipant: NonNegativeInt,
+      maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt],
       maxRequestSize: NonNegativeInt,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -93,7 +94,7 @@ object GrpcSequencerService {
       authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription](clock, metrics, timeouts, loggerFactory),
       new DirectSequencerSubscriptionFactory(sequencer, timeouts, loggerFactory),
-      maxRatePerParticipant,
+      maxRatePerParticipantLookup,
       maxRequestSize,
       timeouts,
     )
@@ -112,7 +113,7 @@ class GrpcSequencerService(
     authenticationCheck: AuthenticationCheck,
     subscriptionPool: SubscriptionPool[GrpcManagedSubscription],
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
-    maxRatePerParticipant: NonNegativeInt,
+    maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt],
     maxRequestSize: NonNegativeInt,
     override protected val timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext)
@@ -133,6 +134,8 @@ class GrpcSequencerService(
     fromGrpcContext { implicit traceContext =>
       lazy val sendF = {
         val messageIdP = requestP.messageId
+        // validateSubmissionRequest is thread-local and therefore we need to validate the submission request
+        // before we switch threads
         val validatedRequestEither = for {
           validatedRequest <- validateSubmissionRequest(requestP)
           sender = validatedRequest.sender
@@ -148,7 +151,13 @@ class GrpcSequencerService(
           }
         } yield validatedRequest
 
-        sendRequestIfValid(validatedRequestEither)
+        val validatedRequestF =
+          for {
+            validatedRequest <- EitherT.fromEither[Future](validatedRequestEither)
+            _ <- checkRate(requestP, validatedRequest.sender)
+          } yield validatedRequest
+
+        sendRequestIfValid(validatedRequestF)
       }
 
       val sendUnlessShutdown = performUnlessClosingF(functionFullName)(sendF)
@@ -165,6 +174,8 @@ class GrpcSequencerService(
     fromGrpcContext { implicit traceContext =>
       lazy val sendF = {
         val messageIdP = requestP.messageId
+        // validateSubmissionRequest is thread-local and therefore we need to validate the submission request
+        // before we switch threads
         val validatedRequestEither = for {
           validatedRequest <- validateSubmissionRequest(requestP)
           sender = validatedRequest.sender
@@ -180,7 +191,13 @@ class GrpcSequencerService(
           }
         } yield validatedRequest
 
-        sendRequestIfValid(validatedRequestEither)
+        val validatedRequestF =
+          for {
+            validatedRequest <- EitherT.fromEither[Future](validatedRequestEither)
+            _ <- checkRate(requestP, validatedRequest.sender)
+          } yield validatedRequest
+
+        sendRequestIfValid(validatedRequestF)
       }
 
       performUnlessClosingF(functionFullName)(sendF).onShutdown(
@@ -189,10 +206,10 @@ class GrpcSequencerService(
     }
 
   private def sendRequestIfValid(
-      validatedRequestEither: Either[SendAsyncError, SubmissionRequest]
+      validatedRequestEither: EitherT[Future, SendAsyncError, SubmissionRequest]
   )(implicit traceContext: TraceContext): Future[v0.SendAsyncResponse] = {
     val resultET = for {
-      validatedRequest <- EitherT.fromEither[Future](validatedRequestEither)
+      validatedRequest <- validatedRequestEither
       _ <- sequencer.sendAsync(validatedRequest)
     } yield ()
 
@@ -231,6 +248,7 @@ class GrpcSequencerService(
         s"'$sender' sends request with id '$messageIdP' of size $requestSize bytes with $envelopesCount envelopes."
       )
 
+      // this method is thread-local.
       _ <- authenticationCheck
         .authenticate(sender)
         .leftMap(err => refuse(messageIdP, sender)(s"$sender is not authorized to send: $err"))
@@ -239,7 +257,6 @@ class GrpcSequencerService(
         requestSize <= maxRequestSize.unwrap,
         s"Request from '$sender' of size ($requestSize bytes) is exceeding maximum size ($maxRequestSize bytes).",
       )
-      _ <- checkRate(requestP, sender)
 
       // Third, check everything else
       _ <- invalidUnless(sender)(
@@ -382,11 +399,18 @@ class GrpcSequencerService(
     case _ => Right(())
   }
 
-  private def checkRate(requestP: v0.SubmissionRequest, sender: Member)(implicit
+  private def checkRate(
+      requestP: v0.SubmissionRequest,
+      sender: Member,
+  )(implicit
       traceContext: TraceContext
-  ): Either[SendAsyncError, Unit] = sender match {
-    case participantId: ParticipantId if requestP.isRequest =>
-      val limiter = rates.getOrElseUpdate(participantId, new RateLimiter(maxRatePerParticipant))
+  ): EitherT[Future, SendAsyncError, Unit] = {
+
+    def checkRate(
+        participantId: ParticipantId,
+        maxRatePerParticipant: NonNegativeInt,
+    ): Either[SendAsyncError, Unit] = {
+      val limiter = getOrUpdateRateLimiter(participantId, maxRatePerParticipant)
       Either.cond(
         limiter.checkAndUpdateRate(),
         (), {
@@ -397,10 +421,39 @@ class GrpcSequencerService(
           SendAsyncError.Overloaded(message)
         },
       )
-    case _ =>
-      // No rate limitation for domain entities and non-requests
-      // TODO(i2898): verify that the sender is not lying about the request nature to bypass the rate limitation
-      Right(())
+    }
+
+    sender match {
+      case participantId: ParticipantId if requestP.isRequest =>
+        for {
+          // TODO(i10191): Create a specific error type if getApproximate fails
+          maxRatePerParticipant <- EitherTUtil.fromFuture(
+            maxRatePerParticipantLookup.getApproximate,
+            e => SendAsyncError.RequestInvalid(message = e.getMessage),
+          )
+          _ <- EitherT.fromEither[Future](checkRate(participantId, maxRatePerParticipant))
+        } yield ()
+      case _ =>
+        // No rate limitation for domain entities and non-requests
+        // TODO(i2898): verify that the sender is not lying about the request nature to bypass the rate limitation
+        EitherT.rightT[Future, SendAsyncError](())
+    }
+  }
+  private def getOrUpdateRateLimiter(
+      participantId: ParticipantId,
+      maxRatePerParticipant: NonNegativeInt,
+  ): RateLimiter = {
+    rates.get(participantId) match {
+      case Some(rateLimiter) =>
+        if (rateLimiter.maxTasksPerSecond == maxRatePerParticipant) rateLimiter
+        else {
+          val newRateLimiter = new RateLimiter(maxRatePerParticipant)
+          rates.update(participantId, newRateLimiter)
+          newRateLimiter
+        }
+      case None =>
+        rates.getOrElseUpdate(participantId, new RateLimiter(maxRatePerParticipant))
+    }
   }
 
   override def subscribe(

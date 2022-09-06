@@ -99,7 +99,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
       s"$cantonBin --config $simpleConf --config $unsupportedProtocolVersionConfig" ! processLogger
       checkOutput(
         processLogger,
-        shouldContain = Seq("unsupported-protocol-version.conf", "42.0.0"),
+        shouldContain = Seq("unsupported-protocol-version.conf", "42"),
         shouldSucceed = false,
       )
     }

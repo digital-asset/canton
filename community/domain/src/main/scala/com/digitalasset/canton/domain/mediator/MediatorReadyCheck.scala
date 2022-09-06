@@ -23,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * without performing identity operations. Callers should ensure to call [[reset]] after every topology transaction
   * where the state could change.
   */
-class MediatorReadyCheck(
+private[mediator] class MediatorReadyCheck(
     val check: Traced[CantonTimestamp] => Future[Boolean],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -64,7 +64,7 @@ class MediatorReadyCheck(
   }
 }
 
-object MediatorReadyCheck {
+private[mediator] object MediatorReadyCheck {
 
   def apply(
       mediatorId: MediatorId,

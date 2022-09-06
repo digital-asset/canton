@@ -66,7 +66,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    ): Source[ReadSignal, NotUsed] =
+    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
       ???
 
     override def close(): Unit = ()

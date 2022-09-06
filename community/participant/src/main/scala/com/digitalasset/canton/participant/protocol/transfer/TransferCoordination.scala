@@ -25,11 +25,8 @@ import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuratio
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.version.{
-  ProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
-}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 
 import scala.concurrent.{ExecutionContext, Future}
 

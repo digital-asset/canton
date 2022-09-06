@@ -9,7 +9,7 @@ import cats.syntax.traverseFilter._
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
-import com.digitalasset.canton.admin.api.client.data.console._
+import com.digitalasset.canton.admin.api.client.data._
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -31,7 +31,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.{DynamicDomainParameters => DomainDynamicDomainParameters}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters => DynamicDomainParametersInternal}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
@@ -1298,7 +1298,7 @@ class TopologyAdministrationGroup(
     // This method accepts parameters in the internal format; used by [[all.renew]] above
     private[TopologyAdministrationGroup] def authorizeInternal(
         domainId: DomainId,
-        newParameters: DomainDynamicDomainParameters,
+        newParameters: DynamicDomainParametersInternal,
         signedBy: Option[Fingerprint] = None,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded

@@ -207,7 +207,7 @@ class SequencerReader(
         case None =>
           val warnIfApproximate =
             (event.counter > GenesisSequencerCounter) && member.isAuthenticated &&
-              protocolVersion != ProtocolVersion.v2_0_0
+              protocolVersion != ProtocolVersion.v2
           SyncCryptoClient
             .getSnapshotForTimestamp(
               syncCryptoApi,
@@ -277,7 +277,7 @@ class SequencerReader(
               topologyClientTimestampBefore,
               // This warning should only trigger on unauthenticated members,
               // but batches addressed to unauthenticated members must not specify a signing key timestamp.
-              warnIfApproximate = protocolVersion != ProtocolVersion.v2_0_0,
+              warnIfApproximate = protocolVersion != ProtocolVersion.v2,
             )
             .value
             .flatMap {

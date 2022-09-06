@@ -14,6 +14,12 @@ import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import scala.jdk.CollectionConverters._
 
 trait StorageConfig {
+  type Self <: StorageConfig
+
+  /** If true, the node will fail-fast when the database cannot be connected to
+    * If false, the node will wait indefinitely for the database to come up
+    */
+  def failFastOnStartup: Boolean
 
   /** Database specific configuration parameters used by Slick.
     * Also available for in-memory storage to support easy switching between in-memory and database storage.
@@ -26,6 +32,16 @@ trait StorageConfig {
     * (i.e., `config.numThreads`).
     */
   def maxConnections: Option[Int]
+
+  /** Copy parameters of `storageConfig` into `this` (if possible)
+    */
+  def withParameters(storageConfig: StorageConfig): Self
+
+  /** Converts this to B, copying all values of this to the new config created by mk.
+    * @param mk function creating a new storage config of type B from a typesafe config
+    * @tparam B new storage type to convert this to
+    */
+  def to[B <: StorageConfig](mk: Config => B): B#Self = mk(config).withParameters(this)
 
   private def maxConnectionsOrDefault: Int = {
     // The following is an educated guess of a sane default for the number of DB connections.
@@ -88,9 +104,16 @@ object CommunityStorageConfig {
     *
     * @param config IGNORED configuration option, used to allow users to use configuration mixins with postgres and h2
     */
-  case class Memory(override val config: Config = ConfigFactory.empty())
-      extends CommunityStorageConfig
-      with MemoryStorageConfig
+  case class Memory(
+      override val config: Config = ConfigFactory.empty(),
+      failFastOnStartup: Boolean = false,
+  ) extends CommunityStorageConfig
+      with MemoryStorageConfig {
+    override type Self = Memory
+
+    override def withParameters(storageConfig: StorageConfig): Self =
+      this.copy(config = storageConfig.config)
+  }
 }
 
 /** Dictates that persistent data is stored in a database.
@@ -170,13 +193,34 @@ object CommunityDbConfig {
       override val migrationsPaths: Seq[String] = Seq(DbConfig.h2MigrationsPathStable),
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
+      override val failFastOnStartup: Boolean = true,
   ) extends CommunityDbConfig
       with H2DbConfig {
+    override type Self = H2
+
     override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
       if (devVersionSupport)
         migrationsPaths :+ DbConfig.h2MigrationsPathDev
       else
         migrationsPaths
+    }
+
+    override def withParameters(storageConfig: StorageConfig): H2 = storageConfig match {
+      case dbConfig: DbConfig =>
+        this.copy(
+          config = dbConfig.config,
+          maxConnections = dbConfig.maxConnections,
+          migrationsPaths = dbConfig.migrationsPaths,
+          ledgerApiJdbcUrl = dbConfig.ledgerApiJdbcUrl,
+          connectionTimeout = dbConfig.connectionTimeout,
+          failFastOnStartup = dbConfig.failFastOnStartup,
+        )
+      case memoryConfig: MemoryStorageConfig =>
+        this.copy(config = memoryConfig.config, failFastOnStartup = storageConfig.failFastOnStartup)
+      case unknownConfig =>
+        throw new UnsupportedOperationException(
+          s"Unknown storage config type: ${unknownConfig.getClass.getSimpleName}"
+        )
     }
   }
 
@@ -187,8 +231,11 @@ object CommunityDbConfig {
       override val ledgerApiJdbcUrl: Option[String] = None,
       override val connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
       override val cleanOnValidationError: Boolean = false,
+      override val failFastOnStartup: Boolean = true,
   ) extends CommunityDbConfig
       with PostgresDbConfig {
+    override type Self = Postgres
+
     override def buildMigrationsPaths(devVersionSupport: Boolean): Seq[String] = {
       if (devVersionSupport)
         migrationsPaths :+ DbConfig.postgresMigrationsPathDev
@@ -196,6 +243,24 @@ object CommunityDbConfig {
         migrationsPaths
     }
 
+    override def withParameters(storageConfig: StorageConfig): Postgres = storageConfig match {
+      case dbConfig: DbConfig =>
+        this.copy(
+          config = dbConfig.config,
+          maxConnections = dbConfig.maxConnections,
+          migrationsPaths = dbConfig.migrationsPaths,
+          ledgerApiJdbcUrl = dbConfig.ledgerApiJdbcUrl,
+          connectionTimeout = dbConfig.connectionTimeout,
+          cleanOnValidationError = dbConfig.cleanOnValidationError,
+          failFastOnStartup = dbConfig.failFastOnStartup,
+        )
+      case memoryConfig: MemoryStorageConfig =>
+        this.copy(config = memoryConfig.config, failFastOnStartup = storageConfig.failFastOnStartup)
+      case unknownConfig =>
+        throw new UnsupportedOperationException(
+          s"Unknown storage config type: ${unknownConfig.getClass.getSimpleName}"
+        )
+    }
   }
 }
 

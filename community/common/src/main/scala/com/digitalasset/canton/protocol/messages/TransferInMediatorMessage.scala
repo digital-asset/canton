@@ -13,12 +13,12 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  TargetProtocolVersion,
 }
 
 import java.util.UUID
@@ -102,7 +102,7 @@ object TransferInMediatorMessage
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.TransferInMediatorMessage)((hashOps, proto) =>
         fromProtoV0(hashOps)(proto)
       ),

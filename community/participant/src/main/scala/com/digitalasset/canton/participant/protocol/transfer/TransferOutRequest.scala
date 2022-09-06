@@ -9,7 +9,7 @@ import com.digitalasset.canton.data._
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 
 import java.util.UUID
 

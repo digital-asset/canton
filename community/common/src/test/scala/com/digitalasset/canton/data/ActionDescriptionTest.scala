@@ -58,7 +58,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
     "deserialize to the same value (V0)" in {
       val tests = Seq(
         CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
-        tryCreateExerciseActionDescription(interface = None, ProtocolVersion.v3_0_0),
+        tryCreateExerciseActionDescription(interface = None, ProtocolVersion.v3),
         fetchAction,
         LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
       )
@@ -73,7 +73,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
         tryCreateExerciseActionDescription(
           Some(LfTransactionBuilder.defaultInterfaceId),
-          ProtocolVersion.unstable_development, // TODO(#9910) migrate to stable
+          ProtocolVersion.dev, // TODO(#9910) migrate to stable
         ),
         fetchAction,
         LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
@@ -94,16 +94,16 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
             protocolVersion,
           )
 
-        val v3 = ProtocolVersion.v3_0_0
-        val v2 = ProtocolVersion.v2_0_0
+        val v3 = ProtocolVersion.v3
+        val v2 = ProtocolVersion.v2
         create(v3) shouldBe Left(
           InvalidActionDescription(
-            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.unstable_development}"
+            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.dev}"
           )
         )
 
         // TODO(#9910) migrate to stable
-        create(ProtocolVersion.unstable_development).value shouldBe a[ExerciseActionDescription]
+        create(ProtocolVersion.dev).value shouldBe a[ExerciseActionDescription]
       }
 
       "the choice argument cannot be serialized" in {

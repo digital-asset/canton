@@ -7,13 +7,13 @@ import com.digitalasset.canton.config.RequireTypes.Port
 
 import java.util.concurrent.atomic.AtomicReference
 
-trait ConfigDefaults[Self] { self: Self =>
+trait ConfigDefaults[Defaults, Self] { self: Self =>
 
   /** Returns this configuration with defaults set if necessary. */
-  def withDefaults: Self
+  def withDefaults(defaults: Defaults): Self
 }
 
-object ConfigDefaults {
+class DefaultPorts {
 
   class DefaultPort(private val startPort: Int) {
     private val portRef = new AtomicReference[Port](Port.tryCreate(startPort))
@@ -58,14 +58,4 @@ object ConfigDefaults {
   private val portStep = 10
   // user-manual-entry-end: ConfigDefaults
 
-  def resetDefaultPorts(): Unit = Seq(
-    ledgerApiPort,
-    participantAdminApiPort,
-    domainPublicApiPort,
-    domainAdminApiPort,
-    sequencerPublicApiPort,
-    sequencerAdminApiPort,
-    mediatorAdminApiPort,
-    domainManagerAdminApiPort,
-  ).foreach(_.reset())
 }

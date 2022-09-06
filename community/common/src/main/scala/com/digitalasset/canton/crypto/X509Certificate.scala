@@ -223,7 +223,7 @@ class X509CertificateGenerator(
           .sign(receiver.bytes, signignKeyId)
           .leftMap(signingError => X509CertificateError.SigningError(signingError))
         certificate <- getCertificate(
-          new SignatureProvider(signature.toByteString(ProtocolVersion.v2_0_0_Todo_i8793))
+          new SignatureProvider(signature.toByteString(ProtocolVersion.v2Todo_i8793))
         )
       } yield X509Certificate(certificate)
     }

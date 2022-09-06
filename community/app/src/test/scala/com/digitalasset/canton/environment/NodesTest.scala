@@ -25,7 +25,9 @@ import scala.concurrent.Future
 class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   val clock = new SimClock(loggerFactory = loggerFactory)
   trait TestNode extends CantonNode
-  case class TestNodeConfig() extends LocalNodeConfig with ConfigDefaults[TestNodeConfig] {
+  case class TestNodeConfig()
+      extends LocalNodeConfig
+      with ConfigDefaults[DefaultPorts, TestNodeConfig] {
     override val init: InitConfig = InitConfig()
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig()
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory()
@@ -34,7 +36,7 @@ class NodesTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     override val caching: CachingConfigs = CachingConfigs()
     override val nodeTypeName: String = "test-node"
     override def clientAdminApi = adminApi.clientConfig
-    override def withDefaults: TestNodeConfig = this
+    override def withDefaults(ports: DefaultPorts): TestNodeConfig = this
   }
   object TestNodeParameters extends LocalNodeParameters {
     override def delayLoggingThreshold: NonNegativeFiniteDuration = ???

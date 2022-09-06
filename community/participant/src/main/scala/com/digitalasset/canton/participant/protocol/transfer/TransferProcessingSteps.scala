@@ -40,7 +40,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter}
 
 import scala.collection.concurrent
@@ -103,7 +103,7 @@ trait TransferProcessingSteps[
       pendingSubmission: PendingTransferSubmission,
   )(implicit traceContext: TraceContext): Unit = {
     val status = verdict match {
-      case Approve =>
+      case _: Approve =>
         com.google.rpc.status.Status(com.google.rpc.Code.OK_VALUE)
       case reject: MediatorReject =>
         reject.rpcStatus()

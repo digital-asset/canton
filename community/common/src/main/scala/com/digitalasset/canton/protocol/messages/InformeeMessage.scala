@@ -97,13 +97,13 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.InformeeMessage)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
     // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersion(v1.InformeeMessage)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     ),
@@ -150,7 +150,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         maybeFullInformeeTreeP,
       )
       fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      protocolVersion = ProtocolVersion(protocolVersionP)
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }
 

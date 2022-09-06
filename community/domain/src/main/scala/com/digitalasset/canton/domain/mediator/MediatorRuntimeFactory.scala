@@ -47,7 +47,7 @@ trait MediatorRuntime extends FlagCloseable {
   override protected def onClosed(): Unit = mediator.close()
 }
 
-class CommunityMediatorRuntime(
+private[mediator] class CommunityMediatorRuntime(
     override val mediator: Mediator,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,

@@ -46,7 +46,7 @@ class DbDomainConnectionConfigStore private[store] (
   // Eagerly maintained cache of domain config indexed by DomainAlias
   private val domainConfigCache = TrieMap.empty[DomainAlias, StoredDomainConnectionConfig]
 
-  private val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private val protocolVersion = ProtocolVersion.v2Todo_i8793
   private implicit val setParameterDomainConnectionConfig: SetParameter[DomainConnectionConfig] =
     DomainConnectionConfig.getVersionedSetParameter(protocolVersion)
 

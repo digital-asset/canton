@@ -72,7 +72,7 @@ case class SubmissionRequest private (
 object SubmissionRequest extends HasProtocolVersionedCompanion[SubmissionRequest] {
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.SubmissionRequest)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

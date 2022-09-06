@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console.commands
 
 import com.digitalasset.canton.admin.api.client.commands.VaultAdminCommands
-import com.digitalasset.canton.admin.api.client.data.console.CertificateResult
+import com.digitalasset.canton.admin.api.client.data.CertificateResult
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleEnvironment,

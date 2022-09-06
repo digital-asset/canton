@@ -100,7 +100,7 @@ class AuthenticationTokenProvider(
     authenticationClient
       .challenge(
         Challenge
-          .Request(member.toProtoPrimitive, supportedProtocolVersions.map(_.toProtoPrimitive))
+          .Request(member.toProtoPrimitive, supportedProtocolVersions.map(_.toProtoPrimitiveS))
       )
       .map(response => response.value)
       .map {

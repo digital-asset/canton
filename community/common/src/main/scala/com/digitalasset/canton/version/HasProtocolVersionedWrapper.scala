@@ -5,6 +5,7 @@ package com.digitalasset.canton.version
 
 import cats.syntax.either._
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -22,7 +23,7 @@ trait HasRepresentativeProtocolVersion {
 /** See method `representativeProtocolVersion` below for more context */
 sealed abstract case class RepresentativeProtocolVersion[+ValueClass](
     private val v: ProtocolVersion
-) {
+) extends PrettyPrinting {
 
   /** When using this method, keep in mind that for a given companion object `C` that implements
     * `HasProtocolVersionedWrapperCompanion` and for a protocol version `pv`, then
@@ -31,6 +32,8 @@ sealed abstract case class RepresentativeProtocolVersion[+ValueClass](
     * for another class.
     */
   def representative: ProtocolVersion = v
+
+  override def pretty: Pretty[RepresentativeProtocolVersion[_]] = prettyOfParam(_.v)
 }
 
 object RepresentativeProtocolVersion {
@@ -238,8 +241,8 @@ trait HasSupportedProtoVersions[ValueClass] {
       val (_, lowestProtocolVersion) = sortedConverters.last1
 
       require(
-        lowestProtocolVersion.fromInclusive.representative == ProtocolVersion.minimum_protocol_version,
-        s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum_protocol_version}, found $lowestProtocolVersion",
+        lowestProtocolVersion.fromInclusive.representative == ProtocolVersion.minimum,
+        s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found $lowestProtocolVersion",
       )
 
       new SupportedProtoVersions(sortedConverters) {}
@@ -356,6 +359,17 @@ trait HasProtocolVersionedCompanion[
       throw new DbDeserializationException(s"Failed to deserialize $name: $err")
     )
   }
+
+  implicit def hasVersionedWrapperGetResultO(implicit
+      getResultByteArray: GetResult[Option[Array[Byte]]]
+  ): GetResult[Option[ValueClass]] = GetResult { r =>
+    r.<<[Option[Array[Byte]]]
+      .map(
+        fromByteArray(_).valueOr(err =>
+          throw new DbDeserializationException(s"Failed to deserialize $name: $err")
+        )
+      )
+  }
 }
 
 trait HasProtocolVersionedWithContextCompanion[
@@ -397,4 +411,8 @@ trait ProtocolVersionedCompanionDbHelpers[ValueClass <: HasProtocolVersionedWrap
   ): SetParameter[ValueClass] = { (value, pp) =>
     pp >> value.toByteArray
   }
+
+  def getVersionedSetParameterO(implicit
+      setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
+  ): SetParameter[Option[ValueClass]] = (valueO, pp) => pp >> valueO.map(_.toByteArray)
 }

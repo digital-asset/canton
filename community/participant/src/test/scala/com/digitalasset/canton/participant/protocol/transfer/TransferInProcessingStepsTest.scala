@@ -61,7 +61,7 @@ import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -929,7 +929,7 @@ object TransferInProcessingStepsTest {
         RequestId(CantonTimestamp.Epoch),
         Set(),
         TransferOutDomainId(sourceDomain),
-        Verdict.Approve,
+        Verdict.Approve(protocolVersion),
         protocolVersion,
       )
     val signedResult: SignedProtocolMessage[TransferOutResult] =
@@ -966,7 +966,7 @@ object TransferInProcessingStepsTest {
     RequestId(CantonTimestamp.Epoch),
     Set(),
     TransferInDomainId(targetDomain),
-    Verdict.Approve,
+    Verdict.Approve(BaseTest.testedProtocolVersion),
     BaseTest.testedProtocolVersion,
   )
 }

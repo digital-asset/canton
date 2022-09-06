@@ -11,9 +11,6 @@ import scala.concurrent.Future
 
 class LoggingAlarmStreamer(logger: TracedLogger) extends AlarmStreamer {
 
-  override def alarm(throwable: Throwable)(implicit traceContext: TraceContext): Future[Unit] =
-    Future.successful(logger.error("An error happened", throwable))
-
   override def alarm(message: String)(implicit traceContext: TraceContext): Future[Unit] =
     Future.successful(logger.error(message))
 

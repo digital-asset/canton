@@ -1,33 +1,22 @@
 // Copyright (c) 2022 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.admin.api.client.data.console
+package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.admin.api.client.data.console.ListPartiesResult.ParticipantDomains
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationRoundedSeconds}
+import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
 import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
-import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters => DomainDynamicDomainParameters,
-  v0 => protocolV0,
-  v1 => protocolV1,
-}
+import com.digitalasset.canton.protocol.{DynamicDomainParameters => DynamicDomainParametersInternal}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.admin.v0
-import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization
 import com.digitalasset.canton.topology.admin.v0.ListDomainParametersChangesResult.Result.Parameters
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
-import io.scalaland.chimney.dsl._
 
 import java.time.Instant
-import scala.Ordering.Implicits._
 
 case class ListPartiesResult(party: PartyId, participants: Seq[ParticipantDomains])
 
@@ -246,176 +235,11 @@ object ListDomainParametersChangeResult {
   ): ParsingResult[ListDomainParametersChangeResult] = for {
     contextP <- value.context.toRight(ProtoDeserializationError.FieldNotSet("context"))
     context <- BaseResult.fromProtoV0(contextP)
-    domainDynamicDomainParameters <- value.parameters match {
+    dynamicDomainParametersInternal <- value.parameters match {
       case Parameters.Empty => Left(ProtoDeserializationError.FieldNotSet("parameters"))
-      case Parameters.V0(v0) => DomainDynamicDomainParameters.fromProtoV0(v0)
-      case Parameters.V1(v1) => DomainDynamicDomainParameters.fromProtoV1(v1)
+      case Parameters.V0(v0) => DynamicDomainParametersInternal.fromProtoV0(v0)
+      case Parameters.V1(v1) => DynamicDomainParametersInternal.fromProtoV1(v1)
     }
-    item <- DynamicDomainParameters(domainDynamicDomainParameters)
+    item <- DynamicDomainParameters(dynamicDomainParametersInternal)
   } yield ListDomainParametersChangeResult(context, item)
-}
-
-sealed trait DynamicDomainParameters {
-  def participantResponseTimeout: NonNegativeFiniteDuration
-  def mediatorReactionTimeout: NonNegativeFiniteDuration
-  def transferExclusivityTimeout: NonNegativeFiniteDuration
-  def topologyChangeDelay: NonNegativeFiniteDuration
-  def ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
-
-  /** Checks if it is safe to change the `ledgerTimeRecordTimeTolerance` to the given new value.
-    */
-  private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
-      newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
-  ): Boolean
-
-  /** Convert the parameters to the Protobuf representation
-    * @param protocolVersion Protocol version used on the domain; used to ensure that we don't send parameters
-    *                        that are not dynamic yet (e.g., reconciliation interval in a domain running an old
-    *                        protocol version).
-    */
-  def toProto(
-      protocolVersion: ProtocolVersion
-  ): Either[String, v0.DomainParametersChangeAuthorization.Parameters]
-
-  protected def protobufVersion(protocolVersion: ProtocolVersion): Int =
-    DomainDynamicDomainParameters.protobufVersionFor(protocolVersion).v
-
-  def update(
-      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
-      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
-      topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
-  ): DynamicDomainParameters
-}
-
-final case class DynamicDomainParametersV0(
-    participantResponseTimeout: NonNegativeFiniteDuration,
-    mediatorReactionTimeout: NonNegativeFiniteDuration,
-    transferExclusivityTimeout: NonNegativeFiniteDuration,
-    topologyChangeDelay: NonNegativeFiniteDuration,
-    ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-) extends DynamicDomainParameters {
-
-  override private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
-      newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
-  ): Boolean = true // always safe, because we don't have mediatorDeduplicationTimeout
-
-  override def update(
-      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
-      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
-      topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
-  ): DynamicDomainParameters = DynamicDomainParametersV0(
-    participantResponseTimeout = participantResponseTimeout,
-    mediatorReactionTimeout = mediatorReactionTimeout,
-    transferExclusivityTimeout = transferExclusivityTimeout,
-    topologyChangeDelay = topologyChangeDelay,
-    ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-  )
-
-  override def toProto(
-      protocolVersion: ProtocolVersion
-  ): Either[String, DomainParametersChangeAuthorization.Parameters] =
-    if (protobufVersion(protocolVersion) == 0)
-      Right(
-        protocolV0.DynamicDomainParameters(
-          participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
-          mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
-          transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
-          topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
-          ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
-        )
-      ).map(DomainParametersChangeAuthorization.Parameters.ParametersV0)
-    else
-      Left(
-        s"Cannot convert DynamicDomainParametersV0 to Protobuf when domain protocol version is $protocolVersion"
-      )
-}
-
-final case class DynamicDomainParametersV1(
-    participantResponseTimeout: NonNegativeFiniteDuration,
-    mediatorReactionTimeout: NonNegativeFiniteDuration,
-    transferExclusivityTimeout: NonNegativeFiniteDuration,
-    topologyChangeDelay: NonNegativeFiniteDuration,
-    ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-    mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
-    reconciliationInterval: PositiveDurationRoundedSeconds,
-) extends DynamicDomainParameters {
-
-  if (ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2) > mediatorDeduplicationTimeout)
-    throw new InvalidDomainParameters(
-      s"The ledgerTimeRecordTimeTolerance ($ledgerTimeRecordTimeTolerance) must be at most half of the " +
-        s"mediatorDeduplicationTimeout ($mediatorDeduplicationTimeout)."
-    )
-
-  // https://docs.google.com/document/d/1tpPbzv2s6bjbekVGBn6X5VZuw0oOTHek5c30CBo4UkI/edit#bookmark=id.1dzc6dxxlpca
-  override private[canton] def compatibleWithNewLedgerTimeRecordTimeTolerance(
-      newLedgerTimeRecordTimeTolerance: NonNegativeFiniteDuration
-  ): Boolean = {
-    // If false, a new request may receive the same ledger time as a previous request and the previous
-    // request may be evicted too early from the mediator's deduplication store.
-    // Thus, an attacker may assign the same UUID to both requests.
-    // See i9028 for a detailed design. (This is the second clause of item 2 of Lemma 2).
-    ledgerTimeRecordTimeTolerance + newLedgerTimeRecordTimeTolerance <= mediatorDeduplicationTimeout
-  }
-
-  override def update(
-      participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
-      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
-      transferExclusivityTimeout: NonNegativeFiniteDuration = transferExclusivityTimeout,
-      topologyChangeDelay: NonNegativeFiniteDuration = topologyChangeDelay,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
-  ): DynamicDomainParameters = DynamicDomainParametersV1(
-    participantResponseTimeout = participantResponseTimeout,
-    mediatorReactionTimeout = mediatorReactionTimeout,
-    transferExclusivityTimeout = transferExclusivityTimeout,
-    topologyChangeDelay = topologyChangeDelay,
-    ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
-    mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
-    reconciliationInterval = reconciliationInterval,
-  )
-
-  override def toProto(
-      protocolVersion: ProtocolVersion
-  ): Either[String, DomainParametersChangeAuthorization.Parameters] =
-    if (protobufVersion(protocolVersion) == 1)
-      Right(
-        protocolV1.DynamicDomainParameters(
-          participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
-          mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
-          transferExclusivityTimeout = Some(transferExclusivityTimeout.toProtoPrimitive),
-          topologyChangeDelay = Some(topologyChangeDelay.toProtoPrimitive),
-          ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
-          mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
-          reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
-        )
-      ).map(DomainParametersChangeAuthorization.Parameters.ParametersV1)
-    else
-      Left(
-        s"Cannot convert DynamicDomainParametersV1 to Protobuf when domain protocol version is $protocolVersion"
-      )
-}
-
-object DynamicDomainParameters {
-
-  /** Default dynamic domain parameters for non-static clocks */
-  def defaultValues(protocolVersion: ProtocolVersion): DynamicDomainParameters =
-    DynamicDomainParameters(
-      DomainDynamicDomainParameters.defaultValues(protocolVersion)
-    ).fold(err => throw new RuntimeException(err.message), identity)
-
-  def apply(
-      domain: DomainDynamicDomainParameters
-  ): Either[ProtoDeserializationError.VersionError, DynamicDomainParameters] = {
-    val protobufVersion = domain.protobufVersion.v
-
-    if (protobufVersion == 0)
-      Right(domain.transformInto[DynamicDomainParametersV0])
-    else if (protobufVersion == 1)
-      Right(domain.transformInto[DynamicDomainParametersV1])
-    else
-      Left(ProtoDeserializationError.VersionError("DynamicDomainParameters", protobufVersion))
-  }
 }

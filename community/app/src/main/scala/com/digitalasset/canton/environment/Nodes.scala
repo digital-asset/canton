@@ -121,10 +121,9 @@ class ManagedNodes[
       instance <- nodes.get(name) match {
         case Some(instance) => Right(instance)
         case None =>
-          val failFast = config.init.startupFailFast
           val params = parametersFor(name)
           for {
-            _ <- checkMigration(name, config.storage, failFast, params)
+            _ <- checkMigration(name, config.storage, params)
             instance = create(name, config)
             // we call start which will perform the asynchronous startup
             _ <- Try(
@@ -212,7 +211,6 @@ class ManagedNodes[
   private def checkMigration(
       name: String,
       storageConfig: StorageConfig,
-      failFastIfDbOut: Boolean,
       params: LocalNodeParameters,
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
@@ -229,7 +227,8 @@ class ManagedNodes[
           case err: DbMigrations.DatabaseConfigError => FailedDatabaseConfigChecks(name, err)
         }
       }
-      val retryConfig = if (failFastIfDbOut) RetryConfig.failFast else RetryConfig.forever
+      val retryConfig =
+        if (storageConfig.failFastOnStartup) RetryConfig.failFast else RetryConfig.forever
 
       val result = migrations
         .checkAndMigrate(params, retryConfig)
