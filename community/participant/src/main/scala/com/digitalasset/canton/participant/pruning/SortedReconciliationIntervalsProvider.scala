@@ -40,16 +40,14 @@ class SortedReconciliationIntervalsProvider(
       validAt: CantonTimestamp
   )(implicit
       traceContext: TraceContext
-  ): Future[SortedReconciliationIntervals] = {
-    val topologyApproximateTs = reconciliationIntervalsProvider.approximateTimestamp
-
+  ): Future[SortedReconciliationIntervals] =
     reconciliationIntervalsProvider
       .getAll(validAt)
       .map { reconciliationIntervals =>
         SortedReconciliationIntervals
           .create(
             reconciliationIntervals,
-            validUntil = topologyApproximateTs,
+            validUntil = validAt,
           )
           .tapLeft(logger.error(_))
           .getOrElse(SortedReconciliationIntervals.empty)
@@ -59,7 +57,6 @@ class SortedReconciliationIntervalsProvider(
             approximateLatestReconciliationInterval.set(latest)
           }
       }
-  }
 }
 
 object SortedReconciliationIntervalsProvider {

@@ -34,7 +34,7 @@ import java.util.UUID
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Generate transaction trees as used from protocol version [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]] on
+/** Generate transaction trees as used from protocol version [[com.digitalasset.canton.version.ProtocolVersion.v3]] on
   */
 class TransactionTreeFactoryImplV3(
     submitterParticipant: ParticipantId,
@@ -56,8 +56,8 @@ class TransactionTreeFactoryImplV3(
       loggerFactory,
     ) {
   require(
-    protocolVersion >= ProtocolVersion.v3_0_0,
-    s"${this.getClass.getSimpleName} can only be used with protocol version ${ProtocolVersion.v3_0_0} or higher, but not for $protocolVersion",
+    protocolVersion >= ProtocolVersion.v3,
+    s"${this.getClass.getSimpleName} can only be used with protocol version ${ProtocolVersion.v3} or higher, but not for $protocolVersion",
   )
 
   private[TransactionTreeFactoryImplV3] val csm: ContractStateMachine[Unit] =

@@ -21,7 +21,7 @@ import com.digitalasset.canton.util.{AkkaUtil, LoggerUtil}
 import io.functionmeta.functionFullName
 import org.slf4j.event.Level
 
-import scala.concurrent.{ExecutionContext, Future, TimeoutException}
+import scala.concurrent.{ExecutionContext, Future}
 
 /** If all Sequencer writes are occurring locally we pipe write notifications to read subscriptions allowing the
   * [[SequencerReader]] to immediately read from the backing store rather than polling.
@@ -41,27 +41,14 @@ class LocalSequencerStateEventSignaller(
     with FlagCloseableAsync
     with NamedLogging {
 
-  private val (((queue, terminateBeforeConflate), terminateAfterConflate), notificationsHubSource) =
+  private val (queue, notificationsHubSource) =
     AkkaUtil.runSupervised(
       logger.error("LocalStateEventSignaller flow failed", _)(TraceContext.empty),
       Source
         .queue[WriteNotification](1, OverflowStrategy.backpressure)
-        // TODO(#9883) Remove
-        .watchTermination()(Keep.both)
-        .map(logWriteNotification("before-conflate"))
         .conflate(_ union _)
-        // TODO(#9883) Remove
-        .watchTermination()(Keep.both)
-        .map(logWriteNotification("after-conflate"))
         .toMat(BroadcastHub.sink(1))(Keep.both),
     )
-
-  private def logWriteNotification(
-      name: String
-  )(notification: WriteNotification): WriteNotification = {
-    noTracingLogger.debug(s"$name: Write notification $notification passes through")
-    notification
-  }
 
   override def notifyOfLocalWrite(
       notification: WriteNotification
@@ -76,10 +63,12 @@ class LocalSequencerStateEventSignaller(
   override def readSignalsForMember(
       member: Member,
       memberId: SequencerMemberId,
-  ): Source[ReadSignal, NotUsed] =
+  )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] = {
+    logger.debug(s"Creating signal soruce for $member")
     notificationsHubSource
       .filter(_.includes(memberId))
       .map(_ => ReadSignal)
+  }
 
   private def queueWithLogging(name: String, queue: SourceQueueWithComplete[WriteNotification])(
       item: WriteNotification
@@ -101,46 +90,20 @@ class LocalSequencerStateEventSignaller(
   protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty._
 
-    val logAllThreads: Thread => Boolean = _ => true
-    def dumpExecutionContextOnTimeout(timeout: TimeoutException): Unit = {
-      logger.debug(s"Execution context dump at timeout:\n${executionContext.toString}", timeout)
-      logger.debug(s"Akka execution context: ${materializer.executionContext.toString}")
-    }
-
     Seq(
       SyncCloseable("queue.complete", queue.complete()),
       AsyncCloseable(
-        "queue.completion", {
-          // Create a new subscription from the broadcast hub to make sure that
-          // the completion really reaches the hub.
-          // Just watching the queue's completion merely synchronizes on when
-          // the queue's elements have been passed downstream,
-          // not that they have reached the hub.
-          val newSubscription = notificationsHubSource.runWith(Sink.ignore)
-
-          // Somewhere on the way, we're losing the termination of the source.
-          // Let's monitor it.
-          // TODO(#9883) remove
-          timeouts.shutdownShort.await(
-            "queue.completion.before.conflate",
-            stackTraceFilter = logAllThreads,
-            onTimeout = dumpExecutionContextOnTimeout,
-          )(terminateBeforeConflate)
-          logger.debug("queue.completion has terminated before conflate")
-          timeouts.shutdownShort.await(
-            "queue.completion.after.conflate",
-            stackTraceFilter = logAllThreads,
-            onTimeout = dumpExecutionContextOnTimeout,
-          )(terminateAfterConflate)
-          logger.debug("queue.completion has terminated after conflate")
-          timeouts.shutdownShort.await(
-            "queue.watchCompletion",
-            stackTraceFilter = logAllThreads,
-            onTimeout = dumpExecutionContextOnTimeout,
-          )(queue.watchCompletion())
-          newSubscription
-        },
-        timeouts.shutdownShort.unwrap,
+        "queue.watchCompletion",
+        queue.watchCompletion(),
+        // TODO(#9883) revert to timeout.shutdownShort once https://github.com/akka/akka/issues/31530 is solved
+        timeouts.closing.unwrap,
+      ),
+      // TODO(#9883): double check if this step is necessary
+      AsyncCloseable(
+        "queue.completion",
+        notificationsHubSource.runWith(Sink.ignore),
+        // TODO(#9883) revert to timeout.shutdownShort once https://github.com/akka/akka/issues/31530 is solved
+        timeouts.closing.unwrap,
       ),
       // Other readers of the broadcast hub should be shut down separately
     )

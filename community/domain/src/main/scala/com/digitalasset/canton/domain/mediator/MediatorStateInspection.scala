@@ -8,7 +8,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
 
-class MediatorStateInspection(state: MediatorState) {
+private[mediator] class MediatorStateInspection(state: MediatorState) {
   def finalizedResponseCount()(implicit traceContext: TraceContext): Future[Long] =
     state.finalizedResponseStore.count()
 }

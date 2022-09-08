@@ -82,7 +82,7 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
 
   lazy val domain1: DomainId = DomainId.tryFromString("domain::one")
   lazy val update: TransactionUpdate =
-    TransactionUpdate(Set.empty, CantonTimestamp.MinValue, domain1, 0L)
+    TransactionUpdate(Set.empty, CantonTimestamp.MinValue, domain1, 0L, testedProtocolVersion)
 
   def singleDimensionEventLog(mk: () => SingleDimensionEventLog[EventLogId]): Unit = {
 

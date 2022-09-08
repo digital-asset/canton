@@ -51,7 +51,10 @@ class TopologyTimestampPlusEpsilonTrackerTest
       val tx = crypto.mkDmGov(
         DomainParametersChange(
           DefaultTestIdentities.domainId,
-          DynamicDomainParameters.initialValues(topologyChangeDelay, testedProtocolVersion),
+          DynamicDomainParameters.initialValues(
+            topologyChangeDelay,
+            testedProtocolVersion,
+          ),
         ),
         crypto.SigningKeys.key1,
       )

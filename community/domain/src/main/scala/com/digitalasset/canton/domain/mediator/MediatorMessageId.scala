@@ -5,10 +5,8 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.syntax.either._
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.sequencing.protocol.MessageId
-import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfTimestamp, checked}
 import com.google.common.annotations.VisibleForTesting
 
@@ -17,11 +15,11 @@ import scala.util.Try
 /** Structure serialized into a sequencer message id to convey what the sequencer event means for a mediator
   * between a send and a receipt (witnessing the sequenced event).
   */
-sealed trait MediatorMessageId {
+private[mediator] sealed trait MediatorMessageId {
   def toMessageId: MessageId
 }
 
-object MediatorMessageId {
+private[mediator] object MediatorMessageId {
   case class VerdictMessageId(requestId: RequestId) extends MediatorMessageId {
     val toMessageId: MessageId =
       mkMessageId(verdictPrefix)(requestId.unwrap.toLf.micros)
@@ -59,16 +57,6 @@ object MediatorMessageId {
       case _other =>
         // this wasn't created by us so don't attempt to parse it
         None
-    }
-
-  def getOrLogError(
-      logger: TracedLogger
-  )(messageId: Option[MessageId])(implicit traceContext: TraceContext): Option[MediatorMessageId] =
-    MediatorMessageId(messageId) flatMap {
-      case Left(err) =>
-        logger.warn(s"Failed to extract mediator message id from event: $err")
-        None
-      case Right(messageId) => Some(messageId)
     }
 
   @VisibleForTesting

@@ -126,12 +126,12 @@ object TransferResult
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferResult)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development, // TODO(i10131): make this stable
+      ProtocolVersion.dev, // TODO(i10131): make this stable
       supportedProtoVersionMemoized(v1.TransferResult)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -235,8 +235,11 @@ case class DeliveredTransferOutResult(result: SignedContent[Deliver[DefaultOpenE
       transferOutResults(0).protocolMessage.message
   }
 
-  if (unwrap.verdict != Verdict.Approve)
-    throw InvalidTransferOutResult(result, "The transfer-out result must be approving.")
+  unwrap.verdict match {
+    case _: Verdict.Approve => ()
+    case _: Verdict.MediatorReject | _: Verdict.ParticipantReject =>
+      throw InvalidTransferOutResult(result, "The transfer-out result must be approving.")
+  }
 
   def transferId: TransferId = TransferId(unwrap.domainId, unwrap.requestId.unwrap)
 

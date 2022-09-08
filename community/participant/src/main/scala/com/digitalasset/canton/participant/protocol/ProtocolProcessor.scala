@@ -102,8 +102,6 @@ abstract class ProtocolProcessor[
   import ProtocolProcessor._
   import com.digitalasset.canton.util.ShowUtil._
 
-  private type ResultError = steps.ResultError
-
   private val alarmer = new LoggingAlarmStreamer(logger)
 
   private def alarm(message: String)(implicit traceContext: TraceContext): Future[Unit] =
@@ -416,7 +414,11 @@ abstract class ProtocolProcessor[
         steps.removePendingSubmission(steps.pendingSubmissions(ephemeral), submissionId).foreach {
           submissionData =>
             logger.debug(s"Removing sent submission $submissionId without a result.")
-            steps.postProcessResult(MediatorError.Timeout.Reject(), submissionData)
+            steps.postProcessResult(
+              MediatorError.Timeout.Reject
+                .create(sequencerClient.staticDomainParameters.protocolVersion),
+              submissionData,
+            )
         }
       }
     } yield ()
@@ -850,14 +852,24 @@ abstract class ProtocolProcessor[
               update,
             ) =
               commitSetAndContractsAndEvent
-            if (verdict != Approve && commitSetOF.isDefined)
+
+            val isApproval = verdict match {
+              case _: Approve => true
+              case _ => false
+            }
+
+            if (!isApproval && commitSetOF.isDefined)
               throw new RuntimeException("Negative verdicts entail an empty commit set")
             if (!contractsToBeStored.subsetOf(pendingContracts))
               throw new RuntimeException("All contracts to be stored should be pending")
             (commitSetOF, contractsToBeStored, maybeEvent, update)
           }
         case _: CleanReplayData =>
-          val commitSet = if (verdict == Approve) Some(Future.successful(CommitSet.empty)) else None
+          val commitSet = verdict match {
+            case _: Approve => Some(Future.successful(CommitSet.empty))
+            case _ => None
+          }
+
           val contractsToBeStored = Set.empty[LfContractId]
           val maybeEvent = None
           EitherT.pure[Future, steps.ResultError](

@@ -256,7 +256,7 @@ class DatabaseSequencer(
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, String, SequencerSnapshot] =
-    EitherT.rightT(SequencerSnapshot.Unimplemented)
+    EitherT.rightT(SequencerSnapshot.unimplemented(protocolVersion))
 
   override def onClosed(): Unit = {
     super.onClosed()

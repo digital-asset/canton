@@ -23,11 +23,8 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
-import com.digitalasset.canton.version.{
-  ProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
-}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -622,8 +619,8 @@ object TransferStoreTest {
       Method TransferOutView.fromProtoV0 set protocol version to v2 (not present in Protobuf v0).
      */
     val targetProtocolVersion =
-      if (protocolVersion <= ProtocolVersion.v3_0_0)
-        TargetProtocolVersion(ProtocolVersion.v2_0_0)
+      if (protocolVersion <= ProtocolVersion.v3)
+        TargetProtocolVersion(ProtocolVersion.v2)
       else
         TargetProtocolVersion(protocolVersion)
 
@@ -676,7 +673,7 @@ object TransferStoreTest {
       val mediatorMessage = transferData.transferOutRequest.tree.mediatorMessage
       val result = mediatorMessage.createMediatorResult(
         requestId,
-        Verdict.Approve,
+        Verdict.Approve(BaseTest.testedProtocolVersion),
         mediatorMessage.allInformees,
       )
       val signedResult =

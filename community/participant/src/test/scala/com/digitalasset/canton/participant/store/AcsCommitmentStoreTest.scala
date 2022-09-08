@@ -172,7 +172,7 @@ trait AcsCommitmentStoreTest
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    if (testedProtocolVersion >= ProtocolVersion.unstable_development) {
+    if (testedProtocolVersion >= ProtocolVersion.dev) {
       "correctly compute outstanding commitments when intersection contains no tick" in {
         /*
         This copies the scenario of the test

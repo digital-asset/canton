@@ -47,7 +47,7 @@ case class BaseQuery(
       ops.nonEmpty,
       timeQuery.toProtoV0,
       filterSigningKey,
-      protocolVersion.map(_.toProtoPrimitive),
+      protocolVersion.map(_.toProtoPrimitiveS),
     )
 }
 
@@ -60,7 +60,7 @@ object BaseQuery {
       filterSignedKey = baseQuery.filterSignedKey
       timeQuery <- TimeQuery.fromProto(baseQuery.timeQuery, "time_query")
       opsRaw <- TopologyChangeOp.fromProtoV0(baseQuery.operation)
-      protocolVersion <- baseQuery.protocolVersion.traverse(ProtocolVersion.fromProtoPrimitive)
+      protocolVersion <- baseQuery.protocolVersion.traverse(ProtocolVersion.fromProtoPrimitiveS)
     } yield BaseQuery(
       filterStore,
       useStateStore,

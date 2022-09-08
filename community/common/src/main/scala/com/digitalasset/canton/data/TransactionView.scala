@@ -174,7 +174,7 @@ case class TransactionView private (
     * [[com.digitalasset.canton.protocol.LfTransactionVersion]] to be used for serializing the key.
     *
     * @throws java.lang.UnsupportedOperationException
-    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded
     */
   def globalKeyInputs(implicit
@@ -187,10 +187,10 @@ case class TransactionView private (
     NamedLoggingLazyVal[Map[LfGlobalKey, KeyResolutionWithMaintainers]] { implicit loggingContext =>
       val viewParticipantData = tryUnblindViewParticipantData("Global key inputs")
 
-      if (viewParticipantData.isEquivalentTo(ProtocolVersion.v2_0_0)) {
+      if (viewParticipantData.isEquivalentTo(ProtocolVersion.v2)) {
         ErrorUtil.internalError(
           new UnsupportedOperationException(
-            s"Global key inputs can be computed only for protocol version ${ProtocolVersion.v3_0_0} and higher"
+            s"Global key inputs can be computed only for protocol version ${ProtocolVersion.v3} and higher"
           )
         )
       }
@@ -295,7 +295,7 @@ case class TransactionView private (
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
     * @throws java.lang.UnsupportedOperationException
-    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def activeLedgerState(implicit
@@ -308,7 +308,7 @@ case class TransactionView private (
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
     * @throws java.lang.UnsupportedOperationException
-    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def updatedKeys(implicit loggingContext: NamedLoggingContext): Map[LfGlobalKey, Set[LfPartyId]] =
@@ -319,7 +319,7 @@ case class TransactionView private (
     * Must only be used in mode [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]]
     *
     * @throws java.lang.UnsupportedOperationException
-    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]]
+    *   if the protocol version is below [[com.digitalasset.canton.version.ProtocolVersion.v3]]
     * @throws java.lang.IllegalStateException if the [[ViewParticipantData]] of this view or any subview is blinded.
     */
   def updatedKeyValues(implicit
@@ -593,7 +593,7 @@ object ViewCommonData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ViewCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     )
@@ -676,17 +676,17 @@ object ViewCommonData
   *   For [[com.digitalasset.canton.protocol.WellFormedTransaction]]s, the creation therefore is not rolled
   *   back either as the archival can only refer to non-rolled back creates.
   * @param resolvedKeys
-  *   Specifies how to resolve [[com.daml.lf.engine.ResultNeedKey]] requests from DAMLe (resulting from e.g., fetchByKey,
-  *   lookupByKey) when interpreting the view. The resolved contract IDs must be in the [[coreInputs]].
-  *   * Up to protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]]:
-  *     [[com.digitalasset.canton.data.FreeKey]] is used only for lookup-by-key nodes.
-  *   * From protocol version [[com.digitalasset.canton.version.ProtocolVersion.v3_0_0]] on:
-  *     Stores only the resolution difference between this view's global key inputs
-  *     [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]]
-  *     and the aggregated global key inputs from the subviews
-  *     (see [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]] for the aggregation algorithm).
-  *     In [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]],
-  *     the [[com.digitalasset.canton.data.FreeKey]] resolutions must be checked during conflict detection.
+  * Specifies how to resolve [[com.daml.lf.engine.ResultNeedKey]] requests from DAMLe (resulting from e.g., fetchByKey,
+  * lookupByKey) when interpreting the view. The resolved contract IDs must be in the [[coreInputs]].
+  * * Up to protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2]]:
+  * [[com.digitalasset.canton.data.FreeKey]] is used only for lookup-by-key nodes.
+  * * From protocol version [[com.digitalasset.canton.version.ProtocolVersion.v3]] on:
+  * Stores only the resolution difference between this view's global key inputs
+  * [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]]
+  * and the aggregated global key inputs from the subviews
+  * (see [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]] for the aggregation algorithm).
+  * In [[com.daml.lf.transaction.ContractKeyUniquenessMode.Strict]],
+  * the [[com.digitalasset.canton.data.FreeKey]] resolutions must be checked during conflict detection.
   * @param actionDescription The description of the root action of the view
   * @param rollbackContext The rollback context of the root action of the view.
   * @throws ViewParticipantData$.InvalidViewParticipantData
@@ -878,7 +878,7 @@ sealed abstract case class ViewParticipantData(
         )
     }
 
-  override def companionObj: ViewParticipantData.type = ViewParticipantData
+  override protected def companionObj: ViewParticipantData.type = ViewParticipantData
 
   private[ViewParticipantData] def toProtoV0: v0.ViewParticipantData =
     v0.ViewParticipantData(
@@ -943,20 +943,20 @@ object ViewParticipantData
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // Protobuf version 1 uses the same message format as version 0,
     // but interprets resolvedKeys differently. See ViewParticipantData's scaladoc for details
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.v3_0_0,
+      ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
     // TODO(#9910) migrate to stable
     ProtobufVersion(2) -> VersionedProtoConverter(
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersionMemoized(v2.ViewParticipantData)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

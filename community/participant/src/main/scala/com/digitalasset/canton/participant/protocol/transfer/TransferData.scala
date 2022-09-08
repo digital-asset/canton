@@ -9,7 +9,7 @@ import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.version.SourceProtocolVersion
+import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 
 /** Stores the data for a transfer that needs to be passed from the source domain to the target domain. */
 case class TransferData(

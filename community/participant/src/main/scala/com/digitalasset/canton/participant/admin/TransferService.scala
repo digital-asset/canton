@@ -13,11 +13,8 @@ import com.digitalasset.canton.participant.store.TransferLookup
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.{
-  ProtocolVersion,
-  SourceProtocolVersion,
-  TargetProtocolVersion,
-}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{DomainAlias, LfPartyId}
 
 import scala.concurrent.{ExecutionContext, Future}

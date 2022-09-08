@@ -41,12 +41,12 @@ case class SignedContent[+A <: ProtocolVersionedMemoizedEvidence](
     with Product {
   override def companionObj = SignedContent.serializer
 
-  /** We use [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]] here because only v0 is defined
+  /** We use [[com.digitalasset.canton.version.ProtocolVersion.v2]] here because only v0 is defined
     * for SignedContent. This can be revisited when this wrapper will evolve.
     */
   def representativeProtocolVersion
       : RepresentativeProtocolVersion[SignedContent[ProtocolVersionedMemoizedEvidence]] =
-    SignedContent.serializer.protocolVersionRepresentativeFor(ProtocolVersion.v2_0_0)
+    SignedContent.serializer.protocolVersionRepresentativeFor(ProtocolVersion.v2)
 
   def getCryptographicEvidence: ByteString = content.getCryptographicEvidence
 
@@ -134,7 +134,7 @@ object SignedContent {
 
       val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
         ProtobufVersion(0) -> VersionedProtoConverter(
-          ProtocolVersion.v2_0_0,
+          ProtocolVersion.v2,
           supportedProtoVersion(v0.SignedContent)(fromProtoV0),
           _.toProtoV0.toByteString,
         )

@@ -9,20 +9,15 @@ import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWrapperCompanion,
-  HasProtocolVersionedWrapper,
-  ProtobufVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version._
 import com.google.protobuf.ByteString
 
 /** Payload of a response sent to the mediator in reaction to a request.
@@ -66,15 +61,16 @@ sealed abstract case class MediatorResponse(
 ) extends SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MediatorResponse]
     with HasDomainId
-    with NoCopy {
+    with NoCopy
+    with PrettyPrinting {
 
   // If an object invariant is violated, throw an exception specific to the class.
   // Thus, the exception can be caught during deserialization and translated to a human readable error message.
   localVerdict match {
-    case _: LocalReject.Malformed =>
+    case _: Malformed =>
       if (confirmingParties.nonEmpty)
         throw InvalidMediatorResponse("Confirming parties must be empty for verdict Malformed.")
-    case LocalApprove | _: LocalReject =>
+    case _: LocalApprove | _: LocalReject =>
       if (confirmingParties.isEmpty)
         throw InvalidMediatorResponse(
           show"Confirming parties must not be empty for verdict $localVerdict"
@@ -101,11 +97,34 @@ sealed abstract case class MediatorResponse(
       domainId = domainId.toProtoPrimitive,
     )
 
+  protected def toProtoV1: v1.MediatorResponse =
+    v1.MediatorResponse(
+      requestId = Some(requestId.toProtoPrimitive),
+      sender = sender.toProtoPrimitive,
+      viewHash = viewHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      localVerdict = Some(localVerdict.toProtoV1),
+      rootHash = rootHash.fold(ByteString.EMPTY)(_.toProtoPrimitive),
+      confirmingParties = confirmingParties.toList,
+      domainId = domainId.toProtoPrimitive,
+    )
+
   override def toProtoSomeSignedProtocolMessage
       : v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse =
     v0.SignedProtocolMessage.SomeSignedProtocolMessage.MediatorResponse(getCryptographicEvidence)
 
   override def hashPurpose: HashPurpose = HashPurpose.MediatorResponseSignature
+
+  override def pretty: Pretty[this.type] =
+    prettyOfClass(
+      param("sender", _.sender),
+      param("localVerdict", _.localVerdict),
+      param("confirmingParties", _.confirmingParties),
+      param("domainId", _.domainId),
+      param("requestId", _.requestId),
+      paramIfDefined("viewHash", _.viewHash),
+      paramIfDefined("rootHash", _.rootHash),
+      param("protocolVersion", _.representativeProtocolVersion),
+    )
 }
 
 object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[MediatorResponse] {
@@ -113,10 +132,15 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.MediatorResponse)(fromProtoV0),
       _.toProtoV0.toByteString,
-    )
+    ),
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.dev, // TODO(i10131): make stable
+      supportedProtoVersionMemoized(v1.MediatorResponse)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   case class InvalidMediatorResponse(msg: String) extends RuntimeException(msg)
@@ -219,6 +243,50 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             domainId,
           )(
             supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+            Some(bytes),
+          ) {}
+        )
+        .leftMap(err => InvariantViolation(err.toString))
+    } yield response
+  }
+
+  private def fromProtoV1(mediatorResponseP: v1.MediatorResponse)(
+      bytes: ByteString
+  ): ParsingResult[MediatorResponse] = {
+    val v1.MediatorResponse(
+      requestIdPO,
+      senderP,
+      viewHashP,
+      localVerdictPO,
+      rootHashP,
+      confirmingPartiesP,
+      domainIdP,
+    ) =
+      mediatorResponseP
+    for {
+      requestId <- ProtoConverter
+        .required("MediatorResponse.request_id", requestIdPO)
+        .flatMap(RequestId.fromProtoPrimitive)
+      sender <- ParticipantId.fromProtoPrimitive(senderP, "MediatorResponse.sender")
+      viewHash <- ViewHash.fromProtoPrimitiveOption(viewHashP)
+      localVerdict <- ProtoConverter
+        .required("MediatorResponse.local_verdict", localVerdictPO)
+        .flatMap(LocalVerdict.fromProtoV1)
+      rootHashO <- RootHash.fromProtoPrimitiveOption(rootHashP)
+      confirmingParties <- confirmingPartiesP.traverse(ProtoConverter.parseLfPartyId)
+      domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
+      response <- Either
+        .catchOnly[InvalidMediatorResponse](
+          new MediatorResponse(
+            requestId,
+            sender,
+            viewHash,
+            localVerdict,
+            rootHashO,
+            confirmingParties.toSet,
+            domainId,
+          )(
+            supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(1)),
             Some(bytes),
           ) {}
         )

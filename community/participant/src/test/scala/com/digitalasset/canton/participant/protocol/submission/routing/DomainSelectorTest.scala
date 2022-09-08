@@ -145,8 +145,8 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
     }
 
     "take minimum protocol version into account" in {
-      val oldPV = ProtocolVersion.v3_0_0
-      val newPV = ProtocolVersion.unstable_development
+      val oldPV = ProtocolVersion.v3
+      val newPV = ProtocolVersion.dev
       val transactionVersion = LfTransactionVersion.VDev
 
       val selectorOldPV = selectorForExerciseByInterface(
@@ -349,8 +349,7 @@ private[routing] object DomainSelectorTest {
 
     private val defaultPrescribedDomainAlias: Option[String] = None
 
-    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ =>
-      ProtocolVersion.v3_0_0
+    private val defaultDomainProtocolVersion: DomainId => ProtocolVersion = _ => ProtocolVersion.v3
 
     private val defaultTransactionVersion: LanguageVersion = LanguageVersion.v1_14
 

@@ -3,17 +3,13 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import cats.data.EitherT
+import cats.data.OptionT
 import cats.instances.future._
-import cats.syntax.either._
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.mediator.{
-  MediatorRequestNotFound,
-  ResponseAggregation,
-  StaleVersion,
-}
+import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
+import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
@@ -33,7 +29,7 @@ import scala.jdk.CollectionConverters._
   * It is expected that `fetchPendingRequestIdsBefore` operation is not called concurrently with operations
   * to modify the pending requests.
   */
-class MediatorState(
+private[mediator] class MediatorState(
     val finalizedResponseStore: FinalizedResponseStore,
     val deduplicationStore: MediatorDeduplicationStore,
     metrics: MediatorMetrics,
@@ -79,14 +75,13 @@ class MediatorState(
 
   def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation] = {
+  ): OptionT[Future, ResponseAggregation] = {
     // TODO(#10025): in an overload situation, when participants start to reply late, the fetching
     //   from the store became punitive in the semi-optimal mediator response processing
     Option(pendingRequests.get(requestId))
       .orElse(finishedRequests.get(requestId)) match {
-      case Some(cp) => EitherT.rightT[Future, MediatorRequestNotFound](cp)
-      case None =>
-        finalizedResponseStore.fetch(requestId)
+      case Some(cp) => OptionT.some[Future](cp)
+      case None => finalizedResponseStore.fetch(requestId)
     }
   }
 
@@ -95,7 +90,7 @@ class MediatorState(
     */
   def replace(oldValue: ResponseAggregation, newValue: ResponseAggregation)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, StaleVersion, Unit] = {
+  ): OptionT[Future, Unit] = {
     ErrorUtil.requireArgument(
       oldValue.requestId == newValue.requestId,
       s"RequestId ${oldValue.requestId} cannot be replaced with ${newValue.requestId}",
@@ -104,7 +99,7 @@ class MediatorState(
 
     val requestId = oldValue.requestId
 
-    def storeFinalized: EitherT[Future, StaleVersion, Unit] = EitherT.right {
+    def storeFinalized: OptionT[Future, Unit] = OptionT.liftF {
       finalizedResponseStore.store(newValue) map { _ =>
         // keep the request around for a while to avoid a database lookup under contention
         Option(finishedRequests.put(requestId, newValue)) match {
@@ -134,17 +129,27 @@ class MediatorState(
 
     for {
       // I'm not really sure about these validations or errors...
-      currentValue <- Option(pendingRequests.get(requestId))
-        .toRight(StaleVersion(requestId, newValue.version, oldValue.version))
-        .toEitherT
-      _ <- EitherT.cond(
-        currentValue.version == oldValue.version,
-        (),
-        StaleVersion(requestId, newValue.version, currentValue.version),
-      )
+      currentValue <- OptionT.fromOption(Option(pendingRequests.get(requestId)).orElse {
+        MediatorError.InternalError
+          .Reject(
+            s"Request $requestId has unexpectedly disappeared (expected version: ${oldValue.version}, new version: ${newValue.version})."
+          )
+          .log()
+        None
+      })
+      _ <-
+        if (currentValue.version == oldValue.version) OptionT.some[Future](())
+        else {
+          MediatorError.InternalError
+            .Reject(
+              s"Request $requestId has an unexpected version ${currentValue.version} (expected version: ${oldValue.version}, new version: ${newValue.version})."
+            )
+            .log()
+          OptionT.none[Future, Unit]
+        }
       _ <-
         if (newValue.isFinalized) storeFinalized
-        else EitherT.pure[Future, StaleVersion](updatePending())
+        else OptionT.some[Future](updatePending())
     } yield ()
   }
 

@@ -202,7 +202,6 @@ sealed trait SigningKeyScheme extends Product with Serializable with PrettyPrint
   * EC-DSA is slower than Ed25519 but has better compatibility with other systems (such as CCF).
   */
 object SigningKeyScheme {
-
   implicit val signingKeySchemeOrder: Order[SigningKeyScheme] =
     Order.by[SigningKeyScheme, String](_.name)
 

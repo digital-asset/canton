@@ -13,10 +13,10 @@ import com.digitalasset.canton.config.ConfigErrors.{
   NoConfigFiles,
   SubstitutionError,
 }
-import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry, SuppressionRule}
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import org.scalatest.wordspec.AnyWordSpec
 
 class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
@@ -39,6 +39,82 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
       config.portDescription shouldBe "mydomain:admin-api=5019,public-api=5018;participant1:admin-api=5012,ledger-api=5011;participant2:admin-api=5022,ledger-api=5021"
     }
 
+  }
+
+  "deprecated configs" should {
+    val expectedWarnings = LogEntry.assertLogSeq(
+      Seq(
+        (
+          _.message should (include("Config field") and include("is deprecated")),
+          "deprecated field not logged",
+        )
+      ),
+      Seq.empty,
+    ) _
+
+    def deprecatedConfigChecks(config: CantonCommunityConfig) = {
+      import scala.concurrent.duration._
+
+      val participant = config.participants.head._2
+      participant.init.ledgerApi.maxDeduplicationDuration.duration.toSeconds shouldBe 10.minutes.toSeconds
+      participant.init.parameters.uniqueContractKeys shouldBe false
+      participant.init.parameters.unsafeEnableCausalityTracking shouldBe true
+      participant.init.identity.map(_.generateLegalIdentityCertificate) shouldBe Some(true)
+      participant.storage.failFastOnStartup shouldBe false
+
+      def domain(name: String) = config.domains
+        .find(_._1.unwrap == name)
+        .value
+        ._2
+
+      val domain1Parameters = domain("domain1").init.domainParameters
+      val domain2parameters = domain("domain2").init.domainParameters
+
+      domain1Parameters.uniqueContractKeys shouldBe false
+      domain2parameters.uniqueContractKeys shouldBe true
+      domain1Parameters.willCorruptYourSystemDevVersionSupport shouldBe false
+      domain2parameters.willCorruptYourSystemDevVersionSupport shouldBe true
+    }
+
+    // In this test case, both deprecated and new fields are set with opposite values, we make sure the new fields
+    // are used
+    "load with new fields set" in {
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
+        {
+          val parsed = loadFile("deprecated-configs/new-config-fields-take-precedence.conf").value
+          deprecatedConfigChecks(parsed)
+        },
+        expectedWarnings,
+      )
+    }
+
+    // In this test case, only the deprecated fields are set, we make sure they get used as fallbacks
+    "be backwards compatible" in {
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
+        {
+          val parsed = loadFile("deprecated-configs/backwards-compatible.conf").value
+          deprecatedConfigChecks(parsed)
+        },
+        expectedWarnings,
+      )
+    }
+
+    "disable autoInit to false" in {
+      val config =
+        ConfigFactory
+          .parseFile((baseDir.toString / "deprecated-configs/backwards-compatible.conf").toJava)
+          .withValue(
+            "canton.participants.participant1.init.auto-init",
+            ConfigValueFactory.fromAnyRef(false),
+          )
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
+        {
+          val parsed = CantonCommunityConfig.load(config).value
+          parsed.participants.head._2.init.autoInit shouldBe false
+        },
+        expectedWarnings,
+      )
+    }
   }
 
   "the invalid node names configuration" should {

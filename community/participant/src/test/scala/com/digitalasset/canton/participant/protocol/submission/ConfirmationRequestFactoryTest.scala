@@ -273,7 +273,7 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
         val encryptedViewMessage: EncryptedViewMessage[TransactionViewType] =
           testedProtocolVersion match {
             // TODO(i9423): Migrate to next protocol version
-            case ProtocolVersion.unstable_development =>
+            case ProtocolVersion.`dev` =>
               EncryptedViewMessageV1(
                 signature,
                 tree.viewHash,

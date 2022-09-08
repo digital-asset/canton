@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import cats.data.EitherT
+import cats.data.OptionT
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.mediator.{MediatorRequestNotFound, ResponseAggregation}
+import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -27,7 +27,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Stores and retrieves finalized mediator response aggregations
   */
-trait FinalizedResponseStore extends AutoCloseable {
+private[mediator] trait FinalizedResponseStore extends AutoCloseable {
 
   /** Stores finalized mediator response aggregations (whose state is a Left(verdict)).
     * In the event of a crash we may attempt to store an existing finalized request so the store
@@ -40,7 +40,7 @@ trait FinalizedResponseStore extends AutoCloseable {
     */
   def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation]
+  ): OptionT[Future, ResponseAggregation]
 
   /** Remove all responses up to and including the provided timestamp. */
   def prune(timestamp: CantonTimestamp)(implicit traceContext: TraceContext): Future[Unit]
@@ -51,7 +51,7 @@ trait FinalizedResponseStore extends AutoCloseable {
   def count()(implicit traceContext: TraceContext): Future[Long]
 }
 
-object FinalizedResponseStore {
+private[mediator] object FinalizedResponseStore {
   def apply(
       storage: Storage,
       cryptoApi: CryptoPureApi,
@@ -67,8 +67,9 @@ object FinalizedResponseStore {
   }
 }
 
-class InMemoryFinalizedResponseStore(override protected val loggerFactory: NamedLoggerFactory)
-    extends FinalizedResponseStore
+private[mediator] class InMemoryFinalizedResponseStore(
+    override protected val loggerFactory: NamedLoggerFactory
+) extends FinalizedResponseStore
     with NamedLogging {
   private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
@@ -85,9 +86,9 @@ class InMemoryFinalizedResponseStore(override protected val loggerFactory: Named
 
   override def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation] =
-    EitherT.fromEither[Future](
-      finalizedRequests.get(requestId.unwrap).toRight(MediatorRequestNotFound(requestId))
+  ): OptionT[Future, ResponseAggregation] =
+    OptionT.fromOption[Future](
+      finalizedRequests.get(requestId.unwrap)
     )
 
   override def prune(
@@ -103,7 +104,7 @@ class InMemoryFinalizedResponseStore(override protected val loggerFactory: Named
   override def close(): Unit = ()
 }
 
-class DbFinalizedResponseStore(
+private[mediator] class DbFinalizedResponseStore(
     override protected val storage: DbStorage,
     cryptoApi: CryptoPureApi,
     protocolVersion: ProtocolVersion,
@@ -121,7 +122,7 @@ class DbFinalizedResponseStore(
     (r: RequestId, pp: PositionedParameters) => SetParameter[CantonTimestamp].apply(r.unwrap, pp)
 
   private implicit val setParameterVerdict: SetParameter[Verdict] =
-    Verdict.getVersionedSetParameter(protocolVersion)
+    Verdict.getVersionedSetParameter
   private implicit val setParameterTraceContext: SetParameter[TraceContext] =
     TraceContext.getVersionedSetParameter(protocolVersion)
 
@@ -174,28 +175,24 @@ class DbFinalizedResponseStore(
 
   override def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, MediatorRequestNotFound, ResponseAggregation] =
-    processingTime.metric.eitherTEvent {
-      EitherT(
-        storage.query(
-          {
-            sql"""
-      select request_id, mediator_request, version, verdict, request_trace_context from response_aggregations where request_id=${requestId.unwrap}
-    """.as[(RequestId, MediatorRequest, CantonTimestamp, Verdict, TraceContext)].map { result =>
-              result.headOption.toRight(MediatorRequestNotFound(requestId)).map {
-                case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
-                  ResponseAggregation(
-                    reqId,
-                    mediatorRequest,
-                    version,
-                    verdict,
-                    requestTraceContext,
-                  )(loggerFactory)
-              }
-            }
-          },
-          operationName = s"${this.getClass}: fetch request $requestId",
-        )
+  ): OptionT[Future, ResponseAggregation] =
+    processingTime.metric.optionTEvent {
+      storage.querySingle(
+        sql"""select request_id, mediator_request, version, verdict, request_trace_context 
+              from response_aggregations where request_id=${requestId.unwrap}
+           """.as[(RequestId, MediatorRequest, CantonTimestamp, Verdict, TraceContext)].map {
+          _.headOption.map { case (reqId, mediatorRequest, version, verdict, requestTraceContext) =>
+            ResponseAggregation(
+              reqId,
+              mediatorRequest,
+              version,
+              verdict,
+              protocolVersion,
+              requestTraceContext,
+            )(loggerFactory)
+          }
+        },
+        operationName = s"${this.getClass}: fetch request $requestId",
       )
     }
 

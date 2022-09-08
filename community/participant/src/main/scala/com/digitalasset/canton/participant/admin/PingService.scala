@@ -29,7 +29,6 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
@@ -65,8 +64,6 @@ class PingService(
     extends AdminWorkflowService
     with NamedLogging {
   // TODO(#6318): Once we have an ACS service, it should also use it to vacuum stale pings/pongs upon connect
-
-  private val closed: AtomicBoolean = new AtomicBoolean()
 
   // Used to synchronize the ping requests and responses.
   // Once the promise is fulfilled, the ping for the given id is complete.
@@ -166,7 +163,6 @@ class PingService(
   }
 
   override def close(): Unit = {
-    closed.set(true)
     Lifecycle.close(connection)(logger)
   }
 
@@ -490,15 +486,12 @@ class PingService(
     val result = Promise[T]()
 
     other.onComplete(result.tryComplete)
-    // schedule completing the future if not already closed
-    // if we are we'll assume the yet to be created ACS pull will timeout these items
+    // schedule completing the future exceptionally if it didn't finish before the timeout deadline
     timeoutScheduler.schedule(
       { () =>
         {
           if (result.tryFailure(new TimeoutException))
-            logger.info(
-              "Unable to complete time limited computation, as the service is already closed."
-            )
+            logger.info(s"Operation timed out after $durationMillis millis.")
         }
       }: Runnable,
       durationMillis,

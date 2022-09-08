@@ -3,29 +3,34 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.data.EitherT
+import cats.data.OptionT
 import cats.syntax.either._
 import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
-import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
+import com.digitalasset.canton.domain.mediator.ResponseAggregation.{
+  ViewState,
+  alarmMediatorRequestNotFound,
+}
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.messages.LocalReject.Malformed
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{RequestId, ViewHash, v0}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
-object ResponseAggregation {
+private[mediator] object ResponseAggregation {
   final case class ViewState(
       pendingConfirmingParties: Set[ConfirmingParty],
       distanceToThreshold: Int,
@@ -42,7 +47,10 @@ object ResponseAggregation {
     }
   }
 
-  private def initialState(request: MediatorRequest): Either[Verdict, Map[ViewHash, ViewState]] = {
+  private def initialState(
+      request: MediatorRequest,
+      protocolVersion: ProtocolVersion,
+  )(implicit loggingContext: ErrorLoggingContext): Either[Verdict, Map[ViewHash, ViewState]] = {
     val minimumThreshold = request.confirmationPolicy.minimumThreshold
     request.informeesAndThresholdByView.toList
       .traverse { case (viewHash, (informees, threshold)) =>
@@ -50,22 +58,31 @@ object ResponseAggregation {
         Either.cond(
           threshold >= minimumThreshold,
           viewHash -> ViewState(confirmingParties, threshold.unwrap, Nil),
-          MediatorError.MalformedMessage.Reject(
-            s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=$viewHash, threshold=$threshold",
-            v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-          ),
+          MediatorError.MalformedMessage
+            .Reject(
+              s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=$viewHash, threshold=$threshold",
+              v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
+              protocolVersion,
+            )
+            .reported(),
         )
       }
       .map(_.toMap)
   }
 
-  def apply(requestId: RequestId, request: MediatorRequest)(
+  def apply(requestId: RequestId, request: MediatorRequest, protocolVersion: ProtocolVersion)(
       loggerFactory: NamedLoggerFactory
   )(implicit traceContext: TraceContext): ResponseAggregation = {
+    implicit val loggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
     val version = requestId.unwrap
     val initial = for {
-      pending <- initialState(request)
-      _ <- Either.cond(pending.values.exists(_.distanceToThreshold > 0), (), Approve)
+      pending <- initialState(request, protocolVersion)
+      _ <- Either.cond(
+        pending.values.exists(_.distanceToThreshold > 0),
+        (),
+        Approve(protocolVersion),
+      )
       existsQuorum = pending.values.forall(state =>
         state.totalAvailableWeight >= state.distanceToThreshold
       )
@@ -75,16 +92,20 @@ object ResponseAggregation {
           val failed = pending.filterNot { case (_, v) =>
             v.totalAvailableWeight >= v.distanceToThreshold
           }.keys
-          MediatorError.MalformedMessage.Reject(
-            s"Rejected transaction has views with not enough confirming parties: $failed",
-            v0.MediatorRejection.Code.NotEnoughConfirmingParties,
-          )
+          MediatorError.MalformedMessage
+            .Reject(
+              s"Rejected transaction has views with not enough confirming parties: $failed",
+              v0.MediatorRejection.Code.NotEnoughConfirmingParties,
+              protocolVersion,
+            )
+            .reported()
         },
       )
     } yield pending
     new ResponseAggregation(requestId, request, version, initial)(
-      requestTraceContext = traceContext
-    )(loggerFactory)
+      protocolVersion = protocolVersion,
+      requestTraceContext = traceContext,
+    )(loggerFactory) {}
   }
 
   def apply(
@@ -92,19 +113,28 @@ object ResponseAggregation {
       request: MediatorRequest,
       version: CantonTimestamp,
       verdict: Verdict,
+      protocolVersion: ProtocolVersion,
       requestTraceContext: TraceContext,
   )(loggerFactory: NamedLoggerFactory): ResponseAggregation =
-    new ResponseAggregation(requestId, request, version, Left(verdict))(requestTraceContext)(
-      loggerFactory
-    )
+    new ResponseAggregation(requestId, request, version, Left(verdict))(
+      protocolVersion,
+      requestTraceContext,
+    )(loggerFactory) {}
 
-  private[this] def apply(
+  def alarmMediatorRequestNotFound(
       requestId: RequestId,
-      request: MediatorRequest,
-      version: CantonTimestamp,
-      state: Either[Verdict, Map[ViewHash, ViewState]],
-  )(loggerFactory: NamedLoggerFactory): ResponseAggregation =
-    throw new UnsupportedOperationException("Use the other apply methods")
+      sender: Member,
+      viewHashO: Option[ViewHash],
+      rootHashO: Option[RootHash],
+      protocolVersion: ProtocolVersion,
+  )(implicit loggingContext: ErrorLoggingContext): Unit = {
+    val viewHashMsg = viewHashO.fold("")(viewHash => show" for view hash $viewHash")
+    val rootHashMsg = rootHashO.fold("")(rootHash => show" for root hash $rootHash")
+    val cause =
+      s"Unknown request $requestId: received mediator response by $sender$viewHashMsg$rootHashMsg"
+    val alarm = MediatorError.MalformedMessage.Reject(cause, protocolVersion)
+    alarm.report()
+  }
 }
 
 /** @param requestId The request Id of the [[com.digitalasset.canton.protocol.messages.InformeeMessage]]
@@ -118,13 +148,14 @@ object ResponseAggregation {
   *                            validated anywhere. Intentionally supplied in a separate parameter list to avoid being
   *                            included in equality checks.
   */
-case class ResponseAggregation private (
+private[mediator] sealed abstract case class ResponseAggregation(
     requestId: RequestId,
     request: MediatorRequest,
     version: CantonTimestamp,
     state: Either[Verdict, Map[ViewHash, ViewState]],
-)(val requestTraceContext: TraceContext)(protected val loggerFactory: NamedLoggerFactory)
-    extends NamedLogging
+)(protocolVersion: ProtocolVersion, val requestTraceContext: TraceContext)(
+    protected val loggerFactory: NamedLoggerFactory
+) extends NamedLogging
     with PrettyPrinting {
 
   def isFinalized: Boolean = state.isLeft
@@ -137,7 +168,7 @@ case class ResponseAggregation private (
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, ResponseAggregationError, ResponseAggregation] = {
+  ): OptionT[Future, ResponseAggregation] = {
     val MediatorResponse(
       _requestId,
       sender,
@@ -153,10 +184,12 @@ case class ResponseAggregation private (
     def authorizedPartiesOfSender(
         viewHash: ViewHash,
         declaredConfirmingParties: Set[LfPartyId],
-    ): EitherT[Future, ResponseAggregationError, Set[LfPartyId]] =
+    ): OptionT[Future, Set[LfPartyId]] =
       localVerdict match {
         case malformed: Malformed =>
-          reportMalformed(sender, requestId, malformed)
+          malformed.logWithContext(
+            Map("requestId" -> requestId.toString, "reportedBy" -> show"$sender")
+          )
           val hostedConfirmingPartiesF =
             declaredConfirmingParties.toList
               .filterA(p => topologySnapshot.canConfirm(sender, p, requiredTrustLevel))
@@ -165,39 +198,43 @@ case class ResponseAggregation private (
             logger.debug(
               show"Malformed response $responseTimestamp for $viewHash considered as a rejection on behalf of $hostedConfirmingParties"
             )
-            Right(hostedConfirmingParties): Either[ResponseAggregationError, Set[LfPartyId]]
+            Some(hostedConfirmingParties): Option[Set[LfPartyId]]
           }
-          EitherT(res)
+          OptionT(res)
 
-        case LocalApprove | _: LocalReject =>
+        case _: LocalApprove | _: LocalReject =>
           val unexpectedConfirmingParties = confirmingParties -- declaredConfirmingParties
           for {
-            _ <- EitherT.cond[Future](
-              unexpectedConfirmingParties.isEmpty,
-              (),
-              UnexpectedMediatorResponse(
-                requestId,
-                viewHash,
-                unexpectedConfirmingParties,
-              ): ResponseAggregationError,
-            )
-            unauthorizedConfirmingParties <- EitherT.right(
+            _ <-
+              if (unexpectedConfirmingParties.isEmpty) OptionT.some[Future](())
+              else {
+                MediatorError.MalformedMessage
+                  .Reject(
+                    s"Request ${requestId.unwrap}: unexpected mediator response for view $viewHash by $sender on behalf of $unexpectedConfirmingParties.",
+                    protocolVersion,
+                  )
+                  .report()
+                OptionT.none[Future, Unit]
+              }
+
+            unauthorizedConfirmingParties <- OptionT.liftF(
               confirmingParties.toList
                 .filterA(p =>
                   topologySnapshot.canConfirm(sender, p, requiredTrustLevel).map(x => !x)
                 )
                 .map(_.toSet)
             )
-            _ <- EitherT.cond[Future](
-              unauthorizedConfirmingParties.isEmpty,
-              (),
-              UnauthorizedMediatorResponse(
-                requestId,
-                viewHash,
-                sender,
-                unauthorizedConfirmingParties,
-              ): ResponseAggregationError,
-            )
+            _ <-
+              if (unauthorizedConfirmingParties.isEmpty) OptionT.some[Future](())
+              else {
+                MediatorError.MalformedMessage
+                  .Reject(
+                    s"Request ${requestId.unwrap}: unauthorized mediator response for view $viewHash by $sender on behalf of $unauthorizedConfirmingParties",
+                    protocolVersion,
+                  )
+                  .report()
+                OptionT.none[Future, Unit]
+              }
           } yield confirmingParties
       }
 
@@ -232,7 +269,7 @@ case class ResponseAggregation private (
         Either.right[Verdict, Map[ViewHash, ViewState]](statesOfViews)
       } else {
         localVerdict match {
-          case LocalApprove =>
+          case LocalApprove() =>
             val contribution = newlyResponded.foldLeft(0)(_ + _.weight)
             val nextViewState =
               ViewState(stillPending, distanceToThreshold - contribution, rejections)
@@ -240,119 +277,137 @@ case class ResponseAggregation private (
             Either.cond(
               nextStatesOfViews.values.exists(_.distanceToThreshold > 0),
               nextStatesOfViews,
-              Approve,
+              Approve(protocolVersion),
             )
 
           case rejection: LocalReject =>
+            val nextRejections = NonEmpty(List, (authorizedParties -> rejection), rejections: _*)
             val nextViewState = ViewState(
               stillPending,
               distanceToThreshold,
-              (authorizedParties -> rejection) :: rejections,
+              nextRejections,
             )
             Either.cond(
               nextViewState.distanceToThreshold <= nextViewState.totalAvailableWeight,
               statesOfViews + (viewHash -> nextViewState),
               // TODO(#5337): Don't discard the rejection reasons of the other views.
-              ParticipantReject(nextViewState.rejections),
+              ParticipantReject(nextRejections, protocolVersion),
             )
         }
       }
     }
 
     for {
-      statesOfViews <- EitherT.fromEither[Future](state.leftMap { s =>
+      statesOfViews <- OptionT.fromOption[Future](state.leftMap { s =>
         logger.debug(
           s"Request ${requestId.unwrap} has already been finalized with verdict $s before response $responseTimestamp from $sender with $localVerdict for view $viewHashO arrives"
         )
-        MediatorRequestAlreadyFinalized(requestId, s)
-      })
-      _ <- EitherT.fromEither[Future](rootHashO.traverse_ { rootHash =>
-        Either.cond(
-          request.rootHash.forall(_ == rootHash),
-          (),
-          MediatorRequestNotFound(requestId, viewHashO, Some(rootHash)),
-        )
+      }.toOption)
+
+      _ <- OptionT.fromOption[Future](rootHashO.traverse_ { rootHash =>
+        if (request.rootHash.forall(_ == rootHash)) Some(())
+        else {
+          alarmMediatorRequestNotFound(
+            requestId,
+            response.sender,
+            viewHashO,
+            Some(rootHash),
+            protocolVersion,
+          )
+          None
+        }
       })
 
       viewHashesAndParties <- {
-        val tmp: EitherT[Future, ResponseAggregationError, List[(ViewHash, Set[LfPartyId])]] =
-          viewHashO match {
-            case None =>
-              // If no view hash is given, the local verdict is Malformed and confirming parties is empty by the invariants of MediatorResponse.
-              // We treat this as a rejection for all parties hosted by the participant.
-              localVerdict match {
-                case malformed: Malformed => reportMalformed(sender, requestId, malformed)
-                case other =>
-                  ErrorUtil.requireState(
-                    condition = false,
-                    s"Verdict should be of type malformed, but got $other",
-                  )
-              }
+        viewHashO match {
+          case None =>
+            // If no view hash is given, the local verdict is Malformed and confirming parties is empty by the invariants of MediatorResponse.
+            // We treat this as a rejection for all parties hosted by the participant.
+            localVerdict match {
+              case malformed: Malformed =>
+                malformed.logWithContext(
+                  Map("requestId" -> requestId.toString, "reportedBy" -> show"$sender")
+                )
+              case other =>
+                ErrorUtil.requireState(
+                  condition = false,
+                  s"Verdict should be of type malformed, but got $other",
+                )
+            }
 
-              val informeesByView = request.informeesAndThresholdByView
-              val ret = informeesByView.toList
-                .traverseFilter { case (viewHash, (informees, _threshold)) =>
-                  val hostedConfirmingPartiesF = informees.toList.traverseFilter {
-                    case ConfirmingParty(party, _) =>
-                      topologySnapshot
-                        .canConfirm(sender, party, requiredTrustLevel)
-                        .map(x => if (x) Some(party) else None)
-                    case _ => Future.successful(None)
-                  }
-                  hostedConfirmingPartiesF.map { hostedConfirmingParties =>
-                    if (hostedConfirmingParties.nonEmpty)
-                      Some(viewHash -> hostedConfirmingParties.toSet)
-                    else None
-                  }
+            val informeesByView = request.informeesAndThresholdByView
+            val ret = informeesByView.toList
+              .traverseFilter { case (viewHash, (informees, _threshold)) =>
+                val hostedConfirmingPartiesF = informees.toList.traverseFilter {
+                  case ConfirmingParty(party, _) =>
+                    topologySnapshot
+                      .canConfirm(sender, party, requiredTrustLevel)
+                      .map(x => if (x) Some(party) else None)
+                  case _ => Future.successful(None)
                 }
-                .map { viewsWithConfirmingPartiesForSender =>
-                  logger.debug(
-                    s"Malformed response $responseTimestamp from $sender considered as a rejection for ${viewsWithConfirmingPartiesForSender}"
-                  )
-                  viewsWithConfirmingPartiesForSender
+                hostedConfirmingPartiesF.map { hostedConfirmingParties =>
+                  if (hostedConfirmingParties.nonEmpty)
+                    Some(viewHash -> hostedConfirmingParties.toSet)
+                  else None
                 }
-              EitherT.right(ret)
-            case Some(viewHash) =>
-              for {
-                informeesAndThreshold <- EitherT.fromEither[Future](
-                  request.informeesAndThresholdByView
-                    .get(viewHash)
-                    .toRight(MediatorRequestNotFound(requestId, viewHashO, rootHashO))
+              }
+              .map { viewsWithConfirmingPartiesForSender =>
+                logger.debug(
+                  s"Malformed response $responseTimestamp from $sender considered as a rejection for ${viewsWithConfirmingPartiesForSender}"
                 )
-                (informees, _) = informeesAndThreshold
-                declaredConfirmingParties = informees.collect { case ConfirmingParty(party, _) =>
-                  party
-                }
-                authorizedConfirmingParties <- authorizedPartiesOfSender(
-                  viewHash,
-                  declaredConfirmingParties,
-                )
-              } yield List(viewHash -> authorizedConfirmingParties)
-          }
-        tmp
+                viewsWithConfirmingPartiesForSender
+              }
+            OptionT.liftF(ret)
+          case Some(viewHash) =>
+            for {
+              informeesAndThreshold <- OptionT.fromOption[Future](
+                request.informeesAndThresholdByView
+                  .get(viewHash)
+                  .orElse {
+                    alarmMediatorRequestNotFound(
+                      requestId,
+                      response.sender,
+                      viewHashO,
+                      rootHashO,
+                      protocolVersion,
+                    )
+                    None
+                  }
+              )
+              (informees, _) = informeesAndThreshold
+              declaredConfirmingParties = informees.collect { case ConfirmingParty(party, _) =>
+                party
+              }
+              authorizedConfirmingParties <- authorizedPartiesOfSender(
+                viewHash,
+                declaredConfirmingParties,
+              )
+            } yield List(viewHash -> authorizedConfirmingParties)
+        }
       }
     } yield {
       val updatedState = MonadUtil.foldLeftM(statesOfViews, viewHashesAndParties)(progressView)
-      copy(version = responseTimestamp, state = updatedState)(requestTraceContext)(loggerFactory)
+      copy(version = responseTimestamp, state = updatedState)
     }
   }
 
-  private def reportMalformed(sender: ParticipantId, requestId: RequestId, reason: Malformed)(
-      implicit traceContext: TraceContext
-  ): Unit = {
-    // TODO(M40): Make this an alarm
-    //  Requires a refactoring, because currently the method can either return the next ResponseAggregation or an alarm.
-    //  But in this case, it needs to return both.
-    reason.logWithContext(Map("requestId" -> requestId.toString, "reportedBy" -> show"$sender"))
-  }
+  def copy(
+      requestId: RequestId = requestId,
+      request: MediatorRequest = request,
+      version: CantonTimestamp = version,
+      state: Either[Verdict, Map[ViewHash, ViewState]] = state,
+  ): ResponseAggregation = new ResponseAggregation(requestId, request, version, state)(
+    protocolVersion,
+    requestTraceContext,
+  )(loggerFactory) {}
 
   def timeout(version: CantonTimestamp) =
     new ResponseAggregation(
       this.requestId,
       this.request,
       version,
-      Left(MediatorError.Timeout.Reject()),
-    )(requestTraceContext)(loggerFactory)
+      Left(MediatorError.Timeout.Reject.create(protocolVersion)),
+    )(this.protocolVersion, requestTraceContext)(loggerFactory) {}
 
   override def pretty: Pretty[ResponseAggregation] = prettyOfClass(
     param("id", _.requestId),

@@ -536,7 +536,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
      This test is disabled for protocol versions for which the reconciliation interval is
      static because the described setting cannot occur.
      */
-    if (testedProtocolVersion >= ProtocolVersion.unstable_development) {
+    if (testedProtocolVersion >= ProtocolVersion.dev) {
       "work when commitment tick falls between two participants connection to the domain" in {
         /*
         The goal here is to check that ACS commitment processing works even when

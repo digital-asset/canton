@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.domain.config
 
+import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
+import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
 import com.digitalasset.canton.config._
 import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerConfig
@@ -83,10 +85,30 @@ case class DomainNodeParameters(
     initialProtocolVersion: ProtocolVersion,
 ) extends LocalNodeParameters
 
+object DomainBaseConfig {
+
+  // TODO(i10108): remove when backwards compatibility can be discarded
+  /** Adds deprecations specific to DomainBaseConfig
+    * We need to manually combine it with the upstream deprecations from LocalNodeConfig
+    * in order to not lose them.
+    */
+  trait DomainBaseConfigDeprecationImplicits extends LocalNodeConfigDeprecationImplicits {
+    implicit def deprecatedDomainBaseConfig[X <: DomainBaseConfig]: DeprecatedFieldsFor[X] =
+      new DeprecatedFieldsFor[DomainBaseConfig] {
+        override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+          DeprecatedConfigUtils.MovedConfigPath(
+            "domain-parameters",
+            "init.domain-parameters",
+          )
+        ) ++ deprecatedLocalNodeConfig.movedFields
+      }
+  }
+}
+
 trait DomainBaseConfig extends LocalNodeConfig {
 
   /** determines how this node is initialized */
-  def init: InitConfig
+  def init: DomainInitConfig
 
   /** if enabled, selected events will be logged by the ParticipantAuditor class */
   def auditLogging: Boolean
@@ -102,9 +124,6 @@ trait DomainBaseConfig extends LocalNodeConfig {
 
   /** determines how the domain performs topology management */
   def topology: TopologyConfig
-
-  /** misc global parameters */
-  def domainParameters: DomainParametersConfig
 
   /** Configuration of parameters related to time tracking using the domain sequencer. Used by the IDM and optionally the mediator and sequencer components. */
   def timeTracker: DomainTimeTrackerConfig
@@ -133,14 +152,13 @@ trait DomainConfig extends DomainBaseConfig {
 }
 
 final case class CommunityDomainConfig(
-    override val init: InitConfig = InitConfig(),
+    override val init: DomainInitConfig = DomainInitConfig(),
     override val auditLogging: Boolean = false,
     override val publicApi: CommunityPublicServerConfig = CommunityPublicServerConfig(),
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
     override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
-    override val domainParameters: DomainParametersConfig = DomainParametersConfig(),
     sequencer: CommunitySequencerConfig.Database = CommunitySequencerConfig.Database(),
     override val serviceAgreement: Option[File] = None,
     override val timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
@@ -148,15 +166,14 @@ final case class CommunityDomainConfig(
     override val caching: CachingConfigs = CachingConfigs(),
 ) extends DomainConfig
     with CommunityLocalNodeConfig
-    with ConfigDefaults[CommunityDomainConfig] {
+    with ConfigDefaults[DefaultPorts, CommunityDomainConfig] {
 
-  override def withDefaults: CommunityDomainConfig = {
-    import ConfigDefaults._
+  override def withDefaults(ports: DefaultPorts): CommunityDomainConfig = {
     this
       .focus(_.publicApi.internalPort)
-      .modify(domainPublicApiPort.setDefaultPort)
+      .modify(ports.domainPublicApiPort.setDefaultPort)
       .focus(_.adminApi.internalPort)
-      .modify(domainAdminApiPort.setDefaultPort)
+      .modify(ports.domainAdminApiPort.setDefaultPort)
   }
 }
 

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
+import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
@@ -18,7 +19,6 @@ import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, In
 import com.digitalasset.canton.domain.sequencing.sequencer.{LedgerIdentity, SequencerSnapshot}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
-import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, Member}
@@ -65,7 +65,7 @@ object EnterpriseSequencerAdminCommands {
       snapshotO: Option[SequencerSnapshot] = None,
   ) extends BaseSequencerInitializationCommand[v0.InitRequest, v0.InitResponse, InitResponse] {
     override def createRequest(): Either[String, v0.InitRequest] = {
-      val request = InitRequest(domainId, topologySnapshot, domainParameters, snapshotO)
+      val request = InitRequest(domainId, topologySnapshot, domainParameters.toInternal, snapshotO)
       Right(request.toProtoV0)
     }
     override def submitRequest(
@@ -99,10 +99,10 @@ object EnterpriseSequencerAdminCommands {
     override def submitRequest(service: HttpSequencerAdminClient, request: InitRequest)(implicit
         traceContext: TraceContext
     ): EitherT[Future, String, InitResponse] =
-      service.initialize(InitRequest(domainId, topologySnapshot, domainParameters))
+      service.initialize(InitRequest(domainId, topologySnapshot, domainParameters.toInternal))
 
     override def createRequest(): Either[String, InitRequest] = Right(
-      InitRequest(domainId, topologySnapshot, domainParameters)
+      InitRequest(domainId, topologySnapshot, domainParameters.toInternal)
     )
 
     override def handleResponse(response: InitResponse): Either[String, InitResponse] = Right(

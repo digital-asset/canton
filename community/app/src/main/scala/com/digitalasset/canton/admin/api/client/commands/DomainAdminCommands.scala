@@ -5,10 +5,13 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either._
 import cats.syntax.traverse._
+import com.digitalasset.canton.admin.api.client.data.{
+  StaticDomainParameters => StaticDomainParametersConfig
+}
 import com.digitalasset.canton.domain.admin.{v0 => adminproto}
 import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
-import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.protocol.{StaticDomainParameters => StaticDomainParametersInternal}
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.google.protobuf.empty.Empty
 import io.grpc.{ManagedChannel, Status}
@@ -72,7 +75,7 @@ object DomainAdminCommands {
       extends BaseDomainServiceCommand[
         adminproto.GetDomainParameters.Request,
         adminproto.GetDomainParameters.Response,
-        StaticDomainParameters,
+        StaticDomainParametersConfig,
       ] {
     override def createRequest(): Either[String, adminproto.GetDomainParameters.Request] = Right(
       adminproto.GetDomainParameters.Request()
@@ -104,15 +107,30 @@ object DomainAdminCommands {
 
     override def handleResponse(
         response: adminproto.GetDomainParameters.Response
-    ): Either[String, StaticDomainParameters] = {
+    ): Either[String, StaticDomainParametersConfig] = {
       import adminproto.GetDomainParameters.Response.Parameters
 
       response.parameters match {
         case Parameters.Empty => Left("Field parameters was not found in the response")
         case Parameters.ParametersV0(parametersV0) =>
-          StaticDomainParameters.fromProtoV0(parametersV0).leftMap(_.toString)
+          (for {
+            staticDomainParametersInternal <- StaticDomainParametersInternal.fromProtoV0(
+              parametersV0
+            )
+            sraticDomainParametersConfig <- StaticDomainParametersConfig(
+              staticDomainParametersInternal
+            )
+          } yield sraticDomainParametersConfig).leftMap(_.toString)
+
         case Parameters.ParametersV1(parametersV1) =>
-          StaticDomainParameters.fromProtoV1(parametersV1).leftMap(_.toString)
+          (for {
+            staticDomainParametersInternal <- StaticDomainParametersInternal.fromProtoV1(
+              parametersV1
+            )
+            staticDomainParametersConfig <- StaticDomainParametersConfig(
+              staticDomainParametersInternal
+            )
+          } yield staticDomainParametersConfig).leftMap(_.toString)
       }
     }
   }

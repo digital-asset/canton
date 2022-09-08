@@ -24,7 +24,7 @@ class SortedReconciliationIntervalsProviderTest
   "SortedReconciliationIntervalsProvider" must {
     // TODO(#9800) migrate to stable version
     "allow to query reconciliation intervals (PV=DEV)" in {
-      val protocolVersion = ProtocolVersion.unstable_development
+      val protocolVersion = ProtocolVersion.dev
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
 
@@ -74,7 +74,7 @@ class SortedReconciliationIntervalsProviderTest
 
     // TODO(#9800) change DEV and eventually PV=3 below
     "allow to query reconciliation intervals (PV < DEV)" in {
-      val protocolVersion = ProtocolVersion.v3_0_0
+      val protocolVersion = ProtocolVersion.v3
 
       val clock = new SimClock(fromEpoch(0), loggerFactory)
       val updatedStaticDomainParameters =
@@ -86,18 +86,19 @@ class SortedReconciliationIntervalsProviderTest
         )
 
       // When PV is old enough, we have constant sorted reconciliation interval
-      val expectedSortedReconciliationIntervals = SortedReconciliationIntervals
-        .create(
-          Seq(
-            DomainParameters.WithValidity(
-              CantonTimestamp.MinValue,
-              None,
-              updatedStaticDomainParameters.reconciliationInterval,
-            )
-          ),
-          validUntil = CantonTimestamp.MaxValue,
-        )
-        .value
+      def expectedSortedReconciliationIntervals(validAt: CantonTimestamp) =
+        SortedReconciliationIntervals
+          .create(
+            Seq(
+              DomainParameters.WithValidity(
+                CantonTimestamp.MinValue,
+                None,
+                updatedStaticDomainParameters.reconciliationInterval,
+              )
+            ),
+            validUntil = validAt,
+          )
+          .value
 
       val provider = SortedReconciliationIntervalsProvider(
         staticDomainParameters = updatedStaticDomainParameters,
@@ -111,17 +112,19 @@ class SortedReconciliationIntervalsProviderTest
       def query(secondsFromEpoch: Long) =
         provider.reconciliationIntervals(fromEpoch(secondsFromEpoch)).futureValue
 
-      clock.advanceTo(fromEpoch(1))
-      query(1) shouldBe expectedSortedReconciliationIntervals
+      val ts1 = 1L
+      clock.advanceTo(fromEpoch(ts1))
+      query(ts1) shouldBe expectedSortedReconciliationIntervals(CantonTimestamp.ofEpochSecond(ts1))
 
-      clock.advanceTo(fromEpoch(10000))
-      query(10000) shouldBe expectedSortedReconciliationIntervals
+      val ts2 = 10000L
+      clock.advanceTo(fromEpoch(ts2))
+      query(ts2) shouldBe expectedSortedReconciliationIntervals(CantonTimestamp.ofEpochSecond(ts2))
       provider.getApproximateLatestReconciliationInterval.value.intervalLength shouldBe updatedStaticDomainParameters.reconciliationInterval
     }
 
     // TODO(#9800) migrate to stable version
     "return an error if topology is not known" in {
-      val protocolVersion = ProtocolVersion.unstable_development
+      val protocolVersion = ProtocolVersion.dev
 
       val topologyKnownAt = fromEpoch(10)
 

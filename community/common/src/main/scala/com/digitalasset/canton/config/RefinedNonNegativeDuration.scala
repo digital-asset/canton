@@ -4,11 +4,10 @@
 package com.digitalasset.canton.config
 
 import com.digitalasset.canton.DiscardOps
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.time.{
-  NonNegativeFiniteDuration => DomainNonNegativeFiniteDuration,
+  NonNegativeFiniteDuration => NonNegativeFiniteDurationInternal,
   PositiveSeconds => DomainPositiveSeconds,
 }
 import com.digitalasset.canton.util.FutureUtil
@@ -35,13 +34,12 @@ trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends Pre
   def asFiniteApproximation: FiniteDuration
 
   def asJavaApproximation: JDuration = JDuration.ofMillis(asFiniteApproximation.toMillis)
-  def minusSeconds(s: Int): D = update(duration.minus(Duration.fromNanos(s * 10e9)))
+  def minusSeconds(s: Int): D = update(duration.minus(s.seconds))
 
   def +(other: D): D = update(duration.plus(other.duration))
-  def plusSeconds(s: Int): D = update(duration.plus(Duration.fromNanos(s * 10e9)))
+  def plusSeconds(s: Int): D = update(duration.plus(s.seconds))
 
-  def multipliedBy(i: Int): D = update(duration * i.toDouble)
-  def *(i: NonNegativeInt): D = update(duration * i.value.toDouble)
+  def *(d: Double): D = update(duration * d)
 
   def retries(interval: Duration): Int = {
     if (interval.isFinite && duration.isFinite)
@@ -171,9 +169,10 @@ final case class NonNegativeFiniteDuration(underlying: FiniteDuration)
 
   def asFiniteApproximation: FiniteDuration = underlying
 
-  private[canton] def toDomain: DomainNonNegativeFiniteDuration = DomainNonNegativeFiniteDuration(
-    asJava
-  )
+  private[canton] def toInternal: NonNegativeFiniteDurationInternal =
+    NonNegativeFiniteDurationInternal(
+      asJava
+    )
 }
 
 object NonNegativeFiniteDuration
@@ -193,12 +192,12 @@ object NonNegativeFiniteDuration
 }
 
 /** Duration class used for positive durations that are rounded to the second. */
-final case class PositiveDurationRoundedSeconds(underlying: FiniteDuration)
-    extends RefinedNonNegativeDuration[PositiveDurationRoundedSeconds] {
+final case class PositiveDurationSeconds(underlying: FiniteDuration)
+    extends RefinedNonNegativeDuration[PositiveDurationSeconds] {
 
   require(underlying > Duration.Zero, s"Duration ${duration} is not positive")
   require(
-    PositiveDurationRoundedSeconds.isRoundedToTheSecond(underlying),
+    PositiveDurationSeconds.isRoundedToTheSecond(underlying),
     s"Duration ${duration} is not rounded to the second",
   )
 
@@ -208,29 +207,29 @@ final case class PositiveDurationRoundedSeconds(underlying: FiniteDuration)
   def duration: Duration = underlying
   def asJava: JDuration = JDuration.ofNanos(duration.toNanos)
 
-  def update(newDuration: Duration): PositiveDurationRoundedSeconds = newDuration match {
+  def update(newDuration: Duration): PositiveDurationSeconds = newDuration match {
     case _: Duration.Infinite =>
       throw new IllegalArgumentException(s"Duration must be finite, but is Duration.Inf")
-    case duration: FiniteDuration => PositiveDurationRoundedSeconds(duration)
+    case duration: FiniteDuration => PositiveDurationSeconds(duration)
   }
 
   def asFiniteApproximation: FiniteDuration = underlying
 
-  private[canton] def toDomain: DomainPositiveSeconds = DomainPositiveSeconds(
+  private[canton] def toInternal: DomainPositiveSeconds = DomainPositiveSeconds(
     asJava
   )
 }
 
-object PositiveDurationRoundedSeconds
-    extends RefinedNonNegativeDurationCompanion[PositiveDurationRoundedSeconds] {
+object PositiveDurationSeconds
+    extends RefinedNonNegativeDurationCompanion[PositiveDurationSeconds] {
   private def isRoundedToTheSecond(duration: FiniteDuration): Boolean =
     duration == Duration(duration.toSeconds, SECONDS)
 
-  def apply(duration: Duration): PositiveDurationRoundedSeconds = PositiveDurationRoundedSeconds
+  def apply(duration: Duration): PositiveDurationSeconds = PositiveDurationSeconds
     .fromDuration(duration)
     .fold(err => throw new IllegalArgumentException(err), identity)
 
-  def fromDuration(duration: Duration): Either[String, PositiveDurationRoundedSeconds] =
+  def fromDuration(duration: Duration): Either[String, PositiveDurationSeconds] =
     duration match {
       case x: FiniteDuration =>
         for {
@@ -240,7 +239,7 @@ object PositiveDurationRoundedSeconds
             (),
             s"Duration ${duration} is not rounded to the second",
           )
-        } yield PositiveDurationRoundedSeconds(x)
+        } yield PositiveDurationSeconds(x)
       case Duration.Inf => Left(s"Expecting finite duration but found Duration.Inf")
       case x => Left(s"Duration $x is not a valid duration that can be used for timeouts.")
     }

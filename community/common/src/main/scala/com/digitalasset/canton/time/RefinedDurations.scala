@@ -8,8 +8,8 @@ import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
-  NonNegativeFiniteDuration => ConfigNonNegativeFiniteDuration,
-  PositiveDurationRoundedSeconds => ConfigPositiveSeconds,
+  NonNegativeFiniteDuration => NonNegativeFiniteDurationConfig,
+  PositiveDurationSeconds => ConfigPositiveSeconds,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
@@ -161,8 +161,8 @@ final case class NonNegativeFiniteDuration(duration: Duration)
     duration.multipliedBy(multiplicand.value.toLong)
   )
 
-  def toConfig: ConfigNonNegativeFiniteDuration = checked(
-    ConfigNonNegativeFiniteDuration.tryFromJavaDuration(duration)
+  def toConfig: NonNegativeFiniteDurationConfig = checked(
+    NonNegativeFiniteDurationConfig.tryFromJavaDuration(duration)
   )
 }
 
@@ -172,8 +172,8 @@ object NonNegativeFiniteDuration extends RefinedDurationCompanion[NonNegativeFin
   implicit val forgetRefinementFDuration: Transformer[NonNegativeFiniteDuration, FiniteDuration] =
     _.toScala
 
-  implicit val toConfigNonNegativeDuration
-      : Transformer[NonNegativeFiniteDuration, ConfigNonNegativeFiniteDuration] = _.toConfig
+  implicit val toNonNegativeDurationConfig
+      : Transformer[NonNegativeFiniteDuration, NonNegativeFiniteDurationConfig] = _.toConfig
 
   val Zero: NonNegativeFiniteDuration = NonNegativeFiniteDuration(Duration.ZERO)
 }
@@ -201,6 +201,6 @@ final case class PositiveSeconds(duration: Duration) extends RefinedDuration wit
 }
 
 object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds] {
-  implicit val toConfigPositiveSeconds: Transformer[PositiveSeconds, ConfigPositiveSeconds] =
+  implicit val toPositiveSecondsConfig: Transformer[PositiveSeconds, ConfigPositiveSeconds] =
     _.toConfig
 }

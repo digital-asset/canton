@@ -95,7 +95,7 @@ object RootHashMessage
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.RootHashMessage)((deserializer, proto) =>
         fromProtoV0(deserializer)(proto)
       ),

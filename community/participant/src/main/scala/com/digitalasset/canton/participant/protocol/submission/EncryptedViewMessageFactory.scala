@@ -79,7 +79,7 @@ object EncryptedViewMessageFactory {
       )
       message = protocolVersion match {
         // TODO(i9423): Migrate to next protocol version
-        case ProtocolVersion.unstable_development =>
+        case ProtocolVersion.`dev` =>
           val randomnessV1 = randomnessMap.values.toSeq
           EncryptedViewMessageV1[VT](
             signature,

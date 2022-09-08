@@ -17,8 +17,8 @@ final case class HandshakeRequest(
   // when changing the handshake message format
   def toProtoV0: v0.Handshake.Request =
     v0.Handshake.Request(
-      clientProtocolVersions.map(_.fullVersion),
-      minimumProtocolVersion.map(_.fullVersion),
+      clientProtocolVersions.map(_.toProtoPrimitiveS),
+      minimumProtocolVersion.map(_.toProtoPrimitiveS),
     )
 
   /* We allow serializing this message to a ByteArray despite it not implementing HasVersionedWrapper because the serialization
@@ -36,10 +36,10 @@ object HandshakeRequest {
   ): ParsingResult[HandshakeRequest] =
     for {
       clientProtocolVersions <- requestP.clientProtocolVersions.traverse(version =>
-        ProtocolVersion.fromProtoPrimitive(version)
+        ProtocolVersion.fromProtoPrimitiveS(version)
       )
       minimumProtocolVersion <- requestP.minimumProtocolVersion.traverse(
-        ProtocolVersion.fromProtoPrimitive(_)
+        ProtocolVersion.fromProtoPrimitiveS(_)
       )
     } yield HandshakeRequest(clientProtocolVersions, minimumProtocolVersion)
 }

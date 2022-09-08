@@ -21,7 +21,7 @@ import com.daml.ledger.api.v1.value.{
 }
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.ContractData
-import com.digitalasset.canton.admin.api.client.data.console.ListPartiesResult
+import com.digitalasset.canton.admin.api.client.data.ListPartiesResult
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}

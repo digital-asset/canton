@@ -18,7 +18,7 @@ object HandshakeResponse {
   case class Success(serverProtocolVersion: ProtocolVersion) extends HandshakeResponse {
     override def toProtoV0: v0.Handshake.Response =
       v0.Handshake.Response(
-        serverProtocolVersion.fullVersion,
+        serverProtocolVersion.toProtoPrimitiveS,
         v0.Handshake.Response.Value.Success(v0.Handshake.Success()),
       )
   }
@@ -27,7 +27,7 @@ object HandshakeResponse {
     override def toProtoV0: v0.Handshake.Response =
       v0.Handshake
         .Response(
-          serverProtocolVersion.fullVersion,
+          serverProtocolVersion.toProtoPrimitiveS,
           v0.Handshake.Response.Value.Failure(v0.Handshake.Failure(reason)),
         )
   }
@@ -39,10 +39,10 @@ object HandshakeResponse {
       case v0.Handshake.Response.Value.Empty =>
         Left(ProtoDeserializationError.FieldNotSet("Handshake.Response.value"))
       case v0.Handshake.Response.Value.Success(_success) =>
-        ProtocolVersion.fromProtoPrimitive(responseP.serverProtocolVersion).map(Success)
+        ProtocolVersion.fromProtoPrimitiveS(responseP.serverProtocolVersion).map(Success)
       case v0.Handshake.Response.Value.Failure(failure) =>
         ProtocolVersion
-          .fromProtoPrimitive(responseP.serverProtocolVersion)
+          .fromProtoPrimitiveS(responseP.serverProtocolVersion)
           .map(Failure(_, failure.reason))
     }
 }

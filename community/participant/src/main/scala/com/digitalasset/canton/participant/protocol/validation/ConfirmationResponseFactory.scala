@@ -10,8 +10,7 @@ import com.digitalasset.canton.data.ConfirmingParty
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
-import com.digitalasset.canton.protocol.messages.LocalReject.Malformed
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.{Malformed, _}
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, RequestId, ViewHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -129,7 +128,7 @@ class ConfirmationResponseFactory(
           Map(
             logged(
               LocalReject.ConsistencyRejections.CreatesExistingContracts
-                .Reject(existing.toSeq.map(_.coid))
+                .Reject(existing.toSeq.map(_.coid))(protocolVersion)
             ) -> hostedConfirmingParties
           )
         else {
@@ -169,34 +168,35 @@ class ConfirmationResponseFactory(
               addVerdictForParty(
                 party,
                 LocalReject.ConsistencyRejections.InactiveContracts
-                  .Reject(inactiveInputs.toSeq.map(_.coid)),
+                  .Reject(inactiveInputs.toSeq.map(_.coid))(protocolVersion),
               )
             else if (duplicateKeysForParty.nonEmpty)
               addVerdictForParty(
                 party,
                 LocalReject.ConsistencyRejections.DuplicateKey
-                  .Reject(duplicateKeysForParty.map(_.toString())),
+                  .Reject(duplicateKeysForParty.map(_.toString()))(protocolVersion),
               )
             else if (inconsistentKeysForParty.nonEmpty)
               addVerdictForParty(
                 party,
                 LocalReject.ConsistencyRejections.InconsistentKey
-                  .Reject(inconsistentKeysForParty.map(_.toString())),
+                  .Reject(inconsistentKeysForParty.map(_.toString()))(protocolVersion),
               )
             else if (lockedInputs.nonEmpty | lockedForActivation.nonEmpty) {
               val allLocked = lockedForActivation ++ lockedInputs
               addVerdictForParty(
                 party,
                 LocalReject.ConsistencyRejections.LockedContracts
-                  .Reject(allLocked.toSeq.map(_.coid)),
+                  .Reject(allLocked.toSeq.map(_.coid))(protocolVersion),
               )
             } else if (lockedKeys.nonEmpty)
               addVerdictForParty(
                 party,
-                LocalReject.ConsistencyRejections.LockedKeys.Reject(lockedKeys.map(_.toString())),
+                LocalReject.ConsistencyRejections.LockedKeys
+                  .Reject(lockedKeys.map(_.toString()))(protocolVersion),
               )
             else
-              addVerdictForParty(party, LocalApprove)
+              addVerdictForParty(party, LocalApprove()(protocolVersion))
           }
           verdicts.toMap
         }
@@ -212,7 +212,7 @@ class ConfirmationResponseFactory(
 
           case Left(cause) =>
             val verdict = logged(
-              LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)
+              LocalReject.MalformedRejects.ModelConformance.Reject(cause.toString)(protocolVersion)
             )
             Future.successful(transactionValidationResult.viewValidationResults.fmap {
               _viewValidationResult =>
@@ -238,7 +238,7 @@ class ConfirmationResponseFactory(
                                 ) =>
                               LocalReject.TimeRejects.LedgerTime.Reject(
                                 s"ledgerTime=$ledgerTime, recordTime=$recordTime, maxDelta=$maxDelta"
-                              )
+                              )(protocolVersion)
                             case TimeValidator.SubmissionTimeRecordTimeDeltaTooLargeError(
                                   submissionTime,
                                   recordTime,
@@ -246,7 +246,7 @@ class ConfirmationResponseFactory(
                                 ) =>
                               LocalReject.TimeRejects.SubmissionTime.Reject(
                                 s"submissionTime=$submissionTime, recordTime=$recordTime, maxDelta=$maxDelta"
-                              )
+                              )(protocolVersion)
                           }
                           Map[LocalVerdict, Set[LfPartyId]](rej -> parties)
                         }
@@ -289,7 +289,9 @@ class ConfirmationResponseFactory(
 
     if (malformedPayloads.nonEmpty)
       Future.successful(
-        malformed(LocalReject.MalformedRejects.Payloads.Reject(malformedPayloads.toString))
+        malformed(
+          LocalReject.MalformedRejects.Payloads.Reject(malformedPayloads.toString)(protocolVersion)
+        )
       )
     else {
       val confirmationPolicies = transactionValidationResult.confirmationPolicies
@@ -297,7 +299,7 @@ class ConfirmationResponseFactory(
         Future.successful(
           malformed(
             LocalReject.MalformedRejects.MultipleConfirmationPolicies
-              .Reject(confirmationPolicies.toString)
+              .Reject(confirmationPolicies.toString)(protocolVersion)
           )
         )
       else

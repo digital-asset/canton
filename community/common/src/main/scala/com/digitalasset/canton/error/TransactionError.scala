@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.error.{ErrorCategory, ErrorClass, ErrorCode}
+import com.daml.error.ErrorCode
 import com.daml.ledger.participant.state.v2.SubmissionResult
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
   FinalReason,
@@ -13,12 +13,6 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.code.Code
 import com.google.rpc.status.{Status => RpcStatus}
 import io.grpc.Status
-
-abstract class ErrorCodeWithEnum[T](id: String, category: ErrorCategory, val protoCode: T)(implicit
-    parent: ErrorClass
-) extends ErrorCode(id, category) {
-  override implicit val code: ErrorCodeWithEnum[T] = this
-}
 
 trait TransactionError extends BaseCantonError {
 
@@ -60,18 +54,6 @@ abstract class LoggingTransactionErrorImpl(
   // automatically log the error on generation
   log()
 }
-
-trait TransactionErrorWithEnum[T] extends TransactionError {
-  override def code: ErrorCodeWithEnum[T]
-}
-
-/** Transaction errors are derived from BaseCantonError and need to be logged explicitly */
-abstract class TransactionErrorWithEnumImpl[T](
-    override val cause: String,
-    override val throwableO: Option[Throwable] = None,
-    override val definiteAnswer: Boolean = false,
-)(implicit override val code: ErrorCodeWithEnum[T])
-    extends TransactionErrorWithEnum[T]
 
 trait TransactionParentError[T <: TransactionError]
     extends TransactionError

@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.foldable._
 import cats.syntax.option._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -17,8 +17,11 @@ import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.PoolClosed
+import com.digitalasset.canton.protocol.{DomainParametersLookup, TestDomainParameters}
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, GenesisSequencerCounter}
 import com.google.protobuf.ByteString
@@ -86,8 +89,29 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       TestingIdentityFactory(loggerFactory).forOwnerAndDomain(member)
     val subscriptionPool: SubscriptionPool[Subscription] =
       mock[SubscriptionPool[GrpcManagedSubscription]]
-    val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
 
+    private val maxRatePerParticipant = NonNegativeInt.tryCreate(5)
+    val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
+    private val topologyClient = mock[DomainTopologyClient]
+    private val mockTopologySnapshot = mock[TopologySnapshot]
+    when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
+      .thenReturn(mockTopologySnapshot)
+    when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
+      .thenReturn(
+        Future.successful(
+          TestDomainParameters.defaultDynamic(maxRatePerParticipant = maxRatePerParticipant)
+        )
+      )
+
+    private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
+      DomainParametersLookup.forMaxRatePerParticipant(
+        BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant =
+          maxRatePerParticipant.unwrap
+        ),
+        topologyClient,
+        FutureSupervisor.Noop,
+        loggerFactory,
+      )
     val service =
       new GrpcSequencerService(
         sequencer,
@@ -99,7 +123,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         },
         subscriptionPool,
         sequencerSubscriptionFactory,
-        NonNegativeInt.tryCreate(5),
+        maxRatePerParticipantLookup,
         NonNegativeInt.tryCreate(1000),
         timeouts,
       )

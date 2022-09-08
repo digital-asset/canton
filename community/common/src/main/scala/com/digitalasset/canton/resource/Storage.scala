@@ -127,7 +127,7 @@ class CommunityStorageFactory(val config: CommunityStorageConfig) extends Storag
       closeContext: CloseContext,
   ): EitherT[UnlessShutdown, String, Storage] =
     config match {
-      case CommunityStorageConfig.Memory(_) => EitherT.rightT(new MemoryStorage)
+      case CommunityStorageConfig.Memory(_, _) => EitherT.rightT(new MemoryStorage)
       case db: DbConfig =>
         DbStorageSingle
           .create(

@@ -60,7 +60,7 @@ class BadRootHashMessagesRequestProcessor(
     }
 
   /** Immediately moves the request to Confirmed and registers a timeout handler at the decision time with the request tracker.
-    * Also sends a [[com.digitalasset.canton.protocol.messages.LocalReject.Malformed]]
+    * Also sends a [[com.digitalasset.canton.protocol.messages.Malformed]]
     * for the given [[com.digitalasset.canton.protocol.RootHash]] with the given `rejectionReason`.
     */
   def sendRejectionAndExpectMediatorResult(
@@ -82,7 +82,8 @@ class BadRootHashMessagesRequestProcessor(
             requestId = requestId,
             sender = participantId,
             viewHash = None,
-            localVerdict = LocalReject.MalformedRejects.BadRootHashMessages.Reject(rejectionReason),
+            localVerdict = LocalReject.MalformedRejects.BadRootHashMessages
+              .Reject(rejectionReason)(protocolVersion),
             rootHash = Some(rootHash),
             confirmingParties = Set.empty,
             domainId = domainId,

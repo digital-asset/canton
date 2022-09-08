@@ -895,7 +895,12 @@ class TransactionProcessingSteps(
             pendingTransaction,
             responses.map(_ -> mediatorRecipient),
             Seq.empty,
-            RejectionArgs(pendingTransaction, LocalReject.TimeRejects.LocalTimeout.Reject()),
+            RejectionArgs(
+              pendingTransaction,
+              LocalReject.TimeRejects.LocalTimeout.Reject()(
+                staticDomainParameters.protocolVersion
+              ),
+            ),
           )
         }
     }
@@ -1134,6 +1139,7 @@ class TransactionProcessingSteps(
           pendingRequestData.requestTime,
           domainId,
           pendingRequestData.requestCounter,
+          staticDomainParameters.protocolVersion,
         )
       ),
     )
@@ -1168,7 +1174,7 @@ class TransactionProcessingSteps(
         MergeableEither[MediatorResult](result).merge.verdict,
         pendingRequestData.modelConformanceResult,
       ) match {
-        case (Verdict.Approve, Right(modelConformance)) =>
+        case (_: Verdict.Approve, Right(modelConformance)) =>
           getCommitSetAndContractsToBeStoredAndEventApproveConform(
             pendingRequestData,
             completionInfo,
@@ -1177,7 +1183,9 @@ class TransactionProcessingSteps(
 
         case (_, Left(modelConformanceError)) =>
           rejected(
-            LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)
+            LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)(
+              staticDomainParameters.protocolVersion
+            )
           )
 
         case (reasons: Verdict.ParticipantReject, _) =>
@@ -1218,7 +1226,7 @@ class TransactionProcessingSteps(
       val (usedAndCreatedContracts, hostedInformeeStakeholders) =
         extractUsedAndCreatedContracts(rootViewTrees, partyPrefetch)
       val inputAndReassignedKeys =
-        if (staticDomainParameters.protocolVersion >= ProtocolVersion.v3_0_0)
+        if (staticDomainParameters.protocolVersion >= ProtocolVersion.v3)
           extractInputAndUpdatedKeysV3(rootViewTrees, partyPrefetch)
         else
           extractInputAndUpdatedKeysV2(rootViewTrees, partyPrefetch)

@@ -21,11 +21,12 @@ import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
-trait MediatorEventDeduplicator {
+private[mediator] trait MediatorEventDeduplicator {
 
   /** Reads the request uuids of envelopes and checks for duplicates:
     * If the uuid of an envelope has been used previously and the previous usage has not expired by the
@@ -67,11 +68,12 @@ trait MediatorEventDeduplicator {
   )(implicit traceContext: TraceContext): Future[(Seq[DefaultOpenEnvelope], Future[Unit])]
 }
 
-object MediatorEventDeduplicator {
+private[mediator] object MediatorEventDeduplicator {
   def create(
       store: MediatorDeduplicationStore,
       verdictSender: VerdictSender,
       topologyClient: DomainTopologyClient,
+      protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): MediatorEventDeduplicator = {
 
@@ -96,6 +98,7 @@ object MediatorEventDeduplicator {
       verdictSender,
       getDeduplicationTimeout,
       getDecisionTime,
+      protocolVersion,
       loggerFactory,
     )
   }
@@ -106,6 +109,7 @@ class DefaultMediatorEventDeduplicator(
     verdictSender: VerdictSender,
     getDeduplicationTimeout: Traced[CantonTimestamp] => Future[Duration],
     getDecisionTime: Traced[CantonTimestamp] => Future[CantonTimestamp],
+    protocolVersion: ProtocolVersion,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends MediatorEventDeduplicator
@@ -149,6 +153,7 @@ class DefaultMediatorEventDeduplicator(
         val verdict = MediatorError.MalformedMessage.Reject(
           s"The request uuid ($uuid) must not be used until $expireAfter.",
           v0.MediatorRejection.Code.NonUniqueRequestUuid,
+          protocolVersion,
         )
         verdict.report()
 

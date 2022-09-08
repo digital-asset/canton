@@ -34,8 +34,7 @@ trait TransactionTreeFactory {
   /** Converts a `transaction: LfTransaction` to the corresponding transaction tree, if possible.
     *
     * @param keyResolver The key resolutions recorded while interpreting the transaction.
-    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]].
-    *
+    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2]].
     * @see TransactionTreeConversionError for error cases
     */
   def createTransactionTree(
@@ -57,8 +56,7 @@ trait TransactionTreeFactory {
     * using the supplied salts.
     *
     * @param keyResolver The key resolutions recorded while re-interpreting the subaction.
-    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]].
-    *
+    *                    Ignored for protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2]].
     * @throws java.lang.IllegalArgumentException if `subaction` does not contain exactly one root node
     */
   def tryReconstruct(

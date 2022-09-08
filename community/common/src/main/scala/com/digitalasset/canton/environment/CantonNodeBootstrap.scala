@@ -10,7 +10,12 @@ import cats.syntax.option._
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.{LocalNodeConfig, LocalNodeParameters, ProcessingTimeout}
+import com.digitalasset.canton.config.{
+  InitConfigBase,
+  LocalNodeConfig,
+  LocalNodeParameters,
+  ProcessingTimeout,
+}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
@@ -332,7 +337,7 @@ abstract class CantonNodeBootstrapBase[
       _ <- id.fold(
         if (initConfig.autoInit) {
           logger.info("Node is not initialized yet. Performing automated default initialization.")
-          autoInitializeIdentity()
+          autoInitializeIdentity(initConfig)
         } else {
           logger.info(
             "Node is not initialized yet. You have opted for manual configuration by yourself."
@@ -350,7 +355,9 @@ abstract class CantonNodeBootstrapBase[
   protected def initialize(uid: NodeId): EitherT[Future, String, Unit]
 
   /** Generate an identity for the node. */
-  protected def autoInitializeIdentity(): EitherT[Future, String, Unit]
+  protected def autoInitializeIdentity(
+      initConfigBase: InitConfigBase
+  ): EitherT[Future, String, Unit]
 
   /** Initialize the node with an externally provided identity. */
   def initializeWithProvidedId(nodeId: NodeId): EitherT[Future, String, Unit] = {

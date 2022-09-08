@@ -76,7 +76,7 @@ class VerdictSenderTest extends BaseTestWordSpec with HasExecutionContext {
         .sendResult(
           RequestId(CantonTimestamp.Epoch),
           informeeMessage,
-          Verdict.Approve,
+          Verdict.Approve(testedProtocolVersion),
           CantonTimestamp.ofEpochSecond(100),
         )
         .futureValue
@@ -84,9 +84,10 @@ class VerdictSenderTest extends BaseTestWordSpec with HasExecutionContext {
       val request = sequencerSend.requests.loneElement
       inside(request.batch.envelopes.loneElement.protocolMessage) {
         case SignedProtocolMessage(message: MediatorResult, _) =>
-          message.verdict shouldBe MediatorError.InvalidMessage.Reject(
+          message.verdict shouldBe MediatorError.InvalidMessage.Reject.create(
             show"Rejected transaction due to informees not being hosted on an active participant: $observer",
             v0.MediatorRejection.Code.InformeesNotHostedOnActiveParticipant,
+            testedProtocolVersion,
           )
       }
     }

@@ -11,10 +11,11 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
-  VersionedMessage,
+  RepresentativeProtocolVersion,
 }
 import com.google.protobuf.ByteString
 
@@ -23,7 +24,10 @@ case class SequencerSnapshot(
     heads: Map[Member, SequencerCounter],
     status: SequencerPruningStatus,
     additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
-) extends HasVersionedWrapper[VersionedMessage[SequencerSnapshot]] {
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot])
+    extends HasProtocolVersionedWrapper[SequencerSnapshot] {
+
+  override protected def companionObj = SequencerSnapshot
 
   def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
     Some(lastTs.toProtoPrimitive),
@@ -33,26 +37,34 @@ case class SequencerSnapshot(
     Some(status.toProtoV0),
     additional.map(a => v0.ImplementationSpecificInfo(a.implementationName, a.info)),
   )
-
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[SequencerSnapshot] =
-    VersionedMessage(toProtoV0.toByteString, 0)
-
 }
-object SequencerSnapshot extends HasVersionedMessageCompanion[SequencerSnapshot] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SequencerSnapshot)(fromProtoV0)
+object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SequencerSnapshot)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "sequencer snapshot"
 
-  lazy val Unimplemented = SequencerSnapshot(
+  def apply(
+      lastTs: CantonTimestamp,
+      heads: Map[Member, SequencerCounter],
+      status: SequencerPruningStatus,
+      additional: Option[SequencerSnapshot.ImplementationSpecificInfo],
+      protocolVersion: ProtocolVersion,
+  ): SequencerSnapshot = SequencerSnapshot(lastTs, heads, status, additional)(
+    protocolVersionRepresentativeFor(protocolVersion)
+  )
+
+  def unimplemented(protocolVersion: ProtocolVersion) = SequencerSnapshot(
     CantonTimestamp.MinValue,
     Map.empty,
     SequencerPruningStatus.Unimplemented,
     None,
-  )
+  )(protocolVersionRepresentativeFor(protocolVersion))
 
   case class ImplementationSpecificInfo(implementationName: String, info: ByteString)
 
@@ -80,7 +92,7 @@ object SequencerSnapshot extends HasVersionedMessageCompanion[SequencerSnapshot]
       heads,
       status,
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
-    )
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
 }
 
 case class SequencerInitialState(

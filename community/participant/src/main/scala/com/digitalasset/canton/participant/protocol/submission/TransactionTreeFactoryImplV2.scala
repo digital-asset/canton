@@ -27,7 +27,7 @@ import java.util.UUID
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Generate transaction trees as used up to protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2_0_0]]
+/** Generate transaction trees as used up to protocol version [[com.digitalasset.canton.version.ProtocolVersion.v2]]
   */
 final class TransactionTreeFactoryImplV2(
     submitterParticipant: ParticipantId,
@@ -48,8 +48,8 @@ final class TransactionTreeFactoryImplV2(
       loggerFactory,
     ) {
   require(
-    protocolVersion <= ProtocolVersion.v2_0_0,
-    s"${this.getClass.getSimpleName} can only be used up to protocol version ${ProtocolVersion.v2_0_0}, but not for $protocolVersion",
+    protocolVersion <= ProtocolVersion.v2,
+    s"${this.getClass.getSimpleName} can only be used up to protocol version ${ProtocolVersion.v2}, but not for $protocolVersion",
   )
 
   protected[submission] class State private (

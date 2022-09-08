@@ -17,10 +17,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
   ParticipantAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.console.{
-  DarMetadata,
-  ListConnectedDomainsResult,
-}
+import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,

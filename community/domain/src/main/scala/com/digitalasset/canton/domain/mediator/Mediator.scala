@@ -49,7 +49,7 @@ import io.opentelemetry.api.trace.Tracer
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The Mediator that acts as transaction coordinator. */
-class Mediator(
+private[mediator] class Mediator(
     val domain: DomainId,
     val mediatorId: MediatorId,
     @VisibleForTesting
@@ -103,6 +103,7 @@ class Mediator(
     state.deduplicationStore,
     verdictSender,
     syncCrypto.ips,
+    protocolVersion,
     loggerFactory,
   )
 
@@ -255,7 +256,7 @@ class Mediator(
     )
 }
 
-object Mediator {
+private[mediator] object Mediator {
   sealed trait PruningError
   object PruningError {
 

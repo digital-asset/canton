@@ -4,20 +4,14 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either._
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
 import com.digitalasset.canton.protocol.v0.TransferViewTree
 import com.digitalasset.canton.protocol.{ViewHash, v0}
+import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
-import com.digitalasset.canton.version.{
-  HasVersionedWrapper,
-  ProtocolVersion,
-  UntypedVersionedMessage,
-  VersionedMessage,
-}
+import com.digitalasset.canton.version.{HasVersionedWrapper, ProtocolVersion, VersionedMessage}
 import com.google.protobuf.ByteString
 
 /** A transfer request tree has two children:
@@ -64,23 +58,6 @@ abstract class GenTransferViewTree[
 }
 
 object GenTransferViewTree {
-
-  private[data] def fromProtoVersioned[CommonData, View, Tree](
-      deserializeCommonData: ByteString => ParsingResult[MerkleTree[
-        CommonData
-      ]],
-      deserializeView: ByteString => ParsingResult[MerkleTree[View]],
-  )(
-      createTree: (MerkleTree[CommonData], MerkleTree[View]) => Tree
-  )(treeP: UntypedVersionedMessage): ParsingResult[Tree] =
-    if (treeP.version == 0)
-      treeP.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet("data")).flatMap { data =>
-        ProtoConverter
-          .protoParser(v0.TransferViewTree.parseFrom)(data)
-          .flatMap(fromProtoV0(deserializeCommonData, deserializeView)(createTree))
-      }
-    else Left(ProtoDeserializationError.VersionError("TransferViewTree", treeP.version))
-
   private[data] def fromProtoV0[CommonData, View, Tree](
       deserializeCommonData: ByteString => ParsingResult[MerkleTree[
         CommonData

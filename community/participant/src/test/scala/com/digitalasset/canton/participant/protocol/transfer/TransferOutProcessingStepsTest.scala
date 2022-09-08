@@ -55,7 +55,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -623,7 +623,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           RequestId(CantonTimestamp.Epoch),
           Set(),
           TransferOutDomainId(sourceDomain),
-          Verdict.Approve,
+          Verdict.Approve(testedProtocolVersion),
           testedProtocolVersion,
         )
       for {

@@ -13,7 +13,7 @@ object ProtocolCryptoApi {
       outputBytes: Int,
       info: HkdfInfo,
   ): Either[HkdfError, SecureRandomness] = protocolVersion match {
-    case pv if pv > ProtocolVersion.v2_0_0 =>
+    case pv if pv > ProtocolVersion.v2 =>
       hkdfOps.computeHkdf(keyMaterial.unwrap, outputBytes, info)
     case _ => hkdfOps.hkdfExpand(keyMaterial, outputBytes, info)
   }

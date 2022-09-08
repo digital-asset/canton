@@ -82,7 +82,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    ): Source[ReadSignal, NotUsed] =
+    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
       source
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(

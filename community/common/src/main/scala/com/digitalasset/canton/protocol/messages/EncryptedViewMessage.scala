@@ -430,13 +430,13 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.EncryptedViewMessage)(EncryptedViewMessageV0.fromProto),
       _.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
       // TODO(i9423): Migrate to next protocol version
-      ProtocolVersion.unstable_development,
+      ProtocolVersion.dev,
       supportedProtoVersion(v1.EncryptedViewMessage)(EncryptedViewMessageV1.fromProto),
       _.toByteString,
     ),

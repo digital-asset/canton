@@ -18,7 +18,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config.{DbConfig, H2DbConfig, TestingConfigInternal}
+import com.digitalasset.canton.config.{DbConfig, H2DbConfig, InitConfigBase, TestingConfigInternal}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
   CommunityCryptoPrivateStoreFactory,
   CryptoPrivateStoreFactory,
@@ -223,7 +223,9 @@ class ParticipantNodeBootstrap(
     } yield ledgerApiServer
   }
 
-  override protected def autoInitializeIdentity(): EitherT[Future, String, Unit] =
+  override protected def autoInitializeIdentity(
+      initConfigBase: InitConfigBase
+  ): EitherT[Future, String, Unit] =
     withNewTraceContext { implicit traceContext =>
       val protocolVersion = config.parameters.initialProtocolVersion.unwrap
 
@@ -234,8 +236,11 @@ class ParticipantNodeBootstrap(
         encryptionKey <- getOrCreateEncryptionKey(s"$name-encryption")
 
         // create id
+        identifierName = initConfigBase.identity
+          .flatMap(_.nodeIdentifier.identifierName)
+          .getOrElse(name.unwrap)
         identifier <- EitherT
-          .fromEither[Future](Identifier.create(name.unwrap))
+          .fromEither[Future](Identifier.create(identifierName))
           .leftMap(err => s"Failed to convert participant name to identifier: $err")
         uid = UniqueIdentifier(
           identifier,
@@ -273,7 +278,7 @@ class ParticipantNodeBootstrap(
 
         // initialize certificate if enabled
         _ <-
-          if (config.init.generateLegalIdentityCertificate) {
+          if (config.init.identity.exists(_.generateLegalIdentityCertificate)) {
             (new LegalIdentityInit(certificateGenerator, crypto)).checkOrInitializeCertificate(
               uid,
               Seq(participantId),
@@ -341,8 +346,8 @@ class ParticipantNodeBootstrap(
           syncDomainPersistentStateManager,
           storage,
           clock,
-          config.ledgerApi.maxDeduplicationDuration.some,
-          cantonParameterConfig.uniqueContractKeys.some,
+          config.init.ledgerApi.maxDeduplicationDuration.some,
+          config.init.parameters.uniqueContractKeys.some,
           cantonParameterConfig.stores,
           metrics,
           indexedStringStore,

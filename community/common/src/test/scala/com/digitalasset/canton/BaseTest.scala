@@ -73,8 +73,6 @@ trait BaseTest
   protected lazy val defaultStaticDomainParameters: StaticDomainParameters =
     BaseTest.defaultStaticDomainParameters
 
-  protected def isTestedProtocolVersionDev: Boolean = BaseTest.isTestedProtocolVersionDev
-
   protected def signedTransactionProtocolVersionRepresentative
       : RepresentativeProtocolVersion[SignedTopologyTransaction[TopologyChangeOp]] =
     SignedTopologyTransaction.protocolVersionRepresentativeFor(testedProtocolVersion)
@@ -354,9 +352,6 @@ object BaseTest {
 
   lazy val testedProtocolVersion: ProtocolVersion =
     ProtocolVersion.tryGetOptFromEnv.getOrElse(ProtocolVersion.latest)
-
-  lazy val isTestedProtocolVersionDev: Boolean =
-    testedProtocolVersion == ProtocolVersion.unstable_development
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")

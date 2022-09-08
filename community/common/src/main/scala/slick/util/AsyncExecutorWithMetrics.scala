@@ -242,24 +242,36 @@ class AsyncExecutorWithMetrics(
             .map(_.toString)
             .getOrElse("<unknown>")
         } else "query-tracking-disabled"
+        // initialize statistics gathering
         stats.put(command, QueryInfo(tr, added = System.nanoTime(), None).created())
-        super.execute(command)
+        try {
+          super.execute(command)
+        } catch {
+          // if we throw here, the task will never be executed. therefore, we'll have to remove the task statistics
+          // again to not leak memory
+          case NonFatal(e) =>
+            stats.remove(command)
+            throw e
+        }
       }
       // canton change end
 
       /** If the runnable/task has released the Jdbc connection we decrease the counter again
         */
       override def afterExecute(r: Runnable, t: Throwable): Unit = {
-        super.afterExecute(r, t)
-        (r, queue) match {
-          case (pr: PrioritizedRunnable, q: ManagedArrayBlockingQueue[Runnable])
-              if pr.connectionReleased =>
-            q.decreaseInUseCount()
-          case _ =>
+        try {
+          super.afterExecute(r, t)
+          (r, queue) match {
+            case (pr: PrioritizedRunnable, q: ManagedArrayBlockingQueue[Runnable])
+                if pr.connectionReleased =>
+              q.decreaseInUseCount()
+            case _ =>
+          }
+          // canton change begin
+        } finally {
+          stats.remove(r).foreach(_.completed())
+          // canton change end
         }
-        // canton change begin
-        stats.remove(r).foreach(_.completed())
-        // canton change end
       }
 
     }

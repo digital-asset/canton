@@ -8,6 +8,7 @@ import com.digitalasset.canton.admin.api.client.commands.EnterpriseMediatorAdmin
   Initialize,
   Prune,
 }
+import com.digitalasset.canton.admin.api.client.data.StaticDomainParameters
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -20,7 +21,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
@@ -81,7 +81,7 @@ class MediatorAdministrationGroup(
         mediatorId,
         Option(cryptoType).filterNot(_.isEmpty),
         topologySnapshot,
-        domainParameters,
+        domainParameters.toInternal,
         sequencerConnection,
       )
     )

@@ -166,9 +166,8 @@ private[domain] object RequestProcessingStrategy {
         transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     )(implicit
         traceContext: TraceContext
-    ): EitherT[Future, DomainTopologyManagerError, Unit] = if (
-      protocolVersion < ProtocolVersion.v3_0_0
-    ) EitherT.pure(())
+    ): EitherT[Future, DomainTopologyManagerError, Unit] = if (protocolVersion < ProtocolVersion.v3)
+      EitherT.pure(())
     else {
       val allowedSet =
         TopologyStore.initialParticipantDispatchingSet + DomainTopologyTransactionType.NamespaceDelegation + DomainTopologyTransactionType.IdentifierDelegation

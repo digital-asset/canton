@@ -24,6 +24,8 @@ import com.daml.platform.store.backend.postgresql.{
 import com.daml.platform.usermanagement.UserManagementConfig
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
+import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt._
 import com.digitalasset.canton.config.RequireTypes._
 import com.digitalasset.canton.config._
@@ -54,12 +56,41 @@ trait BaseParticipantConfig extends NodeConfig {
   def clientLedgerApi: ClientConfig
 }
 
+object LocalParticipantConfig {
+
+  // TODO(i10108): remove when backwards compatibility can be discarded
+  /** Adds deprecations specific to LocalParticipantConfig
+    * We need to manually combine it with the upstream deprecations from LocalNodeConfig
+    * in order to not lose them.
+    */
+  trait LocalParticipantDeprecationsImplicits extends LocalNodeConfigDeprecationImplicits {
+    implicit def deprecatedLocalParticipantConfig[X <: LocalParticipantConfig]
+        : DeprecatedFieldsFor[X] =
+      new DeprecatedFieldsFor[LocalParticipantConfig] {
+        override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+          DeprecatedConfigUtils.MovedConfigPath(
+            "ledger-api.max-deduplication-duration",
+            "init.ledger-api.max-deduplication-duration",
+          ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "parameters.unique-contract-keys",
+            "init.parameters.unique-contract-keys",
+          ),
+          DeprecatedConfigUtils.MovedConfigPath(
+            "parameters.enable-causality-tracking",
+            "init.parameters.unsafe-enable-causality-tracking",
+          ),
+        ) ++ deprecatedLocalNodeConfig.movedFields
+      }
+  }
+}
+
 /** Base for local participant configurations */
 trait LocalParticipantConfig extends BaseParticipantConfig with LocalNodeConfig {
   override val nodeTypeName: String = "participant"
 
   /** determines how this node is initialized */
-  def init: InitConfig
+  def init: ParticipantInitConfig
 
   /** determines the algorithms used for signing, hashing, and encryption */
   def crypto: CryptoConfig
@@ -146,7 +177,7 @@ case class ParticipantNodeParameters(
   * sufficient to guarantee the processing of all transactions.
   */
 case class CommunityParticipantConfig(
-    override val init: InitConfig = InitConfig(),
+    override val init: ParticipantInitConfig = ParticipantInitConfig(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val ledgerApi: LedgerApiServerConfig = LedgerApiServerConfig(),
     override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
@@ -157,7 +188,7 @@ case class CommunityParticipantConfig(
     override val caching: CachingConfigs = CachingConfigs(),
 ) extends LocalParticipantConfig
     with CommunityLocalNodeConfig
-    with ConfigDefaults[CommunityParticipantConfig] {
+    with ConfigDefaults[DefaultPorts, CommunityParticipantConfig] {
 
   override def clientAdminApi: ClientConfig = adminApi.clientConfig
 
@@ -166,13 +197,12 @@ case class CommunityParticipantConfig(
   def toRemoteConfig: RemoteParticipantConfig =
     RemoteParticipantConfig(clientAdminApi, clientLedgerApi)
 
-  override def withDefaults: CommunityParticipantConfig = {
-    import ConfigDefaults._
+  override def withDefaults(ports: DefaultPorts): CommunityParticipantConfig = {
     this
       .focus(_.ledgerApi.internalPort)
-      .modify(ledgerApiPort.setDefaultPort)
+      .modify(ports.ledgerApiPort.setDefaultPort)
       .focus(_.adminApi.internalPort)
-      .modify(participantAdminApiPort.setDefaultPort)
+      .modify(ports.participantAdminApiPort.setDefaultPort)
   }
 }
 
@@ -197,7 +227,7 @@ case class RemoteParticipantConfig(
   * @param internalPort              ledger api server port.
   * @param maxEventCacheWeight       ledger api server event cache maximum weight (caffeine cache size)
   * @param maxContractCacheWeight    ledger api server contract cache maximum weight (caffeine cache size)
-  * @param maxDeduplicationDuration  Max deduplication duration of the participant's ledger configuration.
+  * @param maxDeduplicationDuration  Deprecated. Use maxDeduplicationDuration in the `init` object of the participant config instead
   * @param tls                       tls configuration setting from ledger api server.
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
   * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
@@ -227,7 +257,6 @@ case class LedgerApiServerConfig(
     internalPort: Option[Port] = None,
     maxEventCacheWeight: Long = 0L,
     maxContractCacheWeight: Long = 0L,
-    maxDeduplicationDuration: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7L),
     tls: Option[TlsServerConfig] = None,
     configurationLoadTimeout: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultConfigurationLoadTimeout,
@@ -725,7 +754,8 @@ object TestingTimeServiceConfig {
   *                                             will be requested.
   *                                             Setting to zero will disable reusing recent time proofs and will instead always fetch a new proof.
   * @param minimumProtocolVersion The minimum protocol version that this participant will speak when connecting to a domain
-  * @param uniqueContractKeys Whether the participant can connect only to a single domain that has [[com.digitalasset.canton.protocol.StaticDomainParameters.uniqueContractKeys]] set
+  * @param uniqueContractKeys Deprecated. Use uniqueContractKeys in the `init` object of the participant config instead
+  * @param enableCausalityTracking Deprecated. Use unsafeEnableCausalityTracking in the `init` object of the participant config instead
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
   * @param initialProtocolVersion The initial protocol version used by the participant (default latest), e.g., used to create the initial topology transactions.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
@@ -742,11 +772,9 @@ case class ParticipantNodeParameterConfig(
     transferTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(
-        ProtocolVersion.v3_0_0
+        ProtocolVersion.v3
       )
     ),
-    uniqueContractKeys: Boolean = true,
-    enableCausalityTracking: Boolean = false,
     unsafeEnableDamlLfDevVersion: Boolean = false,
     initialProtocolVersion: ParticipantProtocolVersion = ParticipantProtocolVersion(
       ProtocolVersion.latest

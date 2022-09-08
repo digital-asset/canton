@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.{
   ConsoleCommandTimeout,
   NonNegativeDuration,
   NonNegativeFiniteDuration,
-  PositiveDurationRoundedSeconds,
+  PositiveDurationSeconds,
   ProcessingTimeout,
 }
 import com.digitalasset.canton.console.CommandErrors.{
@@ -545,14 +545,14 @@ object ConsoleEnvironment {
     ): NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.tryFromDuration(duration)
 
-    /** Implicitly convert a duration to a [[com.digitalasset.canton.config.PositiveDurationRoundedSeconds]]
+    /** Implicitly convert a duration to a [[com.digitalasset.canton.config.PositiveDurationSeconds]]
       *
       * @throws java.lang.IllegalArgumentException if `duration` is not positive or not rounded to the second.
       */
     implicit def durationToPositiveDurationRoundedSeconds(
         duration: SDuration
-    ): PositiveDurationRoundedSeconds =
-      PositiveDurationRoundedSeconds.tryFromDuration(duration)
+    ): PositiveDurationSeconds =
+      PositiveDurationSeconds.tryFromDuration(duration)
   }
 
   object Implicits extends Implicits

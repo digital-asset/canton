@@ -53,7 +53,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.{SourceProtocolVersion, TargetProtocolVersion}
+import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
@@ -468,23 +468,27 @@ private[transfer] class TransferInProcessingSteps(
         case Some(validationResult) =>
           val contractResult = activenessResult.contracts
           val localVerdict =
-            if (activenessResult.isSuccessful) LocalApprove
+            if (activenessResult.isSuccessful) LocalApprove()(targetProtocolVersion.v)
             else if (contractResult.notFree.nonEmpty) {
               contractResult.notFree.toSeq match {
                 case Seq((coid, state)) =>
                   if (state == ActiveContractStore.Archived)
-                    LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")
+                    LocalReject.TransferInRejects.ContractAlreadyArchived.Reject(show"coid=$coid")(
+                      targetProtocolVersion.v
+                    )
                   else
-                    LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")
+                    LocalReject.TransferInRejects.ContractAlreadyActive.Reject(show"coid=$coid")(
+                      targetProtocolVersion.v
+                    )
                 case coids =>
                   throw new RuntimeException(
                     s"Activeness result for a transfer-in fails for multiple contract IDs $coids"
                   )
               }
             } else if (contractResult.alreadyLocked.nonEmpty)
-              LocalReject.TransferInRejects.ContractIsLocked.Reject("")
+              LocalReject.TransferInRejects.ContractIsLocked.Reject("")(targetProtocolVersion.v)
             else if (activenessResult.inactiveTransfers.nonEmpty)
-              LocalReject.TransferInRejects.AlreadyCompleted.Reject("")
+              LocalReject.TransferInRejects.AlreadyCompleted.Reject("")(targetProtocolVersion.v)
             else
               throw new RuntimeException(
                 withRequestId(requestId, s"Unexpected activeness result $activenessResult")
@@ -675,7 +679,7 @@ private[transfer] class TransferInProcessingSteps(
 
     import scala.util.Either.MergeableEither
     MergeableEither[MediatorResult](result).merge.verdict match {
-      case Verdict.Approve =>
+      case _: Verdict.Approve =>
         val commitSet = CommitSet(
           archivals = Map.empty,
           creations = Map.empty,
@@ -716,6 +720,7 @@ private[transfer] class TransferInProcessingSteps(
                 domainId,
                 requestCounter,
                 transferId,
+                targetProtocolVersion,
               )
             ),
           )

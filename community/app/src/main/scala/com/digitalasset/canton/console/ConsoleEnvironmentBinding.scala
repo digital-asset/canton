@@ -26,7 +26,6 @@ object ConsoleEnvironmentBinding {
        |import com.digitalasset.canton.crypto._
        |import com.digitalasset.canton.config._
        |import com.digitalasset.canton.admin.api.client.data._
-       |import com.digitalasset.canton.admin.api.client.data.console._
        |import com.digitalasset.canton.participant.domain.DomainConnectionConfig
        |import com.digitalasset.canton.console.ConsoleMacros._
        |import com.digitalasset.canton.console.commands.DomainChoice

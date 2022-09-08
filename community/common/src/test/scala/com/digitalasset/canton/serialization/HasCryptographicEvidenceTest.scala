@@ -109,7 +109,7 @@ object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[Memoi
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       (),
       _ => throw new NotImplementedError("Serialization is not implemented"),
     )

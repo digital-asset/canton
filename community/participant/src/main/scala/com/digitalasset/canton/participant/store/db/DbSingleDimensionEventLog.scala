@@ -49,14 +49,14 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   private def log_id: Int = id.index
 
-  private implicit val protocolVersion = ProtocolVersion.v2_0_0_Todo_i8793
+  private implicit val protocolVersion = ProtocolVersion.v2Todo_i8793
 
   private implicit val setParameterTraceContext: SetParameter[TraceContext] =
     TraceContext.getVersionedSetParameter(protocolVersion)
   private implicit val setParameterCausalityUpdate: SetParameter[CausalityUpdate] =
-    CausalityUpdate.getVersionedSetParameter(protocolVersion)
+    CausalityUpdate.getVersionedSetParameter
   private implicit val setParameterCausalityUpdateO: SetParameter[Option[CausalityUpdate]] =
-    CausalityUpdate.getVersionedSetParameterO(protocolVersion)
+    CausalityUpdate.getVersionedSetParameterO
   private implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
     ParticipantStorageImplicits.setLedgerSyncEvent(protocolVersion)
 

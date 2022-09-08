@@ -20,6 +20,7 @@ import com.digitalasset.canton.config.ConfigErrors.{
   NoConfigFiles,
   SubstitutionError,
 }
+import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.{
   InvalidLengthString,
   defaultMaxLength,
@@ -32,6 +33,10 @@ import com.digitalasset.canton.domain.sequencing.sequencer._
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsPrefix, MetricsReporterConfig}
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
+import com.digitalasset.canton.participant.config.ParticipantInitConfig.{
+  ParticipantLedgerApiInitConfig,
+  ParticipantParametersInitConfig,
+}
 import com.digitalasset.canton.participant.config._
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
@@ -263,8 +268,11 @@ case class CantonFeatures(
 /** Root configuration parameters for a single Canton process. */
 trait CantonConfig {
 
-  type DomainConfigType <: DomainConfig with ConfigDefaults[DomainConfigType]
-  type ParticipantConfigType <: LocalParticipantConfig with ConfigDefaults[ParticipantConfigType]
+  type DomainConfigType <: DomainConfig with ConfigDefaults[DefaultPorts, DomainConfigType]
+  type ParticipantConfigType <: LocalParticipantConfig with ConfigDefaults[
+    DefaultPorts,
+    ParticipantConfigType,
+  ]
 
   /** all domains that this Canton process can operate
     *
@@ -335,9 +343,9 @@ trait CantonConfig {
         domainConfig.sequencerClient,
         domainConfig.caching,
         parameters.nonStandardConfig,
-        domainConfig.domainParameters.willCorruptYourSystemDevVersionSupport,
-        domainConfig.domainParameters.dontWarnOnDeprecatedPV,
-        domainConfig.domainParameters.protocolVersion.unwrap,
+        domainConfig.init.domainParameters.willCorruptYourSystemDevVersionSupport,
+        domainConfig.init.domainParameters.dontWarnOnDeprecatedPV,
+        domainConfig.init.domainParameters.protocolVersion.unwrap,
       )
   }
 
@@ -376,8 +384,8 @@ trait CantonConfig {
           dontWarnOnDeprecatedPV = participantParameters.dontWarnOnDeprecatedPV,
           initialProtocolVersion = participantParameters.initialProtocolVersion.unwrap,
         ),
-        participantParameters.uniqueContractKeys,
-        participantParameters.enableCausalityTracking,
+        participantConfig.init.parameters.uniqueContractKeys,
+        participantConfig.init.parameters.unsafeEnableCausalityTracking,
         participantParameters.unsafeEnableDamlLfDevVersion,
       )
     }
@@ -489,6 +497,9 @@ object CantonConfig {
   )
 
   object ConfigReaders {
+    import DeprecatedConfigUtils._
+    import CantonConfigUtil._
+    import ParticipantInitConfig.DeprecatedImplicits._
 
     lazy implicit val lengthLimitedStringReader: ConfigReader[LengthLimitedString] = {
       ConfigReader.fromString[LengthLimitedString] { str =>
@@ -647,7 +658,32 @@ object CantonConfig {
       deriveReader[TlsServerConfig]
     lazy implicit val tlsClientConfigReader: ConfigReader[TlsClientConfig] =
       deriveReader[TlsClientConfig]
+    lazy implicit val initBaseIdentityConfigReader: ConfigReader[InitConfigBase.Identity] =
+      deriveReader[InitConfigBase.Identity]
     lazy implicit val initConfigReader: ConfigReader[InitConfig] = deriveReader[InitConfig]
+      .enableNestedOpt("auto-init", _.copy(identity = None))
+    lazy implicit val parametersParticipantInitConfigReader
+        : ConfigReader[ParticipantParametersInitConfig] =
+      deriveReader[ParticipantParametersInitConfig]
+    lazy implicit val ledgerApiParticipantInitConfigReader
+        : ConfigReader[ParticipantLedgerApiInitConfig] =
+      deriveReader[ParticipantLedgerApiInitConfig]
+    lazy implicit val nodeNameConfigReader: ConfigReader[NodeIdentifierConfig.Config.type] =
+      deriveReader[NodeIdentifierConfig.Config.type]
+    lazy implicit val nodeNameRandomReader: ConfigReader[NodeIdentifierConfig.Random.type] =
+      deriveReader[NodeIdentifierConfig.Random.type]
+    lazy implicit val nodeNameExplicitReader: ConfigReader[NodeIdentifierConfig.Explicit] =
+      deriveReader[NodeIdentifierConfig.Explicit]
+    lazy implicit val nodeNameReader: ConfigReader[NodeIdentifierConfig] =
+      deriveReader[NodeIdentifierConfig]
+    implicit def participantInitConfigReader(implicit
+        elc: ErrorLoggingContext
+    ): ConfigReader[ParticipantInitConfig] =
+      deriveReader[ParticipantInitConfig].applyDeprecations
+        .enableNestedOpt("auto-init", _.copy(identity = None))
+    lazy implicit val domainInitConfigReader: ConfigReader[DomainInitConfig] =
+      deriveReader[DomainInitConfig]
+        .enableNestedOpt("auto-init", _.copy(identity = None))
     lazy implicit val cryptoProviderReader: ConfigReader[CryptoProvider] =
       deriveEnumerationReader[CryptoProvider]
     lazy implicit val cryptoSigningKeySchemeReader: ConfigReader[SigningKeyScheme] =
@@ -977,7 +1013,27 @@ object CantonConfig {
       deriveWriter[TlsServerConfig]
     lazy implicit val tlsClientConfigWriter: ConfigWriter[TlsClientConfig] =
       deriveWriter[TlsClientConfig]
+    lazy implicit val initBaseIdentityConfigWriter: ConfigWriter[InitConfigBase.Identity] =
+      deriveWriter[InitConfigBase.Identity]
     lazy implicit val initConfigWriter: ConfigWriter[InitConfig] = deriveWriter[InitConfig]
+    lazy implicit val parametersParticipantInitConfigWriter
+        : ConfigWriter[ParticipantParametersInitConfig] =
+      deriveWriter[ParticipantParametersInitConfig]
+    lazy implicit val ledgerApiParticipantInitConfigWriter
+        : ConfigWriter[ParticipantLedgerApiInitConfig] =
+      deriveWriter[ParticipantLedgerApiInitConfig]
+    lazy implicit val nodeNameConfigWriter: ConfigWriter[NodeIdentifierConfig.Config.type] =
+      deriveWriter[NodeIdentifierConfig.Config.type]
+    lazy implicit val nodeNameRandomWriter: ConfigWriter[NodeIdentifierConfig.Random.type] =
+      deriveWriter[NodeIdentifierConfig.Random.type]
+    lazy implicit val nodeNameExplicitWriter: ConfigWriter[NodeIdentifierConfig.Explicit] =
+      deriveWriter[NodeIdentifierConfig.Explicit]
+    lazy implicit val nodeNameWriter: ConfigWriter[NodeIdentifierConfig] =
+      deriveWriter[NodeIdentifierConfig]
+    lazy implicit val participantInitConfigWriter: ConfigWriter[ParticipantInitConfig] =
+      deriveWriter[ParticipantInitConfig]
+    lazy implicit val domainInitConfigWriter: ConfigWriter[DomainInitConfig] =
+      deriveWriter[DomainInitConfig]
     lazy implicit val cryptoProviderWriter: ConfigWriter[CryptoProvider] =
       deriveEnumerationWriter[CryptoProvider]
     lazy implicit val cryptoSigningKeySchemeWriter: ConfigWriter[SigningKeyScheme] =
@@ -1294,9 +1350,9 @@ object CantonConfig {
     * @param files config files to read, parse and merge
     * @return [[scala.Right]] of type `ConfClass` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
-  def parseAndLoad[ConfClass <: CantonConfig with ConfigDefaults[
-    ConfClass
-  ]: ClassTag: ConfigReader](
+  def parseAndLoad[
+      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+  ](
       files: Seq[File]
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, ConfClass] = {
     for {
@@ -1314,9 +1370,9 @@ object CantonConfig {
     * @throws java.lang.IllegalArgumentException if `files` is empty
     * @return [[scala.Right]] of type `ClassTag` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
-  def parseAndLoadOrExit[ConfClass <: CantonConfig with ConfigDefaults[
-    ConfClass
-  ]: ClassTag: ConfigReader](files: Seq[File])(implicit
+  def parseAndLoadOrExit[
+      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+  ](files: Seq[File])(implicit
       elc: ErrorLoggingContext
   ): ConfClass = {
     val result = parseAndLoad[ConfClass](files)
@@ -1329,7 +1385,8 @@ object CantonConfig {
     * @return [[scala.Right]] of type `CantonConfig` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
   def loadAndValidate[ConfClass <: CantonConfig with ConfigDefaults[
-    ConfClass
+    DefaultPorts,
+    ConfClass,
   ]: ClassTag: ConfigReader](
       config: Config
   )(implicit elc: ErrorLoggingContext): Either[CantonConfigError, ConfClass] = {
@@ -1341,8 +1398,7 @@ object CantonConfig {
       case Right(resolvedConfig) =>
         loadRawConfig[ConfClass](resolvedConfig)
           .flatMap { conf =>
-            ConfigDefaults.resetDefaultPorts()
-            val confWithDefaults = conf.withDefaults
+            val confWithDefaults = conf.withDefaults(new DefaultPorts())
             confWithDefaults.validate.toEither
               .map(_ => confWithDefaults)
               .leftMap(causes => ConfigErrors.ValidationError.Error(causes.toList))
@@ -1356,7 +1412,9 @@ object CantonConfig {
     *
     * @return [[scala.Right]] of type `ClassTag` (e.g. [[CantonCommunityConfig]])) if parsing was successful.
     */
-  def loadOrExit[ConfClass <: CantonConfig with ConfigDefaults[ConfClass]: ClassTag: ConfigReader](
+  def loadOrExit[
+      ConfClass <: CantonConfig with ConfigDefaults[DefaultPorts, ConfClass]: ClassTag: ConfigReader
+  ](
       config: Config
   )(implicit elc: ErrorLoggingContext): ConfClass = {
     loadAndValidate[ConfClass](config).valueOr(_ => sys.exit(1))

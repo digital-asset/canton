@@ -11,23 +11,23 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 
-sealed trait MediatorError extends Product with Serializable {
+private[mediator] sealed trait MediatorError extends Product with Serializable {
   def requestId: RequestId
 }
 
-case class StaleVersion(
+private[mediator] case class StaleVersion(
     requestId: RequestId,
     newVersion: CantonTimestamp,
     staleVersion: CantonTimestamp,
 ) extends MediatorError
 
-sealed trait ResponseAggregationError extends MediatorError {
+private[mediator] sealed trait ResponseAggregationError extends MediatorError {
   def alarm(sender: ParticipantId, alarmer: AlarmStreamer)(implicit
       traceContext: TraceContext
   ): Unit
 }
 
-case class MediatorRequestNotFound(
+private[mediator] case class MediatorRequestNotFound(
     requestId: RequestId,
     viewHashO: Option[ViewHash] = None,
     rootHashO: Option[RootHash] = None,
@@ -43,7 +43,7 @@ case class MediatorRequestNotFound(
   }
 }
 
-case class UnexpectedMediatorResponse(
+private[mediator] case class UnexpectedMediatorResponse(
     requestId: RequestId,
     viewHash: ViewHash,
     parties: Set[LfPartyId],
@@ -58,7 +58,7 @@ case class UnexpectedMediatorResponse(
   }
 }
 
-case class UnauthorizedMediatorResponse(
+private[mediator] case class UnauthorizedMediatorResponse(
     requestId: RequestId,
     viewHash: ViewHash,
     sender: ParticipantId,
@@ -74,8 +74,10 @@ case class UnauthorizedMediatorResponse(
 
 }
 
-case class MediatorRequestAlreadyFinalized(requestId: RequestId, existingVerdict: Verdict)
-    extends ResponseAggregationError {
+private[mediator] case class MediatorRequestAlreadyFinalized(
+    requestId: RequestId,
+    existingVerdict: Verdict,
+) extends ResponseAggregationError {
   override def alarm(sender: ParticipantId, alarmer: AlarmStreamer)(implicit
       traceContext: TraceContext
   ): Unit = ()

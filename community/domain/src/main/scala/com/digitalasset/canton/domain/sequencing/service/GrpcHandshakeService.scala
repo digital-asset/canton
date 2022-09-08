@@ -28,7 +28,9 @@ trait GrpcHandshakeService {
       failure => Response.Value.Failure(Failure(failure)),
       _ => Response.Value.Success(Success()),
     )
-    Future.successful(Response(serverProtocolVersion = serverProtocolVersion.fullVersion, response))
+    Future.successful(
+      Response(serverProtocolVersion = serverProtocolVersion.toProtoPrimitiveS, response)
+    )
   }
 
   private def handshakeValidation(

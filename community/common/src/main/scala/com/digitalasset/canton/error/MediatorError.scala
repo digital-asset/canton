@@ -5,8 +5,10 @@ package com.digitalasset.canton.error
 
 import com.daml.error._
 import com.digitalasset.canton.error.CantonErrorGroups.MediatorErrorGroup
+import com.digitalasset.canton.protocol.messages.Verdict
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.v0
+import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import org.slf4j.event.Level
 
 object MediatorError extends MediatorErrorGroup {
@@ -26,10 +28,17 @@ object MediatorError extends MediatorErrorGroup {
     case class Reject(
         override val cause: String =
           "Rejected transaction as the mediator did not receive sufficient confirmations within the expected timeframe."
+    )(
+        val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict]
     ) extends BaseCantonError.Impl(cause)
         with MediatorReject {
 
       override def _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout
+    }
+
+    object Reject {
+      def create(protocolVersion: ProtocolVersion): Reject =
+        Reject()(Verdict.protocolVersionRepresentativeFor(protocolVersion))
     }
   }
 
@@ -50,8 +59,18 @@ object MediatorError extends MediatorErrorGroup {
     case class Reject(
         override val cause: String,
         override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-    ) extends BaseCantonError.Impl(cause)
+    )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+        extends BaseCantonError.Impl(cause)
         with MediatorReject
+
+    object Reject {
+      def create(
+          cause: String,
+          v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
+          protocolVersion: ProtocolVersion,
+      ): Reject =
+        Reject(cause, v0CodeP)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    }
   }
 
   /** Used as a fallback to represent mediator errors coming from a mediator running a higher version.
@@ -60,12 +79,13 @@ object MediatorError extends MediatorErrorGroup {
   case class GenericError(
       override val cause: String,
       id: String,
+      category: ErrorCategory,
       override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-  ) extends BaseCantonError
+  )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+      extends BaseCantonError
       with MediatorReject {
-    override def code: ErrorCode = Timeout.code
-    // TODO(i8744): replace by this line once the docs generator can handle it
-    // new ErrorCode(id, ErrorCategory.InvalidGivenCurrentSystemStateOther) {}
+    override def code: ErrorCode =
+      new ErrorCode(id, category) {}
   }
 
   @Explanation(
@@ -79,8 +99,23 @@ object MediatorError extends MediatorErrorGroup {
     case class Reject(
         override val cause: String,
         override val _v0CodeP: v0.MediatorRejection.Code = v0.MediatorRejection.Code.Timeout,
-    ) extends Alarm(cause)
+    )(val representativeProtocolVersion: RepresentativeProtocolVersion[Verdict])
+        extends Alarm(cause)
         with MediatorReject
+
+    object Reject {
+      def apply(
+          cause: String,
+          v0CodeP: v0.MediatorRejection.Code,
+          protocolVersion: ProtocolVersion,
+      ): Reject =
+        Reject(cause, v0CodeP)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+
+      def apply(
+          cause: String,
+          protocolVersion: ProtocolVersion,
+      ): Reject = Reject(cause)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
+    }
   }
 
   @Explanation(

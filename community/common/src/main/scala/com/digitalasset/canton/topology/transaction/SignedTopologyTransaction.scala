@@ -82,7 +82,7 @@ object SignedTopologyTransaction
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.SignedTopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

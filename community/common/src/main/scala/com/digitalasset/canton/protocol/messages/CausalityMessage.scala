@@ -61,7 +61,7 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
-      ProtocolVersion.v2_0_0,
+      ProtocolVersion.v2,
       supportedProtoVersion(v0.CausalityMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
     )

@@ -29,7 +29,7 @@ class PollingEventSignaller(
   override def readSignalsForMember(
       member: Member,
       memberId: SequencerMemberId,
-  ): Source[ReadSignal, NotUsed] =
+  )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
     Source
       .repeat(ReadSignal)
       .delay(pollingInterval.toScala, strategy = DelayOverflowStrategy.backpressure)
