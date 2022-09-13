@@ -277,7 +277,7 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
       None,
     ) {}
 
-  def fromProtoV0(
+  private def fromProtoV0(
       claimP: v0.LegalIdentityClaim
   )(bytes: ByteString): ParsingResult[LegalIdentityClaim] =
     for {

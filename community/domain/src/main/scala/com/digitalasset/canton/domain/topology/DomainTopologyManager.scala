@@ -468,13 +468,11 @@ object DomainTopologyManagerError extends TopologyManagerError.DomainErrorGroup(
   }
 
   object InvalidOrFaultyOnboardingRequest
-      extends ErrorCode(
-        id = "MALICOUS_OR_FAULTY_ONBOARDING_REQUEST",
-        ErrorCategory.MaliciousOrFaultyBehaviour,
-      ) {
+      extends AlarmErrorCode(id = "MALICOUS_OR_FAULTY_ONBOARDING_REQUEST") {
+
     case class Failure(participantId: ParticipantId, reason: String)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
+        override val loggingContext: ErrorLoggingContext
+    ) extends Alarm(
           cause =
             "The participant submitted invalid or insufficient topology transactions during onboarding"
         )

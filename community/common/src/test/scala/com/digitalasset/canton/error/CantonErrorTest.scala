@@ -107,7 +107,4 @@ class CantonErrorTest extends BaseTestWordSpec {
       Option(status.getCause) shouldBe None
     }
   }
-
-  // TODO(i8744): replace MALICIOUS_OR_FAULTY codes by Alarm
-  // TODO(i8744): go over TODO M40 and add missing alarms
 }

@@ -13,7 +13,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
 }
 import com.digitalasset.canton.admin.api.client.data.{ListConnectedDomainsResult, ListPartiesResult}
 import com.digitalasset.canton.config.NonNegativeDuration
-import com.digitalasset.canton.config.RequireTypes.String255
+import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String255}
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
@@ -45,6 +45,9 @@ import java.time.Instant
 class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment: ConsoleEnvironment)
     extends Helpful {
 
+  protected def defaultLimit: PositiveInt =
+    consoleEnvironment.environment.config.parameters.console.defaultLimit
+
   import runner._
 
   @Help.Summary(
@@ -60,7 +63,7 @@ class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment:
       filterParticipant: Filter for parties that are hosted by a participant with an id starting with the given string
       filterDomain: Filter by domains whose id starts with the given string.
       asOf: Optional timestamp to inspect the topology state at a given point in time.
-      limit: Limit on the number of parties fetched (defaults to 100).
+      limit: Limit on the number of parties fetched (defaults to canton.parameters.console.default-limit).
             
       Example: participant1.parties.list(filterParty="alice")
       """
@@ -70,7 +73,7 @@ class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment:
       filterParticipant: String = "",
       filterDomain: String = "",
       asOf: Option[Instant] = None,
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): Seq[ListPartiesResult] =
     consoleEnvironment.run {
       adminCommand(
@@ -101,14 +104,14 @@ class ParticipantPartiesAdministrationGroup(
       filterParty: Filter by parties starting with the given string.
       filterDomain: Filter by domains whose id starts with the given string.
       asOf: Optional timestamp to inspect the topology state at a given point in time.
-      limit: How many items to return. Defaults to 100.
+      limit: How many items to return (defaults to canton.parameters.console.default-limit)
 
       Example: participant1.parties.hosted(filterParty="alice")""")
   def hosted(
       filterParty: String = "",
       filterDomain: String = "",
       asOf: Option[Instant] = None,
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): Seq[ListPartiesResult] = {
     list(
       filterParty,

@@ -11,6 +11,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data._
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.protocol.{
   DynamicDomainParameters => DynamicDomainParametersInternal,
@@ -50,7 +51,7 @@ object TopologyAdminCommands {
         filterParty: String,
         filterParticipant: String,
         asOf: Option[Instant],
-        limit: Int,
+        limit: PositiveInt,
     ) extends BaseCommand[v0.ListPartiesRequest, v0.ListPartiesResponse, Seq[ListPartiesResult]] {
 
       override def createRequest(): Either[String, v0.ListPartiesRequest] =
@@ -60,7 +61,7 @@ object TopologyAdminCommands {
             filterParty = filterParty,
             filterParticipant = filterParticipant,
             asOf = asOf.map(ts => Timestamp(ts.getEpochSecond)),
-            limit = limit,
+            limit = limit.value,
           )
         )
 
@@ -85,7 +86,7 @@ object TopologyAdminCommands {
         filterKeyOwnerType: Option[KeyOwnerCode],
         filterKeyOwnerUid: String,
         asOf: Option[Instant],
-        limit: Int,
+        limit: PositiveInt,
     ) extends BaseCommand[v0.ListKeyOwnersRequest, v0.ListKeyOwnersResponse, Seq[
           ListKeyOwnersResult
         ]] {
@@ -97,7 +98,7 @@ object TopologyAdminCommands {
             filterKeyOwnerType = filterKeyOwnerType.map(_.toProtoPrimitive).getOrElse(""),
             filterKeyOwnerUid = filterKeyOwnerUid,
             asOf = asOf.map(ts => Timestamp(ts.getEpochSecond)),
-            limit = limit,
+            limit = limit.value,
           )
         )
 

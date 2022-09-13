@@ -6,7 +6,12 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.either._
 import cats.syntax.foldable._
-import com.digitalasset.canton.crypto.{SignatureCheckError, SyncCryptoApi, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SignatureCheckError,
+  SyncCryptoApi,
+  SyncCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
@@ -487,7 +492,7 @@ class SequencedEventValidatorImpl(
             )
             .leftMap(InvalidTimestampOfSigningKey(event.timestamp, signingTs, _))
           _ <- event.signedEvent
-            .verifySignature(snapshot, sequencerId)
+            .verifySignature(snapshot, sequencerId, HashPurpose.SequencedEventSignature)
             .leftMap[SequencedEventValidationError](SignatureInvalid(event.timestamp, signingTs, _))
         } yield ()
 

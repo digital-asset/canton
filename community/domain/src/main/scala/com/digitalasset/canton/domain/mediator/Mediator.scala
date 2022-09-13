@@ -21,11 +21,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{
-  DomainParameters,
-  DynamicDomainParameters,
-  LoggingAlarmStreamer,
-}
+import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
@@ -94,7 +90,6 @@ private[mediator] class Mediator(
     syncCrypto,
     timeTracker,
     state,
-    new LoggingAlarmStreamer(logger),
     protocolVersion,
     loggerFactory,
   )

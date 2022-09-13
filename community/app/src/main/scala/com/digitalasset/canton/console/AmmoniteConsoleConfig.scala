@@ -6,6 +6,7 @@ package com.digitalasset.canton.console
 import ammonite.Main
 import ammonite.main.Defaults
 import ammonite.util.Colors
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.TracedLogger
 import com.typesafe.scalalogging.LazyLogging
 
@@ -20,12 +21,14 @@ import java.io.{File, IOException}
   * @param workingDir working directory. if none is given, we'll use the working directory of the Canton process
   * @param colors if true (default), we'll use color output
   * @param verbose if true (not default), we'll emit verbose ammonite output
+  * @param defaultLimit default limit parameter for commands that can potentially return many results
   */
 case class AmmoniteConsoleConfig(
     cacheDir: Option[java.io.File] = AmmoniteConsoleConfig.defaultCacheDir,
     workingDir: Option[java.io.File] = None,
     colors: Boolean = true,
     verbose: Boolean = false,
+    defaultLimit: PositiveInt = PositiveInt.tryCreate(1000),
 )
 
 object AmmoniteConsoleConfig extends LazyLogging {

@@ -78,8 +78,6 @@ trait TransferProcessingSteps[
 
   override type ResultError = TransferProcessorError
 
-  protected val alarmer = new LoggingAlarmStreamer(logger)
-
   override def embedNoMediatorError(error: NoMediatorError): TransferProcessorError =
     GenericStepsError(error)
 

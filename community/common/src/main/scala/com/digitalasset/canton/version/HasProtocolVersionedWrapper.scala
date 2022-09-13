@@ -282,6 +282,10 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasRepresentati
     (original: OriginalByteString, data: DataByteString) =>
       ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
 
+  def fromByteArray(bytes: Array[Byte]): ParsingResult[ValueClass] = fromByteString(
+    ByteString.copyFrom(bytes)
+  )
+
   def fromByteString(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))

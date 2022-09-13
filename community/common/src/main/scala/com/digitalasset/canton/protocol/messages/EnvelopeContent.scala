@@ -22,9 +22,8 @@ final case class EnvelopeContent(message: ProtocolMessage)(
 ) extends HasProtocolVersionedWrapper[EnvelopeContent] {
 
   // TODO(i9627): Remove this distinction and define an unwrapped serialization for PV2 in the companion object
-  // TODO(i9423): Migrate to next protocol version
   override def toByteString: ByteString =
-    if (isEquivalentTo(ProtocolVersion.dev))
+    if (isEquivalentTo(ProtocolVersion.v4))
       toProtoVersioned.toByteString
     else toProtoVersioned.getData
 
@@ -46,13 +45,13 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       },
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev, // TODO(i9423): Migrate to next protocol version
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.EnvelopeContent)(fromProtoV1),
       _.message match {
         case messageV1: ProtocolMessageV1 => messageV1.toProtoEnvelopeContentV1.toByteString
         case message =>
           throw new IllegalArgumentException(
-            s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.dev}"
+            s"Trying to serialize message $message for incompatible protocol version ${ProtocolVersion.v4}"
           )
       },
     ),
@@ -141,12 +140,9 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
   ): ParsingResult[ProtocolMessage] = {
     // Previously the envelope content was not wrapped in a VersionedMessage, therefore we have to explicitly decide to
     // deserialize from a versioned wrapper message or not.
-    protocolVersion match {
-      // TODO(i9423): Migrate to next protocol version
-      case ProtocolVersion.`dev` =>
-        fromByteString(hashOps)(bytes).map(_.message)
-      case _ =>
-        messageFromByteStringV0(hashOps)(bytes)
-    }
+    if (protocolVersion >= ProtocolVersion.v4)
+      fromByteString(hashOps)(bytes).map(_.message)
+    else
+      messageFromByteStringV0(hashOps)(bytes)
   }
 }

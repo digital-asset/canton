@@ -183,9 +183,8 @@ object TransferOutCommonData
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferOutCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -344,9 +343,8 @@ object TransferOutView
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferOutView)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

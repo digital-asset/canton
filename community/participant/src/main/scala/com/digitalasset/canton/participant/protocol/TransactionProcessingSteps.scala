@@ -49,6 +49,7 @@ import com.digitalasset.canton.participant.protocol.validation.ContractConsisten
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.protocol.validation._
 import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync._
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -121,8 +122,6 @@ class TransactionProcessingSteps(
 
   override type RequestError = TransactionProcessorError
   override type ResultError = TransactionProcessorError
-
-  private val alarmer = new LoggingAlarmStreamer(logger)
 
   override def pendingSubmissions(state: SyncDomainEphemeralState): Unit = ()
 
@@ -558,10 +557,12 @@ class TransactionProcessingSteps(
             case Some(promise) =>
               promise.tryComplete(Success(subviewRandomness))
             case None =>
-              // TODO(M40): raise an alarm and don't confirm the request
-              logger.error(
-                s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
-              )
+              // TODO(M40): make sure to not approve the request
+              SyncServiceAlarm
+                .Warn(
+                  s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
+                )
+                .report()
           }
           ()
         }
@@ -1073,10 +1074,7 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
     val commitSetF = Future {
-      pendingRequestData.transactionValidationResult.commitSet(
-        pendingRequestData.requestId,
-        alarmer.alarm,
-      )
+      pendingRequestData.transactionValidationResult.commitSet(pendingRequestData.requestId)
     }
     val contractsToBeStored =
       pendingRequestData.transactionValidationResult.createdContracts.keySet

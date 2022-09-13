@@ -275,7 +275,7 @@ object TopologyTransaction
       case (_: DomainGovernanceTransaction, _: TopologyStateUpdate[_]) => false
     }
 
-  def fromProtoV0(transactionP: v0.TopologyTransaction)(
+  private def fromProtoV0(transactionP: v0.TopologyTransaction)(
       bytes: ByteString
   ): ParsingResult[TopologyTransaction[TopologyChangeOp]] = transactionP.transaction match {
     case v0.TopologyTransaction.Transaction.Empty =>
@@ -286,7 +286,7 @@ object TopologyTransaction
       DomainGovernanceTransaction.fromProtoV0(domainGovernance, bytes)
   }
 
-  def fromProtoV1(transactionP: v1.TopologyTransaction)(
+  private def fromProtoV1(transactionP: v1.TopologyTransaction)(
       bytes: ByteString
   ): ParsingResult[TopologyTransaction[TopologyChangeOp]] = transactionP.transaction match {
     case v1.TopologyTransaction.Transaction.Empty =>

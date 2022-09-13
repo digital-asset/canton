@@ -6,7 +6,7 @@ package com.digitalasset.canton.console
 import ammonite.util.Bind
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.data.CantonStatus
-import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt}
+import com.digitalasset.canton.config.RequireTypes.{InstanceName, NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   ConsoleCommandTimeout,
   NonNegativeDuration,
@@ -530,6 +530,11 @@ object ConsoleEnvironment {
       * @throws java.lang.IllegalArgumentException if `n` is negative
       */
     implicit def toNonNegativeInt(n: Int): NonNegativeInt = NonNegativeInt.tryCreate(n)
+
+    /** Implicitly map an `Int` to a `PositiveInt`.
+      * @throws java.lang.IllegalArgumentException if `n` is not positive
+      */
+    implicit def toPositiveInt(n: Int): PositiveInt = PositiveInt.tryCreate(n)
 
     /** Implicitly convert a duration to a [[com.digitalasset.canton.config.NonNegativeDuration]]
       * @throws java.lang.IllegalArgumentException if `duration` is negative

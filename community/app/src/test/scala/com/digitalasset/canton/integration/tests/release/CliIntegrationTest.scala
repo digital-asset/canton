@@ -104,6 +104,13 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
       )
     }
 
+    "not shadow bootstrap script variables with the bootstrap script file name" in {
+      processLogger =>
+        s"$cantonBin --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/participant1.canton " ! processLogger
+
+        checkOutput(processLogger, shouldContain = Seq(successMsg))
+    }
+
     "change logging directory, log level and log format when using the appropriate CLI flags" in {
       processLogger =>
         s"$cantonBin --log-truncate --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap.canton --log-file-name log/new-name.log --log-level-canton DEBUG --log-encoder json" ! processLogger

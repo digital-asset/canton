@@ -26,10 +26,10 @@ import com.digitalasset.canton.admin.api.client.commands.{
 }
 import com.digitalasset.canton.admin.api.client.data.{
   LedgerApiUser,
-  LedgerMeteringReport,
   ListLedgerApiUsersResult,
   UserRights,
 }
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.console.{
@@ -63,12 +63,14 @@ import io.grpc.stub.StreamObserver
 import java.time.Instant
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.Await
+import scala.concurrent.{Await, ExecutionContext}
 
 trait BaseLedgerApiAdministration extends NoTracing {
 
   this: LedgerApiCommandRunner with NamedLogging with FeatureFlagFilter =>
   implicit protected val consoleEnvironment: ConsoleEnvironment
+  protected implicit val executionContext: ExecutionContext =
+    consoleEnvironment.environment.executionContext
   protected val name: String
 
   protected def domainOfTransaction(transactionId: String): DomainId
@@ -77,7 +79,9 @@ trait BaseLedgerApiAdministration extends NoTracing {
       txId: String,
       optTimeout: Option[NonNegativeDuration],
   ): Tx
-  protected def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
+  private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
+  protected def defaultLimit: PositiveInt =
+    consoleEnvironment.environment.config.parameters.console.defaultLimit
 
   @Help.Summary("Group of commands that access the ledger-api", FeatureFlag.Testing)
   @Help.Group("Ledger Api")
@@ -129,8 +133,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
         try {
           ResourceUtil.withResource(call) { _ =>
             // Not doing noisyAwaitResult here, because we don't want to log warnings in case of a timeout.
-            Await.result(observer.completion, timeout.duration)
-            CommandSuccessful(observer.responses)
+            CommandSuccessful(Await.result(observer.result, timeout.duration))
           }
         } catch {
           case sre: StatusRuntimeException =>
@@ -349,11 +352,13 @@ trait BaseLedgerApiAdministration extends NoTracing {
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
       ): TransactionTree = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitTransactionTree(
               actAs.map(_.toLf),
+              readAs.map(_.toLf),
               commands,
               workflowId,
               commandId,
@@ -390,11 +395,13 @@ trait BaseLedgerApiAdministration extends NoTracing {
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
       ): Transaction = check(FeatureFlag.Testing) {
         val tx = consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.CommandService.SubmitAndWaitTransaction(
               actAs.map(_.toLf),
+              readAs.map(_.toLf),
               commands,
               workflowId,
               commandId,
@@ -420,11 +427,13 @@ trait BaseLedgerApiAdministration extends NoTracing {
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           submissionId: String = "",
           minLedgerTimeAbs: Option[Instant] = None,
+          readAs: Seq[PartyId] = Seq.empty,
       ): Unit = check(FeatureFlag.Testing) {
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.CommandSubmissionService.Submit(
               actAs.map(_.toLf),
+              readAs.map(_.toLf),
               commands,
               workflowId,
               commandId,
@@ -443,19 +452,33 @@ trait BaseLedgerApiAdministration extends NoTracing {
     object acs extends Helpful {
       @Help.Summary("List the set of active contracts of a given party", FeatureFlag.Testing)
       @Help.Description(
-        "If the filterTemplates argument is not empty, the acs lookup will filter by the given templates."
+        """This command will return the current set of active contracts for the given party.
+
+           Supported arguments:
+           - party: for which party you want to load the acs
+           - limit: limit (default set via canton.parameter.console)
+           - filterTemplate: list of templates ids to filter for
+        """
       )
       def of_party(
           party: PartyId,
-          limit: Option[Int] = None,
+          limit: PositiveInt = defaultLimit,
           verbose: Boolean = true,
           filterTemplates: Seq[P.TemplateId[_]] = Seq.empty,
-      ): Seq[WrappedCreatedEvent] = check(FeatureFlag.Testing)(consoleEnvironment.run {
-        ledgerApiCommand(
-          LedgerApiCommands.AcsService
-            .GetActiveContracts(Set(party.toLf), limit, filterTemplates, verbose)
-        )
-      })
+          timeout: NonNegativeDuration = timeouts.unbounded,
+      ): Seq[WrappedCreatedEvent] =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.AcsService
+              .GetActiveContracts(
+                Set(party.toLf),
+                limit,
+                filterTemplates,
+                verbose,
+                timeout.asFiniteApproximation,
+              )(consoleEnvironment.environment.scheduler)
+          )
+        })
 
       @Help.Summary(
         "List the set of active contracts for all parties hosted on this participant",
@@ -465,9 +488,10 @@ trait BaseLedgerApiAdministration extends NoTracing {
         "If the filterTemplates argument is not empty, the acs lookup will filter by the given templates."
       )
       def of_all(
-          limit: Option[Int] = None,
+          limit: PositiveInt = defaultLimit,
           verbose: Boolean = true,
           filterTemplates: Seq[P.TemplateId[_]] = Seq.empty,
+          timeout: NonNegativeDuration = timeouts.unbounded,
       ): Seq[WrappedCreatedEvent] = check(FeatureFlag.Testing)(
         consoleEnvironment.run {
           ConsoleCommandResult.fromEither(for {
@@ -484,7 +508,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
                     limit,
                     filterTemplates,
                     verbose,
-                  )
+                    timeout.asFiniteApproximation,
+                  )(consoleEnvironment.environment.scheduler)
                 ).toEither
               }
             }
@@ -615,7 +640,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       }
 
       @Help.Summary("List Daml Packages", FeatureFlag.Testing)
-      def list(limit: Option[Int] = None): Seq[PackageDetails] =
+      def list(limit: PositiveInt = defaultLimit): Seq[PackageDetails] =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(LedgerApiCommands.PackageService.ListKnownPackages(limit))
         })
@@ -771,6 +796,19 @@ trait BaseLedgerApiAdministration extends NoTracing {
           )
         })
 
+      @Help.Summary("Get the user data of the user with the given id", FeatureFlag.Testing)
+      @Help.Description(
+        """Fetch the data associated with the given user id failing if there is no such user.
+          |This can be used to get the primary party associated with a given user.
+          |If you need the full user rights, use rights.list instead."""
+      )
+      def get(
+          id: String
+      ): LedgerApiUser =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(LedgerApiCommands.Users.Get(id))
+        })
+
       @Help.Summary("Delete user", FeatureFlag.Testing)
       @Help.Description("""Delete a user.""")
       def delete(id: String): Unit =
@@ -884,7 +922,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           from: CantonTimestamp,
           to: Option[CantonTimestamp] = None,
           applicationId: Option[String] = None,
-      ): LedgerMeteringReport =
+      ): String =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.Metering.GetReport(

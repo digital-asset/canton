@@ -29,8 +29,8 @@ import com.daml.platform.indexer.{
   IndexerStartupMode,
 }
 import com.daml.platform.services.time.TimeProviderType
+import com.daml.platform.store.DbSupport
 import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
-import com.daml.platform.store.{DbSupport, LfValueTranslationCache}
 import com.daml.platform.usermanagement.PersistentUserManagementStore
 import com.daml.ports.Port
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -146,17 +146,6 @@ class StartableStoppableLedgerApiServer(
   private def buildLedgerApiServerOwner(
       overrideIndexerStartupMode: Option[IndexerStartupMode]
   )(implicit traceContext: TraceContext) = {
-    val lfValueTranslationCacheConfig = LfValueTranslationCache.Config(
-      eventsMaximumSize = config.serverConfig.maxEventCacheWeight,
-      contractsMaximumSize = config.serverConfig.maxContractCacheWeight,
-    )
-
-    val lfValueTranslationCache =
-      LfValueTranslationCache.Cache.newInstrumentedInstance(
-        config = lfValueTranslationCacheConfig,
-        metrics = config.metrics,
-      )
-
     val indexServiceConfig = LedgerIndexServiceConfig(
       eventsPageSize = config.serverConfig.eventsPageSize,
       eventsProcessingParallelism = config.serverConfig.eventsProcessingParallelism,
@@ -209,7 +198,6 @@ class StartableStoppableLedgerApiServer(
           .map(overrideStartupMode => indexerConfig.copy(startupMode = overrideStartupMode))
           .getOrElse(indexerConfig),
         config.metrics,
-        lfValueTranslationCache,
         inMemoryState,
         inMemoryStateUpdaterFlow,
         config.serverConfig.additionalMigrationPaths,
@@ -228,7 +216,6 @@ class StartableStoppableLedgerApiServer(
         participantId = config.participantId,
         metrics = config.metrics,
         servicesExecutionContext = executionContext,
-        lfValueTranslationCache = lfValueTranslationCache,
         engine = config.engine,
         inMemoryState = inMemoryState,
       )

@@ -14,7 +14,6 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, PublicKey, SigningPublicKe
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.LoggingAlarmStreamer
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   DomainTopologyTransactionMessage,
@@ -29,16 +28,10 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedDomainTopologyClient,
 }
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor.subscriptionTimestamp
-import com.digitalasset.canton.topology.store.{
-  PositiveSignedTopologyTransactions,
-  SignedTopologyTransactions,
-  TopologyStore,
-  TopologyStoreId,
-  ValidatedTopologyTransaction,
-}
+import com.digitalasset.canton.topology.store._
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.{DomainId, KeyOwner}
+import com.digitalasset.canton.topology.{DomainId, KeyOwner, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
@@ -116,7 +109,6 @@ class TopologyTransactionProcessor(
     extends NamedLogging
     with FlagCloseable {
 
-  protected val alarmer = new LoggingAlarmStreamer(logger)
   private val authValidator =
     new IncomingTopologyTransactionAuthorizationValidator(
       cryptoPureApi,
@@ -612,8 +604,6 @@ class TopologyTransactionProcessor(
             {
               case Deliver(sc, ts, _, _, batch) =>
                 logger.debug(s"Processing sequenced event with counter $sc and timestamp $ts")
-                // TODO(#8744) avoid discarded future as part of AlarmStreamer design
-                @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
                 def extractAndCheckMessages(
                     batch: Batch[DefaultOpenEnvelope]
                 ): List[DomainTopologyTransactionMessage] = {
@@ -621,12 +611,12 @@ class TopologyTransactionProcessor(
                     ProtocolMessage.filterDomainsEnvelopes(
                       batch,
                       domainId,
-                      (wrongMsgs: List[DefaultOpenEnvelope]) => {
-                        alarmer.alarm(
-                          s"received messages with wrong domain ids: ${wrongMsgs.map(_.protocolMessage.domainId)}"
-                        )
-                        ()
-                      },
+                      (wrongMsgs: List[DefaultOpenEnvelope]) =>
+                        TopologyManagerError.TopologyManagerAlarm
+                          .Warn(
+                            s"received messages with wrong domain ids: ${wrongMsgs.map(_.protocolMessage.domainId)}"
+                          )
+                          .report(),
                     )
                   )
                 }

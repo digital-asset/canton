@@ -7,6 +7,15 @@ import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
 import com.daml.error.{ErrorClass, ErrorCode}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
+/** An alarm indicates that a different node is behaving maliciously.
+  * Alarms include situations where an attack has been mitigated successfully.
+  * Alarms are security relevant events that need to be logged in a standardized way for monitoring and auditing.
+  */
+abstract class AlarmErrorCode(id: String)(implicit parent: ErrorClass)
+    extends ErrorCode(id, MaliciousOrFaultyBehaviour) { // TODO(i10234): replace error category by something more appropriate
+  implicit override val code: AlarmErrorCode = this
+}
+
 trait BaseAlarm extends BaseCantonError {
   override def code: AlarmErrorCode
 
@@ -25,8 +34,3 @@ trait BaseAlarm extends BaseCantonError {
 abstract class Alarm(override val cause: String, override val throwableO: Option[Throwable] = None)(
     implicit override val code: AlarmErrorCode
 ) extends BaseAlarm
-
-abstract class AlarmErrorCode(id: String)(implicit parent: ErrorClass)
-    extends ErrorCode(id, MaliciousOrFaultyBehaviour) {
-  implicit override val code: AlarmErrorCode = this
-}

@@ -182,6 +182,9 @@ object RequireTypes {
   object PositiveInt {
     def create(n: Int): Either[InvariantViolation, PositiveInt] = PositiveNumeric.create(n)
     def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
+
+    lazy val MaxValue: PositiveInt = PositiveInt.tryCreate(Int.MaxValue)
+
   }
 
   object PositiveNumeric {

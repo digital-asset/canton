@@ -435,8 +435,7 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
       _.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      // TODO(i9423): Migrate to next protocol version
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.EncryptedViewMessage)(EncryptedViewMessageV1.fromProto),
       _.toByteString,
     ),

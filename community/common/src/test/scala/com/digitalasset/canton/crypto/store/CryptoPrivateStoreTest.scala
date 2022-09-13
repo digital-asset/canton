@@ -13,6 +13,9 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
 
+  def uniqueKeyName(name: String): String =
+    name + getClass.getSimpleName
+
   def toPrivateKeyWithName(
       storedKeys: Set[StoredPrivateKey]
   ): Set[ParsingResult[PrivateKeyWithName]] = {
@@ -26,18 +29,25 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
     })
   }
 
+  // the tag is used to distinguish keys created for the clear and encrypted crypto private store tests
   def cryptoPrivateStore(newStore: => CryptoPrivateStore): Unit = {
 
-    val sigKey1: SigningPrivateKey = SymbolicCrypto.signingPrivateKey("sigKey1")
+    val sigKey1Name: String = uniqueKeyName("sigKey1_")
+    val sigKey2Name: String = uniqueKeyName("sigKey2_")
+
+    val encKey1Name: String = uniqueKeyName("encKey1_")
+    val encKey2Name: String = uniqueKeyName("encKey2_")
+
+    val sigKey1: SigningPrivateKey = SymbolicCrypto.signingPrivateKey(sigKey1Name)
     val sigKey1WithName: SigningPrivateKeyWithName =
-      SigningPrivateKeyWithName(sigKey1, Some(KeyName.tryCreate("sigKey1")))
-    val sigKey2: SigningPrivateKey = SymbolicCrypto.signingPrivateKey("sigKey2")
+      SigningPrivateKeyWithName(sigKey1, Some(KeyName.tryCreate(sigKey1Name)))
+    val sigKey2: SigningPrivateKey = SymbolicCrypto.signingPrivateKey(sigKey2Name)
     val sigKey2WithName: SigningPrivateKeyWithName = SigningPrivateKeyWithName(sigKey2, None)
 
-    val encKey1: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey("encKey1")
+    val encKey1: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey(encKey1Name)
     val encKey1WithName: EncryptionPrivateKeyWithName =
-      EncryptionPrivateKeyWithName(encKey1, Some(KeyName.tryCreate("encKey1")))
-    val encKey2: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey("encKey2")
+      EncryptionPrivateKeyWithName(encKey1, Some(KeyName.tryCreate(encKey1Name)))
+    val encKey2: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey(encKey2Name)
     val encKey2WithName: EncryptionPrivateKeyWithName = EncryptionPrivateKeyWithName(encKey2, None)
 
     "store encryption keys correctly when added incrementally" in {

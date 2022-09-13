@@ -135,14 +135,12 @@ class TransferOutProcessingSteps(
         FutureUnlessShutdown.outcomeK
       )
 
-      // TODO(#9423) change DEV to stable protocol version when released and check PVs
       /*
-        In DEV, we introduced the sourceProtocolVersion in TransferInView, which is needed for
+        In PV=4, we introduced the sourceProtocolVersion in TransferInView, which is needed for
         proper deserialization. Hence, we disallow some transfers
        */
       missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3
-      isSourceProtocolVersionRequired =
-        sourceDomainProtocolVersion.v == ProtocolVersion.dev
+      isSourceProtocolVersionRequired = sourceDomainProtocolVersion.v >= ProtocolVersion.v4
 
       _ <- condUnitET[FutureUnlessShutdown](
         !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),

@@ -85,9 +85,8 @@ object RegisterTopologyTransactionResponse
       supportedProtoVersion(v0.RegisterTopologyTransactionResponse)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#9757) Migrate from dev
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.RegisterTopologyTransactionResponse)(fromProtoV1),
       _.toProtoV0.toByteString,
     ),
@@ -362,8 +361,7 @@ object RegisterTopologyTransactionResponseResult {
       state: State,
       protocolVersion: ProtocolVersion,
   ): RegisterTopologyTransactionResponseResult =
-    // TODO(#9757) Migrate from dev
-    if (protocolVersion == ProtocolVersion.dev)
+    if (protocolVersion >= ProtocolVersion.v4)
       V1(state)
     else V0(uniquePathProtoPrimitive, state)
 }

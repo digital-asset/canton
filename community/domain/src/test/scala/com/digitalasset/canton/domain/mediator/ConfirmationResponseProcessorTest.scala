@@ -113,7 +113,6 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         syncCryptoApi,
         timeTracker,
         mediatorState,
-        new LoggingAlarmStreamer(logger),
         testedProtocolVersion,
         loggerFactory,
       )

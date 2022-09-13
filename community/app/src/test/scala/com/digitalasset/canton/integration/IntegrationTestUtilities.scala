@@ -74,7 +74,7 @@ object IntegrationTestUtilities {
   ): GrabbedCounts = {
     val domain = domainRef.name
     val pcsCount = pr.testing.pcs_search(domain, limit = limit).length
-    val acceptedTransactionCount = pr.testing.transaction_search(domain).length
+    val acceptedTransactionCount = pr.testing.transaction_search(domain, limit = limit).length
     mkGrabCounts(pcsCount, acceptedTransactionCount, limit)
   }
 
