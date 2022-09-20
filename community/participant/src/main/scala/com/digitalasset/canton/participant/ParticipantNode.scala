@@ -79,6 +79,7 @@ import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerT
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.grpc.ServerServiceDefinition
 
 import java.util.concurrent.ScheduledExecutorService
@@ -193,7 +194,7 @@ class ParticipantNodeBootstrap(
         .initialize(
           CantonLedgerApiServerWrapper.Config(
             config.ledgerApi,
-            cantonParameterConfig.indexer,
+            cantonParameterConfig.ledgerApiServerParameters.indexer,
             indexerLockIds,
             ledgerId,
             participantId,
@@ -331,7 +332,12 @@ class ParticipantNodeBootstrap(
 
     for {
       domainConnectionConfigStore <- EitherT.right(
-        DomainConnectionConfigStore(storage, timeouts, loggerFactory)
+        DomainConnectionConfigStore(
+          storage,
+          ReleaseProtocolVersion.latest,
+          timeouts,
+          loggerFactory,
+        )
       )
       domainAliasManager <- EitherT.right[String](
         DomainAliasManager(domainConnectionConfigStore, registeredDomainsStore, loggerFactory)
@@ -349,6 +355,7 @@ class ParticipantNodeBootstrap(
           config.init.ledgerApi.maxDeduplicationDuration.some,
           config.init.parameters.uniqueContractKeys.some,
           cantonParameterConfig.stores,
+          ReleaseProtocolVersion.latest,
           metrics,
           indexedStringStore,
           cantonParameterConfig.processingTimeouts,

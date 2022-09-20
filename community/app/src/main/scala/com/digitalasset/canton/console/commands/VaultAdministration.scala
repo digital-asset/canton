@@ -8,6 +8,7 @@ import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.admin.api.client.commands.{TopologyAdminCommands, VaultAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.ListKeyOwnersResult
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{AdminCommandRunner, ConsoleEnvironment, Help, Helpful}
 import com.digitalasset.canton.crypto.store.CryptoPublicStoreError
 import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}
@@ -223,6 +224,9 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
 
   import runner._
 
+  private def defaultLimit: PositiveInt =
+    consoleEnvironment.environment.config.parameters.console.defaultLimit
+
   @Help.Summary("Upload public key")
   @Help.Description(
     """Import a public key and store it together with a name used to provide some context to that key."""
@@ -278,7 +282,7 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
       filterKeyOwnerType: Option[KeyOwnerCode] = None,
       filterDomain: String = "",
       asOf: Option[Instant] = None,
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): Seq[ListKeyOwnersResult] = consoleEnvironment.run {
     adminCommand(
       TopologyAdminCommands.Aggregation
@@ -295,7 +299,7 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
       keyOwner: KeyOwner,
       filterDomain: String = "",
       asOf: Option[Instant] = None,
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): Seq[ListKeyOwnersResult] = consoleEnvironment.run {
     adminCommand(
       TopologyAdminCommands.Aggregation.ListKeyOwners(

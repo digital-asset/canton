@@ -102,10 +102,10 @@ private[mediator] object ResponseAggregation {
         },
       )
     } yield pending
-    new ResponseAggregation(requestId, request, version, initial)(
+    ResponseAggregation(requestId, request, version, initial)(
       protocolVersion = protocolVersion,
       requestTraceContext = traceContext,
-    )(loggerFactory) {}
+    )(loggerFactory)
   }
 
   def apply(
@@ -116,10 +116,10 @@ private[mediator] object ResponseAggregation {
       protocolVersion: ProtocolVersion,
       requestTraceContext: TraceContext,
   )(loggerFactory: NamedLoggerFactory): ResponseAggregation =
-    new ResponseAggregation(requestId, request, version, Left(verdict))(
+    ResponseAggregation(requestId, request, version, Left(verdict))(
       protocolVersion,
       requestTraceContext,
-    )(loggerFactory) {}
+    )(loggerFactory)
 
   def alarmMediatorRequestNotFound(
       requestId: RequestId,
@@ -148,7 +148,7 @@ private[mediator] object ResponseAggregation {
   *                            validated anywhere. Intentionally supplied in a separate parameter list to avoid being
   *                            included in equality checks.
   */
-private[mediator] sealed abstract case class ResponseAggregation(
+private[mediator] final case class ResponseAggregation private (
     requestId: RequestId,
     request: MediatorRequest,
     version: CantonTimestamp,
@@ -396,18 +396,18 @@ private[mediator] sealed abstract case class ResponseAggregation(
       request: MediatorRequest = request,
       version: CantonTimestamp = version,
       state: Either[Verdict, Map[ViewHash, ViewState]] = state,
-  ): ResponseAggregation = new ResponseAggregation(requestId, request, version, state)(
+  ): ResponseAggregation = ResponseAggregation(requestId, request, version, state)(
     protocolVersion,
     requestTraceContext,
-  )(loggerFactory) {}
+  )(loggerFactory)
 
   def timeout(version: CantonTimestamp) =
-    new ResponseAggregation(
+    ResponseAggregation(
       this.requestId,
       this.request,
       version,
       Left(MediatorError.Timeout.Reject.create(protocolVersion)),
-    )(this.protocolVersion, requestTraceContext)(loggerFactory) {}
+    )(this.protocolVersion, requestTraceContext)(loggerFactory)
 
   override def pretty: Pretty[ResponseAggregation] = prettyOfClass(
     param("id", _.requestId),

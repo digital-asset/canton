@@ -36,7 +36,7 @@ final case class TempDirectory(directory: File) {
   def toTempFile(filename: String): TempFile = TempFile(this, filename)
 }
 
-sealed abstract case class TempFile(file: File) {
+final case class TempFile private (file: File) {
   override def toString: String = file.toString()
 
   def path: Path = file.path
@@ -45,12 +45,12 @@ sealed abstract case class TempFile(file: File) {
 }
 
 object TempFile {
-  def apply(tempDirectory: TempDirectory, filename: String) = new TempFile(
+  def apply(tempDirectory: TempDirectory, filename: String): TempFile = TempFile(
     tempDirectory.directory / filename
-  ) {}
+  )
 
   def usingTemporaryFile[U](prefix: String = "", suffix: String = "")(f: TempFile => U): Unit =
     File.usingTemporaryFile(prefix = prefix, suffix = suffix) { file =>
-      f(new TempFile(file) {})
+      f(TempFile(file))
     }
 }

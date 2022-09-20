@@ -34,7 +34,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, OptionUtil, SingleUseCell, retry}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc.SetParameter
 
@@ -46,6 +46,7 @@ class DbInFlightSubmissionStore(
     override protected val storage: DbStorage,
     maxItemsInSqlInClause: PositiveNumeric[Int],
     registerBatchAggregatorConfig: BatchAggregatorConfig,
+    releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -59,7 +60,7 @@ class DbInFlightSubmissionStore(
     storage.metrics.loadGaugeM("in-flight-submission-store")
 
   private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
-    SubmissionTrackingData.getVersionedSetParameter(ProtocolVersion.v2Todo_i8793)
+    SubmissionTrackingData.getVersionedSetParameter
 
   override def lookup(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
@@ -143,6 +144,7 @@ class DbInFlightSubmissionStore(
       new DbInFlightSubmissionStore.RegisterProcessor(
         storage,
         maxItemsInSqlInClause,
+        releaseProtocolVersion,
         logger,
       )
     BatchAggregator(processor, registerBatchAggregatorConfig, processingTime.some)
@@ -287,6 +289,7 @@ object DbInFlightSubmissionStore {
   class RegisterProcessor(
       override protected val storage: DbStorage,
       maxItemsInSqlInClause: PositiveNumeric[Int],
+      releaseProtocolVersion: ReleaseProtocolVersion,
       override val logger: TracedLogger,
   )(
       override protected implicit val executionContext: ExecutionContext,
@@ -300,11 +303,10 @@ object DbInFlightSubmissionStore {
 
     override def kind: String = "in-flight submission"
 
-    private val protocolVersion = ProtocolVersion.v2Todo_i8793
     private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-      TraceContext.getVersionedSetParameter(protocolVersion)
+      TraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
     private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
-      SubmissionTrackingData.getVersionedSetParameter(protocolVersion)
+      SubmissionTrackingData.getVersionedSetParameter
 
     override def executeBatch(
         submissions: NonEmpty[Seq[Traced[InFlightSubmission[UnsequencedSubmission]]]]

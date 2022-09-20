@@ -26,7 +26,7 @@ import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, SequencedEvent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
-import com.digitalasset.canton.util.{EitherUtil, NoCopy}
+import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
@@ -96,7 +96,7 @@ object TransferInViewTree
   * @param stakeholders The stakeholders of the transferred contract
   * @param uuid The uuid of the transfer-in request
   */
-sealed abstract case class TransferInCommonData private (
+final case class TransferInCommonData private (
     override val salt: Salt,
     targetDomain: DomainId,
     targetMediator: MediatorId,
@@ -108,8 +108,7 @@ sealed abstract case class TransferInCommonData private (
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInCommonData](hashOps)
     with HasProtocolVersionedWrapper[TransferInCommonData]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
 
   val representativeProtocolVersion: RepresentativeProtocolVersion[TransferInCommonData] =
     TransferInCommonData.protocolVersionRepresentativeFor(targetProtocolVersion.v)
@@ -159,9 +158,8 @@ object TransferInCommonData
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferInCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -175,11 +173,11 @@ object TransferInCommonData
       uuid: UUID,
       targetProtocolVersion: TargetProtocolVersion,
   ): TransferInCommonData =
-    new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(
+    TransferInCommonData(salt, targetDomain, targetMediator, stakeholders, uuid)(
       hashOps,
       targetProtocolVersion,
       None,
-    ) {}
+    )
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInCommonDataP: v0.TransferInCommonData)(
       bytes: ByteString
@@ -192,13 +190,13 @@ object TransferInCommonData
       targetMediator <- MediatorId.fromProtoPrimitive(targetMediatorP, "target_mediator")
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
-    } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
+    } yield TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
       TargetProtocolVersion(
         protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
       ),
       Some(bytes),
-    ) {}
+    )
   }
 
   private[this] def fromProtoV1(hashOps: HashOps, transferInCommonDataP: v1.TransferInCommonData)(
@@ -220,11 +218,11 @@ object TransferInCommonData
       stakeholders <- stakeholdersP.traverse(ProtoConverter.parseLfPartyId)
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
       protocolVersion = ProtocolVersion(protocolVersionP)
-    } yield new TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
+    } yield TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
       TargetProtocolVersion(protocolVersion),
       Some(bytes),
-    ) {}
+    )
   }
 }
 
@@ -236,7 +234,7 @@ object TransferInCommonData
   * @param contract The contract to be transferred including the instance
   * @param transferOutResultEvent The signed deliver event of the transfer-out result message
   */
-sealed abstract case class TransferInView private (
+final case class TransferInView private (
     override val salt: Salt,
     submitter: LfPartyId,
     contract: SerializableContract,
@@ -249,8 +247,7 @@ sealed abstract case class TransferInView private (
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[TransferInView](hashOps)
     with HasProtocolVersionedWrapper[TransferInView]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
 
   override def hashPurpose: HashPurpose = HashPurpose.TransferInView
 
@@ -297,9 +294,8 @@ object TransferInView
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferInView)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -314,7 +310,7 @@ object TransferInView
       sourceProtocolVersion: SourceProtocolVersion,
       targetProtocolVersion: TargetProtocolVersion,
   ): TransferInView =
-    new TransferInView(
+    TransferInView(
       salt,
       submitter,
       contract,
@@ -325,7 +321,7 @@ object TransferInView
       hashOps,
       protocolVersionRepresentativeFor(targetProtocolVersion.v),
       None,
-    ) {}
+    )
 
   private[this] def fromProtoV0(hashOps: HashOps, transferInViewP: v0.TransferInView)(
       bytes: ByteString
@@ -369,14 +365,14 @@ object TransferInView
         .create(transferOutResultEventMC)
         .leftMap(err => OtherError(err.toString))
       creatingTransactionId <- TransactionId.fromProtoPrimitive(creatingTransactionIdP)
-    } yield new TransferInView(
+    } yield TransferInView(
       salt,
       submitter,
       contract,
       creatingTransactionId,
       transferOutResultEvent,
       SourceProtocolVersion(sourceDomainPV),
-    )(hashOps, protocolVersionRepresentative, Some(bytes)) {}
+    )(hashOps, protocolVersionRepresentative, Some(bytes))
   }
 
   private[this] def fromProtoV1(hashOps: HashOps, transferInViewP: v1.TransferInView)(
@@ -421,14 +417,14 @@ object TransferInView
         .create(transferOutResultEventMC)
         .leftMap(err => OtherError(err.toString))
       creatingTransactionId <- TransactionId.fromProtoPrimitive(creatingTransactionIdP)
-    } yield new TransferInView(
+    } yield TransferInView(
       salt,
       submitter,
       contract,
       creatingTransactionId,
       transferOutResultEvent,
       sourceProtocolVersion,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(1)), Some(bytes)) {}
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(1)), Some(bytes))
   }
 }
 

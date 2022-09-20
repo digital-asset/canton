@@ -8,7 +8,7 @@ import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
-case class InitResponse private (keyId: String, publicKey: SigningPublicKey, replicated: Boolean) {
+final case class InitResponse(keyId: String, publicKey: SigningPublicKey, replicated: Boolean) {
   def toProtoV0: v0.InitResponse = v0.InitResponse(
     keyId = keyId,
     publicKey = Some(publicKey.toProtoV0),

@@ -136,19 +136,19 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
           mbMsgIdP match {
             case None =>
               Right(
-                new Deliver(counter, timestamp, domainId, None, batch)(
+                Deliver(counter, timestamp, domainId, None, batch)(
                   protocolVersionRepresentative,
                   Some(bytes),
-                ) {}
+                )
               )
             case Some(msgId) =>
               MessageId
                 .fromProtoPrimitive(msgId)
                 .map(msgId =>
-                  new Deliver(counter, timestamp, domainId, Some(msgId), batch)(
+                  Deliver(counter, timestamp, domainId, Some(msgId), batch)(
                     protocolVersionRepresentative,
                     Some(bytes),
-                  ) {}
+                  )
                 )
           }
       }): ParsingResult[SequencedEvent[Env]]
@@ -214,7 +214,7 @@ object DeliverError {
   * @param messageId   populated with the message id used on the originating send operation only for the sender
   * @param batch     a batch of envelopes.
   */
-sealed abstract case class Deliver[+Env <: Envelope[_]] private[sequencing] (
+case class Deliver[+Env <: Envelope[_]] private[sequencing] (
     override val counter: SequencerCounter,
     override val timestamp: CantonTimestamp,
     override val domainId: DomainId,
@@ -223,8 +223,7 @@ sealed abstract case class Deliver[+Env <: Envelope[_]] private[sequencing] (
 )(
     val representativeProtocolVersion: RepresentativeProtocolVersion[SequencedEvent[Envelope[_]]],
     val deserializedFrom: Option[ByteString],
-) extends SequencedEvent[Env]
-    with NoCopy {
+) extends SequencedEvent[Env] {
 
   /** Is this deliver event a receipt for a message that the receiver previously sent?
     * (messageId is only populated for the sender)
@@ -244,10 +243,10 @@ sealed abstract case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       f: Env => F[Env2]
   )(implicit F: Applicative[F]) =
     F.map(batch.traverse(f))(
-      new Deliver(counter, timestamp, domainId, messageId, _)(
+      Deliver(counter, timestamp, domainId, messageId, _)(
         representativeProtocolVersion,
         deserializedFrom,
-      ) {}
+      )
     )
 
   @VisibleForTesting
@@ -258,10 +257,10 @@ sealed abstract case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       messageId: Option[MessageId] = this.messageId,
       batch: Batch[Env2] = this.batch,
   ): Deliver[Env2] =
-    new Deliver[Env2](counter, timestamp, domainId, messageId, batch)(
+    Deliver[Env2](counter, timestamp, domainId, messageId, batch)(
       representativeProtocolVersion,
       None,
-    ) {}
+    )
 
   override def pretty: Pretty[this.type] =
     prettyOfClass(
@@ -282,10 +281,10 @@ object Deliver {
       batch: Batch[Env],
       protocolVersion: ProtocolVersion,
   ): Deliver[Env] =
-    new Deliver[Env](counter, timestamp, domainId, messageId, batch)(
+    Deliver[Env](counter, timestamp, domainId, messageId, batch)(
       SequencedEvent.protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
   def fromSequencedEvent[Env <: Envelope[_]](
       deliverEvent: SequencedEvent[Env]

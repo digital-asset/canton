@@ -45,7 +45,7 @@ object DomainParameters {
   }
 }
 
-sealed abstract case class StaticDomainParameters(
+final case class StaticDomainParameters(
     reconciliationInterval: PositiveSeconds, // TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
     maxRatePerParticipant: NonNegativeInt, //  TODO(#9800) Mark as deprecated, optional, indicate that it should be used only for V0
     maxInboundMessageSize: NonNegativeInt,
@@ -137,7 +137,7 @@ object StaticDomainParameters
       reconciliationInterval: PositiveSeconds =
         StaticDomainParameters.defaultReconciliationInterval,
       maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
-  ) = new StaticDomainParameters(
+  ) = StaticDomainParameters(
     reconciliationInterval = reconciliationInterval,
     maxRatePerParticipant = maxRatePerParticipant,
     maxInboundMessageSize = maxInboundMessageSize,
@@ -148,7 +148,7 @@ object StaticDomainParameters
     requiredHashAlgorithms = requiredHashAlgorithms,
     requiredCryptoKeyFormats = requiredCryptoKeyFormats,
     protocolVersion = protocolVersion,
-  )(protocolVersionRepresentativeFor(protocolVersion)) {}
+  )(protocolVersionRepresentativeFor(protocolVersion))
 
   private def requiredKeySchemes[P, A: Order](
       field: String,
@@ -209,7 +209,7 @@ object StaticDomainParameters
       protocolVersion <- ProtocolVersion
         .create(protocolVersionP)
         .leftMap(err => ProtoDeserializationError.OtherError(err))
-    } yield new StaticDomainParameters(
+    } yield StaticDomainParameters(
       reconciliationInterval,
       maxRatePerParticipant,
       maxInboundMessageSize,
@@ -220,7 +220,7 @@ object StaticDomainParameters
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
   }
 
   def fromProtoV1(
@@ -266,7 +266,7 @@ object StaticDomainParameters
         CryptoKeyFormat.fromProtoEnum,
       )
       protocolVersion = ProtocolVersion(protocolVersionP)
-    } yield new StaticDomainParameters(
+    } yield StaticDomainParameters(
       StaticDomainParameters.defaultReconciliationInterval,
       StaticDomainParameters.defaultMaxRatePerParticipant,
       maxInboundMessageSize,
@@ -277,7 +277,7 @@ object StaticDomainParameters
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(1))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(1)))
   }
 }
 
@@ -325,7 +325,7 @@ object StaticDomainParameters
   * @throws DynamicDomainParameters$.InvalidDomainParameters
   *   if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.
   */
-sealed abstract case class DynamicDomainParameters(
+final case class DynamicDomainParameters(
     participantResponseTimeout: NonNegativeFiniteDuration,
     mediatorReactionTimeout: NonNegativeFiniteDuration,
     transferExclusivityTimeout: NonNegativeFiniteDuration,
@@ -497,7 +497,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
       maxRatePerParticipant: NonNegativeInt,
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[DynamicDomainParameters]
-  ): DynamicDomainParameters = new DynamicDomainParameters(
+  ): DynamicDomainParameters = DynamicDomainParameters(
     participantResponseTimeout,
     mediatorReactionTimeout,
     transferExclusivityTimeout,
@@ -506,7 +506,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
     mediatorDeduplicationTimeout,
     reconciliationInterval,
     maxRatePerParticipant,
-  )(representativeProtocolVersion) {}
+  )(representativeProtocolVersion)
 
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(

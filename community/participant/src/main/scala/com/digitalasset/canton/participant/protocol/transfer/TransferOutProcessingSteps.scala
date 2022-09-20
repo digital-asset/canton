@@ -135,14 +135,12 @@ class TransferOutProcessingSteps(
         FutureUnlessShutdown.outcomeK
       )
 
-      // TODO(#9423) change DEV to stable protocol version when released and check PVs
       /*
-        In DEV, we introduced the sourceProtocolVersion in TransferInView, which is needed for
+        In PV=4, we introduced the sourceProtocolVersion in TransferInView, which is needed for
         proper deserialization. Hence, we disallow some transfers
        */
       missingSourceProtocolVersionInTransferIn = targetProtocolVersion.v <= ProtocolVersion.v3
-      isSourceProtocolVersionRequired =
-        sourceDomainProtocolVersion.v == ProtocolVersion.dev
+      isSourceProtocolVersionRequired = sourceDomainProtocolVersion.v >= ProtocolVersion.v4
 
       _ <- condUnitET[FutureUnlessShutdown](
         !(missingSourceProtocolVersionInTransferIn && isSourceProtocolVersionRequired),
@@ -205,7 +203,7 @@ class TransferOutProcessingSteps(
         Recipients.groups(
           checked(
             NonEmptyUtil.fromUnsafe(
-              recipients.toSeq.map(participant => NonEmpty(Set, mediatorId, participant))
+              recipients.toSeq.map(participant => NonEmpty(Set, mediatorId, participant: Member))
             )
           )
         )
@@ -761,7 +759,7 @@ object TransferOutProcessingSteps {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, TransferProcessorError, (TransferOutRequest, Set[Member])] = {
+  ): EitherT[Future, TransferProcessorError, (TransferOutRequest, Set[ParticipantId])] = {
 
     for {
       adminPartiesAndRecipients <- transferOutRequestData(
@@ -801,7 +799,7 @@ object TransferOutProcessingSteps {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[Member])] = {
+  ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[ParticipantId])] = {
     for {
       canSubmit <- EitherT.right(
         sourceIps.hostedOn(submitter, participantId).map(_.exists(_.permission == Submission))
@@ -831,7 +829,7 @@ object TransferOutProcessingSteps {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[Member])] = {
+  ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[ParticipantId])] = {
 
     val stakeholdersWithParticipantPermissionsF = stakeholders.toList
       .traverse { stakeholder =>
@@ -874,7 +872,7 @@ object TransferOutProcessingSteps {
       val participants =
         stakeholdersWithParticipantPermissions.values
           .map(_._1.all)
-          .foldLeft[Set[Member]](Set.empty[Member])(_ ++ _)
+          .foldLeft[Set[ParticipantId]](Set.empty[ParticipantId])(_ ++ _)
       (transferOutAdminParties, participants)
     }
   }

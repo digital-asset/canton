@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.service
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 
 /** Class that is used to verify that a generic server and a generic client support the same protocol version.
   * In practice, this class is used for all handshakes (e.g. the participant-domain one) except the
@@ -24,7 +24,7 @@ class HandshakeValidator(
     for {
       clientVersions <- clientVersionsP.traverse(ProtocolVersion.create)
       minClientVersion <- minClientVersionP.traverse(ProtocolVersion.create)
-      _ <- ProtocolVersion
+      _ <- ProtocolVersionCompatibility
         .canClientConnectToServer(clientVersions, serverVersion, minClientVersion)
         .leftMap(_.description)
     } yield ()

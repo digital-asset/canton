@@ -28,7 +28,7 @@ import com.google.protobuf.ByteString
   * The mediator also checks that all payloads have the same serialization and,
   * if it can parse the mediator request envelope, that the payload fits to the mediator request.
   */
-sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
+final case class RootHashMessage[+Payload <: RootHashMessagePayload](
     rootHash: RootHash,
     override val domainId: DomainId,
     viewType: ViewType,
@@ -79,13 +79,12 @@ sealed abstract case class RootHashMessage[+Payload <: RootHashMessagePayload](
       payload: Payload2 = payload,
       viewType: ViewType = viewType,
   ): RootHashMessage[Payload2] =
-    new RootHashMessage(
+    RootHashMessage(
       rootHash,
       domainId,
       viewType,
       payload,
-    )(representativeProtocolVersion) {}
-
+    )(representativeProtocolVersion)
 }
 
 object RootHashMessage
@@ -109,12 +108,12 @@ object RootHashMessage
       protocolVersion: ProtocolVersion,
       viewType: ViewType,
       payload: Payload,
-  ): RootHashMessage[Payload] = new RootHashMessage(
+  ): RootHashMessage[Payload] = RootHashMessage(
     rootHash,
     domainId,
     viewType,
     payload,
-  )(protocolVersionRepresentativeFor(protocolVersion)) {}
+  )(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV0[Payload <: RootHashMessagePayload](
       payloadDeserializer: ByteString => ParsingResult[Payload]
@@ -127,12 +126,12 @@ object RootHashMessage
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       payloadO <- payloadDeserializer(payloadP)
-    } yield new RootHashMessage(
+    } yield RootHashMessage(
       rootHash,
       domainId,
       viewType,
       payloadO,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit

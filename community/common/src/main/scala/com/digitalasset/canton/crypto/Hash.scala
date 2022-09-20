@@ -15,7 +15,7 @@ import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
   HasCryptographicEvidence,
 }
-import com.digitalasset.canton.util.{HexString, NoCopy}
+import com.digitalasset.canton.util.HexString
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -75,8 +75,7 @@ object HashAlgorithm {
 case class Hash private (private val hash: ByteString, private val algorithm: HashAlgorithm)
     extends HasCryptographicEvidence
     with Ordered[Hash]
-    with PrettyPrinting
-    with NoCopy {
+    with PrettyPrinting {
 
   require(!hash.isEmpty, "Hash must not be empty")
   require(
@@ -132,9 +131,6 @@ object Hash {
     (r.<<[Option[ByteString]]).map(bytes => tryFromByteString(bytes))
 
   }
-
-  private[this] def apply(hash: ByteString, algorithm: HashAlgorithm): Hash =
-    throw new UnsupportedOperationException("Use the create/build methods instead")
 
   private[crypto] def tryCreate(hash: ByteString, algorithm: HashAlgorithm): Hash =
     create(hash, algorithm).valueOr(err => throw new IllegalArgumentException(err))

@@ -30,14 +30,10 @@ import com.digitalasset.canton.participant.protocol.transfer.{
   TransferOutProcessor,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.select
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{
-  LoggingAlarmStreamer,
-  RequestAndRootHashMessage,
-  RequestProcessor,
-  RootHash,
-}
+import com.digitalasset.canton.protocol.{RequestAndRootHashMessage, RequestProcessor, RootHash}
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
@@ -60,8 +56,6 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def domainId: DomainId
 
   protected def participantId: ParticipantId
-
-  protected lazy val alarmer = new LoggingAlarmStreamer(logger)
 
   protected type ProcessingResult
   protected def doProcess[A](
@@ -189,7 +183,7 @@ trait MessageDispatcher { this: NamedLogging =>
         } else if (batch.envelopes.isEmpty) {
           doProcess(
             MalformedMessage,
-            FutureUnlessShutdown.outcomeF(alarm(sc, ts, "Received an empty batch.")),
+            FutureUnlessShutdown.pure(alarm(sc, ts, "Received an empty batch.")),
           )
         } else FutureUnlessShutdown.pure(processingResultMonoid.empty)
 
@@ -554,8 +548,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def alarm(sc: SequencerCounter, ts: CantonTimestamp, msg: String)(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
-    alarmer.alarm(s"(sequencer counter: $sc, timestamp: $ts): $msg")
+  ): Unit = SyncServiceAlarm.Warn(s"(sequencer counter: $sc, timestamp: $ts): $msg").report()
 }
 
 object MessageDispatcher {

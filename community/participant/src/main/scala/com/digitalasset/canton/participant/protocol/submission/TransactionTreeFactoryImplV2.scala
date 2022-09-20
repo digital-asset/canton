@@ -297,7 +297,7 @@ final class TransactionTreeFactoryImplV2(
       state.resolvedKeysInView = resolvedKeysInView
 
       // Compute the result
-      TransactionView(cryptoOps)(viewCommonData, viewParticipantData, childViews)
+      TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, childViews)
     }
   }
 }

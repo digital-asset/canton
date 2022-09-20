@@ -10,9 +10,14 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  SendAsyncError,
+  SignedContent,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.{DomainTopologyManagerId, Member, UnauthenticatedMemberId}
+import com.digitalasset.canton.tracing.Spanning.SpanWrapper
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.ifThenET
 import io.opentelemetry.api.trace.Tracer
@@ -87,30 +92,51 @@ abstract class BaseSequencer(
       case error: WriteRequestRefused => EitherT.leftT(error)
     }
 
+  override def sendAsyncSigned(signedSubmission: SignedContent[SubmissionRequest])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SendAsyncError, Unit] = withSpan("Sequencer.sendAsyncSigned") {
+    implicit traceContext => span =>
+      val submission = signedSubmission.content
+      span.setAttribute("sender", submission.sender.toString)
+      span.setAttribute("message_id", submission.messageId.unwrap)
+      for {
+        _ <- checkMemberRegistration(submission)
+        _ <- sendAsyncSignedInternal(signedSubmission)
+      } yield ()
+  }
+
   override def sendAsync(
       submission: SubmissionRequest
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] =
     withSpan("Sequencer.sendAsync") { implicit traceContext => span =>
-      span.setAttribute("sender", submission.sender.toString)
-      span.setAttribute("message_id", submission.messageId.unwrap)
+      setSpanAttributes(span, submission)
       for {
-        _ <- (for {
-          _ <- autoRegisterNewMembersMentionedByIdentityManager(submission)
-          _ <- submission.sender match {
-            case member: UnauthenticatedMemberId =>
-              ensureMemberRegistered(member)
-            case _ => EitherT.pure[Future, WriteRequestRefused](())
-          }
-        } yield ()).leftSemiflatMap { registrationError =>
-          logger.error(s"Failed to auto-register members: $registrationError")
-          // this error won't exist once sendAsync is fully implemented, so temporarily we'll just return a failed future
-          Future.failed(
-            new RuntimeException(s"Failed to auto-register members: $registrationError")
-          )
-        }
+        _ <- checkMemberRegistration(submission)
         _ <- sendAsyncInternal(submission)
       } yield ()
     }
+
+  private def setSpanAttributes(span: SpanWrapper, submission: SubmissionRequest): Unit = {
+    span.setAttribute("sender", submission.sender.toString)
+    span.setAttribute("message_id", submission.messageId.unwrap)
+  }
+
+  private def checkMemberRegistration(
+      submission: SubmissionRequest
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = (for {
+    _ <- autoRegisterNewMembersMentionedByIdentityManager(submission)
+    _ <- submission.sender match {
+      case member: UnauthenticatedMemberId =>
+        ensureMemberRegistered(member)
+      case _ => EitherT.pure[Future, WriteRequestRefused](())
+    }
+  } yield ()).leftSemiflatMap { registrationError =>
+    logger.error(s"Failed to auto-register members: $registrationError")
+    // this error won't exist once sendAsync is fully implemented, so temporarily we'll just return a failed future
+    Future.failed(
+      new RuntimeException(s"Failed to auto-register members: $registrationError")
+    )
+  }
 
   override def health(implicit traceContext: TraceContext): Future[SequencerHealthStatus] = for {
     newHealth <- healthInternal
@@ -137,6 +163,10 @@ abstract class BaseSequencer(
   }
 
   protected def sendAsyncInternal(submission: SubmissionRequest)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SendAsyncError, Unit]
+
+  protected def sendAsyncSignedInternal(signedSubmission: SignedContent[SubmissionRequest])(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncError, Unit]
 

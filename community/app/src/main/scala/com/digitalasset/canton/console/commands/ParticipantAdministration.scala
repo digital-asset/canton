@@ -19,6 +19,7 @@ import com.digitalasset.canton.admin.api.client.commands.{
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
 import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   BaseInspection,
@@ -310,6 +311,9 @@ class LocalParticipantTestingGroup(
     with FeatureFlagFilter
     with NoTracing {
 
+  protected def defaultLimit: PositiveInt =
+    consoleEnvironment.environment.config.parameters.console.defaultLimit
+
   import participantRef._
   @Help.Summary("Lookup contracts in the Private Contract Store", FeatureFlag.Testing)
   @Help.Description("""Get raw access to the PCS of the given domain sync controller.
@@ -325,7 +329,7 @@ class LocalParticipantTestingGroup(
       filterTemplate: String = "",
       // only include active contracts
       activeSet: Boolean = false,
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): List[(Boolean, SerializableContract)] = {
     def toOpt(str: String) = OptionUtil.emptyStringAsNone(str)
 
@@ -335,7 +339,7 @@ class LocalParticipantTestingGroup(
         toOpt(filterId),
         toOpt(filterPackage),
         toOpt(filterTemplate),
-        limit,
+        limit.value,
       )
     if (activeSet) pcs.filter { case (isActive, _) => isActive }
     else pcs
@@ -348,7 +352,7 @@ class LocalParticipantTestingGroup(
       filterId: String = "",
       filterPackage: String = "",
       filterTemplate: String = "",
-      limit: Int = 100,
+      limit: PositiveInt = defaultLimit,
   ): List[SerializableContract] = check(FeatureFlag.Testing) {
     pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit).map(
       _._2
@@ -367,7 +371,7 @@ class LocalParticipantTestingGroup(
       domain: DomainAlias = DomainAlias.tryCreate(""),
       from: Option[Instant] = None,
       to: Option[Instant] = None,
-      limit: Option[Int] = None,
+      limit: PositiveInt = defaultLimit,
   ): Seq[(String, TimestampedEvent)] = {
     check(FeatureFlag.Testing) {
       if (domain == DomainAlias.tryCreate("") && (from.isDefined || to.isDefined)) {
@@ -381,7 +385,7 @@ class LocalParticipantTestingGroup(
           domain,
           from.map(timestampFromInstant),
           to.map(timestampFromInstant),
-          limit,
+          Some(limit.value),
         )
       }
     }
@@ -398,7 +402,7 @@ class LocalParticipantTestingGroup(
       domain: DomainAlias,
       from: Option[Instant] = None,
       to: Option[Instant] = None,
-      limit: Option[Int] = None,
+      limit: PositiveInt = defaultLimit,
   ): Seq[(String, LfCommittedTransaction)] =
     check(FeatureFlag.Testing) {
       if (domain.unwrap == "" && (from.isDefined || to.isDefined)) {
@@ -412,7 +416,7 @@ class LocalParticipantTestingGroup(
           domain,
           from.map(timestampFromInstant),
           to.map(timestampFromInstant),
-          limit,
+          Some(limit.value),
         )
       }
     }
@@ -427,9 +431,9 @@ class LocalParticipantTestingGroup(
       domain: DomainAlias,
       from: Option[Instant] = None,
       to: Option[Instant] = None,
-      limit: Option[Int] = None,
+      limit: PositiveInt = defaultLimit,
   ): Seq[PossiblyIgnoredProtocolEvent] =
-    state_inspection.findMessages(domain, from, to, limit)
+    state_inspection.findMessages(domain, from, to, Some(limit.value))
 
   @Help.Summary(
     "Return the sync crypto api provider, which provides access to all cryptographic methods",
@@ -711,10 +715,10 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       |  filterName: filter by name (source description)
       |  limit: Limit number of results (default none)
       """)
-    def list(limit: Option[Int] = None, filterName: String = ""): Seq[v0.DarDescription] =
+    def list(limit: PositiveInt = defaultLimit, filterName: String = ""): Seq[v0.DarDescription] =
       consoleEnvironment
         .run {
-          adminCommand(ParticipantAdminCommands.Package.ListDars(limit: Option[Int]))
+          adminCommand(ParticipantAdminCommands.Package.ListDars(limit))
         }
         .filter(_.name.startsWith(filterName))
 
@@ -858,10 +862,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   object packages extends Helpful {
 
     @Help.Summary("List packages stored on the participant")
-    @Help.Description("If a limit is given, only up to `limit` packages are returned. ")
-    def list(limit: Option[Int] = None): Seq[v0.PackageDescription] = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.Package.List(limit))
-    }
+    @Help.Description("""Supported arguments:
+        limit - Limit on the number of packages returned (defaults to canton.parameters.console.default-limit)
+        """)
+    def list(limit: PositiveInt = defaultLimit): Seq[v0.PackageDescription] =
+      consoleEnvironment.run {
+        adminCommand(ParticipantAdminCommands.Package.List(limit))
+      }
 
     @Help.Summary("List package contents")
     def list_contents(packageId: String): Seq[v0.ModuleDescription] = consoleEnvironment.run {
@@ -869,8 +876,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("Find packages that contain a module with the given name")
-    def find(moduleName: String): Seq[v0.PackageDescription] = consoleEnvironment.run {
-      val packageC = adminCommand(ParticipantAdminCommands.Package.List(None)).toEither
+    def find(
+        moduleName: String,
+        limitPackages: PositiveInt = defaultLimit,
+    ): Seq[v0.PackageDescription] = consoleEnvironment.run {
+      val packageC = adminCommand(ParticipantAdminCommands.Package.List(limitPackages)).toEither
       val matchingC = packageC
         .flatMap { packages =>
           packages.traverse(x =>
@@ -918,13 +928,17 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       try {
         AdminCommandRunner.retryUntilTrue(timeout) {
           val canton = packages.list().map(_.packageId).toSet
+          val maxPackages = PositiveInt.tryCreate(1000)
           val lApi = consoleEnvironment
             .run {
-              ledgerApiCommand(LedgerApiCommands.PackageService.ListKnownPackages(None))
+              ledgerApiCommand(
+                LedgerApiCommands.PackageService.ListKnownPackages(maxPackages)
+              )
             }
             .map(_.packageId)
             .toSet
-          (canton -- lApi).isEmpty
+          // don't synchronise anymore in a big production system (as we only need this truly for testing)
+          (lApi.size >= maxPackages.value) || (canton -- lApi).isEmpty
         }
       } catch {
         case _: TimeoutException =>
@@ -1448,7 +1462,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         filterSourceDomain: Option[DomainAlias],
         filterTimestamp: Option[Instant],
         filterSubmittingParty: Option[PartyId],
-        limit: Int = 100,
+        limit: PositiveInt = defaultLimit,
     ): Seq[TransferSearchResult] =
       check(FeatureFlag.Preview)(consoleEnvironment.run {
         adminCommand(
@@ -1458,7 +1472,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
               filterSourceDomain,
               filterTimestamp,
               filterSubmittingParty,
-              limit,
+              limit.value,
             )
         )
       })

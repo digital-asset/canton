@@ -40,7 +40,6 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
@@ -652,7 +651,7 @@ object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInfo
 
 /** Information about the submitters of the transaction
   */
-sealed abstract case class SubmitterMetadata private (
+final case class SubmitterMetadata private (
     actAs: NonEmpty[Set[LfPartyId]],
     applicationId: ApplicationId,
     commandId: CommandId,
@@ -666,8 +665,7 @@ sealed abstract case class SubmitterMetadata private (
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[SubmitterMetadata](hashOps)
     with HasProtocolVersionedWrapper[SubmitterMetadata]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -721,10 +719,9 @@ object SubmitterMetadata
       salt: Salt,
       submissionId: Option[LedgerSubmissionId],
       dedupPeriod: DeduplicationPeriod,
-  )(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
-  ) = new SubmitterMetadata(
+  ): SubmitterMetadata = SubmitterMetadata(
     actAs, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
     applicationId,
     commandId,
@@ -732,7 +729,7 @@ object SubmitterMetadata
     salt,
     submissionId,
     dedupPeriod,
-  )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None) {}
+  )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
 
   def fromSubmitterInfo(hashOps: HashOps)(
       submitterInfo: SubmitterInfo,
@@ -742,7 +739,7 @@ object SubmitterMetadata
   ): Either[String, SubmitterMetadata] = {
     NonEmpty.from(submitterInfo.actAs.toSet).toRight("The actAs set must not be empty.").map {
       actAsNes =>
-        new SubmitterMetadata(
+        SubmitterMetadata(
           actAsNes, // Canton ignores SubmitterInfo.readAs per https://github.com/digital-asset/daml/pull/12136
           ApplicationId(submitterInfo.applicationId),
           CommandId(submitterInfo.commandId),
@@ -750,7 +747,7 @@ object SubmitterMetadata
           salt,
           submitterInfo.submissionId,
           submitterInfo.deduplicationPeriod,
-        )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None) {}
+        )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
     }
   }
 
@@ -804,7 +801,7 @@ object SubmitterMetadata
         .toRight(
           ProtoDeserializationError.ValueConversionError("acsAs", "actAs set must not be empty.")
         )
-    } yield new SubmitterMetadata(
+    } yield SubmitterMetadata(
       actAsNes,
       applicationId,
       commandId,
@@ -812,7 +809,7 @@ object SubmitterMetadata
       salt,
       submissionId,
       dedupPeriod,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes)) {}
+    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes))
   }
 }
 
@@ -820,7 +817,7 @@ object SubmitterMetadata
   *
   * @param confirmationPolicy determines who must confirm the request
   */
-sealed abstract case class CommonMetadata private (
+final case class CommonMetadata private (
     confirmationPolicy: ConfirmationPolicy,
     domainId: DomainId,
     mediatorId: MediatorId,
@@ -832,8 +829,7 @@ sealed abstract case class CommonMetadata private (
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[CommonMetadata](hashOps)
     with HasProtocolVersionedWrapper[CommonMetadata]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -883,11 +879,11 @@ object CommonMetadata
       salt: Salt,
       uuid: UUID,
       protocolVersion: ProtocolVersion,
-  ) = new CommonMetadata(confirmationPolicy, domain, mediatorId, salt, uuid)(
+  ): CommonMetadata = CommonMetadata(confirmationPolicy, domain, mediatorId, salt, uuid)(
     hashOps,
     protocolVersionRepresentativeFor(protocolVersion),
     None,
-  ) {}
+  )
 
   private def fromProtoV0(hashOps: HashOps, metaDataP: v0.CommonMetadata)(
       bytes: ByteString
@@ -908,11 +904,11 @@ object CommonMetadata
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
         .leftMap(_.inField("salt"))
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
-    } yield new CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
+    } yield CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
       hashOps,
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
 }
 
 /** Information concerning every '''participant''' involved in the underlying transaction.
@@ -921,7 +917,7 @@ object CommonMetadata
   * @param submissionTime The submission time of the transaction
   * @param workflowId     optional workflow id associated with the ledger api provided workflow instance
   */
-sealed abstract case class ParticipantMetadata private (
+final case class ParticipantMetadata private (
     ledgerTime: CantonTimestamp,
     submissionTime: CantonTimestamp,
     workflowId: Option[WorkflowId],
@@ -932,8 +928,7 @@ sealed abstract case class ParticipantMetadata private (
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ParticipantMetadata](hashOps)
     with HasProtocolVersionedWrapper[ParticipantMetadata]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
 
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
@@ -976,11 +971,11 @@ object ParticipantMetadata
       salt: Salt,
       protocolVersion: ProtocolVersion,
   ): ParticipantMetadata =
-    new ParticipantMetadata(ledgerTime, submissionTime, workflowId, salt)(
+    ParticipantMetadata(ledgerTime, submissionTime, workflowId, salt)(
       hashOps,
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
   private def fromProtoV0(hashOps: HashOps, metadataP: v0.ParticipantMetadata)(
       bytes: ByteString
@@ -1002,11 +997,11 @@ object ParticipantMetadata
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV0, "salt", saltP)
         .leftMap(_.inField("salt"))
-    } yield new ParticipantMetadata(let, submissionTime, workflowId, salt)(
+    } yield ParticipantMetadata(let, submissionTime, workflowId, salt)(
       hashOps,
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
 }
 
 /** Wraps a `GenTransactionTree` where exactly one view (not including subviews) is unblinded.

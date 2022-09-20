@@ -227,11 +227,11 @@ object MerkleTree {
       case Left(h) => v0.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
       case Right(n) =>
         v0.BlindableNode.BlindedOrNot.Unblinded(
-          n.toByteString(ProtocolVersion.v2Todo_i8793)
+          n.toByteString(ProtocolVersion.v2Todo_i10354)
         )
     })
 
-  /** Deserialize a bindable protobuf node to a blinded or an unblinded tree node depending on the contents of protoNode */
+  /** Deserialize a blindable protobuf node to a blinded or an unblinded tree node depending on the contents of protoNode */
   def fromProtoOption[NodeType](
       protoNode: Option[v0.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],

@@ -179,4 +179,7 @@ object LogEntry {
       }
     }
   } withClue s"\n\nAll log entries:${LogEntry.format(entries)}"
+
+  val SECURITY_SENSITIVE_MESSAGE_ON_API =
+    "An error occurred. Please contact the operator and inquire about the request"
 }

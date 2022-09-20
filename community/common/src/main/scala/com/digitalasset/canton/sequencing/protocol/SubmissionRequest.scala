@@ -7,17 +7,18 @@ import cats.syntax.traverse._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.protocol
-import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasProtocolVersionedCompanion,
+  HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtocolVersionedWrapper,
   HasProtocolVersionedWrapperCompanion,
   ProtobufVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
+import com.google.protobuf.ByteString
 
 case class SubmissionRequest private (
     sender: Member,
@@ -26,8 +27,11 @@ case class SubmissionRequest private (
     batch: Batch[ClosedEnvelope],
     maxSequencingTime: CantonTimestamp,
     timestampOfSigningKey: Option[CantonTimestamp],
-)(val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest])
-    extends HasProtocolVersionedWrapper[SubmissionRequest] {
+)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionRequest],
+    override val deserializedFrom: Option[ByteString] = None,
+) extends HasProtocolVersionedWrapper[SubmissionRequest]
+    with ProtocolVersionedMemoizedEvidence {
 
   // Caches the serialized compressed batch to be able to do checks on its size without re-serializing
   lazy val batchProtoV0: protocol.v0.CompressedBatch = batch.toProtoV0
@@ -67,13 +71,18 @@ case class SubmissionRequest private (
 
   def isConfirmationResponse(mediator: Member): Boolean =
     batch.envelopes.nonEmpty && batch.envelopes.forall(_.recipients.allRecipients == Set(mediator))
+
+  override protected[this] def toByteStringUnmemoized: ByteString =
+    super[HasProtocolVersionedWrapper].toByteString
 }
 
-object SubmissionRequest extends HasProtocolVersionedCompanion[SubmissionRequest] {
+object SubmissionRequest extends HasMemoizedProtocolVersionedWrapperCompanion[SubmissionRequest] {
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
-      supportedProtoVersion(v0.SubmissionRequest)(fromProtoV0),
+      supportedProtoVersionMemoized(v0.SubmissionRequest)(req =>
+        bytes => fromProtoV0(req, Some(bytes))
+      ),
       _.toProtoV0.toByteString,
     )
   )
@@ -98,8 +107,12 @@ object SubmissionRequest extends HasProtocolVersionedCompanion[SubmissionRequest
       timestampOfSigningKey,
     )(protocolVersionRepresentativeFor(protocolVersion))
 
-  def fromProtoV0(
-      requestP: v0.SubmissionRequest
+  def fromProtoV0(requestP: v0.SubmissionRequest): ParsingResult[SubmissionRequest] =
+    fromProtoV0(requestP, None)
+
+  private def fromProtoV0(
+      requestP: v0.SubmissionRequest,
+      bytes: Option[ByteString],
   ): ParsingResult[SubmissionRequest] = {
     val v0.SubmissionRequest(
       senderP,
@@ -121,8 +134,16 @@ object SubmissionRequest extends HasProtocolVersionedCompanion[SubmissionRequest
         .required("SubmissionRequest.batch", batchP)
         .flatMap(Batch.fromProtoV0(ClosedEnvelope.fromProtoV0))
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
-    } yield new SubmissionRequest(sender, messageId, isRequest, batch, maxSequencingTime, ts)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0))
+    } yield new SubmissionRequest(
+      sender,
+      messageId,
+      isRequest,
+      batch,
+      maxSequencingTime,
+      ts,
+    )(
+      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      bytes,
     )
   }
 }

@@ -29,6 +29,8 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   CreateUserResponse,
   DeleteUserRequest,
   DeleteUserResponse,
+  GetUserRequest,
+  GetUserResponse,
   GrantUserRightsRequest,
   GrantUserRightsResponse,
   ListUserRightsRequest,
@@ -91,10 +93,11 @@ import com.digitalasset.canton.admin.api.client.data.{
   UserRights,
 }
 import com.digitalasset.canton.config.NonNegativeDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.networking.grpc.{ForwardingStreamObserver, RecordingStreamObserver}
+import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -331,7 +334,7 @@ object LedgerApiCommands {
 
     }
 
-    final case class ListKnownPackages(limit: Option[Int])
+    final case class ListKnownPackages(limit: PositiveInt)
         extends BaseCommand[ListKnownPackagesRequest, ListKnownPackagesResponse, Seq[
           PackageDetails
         ]] {
@@ -349,7 +352,7 @@ object LedgerApiCommands {
       override def handleResponse(
           response: ListKnownPackagesResponse
       ): Either[String, Seq[PackageDetails]] =
-        Right(response.packageDetails.take(limit.getOrElse(Int.MaxValue)))
+        Right(response.packageDetails.take(limit.value))
     }
 
   }
@@ -556,6 +559,7 @@ object LedgerApiCommands {
 
   private[commands] trait SubmitCommand extends PrettyPrinting {
     def actAs: Seq[LfPartyId]
+    def readAs: Seq[LfPartyId]
     def commands: Seq[Command]
     def workflowId: String
     def commandId: String
@@ -568,6 +572,7 @@ object LedgerApiCommands {
       applicationId = applicationId,
       commandId = if (commandId.isEmpty) UUID.randomUUID().toString else commandId,
       actAs = actAs,
+      readAs = readAs,
       commands = commands,
       deduplicationPeriod = deduplicationPeriod.fold(
         CommandsV1.DeduplicationPeriod.Empty: CommandsV1.DeduplicationPeriod
@@ -589,6 +594,7 @@ object LedgerApiCommands {
     override def pretty: Pretty[this.type] =
       prettyOfClass(
         param("actAs", _.actAs),
+        param("readAs", _.readAs),
         param("commandId", _.commandId.singleQuoted),
         param("workflowId", _.workflowId.singleQuoted),
         param("submissionId", _.submissionId.singleQuoted),
@@ -607,6 +613,7 @@ object LedgerApiCommands {
 
     final case class Submit(
         override val actAs: Seq[LfPartyId],
+        override val readAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
         override val commandId: String,
@@ -639,6 +646,7 @@ object LedgerApiCommands {
 
     final case class SubmitAndWaitTransactionTree(
         override val actAs: Seq[LfPartyId],
+        override val readAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
         override val commandId: String,
@@ -672,6 +680,7 @@ object LedgerApiCommands {
 
     final case class SubmitAndWaitTransaction(
         override val actAs: Seq[LfPartyId],
+        override val readAs: Seq[LfPartyId],
         override val commands: Seq[Command],
         override val workflowId: String,
         override val commandId: String,
@@ -709,10 +718,12 @@ object LedgerApiCommands {
 
     final case class GetActiveContracts(
         parties: Set[LfPartyId],
-        limit: Option[Int] = None,
+        limit: PositiveInt,
         templateFilter: Seq[P.TemplateId[_]] = Seq.empty,
         verbose: Boolean = true,
-    ) extends BaseCommand[GetActiveContractsRequest, Seq[GetActiveContractsResponse], Seq[
+        timeout: FiniteDuration,
+    )(scheduler: ScheduledExecutorService)
+        extends BaseCommand[GetActiveContractsRequest, Seq[WrappedCreatedEvent], Seq[
           WrappedCreatedEvent
         ]] {
 
@@ -737,26 +748,25 @@ object LedgerApiCommands {
       override def submitRequest(
           service: ActiveContractsServiceStub,
           request: GetActiveContractsRequest,
-      ): Future[Seq[GetActiveContractsResponse]] = {
-        val promise = Promise[Seq[GetActiveContractsResponse]]()
-
-        val observer =
-          new RecordingStreamObserver[GetActiveContractsResponse](limit.getOrElse(Int.MaxValue)) {
-            override def onCompleted(): Unit = promise.success(this.responses)
-            override def onError(t: Throwable): Unit = promise.tryFailure(t).discard
-          }
-
-        service.getActiveContracts(
+      ): Future[Seq[WrappedCreatedEvent]] = {
+        streamedResponse[
+          GetActiveContractsRequest,
+          GetActiveContractsResponse,
+          WrappedCreatedEvent,
+        ](
+          service.getActiveContracts,
+          _.activeContracts.map(WrappedCreatedEvent),
           request,
-          observer,
+          limit.value,
+          timeout,
+          scheduler,
         )
-        promise.future
       }
 
       override def handleResponse(
-          response: Seq[GetActiveContractsResponse]
+          response: Seq[WrappedCreatedEvent]
       ): Either[String, Seq[WrappedCreatedEvent]] = {
-        Right(response.flatMap(_.activeContracts).map(WrappedCreatedEvent))
+        Right(response)
       }
 
       // fetching ACS might take long if we fetch a lot of data
@@ -848,6 +858,29 @@ object LedgerApiCommands {
       )
 
       override def handleResponse(response: CreateUserResponse): Either[String, LedgerApiUser] =
+        ProtoConverter
+          .parseRequired(LedgerApiUser.fromProtoV0, "user", response.user)
+          .leftMap(_.toString)
+
+    }
+
+    final case class Get(
+        id: String
+    ) extends BaseCommand[GetUserRequest, GetUserResponse, LedgerApiUser] {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: GetUserRequest,
+      ): Future[GetUserResponse] =
+        service.getUser(request)
+
+      override def createRequest(): Either[String, GetUserRequest] = Right(
+        GetUserRequest(
+          userId = id
+        )
+      )
+
+      override def handleResponse(response: GetUserResponse): Either[String, LedgerApiUser] =
         ProtoConverter
           .parseRequired(LedgerApiUser.fromProtoV0, "user", response.user)
           .leftMap(_.toString)
@@ -983,7 +1016,7 @@ object LedgerApiCommands {
     ) extends BaseCommand[
           GetMeteringReportRequest,
           GetMeteringReportResponse,
-          LedgerMeteringReport,
+          String,
         ] {
 
       override def submitRequest(
@@ -1003,7 +1036,7 @@ object LedgerApiCommands {
 
       override def handleResponse(
           response: GetMeteringReportResponse
-      ): Either[String, LedgerMeteringReport] =
+      ): Either[String, String] =
         LedgerMeteringReport.fromProtoV0(response).leftMap(_.toString)
     }
   }

@@ -28,7 +28,7 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
   SerializationCheckFailed,
 }
-import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal, NoCopy}
+import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal}
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
@@ -64,8 +64,7 @@ case class TransactionView private (
 )(hashOps: HashOps)
     extends MerkleTreeInnerNode[TransactionView](hashOps)
     with HasVersionedToByteString
-    with HasLoggerName
-    with NoCopy {
+    with HasLoggerName {
 
   if (viewCommonData.unwrap.isRight) {
     subviews
@@ -105,7 +104,7 @@ case class TransactionView private (
   override private[data] def withBlindedSubtrees(
       blindingCommandPerNode: PartialFunction[RootHash, MerkleTree.BlindingCommand]
   ): MerkleTree[TransactionView] =
-    TransactionView(hashOps)(
+    TransactionView.tryCreate(hashOps)(
       viewCommonData.doBlind(blindingCommandPerNode), // O(1)
       viewParticipantData.doBlind(blindingCommandPerNode), // O(1)
       subviews.map(_.doBlind(blindingCommandPerNode)), // O(#subviews)
@@ -406,18 +405,11 @@ case class TransactionView private (
 
 object TransactionView {
 
-  private def apply(
-      viewCommonData: MerkleTree[ViewCommonData],
-      viewParticipantData: MerkleTree[ViewParticipantData],
-      subviews: Seq[MerkleTree[TransactionView]],
-  )(hashOps: HashOps): TransactionView =
-    throw new UnsupportedOperationException("Use the create/tryCreate methods instead")
-
   /** Creates a view.
     *
     * @throws InvalidView if the `viewCommonData` is unblinded and equals the `viewCommonData` of a direct subview
     */
-  def apply(hashOps: HashOps)(
+  def tryCreate(hashOps: HashOps)(
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: Seq[MerkleTree[TransactionView]],
@@ -435,7 +427,7 @@ object TransactionView {
   ): Either[String, TransactionView] =
     Either
       .catchOnly[InvalidView](
-        TransactionView(hashOps)(viewCommonData, viewParticipantData, subviews)
+        TransactionView.tryCreate(hashOps)(viewCommonData, viewParticipantData, subviews)
       )
       .leftMap(_.message)
 
@@ -478,32 +470,19 @@ object TransactionView {
   private sealed trait AffectedKey extends Product with Serializable {
     def contractIdO: Option[LfContractId]
   }
-  private final case class AffectedByInput(keyMapping: KeyMapping) extends AffectedKey {
-    override def contractIdO: Option[LfContractId] = keyMapping
-  }
-  private final case class AffectedByCreation(contractId: LfContractId) extends AffectedKey {
-    override def contractIdO: Option[LfContractId] = Some(contractId)
-  }
-  private final case class AffectedByConsumption(contractId: LfContractId) extends AffectedKey {
-    override def contractIdO: Option[LfContractId] = Some(contractId)
-  }
 }
 
 /** Tags transaction views where all the view metadata are visible (such as in the views sent to participants).
   *
   * Note that the subviews and their metadata are not guaranteed to be visible.
   */
-case class ParticipantTransactionView private (view: TransactionView) extends NoCopy {
+case class ParticipantTransactionView private (view: TransactionView) {
   def unwrap: TransactionView = view
   def viewCommonData: ViewCommonData = view.viewCommonData.tryUnwrap
   def viewParticipantData: ViewParticipantData = view.viewParticipantData.tryUnwrap
 }
 
 object ParticipantTransactionView {
-  private def apply(view: TransactionView) = throw new UnsupportedOperationException(
-    "Use the create method instead"
-  )
-
   def create(view: TransactionView): Either[String, ParticipantTransactionView] = {
     val validated = view.viewCommonData.unwrap
       .leftMap(rh => s"Common data blinded (hash $rh)")
@@ -545,8 +524,7 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
     with ProtocolVersionedMemoizedEvidence
     // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format and need to encode
     // the version of the serialized Protobuf message
-    with HasProtocolVersionedWrapper[ViewCommonData]
-    with NoCopy {
+    with HasProtocolVersionedWrapper[ViewCommonData] {
 
   // The toProto... methods are deliberately protected, as they could otherwise be abused to bypass memoization.
   //
@@ -598,15 +576,6 @@ object ViewCommonData
       _.toProtoV0.toByteString,
     )
   )
-
-  // Make the auto-generated apply method inaccessible to prevent clients from creating instances with an incorrect
-  // `deserializedFrom` field.
-  private[this] def apply(informees: Set[Informee], threshold: NonNegativeInt, salt: Salt)(
-      hashOps: HashOps,
-      representativeProtocolVersion: ProtocolVersion,
-      deserializedFrom: Option[ByteString],
-  ): ViewCommonData =
-    throw new UnsupportedOperationException("Use the create/tryCreate methods instead")
 
   /** Creates a fresh [[ViewCommonData]].
     *
@@ -702,7 +671,7 @@ object ViewCommonData
   * and the key is not in [[resolvedKeys]].
   * @throws com.digitalasset.canton.serialization.SerializationCheckFailed if this instance cannot be serialized
   */
-sealed abstract case class ViewParticipantData(
+final case class ViewParticipantData private (
     coreInputs: Map[LfContractId, InputContract],
     createdCore: Seq[CreatedContract],
     createdInSubviewArchivedInCore: Set[LfContractId],
@@ -716,8 +685,7 @@ sealed abstract case class ViewParticipantData(
     override val deserializedFrom: Option[ByteString],
 ) extends MerkleTreeLeaf[ViewParticipantData](hashOps)
     with HasProtocolVersionedWrapper[ViewParticipantData]
-    with ProtocolVersionedMemoizedEvidence
-    with NoCopy {
+    with ProtocolVersionedMemoizedEvidence {
   {
     def requireDistinct[A](vals: Seq[A])(message: A => String): Unit = {
       val set = scala.collection.mutable.Set[A]()
@@ -989,7 +957,7 @@ object ViewParticipantData
       salt: Salt,
       protocolVersion: ProtocolVersion,
   ): ViewParticipantData =
-    new ViewParticipantData(
+    ViewParticipantData(
       coreInputs,
       createdCore,
       createdInSubviewArchivedInCore,
@@ -997,7 +965,7 @@ object ViewParticipantData
       actionDescription,
       rollbackContext,
       salt,
-    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None) {}
+    )(hashOps, protocolVersionRepresentativeFor(protocolVersion), None)
 
   /** Creates a view participant data.
     *
@@ -1116,7 +1084,7 @@ object ViewParticipantData
       .leftMap(_.inField("rollbackContext"))
 
     viewParticipantData <- returnLeftWhenInitializationFails(
-      new ViewParticipantData(
+      ViewParticipantData(
         coreInputs = coreInputs,
         createdCore = createdCore,
         createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSet,
@@ -1124,7 +1092,7 @@ object ViewParticipantData
         actionDescription = actionDescription,
         rollbackContext = rollbackContext,
         salt = salt,
-      )(hashOps, protocolVersionRepresentativeFor(protobufVersion), Some(bytes)) {}
+      )(hashOps, protocolVersionRepresentativeFor(protobufVersion), Some(bytes))
     ).leftMap(ProtoDeserializationError.OtherError)
   } yield viewParticipantData
 

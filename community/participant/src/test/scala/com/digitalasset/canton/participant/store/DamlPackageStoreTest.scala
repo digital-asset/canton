@@ -42,6 +42,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
     val hash = TestHash.digest("hash")
 
     val testDescription = String256M.tryCreate("test")
+    val testDescription2 = String256M.tryCreate("other test description")
 
     "save, retrieve, and remove a dar" in {
       val store = mk()
@@ -225,6 +226,30 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         packageId,
         String256M.tryCreate("default"),
       )
+    }
+
+    "update a package description when (and only when) it is provided" in {
+      val store = mk()
+      for {
+        _ <- store.append(List(damlPackage), testDescription, None)
+        pkg1 <- store.getPackageDescription(packageId)
+
+        // Appending the same package with a new description should update it
+        _ <- store.append(List(damlPackage), testDescription2, None)
+        pkg2 <- store.getPackageDescription(packageId)
+
+        // Appending the same package without providing a description should leave it unchanged
+        _ <- store.append(List(damlPackage), String256M.empty, None)
+        pkg3 <- store.getPackageDescription(packageId)
+
+        // There are no duplicates
+        pkgList <- store.listPackages()
+      } yield {
+        pkg1 shouldBe Some(PackageDescription(packageId, testDescription))
+        pkg2 shouldBe Some(PackageDescription(packageId, testDescription2))
+        pkg3 shouldBe Some(PackageDescription(packageId, testDescription2))
+        pkgList.loneElement shouldBe PackageDescription(packageId, testDescription2)
+      }
     }
 
     "list several packages with a limit" in {

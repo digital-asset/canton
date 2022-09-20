@@ -92,6 +92,7 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Ywarn-unused:locals",
             "-Vimplicits",
             "-Vtype-diffs",
+            "-Xsource:3",
           )
       },
       Test / scalacOptions --= Seq("-Ywarn-value-discard"), // disable value discard check on tests

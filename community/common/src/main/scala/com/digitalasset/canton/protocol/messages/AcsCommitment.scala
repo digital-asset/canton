@@ -29,11 +29,10 @@ import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
 
 import scala.math.Ordering.Implicits._
 
-sealed abstract case class CommitmentPeriod(
+final case class CommitmentPeriod(
     fromExclusive: CantonTimestampSecond,
     periodLength: PositiveSeconds,
-) extends PrettyPrinting
-    with NoCopy {
+) extends PrettyPrinting {
   val toInclusive: CantonTimestampSecond = fromExclusive + periodLength
 
   def overlaps(other: CommitmentPeriod): Boolean = {
@@ -70,10 +69,10 @@ object CommitmentPeriod {
       (),
       s"The commitment period must end at a commitment tick, but it ends on $toInclusive, and the tick interval is $interval",
     )
-  } yield new CommitmentPeriod(
+  } yield CommitmentPeriod(
     fromExclusive = from,
     periodLength = periodLength,
-  ) {}
+  )
 
   def create(
       fromExclusive: CantonTimestamp,
@@ -89,12 +88,6 @@ object CommitmentPeriod {
       toInclusive: CantonTimestampSecond,
   ): Either[String, CommitmentPeriod] =
     PositiveSeconds.between(fromExclusive, toInclusive).map(CommitmentPeriod(fromExclusive, _))
-
-  def apply(fromExclusive: CantonTimestampSecond, periodLength: PositiveSeconds): CommitmentPeriod =
-    new CommitmentPeriod(
-      fromExclusive = fromExclusive,
-      periodLength = periodLength,
-    ) {}
 
   implicit val getCommitmentPeriod: GetResult[CommitmentPeriod] =
     new GetTupleResult[(CantonTimestampSecond, CantonTimestampSecond)](

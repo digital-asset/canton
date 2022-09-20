@@ -8,7 +8,6 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.NoCopy
 
 import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 
@@ -25,8 +24,7 @@ import RollbackContext.{RollbackScope, RollbackSibling, firstChild}
 case class RollbackContext private (
     private val rbScope: Vector[RollbackSibling],
     private val nextChild: RollbackSibling = firstChild,
-) extends NoCopy
-    with PrettyPrinting {
+) extends PrettyPrinting {
 
   def enterRollback: RollbackContext = new RollbackContext(rbScope :+ nextChild)
 
@@ -80,9 +78,6 @@ object RollbackContext {
       (rbPops, rbPushes)
     }
   }
-
-  private def apply(rbScope: RollbackScope, nextChild: RollbackSibling) =
-    throw new UnsupportedOperationException("Use one of the other builders")
 
   def empty: RollbackContext = new RollbackContext(Vector.empty)
 

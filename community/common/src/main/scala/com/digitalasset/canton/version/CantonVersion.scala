@@ -96,18 +96,18 @@ sealed trait CompanionTrait {
     rawVersion match {
       case regex(rawMajor, rawMinor, rawPatch, suffix) =>
         val parsedDigits = List(rawMajor, rawMinor, rawPatch).traverse(raw =>
-          raw.toIntOption.toRight(s"Couldn't parse number $raw")
+          raw.toIntOption.toRight(s"Couldn't parse number `$raw`")
         )
         parsedDigits.flatMap {
           case List(major, minor, patch) =>
             // `suffix` is `null` if no suffix is given
             Right((major, minor, patch, Option(suffix)))
-          case _ => Left(s"Unexpected error while parsing version $rawVersion")
+          case _ => Left(s"Unexpected error while parsing version `$rawVersion`")
         }
 
       case _ =>
         Left(
-          s"Unable to convert string $rawVersion to a valid ${baseName}. A ${baseName} is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid ${baseName}s."
+          s"Unable to convert string `$rawVersion` to a valid ${baseName}. A ${baseName} is similar to a semantic version. For example, '1.2.3' or '1.2.3-SNAPSHOT' are valid ${baseName}s."
         )
     }
   }

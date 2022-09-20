@@ -11,7 +11,6 @@ import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints.InvalidStartingPointsException
 import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
 import com.digitalasset.canton.store.CursorPrehead
-import com.digitalasset.canton.util.NoCopy
 
 /** Summarizes the counters and timestamps where request processing or replay can start
   *
@@ -70,8 +69,7 @@ case class ProcessingStartingPoints private (
     processing: MessageProcessingStartingPoint,
     eventPublishingNextLocalOffset: LocalOffset,
     rewoundSequencerCounterPrehead: Option[CursorPrehead[SequencerCounter]],
-) extends NoCopy
-    with PrettyPrinting {
+) extends PrettyPrinting {
 
   if (cleanReplay.prenextTimestamp > processing.prenextTimestamp)
     throw InvalidStartingPointsException(
@@ -107,14 +105,6 @@ case class ProcessingStartingPoints private (
 
 object ProcessingStartingPoints {
   case class InvalidStartingPointsException(message: String) extends RuntimeException(message)
-
-  private[this] def apply(
-      cleanReplay: MessageProcessingStartingPoint,
-      processing: MessageProcessingStartingPoint,
-      eventPublishingNextLocalOffset: LocalOffset,
-      rewoundSequencerCounterPrehead: Option[CursorPrehead[SequencerCounter]],
-  ): ProcessingStartingPoints =
-    throw new UnsupportedOperationException("Use the factory methods instead")
 
   def tryCreate(
       cleanReplay: MessageProcessingStartingPoint,

@@ -73,7 +73,7 @@ abstract class IndexedStringFromDb[A <: IndexedString[B], B] {
   }
 }
 
-sealed abstract case class IndexedDomain private (domainId: DomainId, index: Int)
+final case class IndexedDomain private (domainId: DomainId, index: Int)
     extends IndexedString.Impl[DomainId](domainId) {
   require(
     index > 0,
@@ -87,7 +87,7 @@ object IndexedDomain extends IndexedStringFromDb[IndexedDomain, DomainId] {
     */
   @VisibleForTesting
   def tryCreate(domainId: DomainId, index: Int): IndexedDomain =
-    new IndexedDomain(domainId, index) {}
+    IndexedDomain(domainId, index)
 
   override protected def dbTyp: IndexedStringType = IndexedStringType.domainId
 

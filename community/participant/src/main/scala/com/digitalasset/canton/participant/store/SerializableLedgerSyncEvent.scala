@@ -43,10 +43,12 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
 }
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.version.{
-  HasVersionedMessageWithContextCompanion,
-  HasVersionedWrapper,
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
-  VersionedMessage,
+  ProtocolVersionedCompanionDbHelpers,
+  RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{
   LedgerApplicationId,
@@ -68,14 +70,15 @@ import slick.jdbc.{GetResult, SetParameter}
   * @throws canton.store.db.DbSerializationException if transactions or contracts fail to serialize
   * @throws canton.store.db.DbDeserializationException if transactions or contracts fail to deserialize
   */
-final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
-    extends HasVersionedWrapper[VersionedMessage[LedgerSyncEvent]] {
-  private val SyncEventP = v0.LedgerSyncEvent.Value
+final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[SerializableLedgerSyncEvent]
+) extends HasProtocolVersionedWrapper[SerializableLedgerSyncEvent] {
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[LedgerSyncEvent] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = SerializableLedgerSyncEvent
 
-  def toProtoV0: v0.LedgerSyncEvent =
+  def toProtoV0: v0.LedgerSyncEvent = {
+    val SyncEventP = v0.LedgerSyncEvent.Value
+
     v0.LedgerSyncEvent(
       ledgerSyncEvent match {
         case configurationChanged: LedgerSyncEvent.ConfigurationChanged =>
@@ -110,28 +113,33 @@ final case class SerializableLedgerSyncEvent(ledgerSyncEvent: LedgerSyncEvent)
           SyncEventP.CommandRejected(SerializableCommandRejected(commandRejected).toProtoV0)
       }
     )
+  }
 }
 
-object SerializableLedgerSyncEvent {
-  private[this] object VersionedProtoConverter
-      extends HasVersionedMessageWithContextCompanion[LedgerSyncEvent, Unit] {
-    override val name: String = "SerializableLedgerSyncEvent"
+object SerializableLedgerSyncEvent
+    extends HasProtocolVersionedCompanion[SerializableLedgerSyncEvent]
+    with ProtocolVersionedCompanionDbHelpers[SerializableLedgerSyncEvent] {
+  override val name: String = "SerializableLedgerSyncEvent"
 
-    val supportedProtoVersions: Map[Int, Parser] = Map(
-      0 -> supportedProtoVersion(v0.LedgerSyncEvent) { case (_, proto) => fromProtoV0(proto) }
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.LedgerSyncEvent)(fromProtoV0),
+      _.toProtoV0.toByteString,
     )
-  }
+  )
 
-  def fromProtoVersioned(
-      ledgerSyncEventP: VersionedMessage[LedgerSyncEvent]
-  ): ParsingResult[LedgerSyncEvent] =
-    VersionedProtoConverter.fromProtoVersioned(())(ledgerSyncEventP)
+  def apply(
+      ledgerSyncEvent: LedgerSyncEvent,
+      protocolVersion: ProtocolVersion,
+  ): SerializableLedgerSyncEvent =
+    SerializableLedgerSyncEvent(ledgerSyncEvent)(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV0(
       ledgerSyncEventP: v0.LedgerSyncEvent
-  ): ParsingResult[LedgerSyncEvent] = {
+  ): ParsingResult[SerializableLedgerSyncEvent] = {
     val SyncEventP = v0.LedgerSyncEvent.Value
-    ledgerSyncEventP.value match {
+    val ledgerSyncEvent = ledgerSyncEventP.value match {
       case SyncEventP.Empty =>
         Left(ProtoDeserializationError.FieldNotSet("LedgerSyncEvent.value"))
       case SyncEventP.ConfigurationChanged(configurationChanged) =>
@@ -151,6 +159,12 @@ object SerializableLedgerSyncEvent {
       case SyncEventP.CommandRejected(commandRejected) =>
         SerializableCommandRejected.fromProtoV0(commandRejected)
     }
+
+    ledgerSyncEvent.map(
+      SerializableLedgerSyncEvent(_)(
+        protocolVersionRepresentativeFor(ProtobufVersion(0))
+      )
+    )
   }
 }
 

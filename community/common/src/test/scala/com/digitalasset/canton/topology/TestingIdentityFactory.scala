@@ -337,7 +337,8 @@ class TestingIdentityFactory(
     TopologyStateUpdate(
       TopologyChangeOp.Add,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )(defaultProtocolVersion),
+      defaultProtocolVersion,
+    ),
     mock[SigningPublicKey],
     mock[Signature],
   )(signedTxProtocolRepresentative, None)

@@ -116,8 +116,7 @@ object EncryptedView {
     * instances.
     */
   case class CompressedView[+V <: HasVersionedToByteString] private (value: V)
-      extends HasVersionedToByteString
-      with NoCopy {
+      extends HasVersionedToByteString {
     override def toByteString(version: ProtocolVersion): ByteString =
       ByteStringUtil.compressGzip(value.toByteString(version))
   }
@@ -183,7 +182,7 @@ sealed trait EncryptedViewMessage[+VT <: ViewType]
   def toByteString: ByteString
 }
 
-case class EncryptedViewMessageV0[+VT <: ViewType] private (
+final case class EncryptedViewMessageV0[+VT <: ViewType](
     submitterParticipantSignature: Option[Signature],
     viewHash: ViewHash,
     randomnessMap: Map[ParticipantId, Encrypted[SecureRandomness]],
@@ -219,7 +218,7 @@ case class EncryptedViewMessageV0[+VT <: ViewType] private (
   override def toByteString: ByteString = toProtoV0.toByteString
 }
 
-case class EncryptedViewMessageV1[+VT <: ViewType] private (
+final case class EncryptedViewMessageV1[+VT <: ViewType](
     submitterParticipantSignature: Option[Signature],
     viewHash: ViewHash,
     randomness: Seq[AsymmetricEncrypted[SecureRandomness]],
@@ -435,8 +434,7 @@ object EncryptedViewMessage extends HasProtocolVersionedCompanion[EncryptedViewM
       _.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      // TODO(i9423): Migrate to next protocol version
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.EncryptedViewMessage)(EncryptedViewMessageV1.fromProto),
       _.toByteString,
     ),

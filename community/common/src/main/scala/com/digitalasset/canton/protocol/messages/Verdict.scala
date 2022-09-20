@@ -47,9 +47,8 @@ object Verdict
       supportedProtoVersion(v0.Verdict)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i10131): replace by stable version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.Verdict)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),

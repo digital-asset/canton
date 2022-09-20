@@ -33,6 +33,7 @@ trait DbInFlightSubmissionStoreTest
         storage,
         PositiveNumeric.tryCreate(2),
         BatchAggregatorConfig.defaultsForTesting,
+        testedReleaseProtocolVersion,
         timeouts,
         loggerFactory,
       )

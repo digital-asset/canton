@@ -20,7 +20,7 @@ import com.digitalasset.canton.version.{
 /** @param representativeProtocolVersion The representativeProtocolVersion must correspond to the protocol version of
   *                                      every transaction in the list (enforced by the factory method)
   */
-sealed abstract case class RegisterTopologyTransactionRequest(
+final case class RegisterTopologyTransactionRequest private (
     requestedBy: Member,
     participant: ParticipantId,
     requestId: TopologyRequestId,
@@ -75,13 +75,13 @@ object RegisterTopologyTransactionRequest
   ): Iterable[RegisterTopologyTransactionRequest] =
     transactions.groupBy(_.representativeProtocolVersion).map {
       case (_transactionRepresentativeProtocolVersion, transactions) =>
-        new RegisterTopologyTransactionRequest(
+        RegisterTopologyTransactionRequest(
           requestedBy = requestedBy,
           participant = participant,
           requestId = requestId,
           transactions = transactions,
           domainId = domainId,
-        )(protocolVersionRepresentativeFor(protocolVersion)) {}
+        )(protocolVersionRepresentativeFor(protocolVersion))
     }
 
   def fromProtoV0(
@@ -95,13 +95,13 @@ object RegisterTopologyTransactionRequest
       )
       domainUid <- UniqueIdentifier.fromProtoPrimitive(message.domainId, "domainId")
       requestId <- String255.fromProtoPrimitive(message.requestId, "requestId")
-    } yield new RegisterTopologyTransactionRequest(
+    } yield RegisterTopologyTransactionRequest(
       requestedBy,
       ParticipantId(participantUid),
       requestId,
       transactions,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
   }
 
   override protected def name: String = "RegisterTopologyTransactionRequest"

@@ -83,13 +83,6 @@ object ContractMetadata extends HasVersionedMessageCompanion[ContractMetadata] {
 
   case class InvalidContractMetadata(message: String) extends RuntimeException(message)
 
-  private def apply(
-      signatories: Set[LfPartyId],
-      stakeholders: Set[LfPartyId],
-      maybeKeyWithMaintainers: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
-  ): ContractMetadata =
-    throw new UnsupportedOperationException("Use the other factory methods instead")
-
   def tryCreate(
       signatories: Set[LfPartyId],
       stakeholders: Set[LfPartyId],

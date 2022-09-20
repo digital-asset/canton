@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.digitalasset.canton.DefaultDamlValues
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
 
 object TestSubmissionTrackingData {
 
@@ -11,5 +11,6 @@ object TestSubmissionTrackingData {
     TransactionSubmissionTrackingData(
       DefaultDamlValues.completionInfo(List.empty),
       TransactionSubmissionTrackingData.TimeoutCause,
+      BaseTest.testedProtocolVersion,
     )
 }

@@ -145,12 +145,6 @@
             <testing>true</testing>
         </rewrite>
         <rewrite class="com.digitalasset.canton.logging.Rewrite">
-            <logger>com.daml.ledger.api.auth.AuthServiceJWT$</logger>
-            <contains>The Token's Signature resulted invalid when verified using the Algorithm</contains>
-            <maxLevel>INFO</maxLevel>
-            <testing>true</testing>
-        </rewrite>
-        <rewrite class="com.digitalasset.canton.logging.Rewrite">
             <logger>com.daml.platform.store.FlywayMigrations</logger>
             <contains>Asked to migrate-on-empty-schema</contains>
             <maxLevel>INFO</maxLevel>

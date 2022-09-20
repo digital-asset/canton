@@ -33,6 +33,7 @@ trait DbCommandDeduplicationStoreTest
       new DbCommandDeduplicationStore(
         storage,
         timeouts,
+        testedReleaseProtocolVersion,
         loggerFactory,
       )
     )

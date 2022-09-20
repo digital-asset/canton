@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.store.memory.InMemoryDomainConnection
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -123,8 +124,12 @@ object DomainConnectionConfigStore {
     override def toString: String = s"$alias is unknown. Has the domain been registered?"
   }
 
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit
+  def apply(
+      storage: Storage,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      timeouts: ProcessingTimeout,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[DomainConnectionConfigStore] =
@@ -132,6 +137,11 @@ object DomainConnectionConfigStore {
       case _: MemoryStorage =>
         Future.successful(new InMemoryDomainConnectionConfigStore(loggerFactory))
       case dbStorage: DbStorage =>
-        new DbDomainConnectionConfigStore(dbStorage, timeouts, loggerFactory).initialize()
+        new DbDomainConnectionConfigStore(
+          dbStorage,
+          releaseProtocolVersion,
+          timeouts,
+          loggerFactory,
+        ).initialize()
     }
 }

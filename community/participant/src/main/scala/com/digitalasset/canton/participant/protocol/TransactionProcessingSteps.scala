@@ -49,6 +49,7 @@ import com.digitalasset.canton.participant.protocol.validation.ContractConsisten
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.protocol.validation._
 import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync._
 import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
@@ -106,6 +107,7 @@ class TransactionProcessingSteps(
       TransactionSubmissionError,
     ]
     with NamedLogging {
+  private def protocolVersion = staticDomainParameters.protocolVersion
 
   override type SubmissionSendError = TransactionProcessor.SubmissionErrors.SequencerRequest.Error
   override type PendingRequestData = PendingTransaction
@@ -121,8 +123,6 @@ class TransactionProcessingSteps(
 
   override type RequestError = TransactionProcessorError
   override type ResultError = TransactionProcessorError
-
-  private val alarmer = new LoggingAlarmStreamer(logger)
 
   override def pendingSubmissions(state: SyncDomainEphemeralState): Unit = ()
 
@@ -235,6 +235,7 @@ class TransactionProcessingSteps(
       val tracking = TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo().copy(optDeduplicationPeriod = dedupInfo.some),
         TransactionSubmissionTrackingData.CauseWithTemplate(error),
+        protocolVersion,
       )
       UnsequencedSubmission(timestampForUpdate(), tracking)
     }
@@ -331,7 +332,7 @@ class TransactionProcessingSteps(
               recentSnapshot,
               TransactionTreeFactory.contractInstanceLookup(contractLookup),
               None,
-              staticDomainParameters.protocolVersion,
+              protocolVersion,
             )
             .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>
@@ -359,6 +360,7 @@ class TransactionProcessingSteps(
         val trackingData = TransactionSubmissionTrackingData(
           submitterInfoWithDedupPeriod.toCompletionInfo(),
           rejectionCause,
+          protocolVersion,
         )
         Success(Left(UnsequencedSubmission(timestampForUpdate(), trackingData)))
       }
@@ -387,6 +389,7 @@ class TransactionProcessingSteps(
       TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo().copy(optDeduplicationPeriod = None),
         TransactionSubmissionTrackingData.TimeoutCause,
+        protocolVersion,
       )
 
     override def embedInFlightSubmissionTrackerError(
@@ -400,7 +403,7 @@ class TransactionProcessingSteps(
         )
       case UnknownDomain(domainId) =>
         TransactionRoutingError.ConfigurationErrors.SubmissionDomainNotReady.Error(domainId)
-      case TimeoutTooLow(submission, lowerBound) =>
+      case TimeoutTooLow(_submission, lowerBound) =>
         TransactionProcessor.SubmissionErrors.TimeoutError.Error(lowerBound)
     }
 
@@ -443,7 +446,8 @@ class TransactionProcessingSteps(
           TransactionProcessor.SubmissionErrors.SequencerRequest.Error(otherSendError)
       }
       val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(errorCode)
-      val trackingData = TransactionSubmissionTrackingData(completionInfo, rejectionCause)
+      val trackingData =
+        TransactionSubmissionTrackingData(completionInfo, rejectionCause, protocolVersion)
       UnsequencedSubmission(timestamp, trackingData)
     }
   }
@@ -491,7 +495,7 @@ class TransactionProcessingSteps(
           snapshot,
           vt,
           participantId,
-          staticDomainParameters.protocolVersion,
+          protocolVersion,
           optRandomness,
         )(
           lightTransactionViewTreeDeserializer
@@ -545,7 +549,7 @@ class TransactionProcessingSteps(
         for {
           subviewRandomness <-
             ProtocolCryptoApi
-              .hkdf(pureCrypto, staticDomainParameters.protocolVersion)(
+              .hkdf(pureCrypto, protocolVersion)(
                 randomness,
                 randomness.unwrap.size,
                 info,
@@ -558,10 +562,12 @@ class TransactionProcessingSteps(
             case Some(promise) =>
               promise.tryComplete(Success(subviewRandomness))
             case None =>
-              // TODO(M40): raise an alarm and don't confirm the request
-              logger.error(
-                s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
-              )
+              // TODO(M40): make sure to not approve the request
+              SyncServiceAlarm
+                .Warn(
+                  s"View ${viewMessage.viewHash} lists a subview with hash $subviewHash, but I haven't received any views for this hash"
+                )
+                .report()
           }
           ()
         }
@@ -898,7 +904,7 @@ class TransactionProcessingSteps(
             RejectionArgs(
               pendingTransaction,
               LocalReject.TimeRejects.LocalTimeout.Reject()(
-                staticDomainParameters.protocolVersion
+                protocolVersion
               ),
             ),
           )
@@ -1073,10 +1079,7 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TransactionProcessorError, CommitAndStoreContractsAndPublishEvent] = {
     val commitSetF = Future {
-      pendingRequestData.transactionValidationResult.commitSet(
-        pendingRequestData.requestId,
-        alarmer.alarm,
-      )
+      pendingRequestData.transactionValidationResult.commitSet(pendingRequestData.requestId)
     }
     val contractsToBeStored =
       pendingRequestData.transactionValidationResult.createdContracts.keySet
@@ -1139,7 +1142,7 @@ class TransactionProcessingSteps(
           pendingRequestData.requestTime,
           domainId,
           pendingRequestData.requestCounter,
-          staticDomainParameters.protocolVersion,
+          protocolVersion,
         )
       ),
     )
@@ -1184,7 +1187,7 @@ class TransactionProcessingSteps(
         case (_, Left(modelConformanceError)) =>
           rejected(
             LocalReject.MalformedRejects.ModelConformance.Reject(modelConformanceError.toString)(
-              staticDomainParameters.protocolVersion
+              protocolVersion
             )
           )
 
@@ -1226,7 +1229,7 @@ class TransactionProcessingSteps(
       val (usedAndCreatedContracts, hostedInformeeStakeholders) =
         extractUsedAndCreatedContracts(rootViewTrees, partyPrefetch)
       val inputAndReassignedKeys =
-        if (staticDomainParameters.protocolVersion >= ProtocolVersion.v3)
+        if (protocolVersion >= ProtocolVersion.v3)
           extractInputAndUpdatedKeysV3(rootViewTrees, partyPrefetch)
         else
           extractInputAndUpdatedKeysV2(rootViewTrees, partyPrefetch)

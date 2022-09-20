@@ -16,7 +16,7 @@ import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerAuthentica
   SequencerAuthenticationFaultyOrMalicious,
 }
 import com.digitalasset.canton.domain.service.HandshakeValidator
-import com.digitalasset.canton.error.CantonError
+import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.AuthenticationError
@@ -226,10 +226,7 @@ object GrpcSequencerAuthenticationService extends GrpcSequencerAuthenticationErr
       |operator to provide explanations to clients struggling to connect."""
   )
   object SequencerAuthenticationFaultyOrMalicious
-      extends ErrorCode(
-        id = "CLIENT_AUTHENTICATION_FAULTY",
-        ErrorCategory.MaliciousOrFaultyBehaviour,
-      ) {
+      extends AlarmErrorCode(id = "CLIENT_AUTHENTICATION_FAULTY") {
 
     override protected def exposedViaApi: Boolean = false
 
@@ -237,21 +234,19 @@ object GrpcSequencerAuthenticationService extends GrpcSequencerAuthenticationErr
         member: String,
         supportedProtocol: Seq[String],
         response: Status,
-    )(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
+    )(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm(
           cause =
             s"Faulty or malicious challenge for $member rejected with ${response.getCode}/${response.getDescription}"
         )
         with CantonError
 
     case class AuthenticationFailure(member: String, response: Status)(implicit
-        val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(
+        override val loggingContext: ErrorLoggingContext
+    ) extends Alarm(
           cause =
             s"Faulty or malicious authentication for $member rejected with ${response.getCode}/${response.getDescription}"
         )
         with CantonError
-
   }
-
 }

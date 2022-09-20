@@ -8,13 +8,11 @@ import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
-import com.digitalasset.canton.util.{HexString, NoCopy}
+import com.digitalasset.canton.util.HexString
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
-final case class Nonce private (private val bytes: ByteString)
-    extends NoCopy
-    with HasCryptographicEvidence {
+final case class Nonce private (private val bytes: ByteString) extends HasCryptographicEvidence {
   def toProtoPrimitive: ByteString = bytes
   def toLengthLimitedHexString: String300 =
     String300.tryCreate(HexString.toHexString(this.toProtoPrimitive))
@@ -29,9 +27,6 @@ object Nonce {
     * See the documentation at [[com.digitalasset.canton.config.RequireTypes.LengthLimitedString]] for more details.
     */
   val length: Int = 20
-
-  private[this] def apply(bytes: ByteString): Nonce =
-    throw new UnsupportedOperationException("Use the generate method instead")
 
   implicit val setNonceParameter: SetParameter[Nonce] =
     (nonce, pp) => pp >> nonce.toLengthLimitedHexString

@@ -39,7 +39,7 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ProtocolVersionCompatibility
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.AtomicReference
@@ -224,7 +224,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           metrics(config.domain).sequencerClient,
           participantNodeParameters.loggingConfig,
           domainLoggerFactory,
-          ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions =
+          ProtocolVersionCompatibility.supportedProtocolsParticipant(includeUnstableVersions =
             protocolConfig.devVersionSupport
           ),
           protocolConfig.minimumProtocolVersion,
@@ -312,7 +312,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
         .handshake(
           alias,
           HandshakeRequest(
-            ProtocolVersion.supportedProtocolsParticipant(includeDevelopmentVersions =
+            ProtocolVersionCompatibility.supportedProtocolsParticipant(includeUnstableVersions =
               protocolConfig.devVersionSupport
             ),
             protocolConfig.minimumProtocolVersion,

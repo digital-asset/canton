@@ -254,7 +254,6 @@ abstract class CantonNodeBootstrapBase[
             new GrpcTopologyManagerReadService(
               topologyStoreFactory.allNonDiscriminated,
               ips,
-              parameterConfig.initialProtocolVersion,
               crypto,
               loggerFactory,
             ),

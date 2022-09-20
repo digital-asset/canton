@@ -7,7 +7,7 @@ import com.daml.error._
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.error.TestGroup.NestedGroup.MyCode.MyError
 import com.digitalasset.canton.error.TestGroup.NestedGroup.{MyCode, TestAlarmErrorCode}
-import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.logging.{ErrorLoggingContext, LogEntry}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status.Code
 import org.slf4j.event.Level
@@ -73,7 +73,7 @@ class CantonErrorTest extends BaseTestWordSpec {
     "log with level WARN including the error category and details" in {
       implicit val traceContext: TraceContext = nonEmptyTraceContext1
       val traceId = traceContext.traceId.value
-      val errorCodeStr = s"TEST_MALICIOUS_BEHAVIOR(5,${traceId.take(8)})"
+      val errorCodeStr = s"TEST_MALICIOUS_BEHAVIOR(15,${traceId.take(8)})"
 
       loggerFactory.assertLogs(
         TestAlarmErrorCode.MyAlarm().report(),
@@ -99,15 +99,12 @@ class CantonErrorTest extends BaseTestWordSpec {
       val myAlarm = TestAlarmErrorCode.MyAlarm()
 
       val sre = myAlarm.asGrpcError
-      sre.getMessage shouldBe "UNKNOWN: An error occurred. Please contact the operator and inquire about the request <no-correlation-id>"
+      sre.getMessage shouldBe s"INVALID_ARGUMENT: ${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id>"
 
       val status = sre.getStatus
-      status.getDescription shouldBe "An error occurred. Please contact the operator and inquire about the request <no-correlation-id>"
-      status.getCode shouldBe Code.UNKNOWN
+      status.getDescription shouldBe s"${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id>"
+      status.getCode shouldBe Code.INVALID_ARGUMENT
       Option(status.getCause) shouldBe None
     }
   }
-
-  // TODO(i8744): replace MALICIOUS_OR_FAULTY codes by Alarm
-  // TODO(i8744): go over TODO M40 and add missing alarms
 }

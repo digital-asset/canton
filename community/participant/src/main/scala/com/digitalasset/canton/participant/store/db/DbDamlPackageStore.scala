@@ -10,7 +10,11 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DarName
-import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String256M}
+import com.digitalasset.canton.config.RequireTypes.{
+  LengthLimitedString,
+  PositiveNumeric,
+  String256M,
+}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
@@ -22,7 +26,7 @@ import com.digitalasset.canton.participant.store.db.DbDamlPackageStore.{DamlPack
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
-import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
+import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -54,61 +58,95 @@ class DbDamlPackageStore(
         mbData.map(DamlLf.Archive.parseFrom)
       }
 
-  private def insertOrUpdatePackage(
-      pkg: DamlPackage,
+  private def insertOrUpdatePackages(
+      pkgs: List[DamlPackage],
       darO: Option[DarDescriptor],
       sourceDescription: String256M,
-  ): DbAction.WriteTransactional[Unit] = {
+  )(implicit traceContext: TraceContext): DbAction.All[Unit] = {
+    val insertToDamlPackages = {
+      val sql = storage.profile match {
+        case _: DbStorage.Profile.H2 =>
+          """merge
+            |  into daml_packages
+            |  using (
+            |    select
+            |      cast(? as varchar(300)) as package_id,
+            |      cast(? as varchar) as source_description,
+            |    from dual
+            |  ) as excluded
+            |  on (daml_packages.package_id = excluded.package_id)
+            |  when not matched then
+            |    insert (package_id, data, source_description)
+            |    values (excluded.package_id, ?, excluded.source_description)
+            |  when matched and ? then
+            |    update set
+            |      source_description = excluded.source_description""".stripMargin
+        case _: DbStorage.Profile.Oracle =>
+          """merge /*+ INDEX ( daml_packages (package_id) ) */
+            |  into daml_packages
+            |  using (
+            |    select
+            |      ? as package_id,
+            |      ? as source_description
+            |    from dual
+            |  ) excluded
+            |  on (daml_packages.package_id = excluded.package_id)
+            |  when not matched then
+            |    insert (package_id, data, source_description)
+            |    values (excluded.package_id, ?, excluded.source_description)
+            |  when matched then
+            |    update set
+            |      source_description = excluded.source_description
+            |      where ? = 1""".stripMargin // Strangely (or not), it looks like Oracle does not have a Boolean type...
+        case _: DbStorage.Profile.Postgres =>
+          """insert
+              |  into daml_packages (package_id, source_description, data)
+              |  values (?, ?, ?)
+              |  on conflict (package_id) do
+              |    update set source_description = excluded.source_description
+              |    where ?""".stripMargin
+      }
 
-    val insertToPackageStore = (storage.profile match {
-      case _: DbStorage.Profile.H2 =>
-        if (sourceDescription.nonEmpty)
-          sqlu"merge into daml_packages (package_id, data, source_description) values (${pkg.packageId}, ${pkg.data}, ${sourceDescription})"
-        else
-          sqlu"merge into daml_packages (package_id, data) values (${pkg.packageId}, ${pkg.data})"
-      case _: DbStorage.Profile.Postgres =>
-        if (sourceDescription.nonEmpty)
-          sqlu"""insert into daml_packages (package_id, data, source_description) values (${pkg.packageId}, ${pkg.data}, ${sourceDescription})
-               on conflict (package_id) do update set data = ${pkg.data}, source_description = ${sourceDescription}"""
-        else
-          sqlu"""insert into daml_packages (package_id, data) values (${pkg.packageId}, ${pkg.data})
-               on conflict (package_id) do update set data = ${pkg.data}"""
-      case _: DbStorage.Profile.Oracle =>
-        if (sourceDescription.nonEmpty)
-          sqlu"""insert
-              /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( daml_packages ( package_id ) ) */
-              into daml_packages (package_id, data, source_description)
-              values (${pkg.packageId}, ${pkg.data}, ${sourceDescription})
-          """
-        else
-          sqlu"""insert
-          /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( daml_packages ( package_id ) ) */
-          into daml_packages (package_id, data)
-          values (${pkg.packageId}, ${pkg.data})
-          """
-    }).map((_int: Int) => ())
+      DbStorage.bulkOperation_(sql, pkgs, storage.profile) { pp => pkg =>
+        pp >> pkg.packageId
+        pp >> (if (sourceDescription.nonEmpty) sourceDescription
+               else String256M.tryCreate("default"))
+        pp >> pkg.data
+        pp >> sourceDescription.nonEmpty
+      }
+    }
 
     val insertToDarPackages = darO
       .map { dar =>
-        val hash = dar.hash.toLengthLimitedHexString
+        val sql = storage.profile match {
+          case _: DbStorage.Profile.Oracle =>
+            """merge /*+ INDEX ( dar_packages (dar_hash_hex package_id) ) */
+            |  into dar_packages
+            |  using (
+            |    select
+            |      ? as dar_hash_hex,
+            |      ? package_id
+            |    from dual
+            |  ) excluded
+            |  on (dar_packages.dar_hash_hex = excluded.dar_hash_hex and dar_packages.package_id = excluded.package_id)
+            |  when not matched then
+            |    insert (dar_hash_hex, package_id)
+            |    values (excluded.dar_hash_hex, excluded.package_id)""".stripMargin
+          case _ =>
+            """insert into dar_packages (dar_hash_hex, package_id)
+            |  values (?, ?)
+            |  on conflict do
+            |    nothing""".stripMargin
+        }
 
-        val sql = IdempotentInsert.insertIgnoringConflicts(
-          storage,
-          oracleIgnoreIndex = "dar_packages ( dar_hash_hex, package_id )",
-          insertBuilder =
-            sql"dar_packages(dar_hash_hex, package_id) values ($hash, ${pkg.packageId})",
-        )
-
-        sql.map((_int: Int) => ())
+        DbStorage.bulkOperation_(sql, pkgs, storage.profile) { pp => pkg =>
+          pp >> (dar.hash.toLengthLimitedHexString: LengthLimitedString)
+          pp >> pkg.packageId
+        }
       }
+      .getOrElse(DBIO.successful(()))
 
-    insertToDarPackages
-      .fold[DBIOAction[Unit, NoStream, Effect.Transactional with Effect.Write]](
-        ifEmpty = insertToPackageStore
-      )(darPkgsInsert =>
-        insertToPackageStore
-          .andThen(darPkgsInsert)
-      )
+    insertToDamlPackages.andThen(insertToDarPackages)
   }
 
   override def append(
@@ -119,11 +157,11 @@ class DbDamlPackageStore(
       traceContext: TraceContext
   ): Future[Unit] = processingTime.metric.event {
 
-    //TODO(i8432): Perform a batch insert for the packages
-    val insertPkgs = pkgs.map { archive =>
-      val pkg = DamlPackage(readPackageId(archive), archive.toByteArray)
-      insertOrUpdatePackage(pkg, dar.map(_.descriptor), sourceDescription)
-    }
+    val insertPkgs = insertOrUpdatePackages(
+      pkgs.map(pkg => DamlPackage(readPackageId(pkg), pkg.toByteArray)),
+      dar.map(_.descriptor),
+      sourceDescription,
+    )
 
     val writeDar: List[WriteOnly[Int]] = dar.map(dar => (appendToDarStore(dar))).toList
 
@@ -133,12 +171,12 @@ class DbDamlPackageStore(
     // This is not a performance-critical operation, and happens rarely, so the isolation level should not be a
     // performance concern.
     val writeDarAndPackages = DBIO
-      .seq(writeDar ++ insertPkgs: _*)
+      .seq(writeDar :+ insertPkgs: _*)
       .transactionally
       .withTransactionIsolation(Serializable)
 
     storage
-      .update_(
+      .queryAndUpdate(
         action = writeDarAndPackages,
         operationName = s"${this.getClass}: append Daml LF archive",
       )

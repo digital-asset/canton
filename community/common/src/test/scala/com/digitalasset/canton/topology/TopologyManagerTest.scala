@@ -326,7 +326,7 @@ trait TopologyManagerTest
             setup.namespaceKey,
             root = true,
           )
-          removeRootCert = TopologyStateUpdate(Remove, rootCert.element)(testedProtocolVersion)
+          removeRootCert = TopologyStateUpdate(Remove, rootCert.element, testedProtocolVersion)
           invalidRev = removeRootCert.reverse.reverse
           _ = assert(
             invalidRev.element.id != rootCert.element.id
@@ -347,9 +347,7 @@ trait TopologyManagerTest
               (cert2, _) <- addCertNamespace(genr, setup.alphaKey, setup.namespaceKey, root = true)
               _ <- addCertNamespace(genr, setup.betaKey, setup.alphaKey, root = false)
 
-              removeRootCert = TopologyStateUpdate(Remove, cert2.element)(
-                testedProtocolVersion
-              )
+              removeRootCert = TopologyStateUpdate(Remove, cert2.element, testedProtocolVersion)
               authFail <- mgr
                 .authorize(
                   removeRootCert,
@@ -387,9 +385,7 @@ trait TopologyManagerTest
           (cert2, _) <- addCertIdentifier(genr, setup.alphaKey, setup.namespaceKey)
           _ <- addOwnerToKeyMapping(genr, setup.alphaKey, setup.alphaKey)
 
-          removeRootCert = TopologyStateUpdate(Remove, cert2.element)(
-            testedProtocolVersion
-          )
+          removeRootCert = TopologyStateUpdate(Remove, cert2.element, testedProtocolVersion)
           authFail <- mgr
             .authorize(removeRootCert, Some(setup.namespaceKey.fingerprint), testedProtocolVersion)
             .value

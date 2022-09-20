@@ -20,7 +20,7 @@ import com.digitalasset.canton.protocol.StoredParties
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{ApplicationId, CommandId, LedgerSubmissionId}
 import slick.jdbc.GetResult
 
@@ -79,12 +79,18 @@ trait CommandDeduplicationStore extends AutoCloseable {
 
 object CommandDeduplicationStore {
 
-  def apply(storage: Storage, timeouts: ProcessingTimeout, loggerFactory: NamedLoggerFactory)(
-      implicit ec: ExecutionContext
+  def apply(
+      storage: Storage,
+      timeouts: ProcessingTimeout,
+      releaseProtocolVersion: ReleaseProtocolVersion,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext
   ): CommandDeduplicationStore =
     storage match {
       case _: MemoryStorage => new InMemoryCommandDeduplicationStore(loggerFactory)
-      case jdbc: DbStorage => new DbCommandDeduplicationStore(jdbc, timeouts, loggerFactory)
+      case jdbc: DbStorage =>
+        new DbCommandDeduplicationStore(jdbc, timeouts, releaseProtocolVersion, loggerFactory)
     }
 
   case class OffsetAndPublicationTime(offset: GlobalOffset, publicationTime: CantonTimestamp)
@@ -115,8 +121,7 @@ case class CommandDeduplicationData private (
     changeId: ChangeId,
     latestDefiniteAnswer: DefiniteAnswerEvent,
     latestAcceptance: Option[DefiniteAnswerEvent],
-) extends PrettyPrinting
-    with NoCopy {
+) extends PrettyPrinting {
   latestAcceptance.foreach { acceptance =>
     if (acceptance.offset > latestDefiniteAnswer.offset) {
       throw CommandDeduplicationData.InvalidCommandDeduplicationData(
@@ -136,13 +141,6 @@ object CommandDeduplicationData {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   case class InvalidCommandDeduplicationData(message: String, cause: Throwable = null)
       extends RuntimeException(message, cause)
-
-  private[this] def apply(
-      changeId: ChangeId,
-      latestDefiniteAnswer: DefiniteAnswerEvent,
-      latestAcceptance: Option[DefiniteAnswerEvent],
-  ): CommandDeduplicationData =
-    throw new UnsupportedOperationException("Use the create/tryCreate factory methods instead")
 
   def create(
       changeId: ChangeId,

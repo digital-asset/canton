@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SequencedSubmission,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.protocol.{
@@ -880,7 +881,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                     succeed
                   },
                   alarms.map(alarm =>
-                    (logEntry: LogEntry) => logEntry.errorMessage should include(alarm)
+                    (entry: LogEntry) => {
+                      entry.shouldBeCantonErrorCode(SyncServiceAlarm)
+                      entry.warningMessage should include(alarm)
+                    }
                   ): _*
                 )
               }
@@ -999,7 +1003,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
                   sut.requestCounterAllocator.peek shouldBe initRc + 1
                 },
                 alarms.map(alarm =>
-                  (logEntry: LogEntry) => logEntry.errorMessage should include(alarm)
+                  (entry: LogEntry) => {
+                    entry.shouldBeCantonErrorCode(SyncServiceAlarm)
+                    entry.warningMessage should include(alarm)
+                  }
                 ): _*
               )
             }
@@ -1081,10 +1088,10 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
           handle(sut, mkDeliver(batch)) {
             checkTicks(sut)
           },
-          _.errorMessage should include(
+          _.warningMessage should include(
             show"Received unexpected ${RequestKind(TestViewType)} for $requestId"
           ),
-          _.errorMessage should include(
+          _.warningMessage should include(
             show"Received unexpected ${RequestKind(OtherTestViewType)} for $requestId"
           ),
         )

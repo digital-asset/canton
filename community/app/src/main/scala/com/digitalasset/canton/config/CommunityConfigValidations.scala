@@ -192,8 +192,7 @@ object CommunityConfigValidations
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     config.participants.toSeq.map { case (name, config) =>
       val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
-      val isMinimumDeprecatedVersion =
-        ProtocolVersion.deprecated.contains(minimum.getOrElse(ProtocolVersion.v2))
+      val isMinimumDeprecatedVersion = minimum.getOrElse(ProtocolVersion.v2).isDeprecated
 
       if (isMinimumDeprecatedVersion && !config.parameters.dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnParticipant(name, minimum)
@@ -223,7 +222,7 @@ object CommunityConfigValidations
         flag: Boolean,
     ): Validated[NonEmpty[Seq[String]], Unit] = {
       Validated.cond(
-        protocolVersion != ProtocolVersion.dev || flag,
+        protocolVersion.isStable || flag,
         (),
         NonEmpty(
           Seq,

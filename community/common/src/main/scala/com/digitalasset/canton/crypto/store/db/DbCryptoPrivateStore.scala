@@ -42,7 +42,10 @@ final case class StoredPrivateKey(
     name: Option[KeyName],
     wrapperKeyId: Option[String300],
 ) extends Product
-    with Serializable
+    with Serializable {
+
+  def isEncrypted: Boolean = { this.wrapperKeyId.isDefined }
+}
 
 object StoredPrivateKey {
   implicit def getResultStoredPrivateKey(implicit
@@ -69,7 +72,7 @@ class DbCryptoPrivateStore(
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
 
-  private val protocolVersion = ProtocolVersion.v2Todo_i8793
+  private val protocolVersion = ProtocolVersion.v2Todo_i9957
   private implicit val setParameterEncryptionPrivateKey: SetParameter[EncryptionPrivateKey] =
     EncryptionPrivateKey.getVersionedSetParameter(protocolVersion)
   private implicit val setParameterSigningPrivateKey: SetParameter[SigningPrivateKey] =
@@ -173,7 +176,7 @@ class DbCryptoPrivateStore(
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     insertKey(key)
 
-  override private[store] def listPrivateKeys(purpose: KeyPurpose)(implicit
+  override private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     EitherTUtil
@@ -181,7 +184,8 @@ class DbCryptoPrivateStore(
         queryTime.metric
           .event(
             storage.query(queryKeys(purpose), functionFullName)
-          ),
+          )
+          .map(keys => keys.filter(_.isEncrypted == encrypted)),
         err => CryptoPrivateStoreError.FailedToListKeys(err.toString),
       )
 

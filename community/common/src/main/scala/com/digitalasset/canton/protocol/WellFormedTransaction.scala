@@ -16,7 +16,7 @@ import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, Rollback
 import com.digitalasset.canton.protocol.WellFormedTransaction.State
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil, NoCopy}
+import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil}
 
 import scala.collection.immutable.HashMap
 import scala.collection.mutable
@@ -49,8 +49,7 @@ import scala.collection.mutable
 case class WellFormedTransaction[+S <: State] private (
     private val tx: LfVersionedTransaction,
     metadata: TransactionMetadata,
-)(state: S)
-    extends NoCopy {
+)(state: S) {
   def unwrap: LfVersionedTransaction = tx
 
   def withoutVersion: LfTransaction = CantonOnly.unwrapVersionedTransaction(tx)
@@ -85,11 +84,6 @@ case class WellFormedTransaction[+S <: State] private (
 }
 
 object WellFormedTransaction {
-
-  private[this] def apply[S <: State](tx: LfVersionedTransaction, metadata: TransactionMetadata)(
-      state: S
-  ): WellFormedTransaction[S] =
-    throw new UnsupportedOperationException("Use normalizeAndCheck or normalizeAndAssert instead.")
 
   /** Determines whether the IDs of created contracts in a transaction are suffixed */
   sealed trait State extends Product with Serializable {

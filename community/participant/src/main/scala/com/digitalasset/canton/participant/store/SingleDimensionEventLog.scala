@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{LedgerTransactionId, checked}
 import slick.jdbc.SetParameter
 
@@ -193,6 +194,7 @@ object SingleDimensionEventLog {
       id: Id,
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): SingleDimensionEventLog[Id] =
@@ -203,6 +205,7 @@ object SingleDimensionEventLog {
           id,
           dbStorage,
           indexedStringStore,
+          releaseProtocolVersion,
           timeouts,
           loggerFactory,
         )

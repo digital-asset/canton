@@ -8,7 +8,6 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.NoCopy
 
 /** @param consumedInCore Whether the contract is consumed in the core of the view.
   *   [[com.digitalasset.canton.protocol.WellFormedTransaction]] checks that a created contract
@@ -20,8 +19,7 @@ case class CreatedContract private (
     contract: SerializableContract,
     consumedInCore: Boolean,
     rolledBack: Boolean,
-) extends NoCopy
-    with PrettyPrinting {
+) extends PrettyPrinting {
 
   // Note that on behalf of rolledBack contracts we still send the SerializableContract along with the contract instance
   // mainly to support DAMLe.reinterpret on behalf of a top-level CreateActionDescription under a rollback node because
@@ -42,13 +40,6 @@ case class CreatedContract private (
 }
 
 object CreatedContract {
-  private[this] def apply(
-      contract: SerializableContract,
-      consumedInCore: Boolean,
-      rolledBack: Boolean,
-  ): CreatedContract =
-    throw new UnsupportedOperationException("Use the public create method")
-
   def create(
       contract: SerializableContract,
       consumedInCore: Boolean,

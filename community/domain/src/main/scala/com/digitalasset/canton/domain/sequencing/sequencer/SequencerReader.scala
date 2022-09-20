@@ -10,7 +10,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.option._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{SyncCryptoApi, SyncCryptoClient}
+import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
@@ -426,6 +426,7 @@ class SequencerReader(
           signingSnapshot,
           event,
           signingTimestampO,
+          HashPurpose.SequencedEventSignature,
         )
       } yield OrdinarySequencedEvent(signedEvent)(traceContext)
     }

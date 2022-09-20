@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 
-case class InitRequest private (
+final case class InitRequest(
     domainId: DomainId,
     topologySnapshot: StoredTopologyTransactions[TopologyChangeOp.Positive],
     domainParameters: StaticDomainParameters,

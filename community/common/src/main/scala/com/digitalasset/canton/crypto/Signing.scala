@@ -147,6 +147,13 @@ case class Signature private[crypto] (
 }
 
 object Signature extends HasVersionedMessageCompanion[Signature] {
+  val noSignature =
+    new Signature(
+      SignatureFormat.Raw,
+      ByteString.EMPTY,
+      Fingerprint.tryCreate("no-fingerprint"),
+    )
+
   val supportedProtoVersions: Map[Int, Parser] = Map(
     0 -> supportedProtoVersion(v0.Signature)(fromProtoV0)
   )
@@ -379,7 +386,7 @@ final case class SigningPrivateKey private[crypto] (
   def toStored(name: Option[KeyName], wrapperKeyId: Option[String300]): StoredPrivateKey = {
     new StoredPrivateKey(
       id,
-      //todo #9957: verify correctness of hardcoded protocol version
+      // TODO(#9957) verify correctness of hardcoded protocol version
       toByteString(ProtocolVersion.latest),
       purpose,
       name,

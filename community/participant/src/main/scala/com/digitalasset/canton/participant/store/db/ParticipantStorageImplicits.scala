@@ -8,8 +8,8 @@ import com.digitalasset.canton.participant.store.SerializableLedgerSyncEvent
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
-import slick.jdbc.{GetResult, SetParameter}
+import com.digitalasset.canton.version.{UntypedVersionedMessage, VersionedMessage}
+import slick.jdbc.GetResult
 
 object ParticipantStorageImplicits {
 
@@ -31,26 +31,9 @@ object ParticipantStorageImplicits {
           throw new DbDeserializationException(
             s"LedgerSyncEvent protobuf deserialization error: $err"
           ),
-        identity,
+        _.ledgerSyncEvent,
       )
   }
-
-  private def eventToBytes(event: LedgerSyncEvent, protocolVersion: ProtocolVersion): Array[Byte] =
-    SerializableLedgerSyncEvent(event).toByteArray(protocolVersion)
-
-  private[db] def setLedgerSyncEvent(protocolVersion: ProtocolVersion)(implicit
-      setParameterByteArray: SetParameter[Array[Byte]]
-  ): SetParameter[LedgerSyncEvent] = (v, pp) => pp >> eventToBytes(v, protocolVersion)
-
-  private[participant] implicit def getOptionLedgerSyncEvent(implicit
-      getResultByteArrayO: GetResult[Option[Array[Byte]]]
-  ): GetResult[Option[LedgerSyncEvent]] =
-    _.<<[Option[Array[Byte]]].map(bytesToEvent)
-
-  private[participant] def setOptionLedgerSyncEvent(protocolVersion: ProtocolVersion)(implicit
-      setParameterByteArrayO: SetParameter[Option[Array[Byte]]]
-  ): SetParameter[Option[LedgerSyncEvent]] = (v, pp) =>
-    pp >> v.map(eventToBytes(_, protocolVersion))
 
   private[db] implicit def getTracedLedgerSyncEvent(implicit
       getResultByteArray: GetResult[Array[Byte]]
@@ -58,7 +41,7 @@ object ParticipantStorageImplicits {
     GetResult { r =>
       import TraceContext.hasVersionedWrapperGetResult
 
-      val event = GetResult[LedgerSyncEvent].apply(r)
+      val event = GetResult[SerializableLedgerSyncEvent].apply(r).ledgerSyncEvent
       implicit val traceContext: TraceContext = GetResult[TraceContext].apply(r)
 
       Traced(event)

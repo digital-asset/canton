@@ -179,7 +179,7 @@ trait HasSupportedProtoVersions[ValueClass] {
     )
   }
 
-  sealed abstract case class SupportedProtoVersions(
+  case class SupportedProtoVersions private (
       // Sorted with descending order
       converters: NonEmpty[immutable.SortedMap[ProtobufVersion, VersionedProtoConverter]]
   ) {
@@ -225,11 +225,11 @@ trait HasSupportedProtoVersions[ValueClass] {
     def apply(
         head: (ProtobufVersion, VersionedProtoConverter),
         tail: (ProtobufVersion, VersionedProtoConverter)*
-    ): SupportedProtoVersions = SupportedProtoVersions(
+    ): SupportedProtoVersions = SupportedProtoVersions.fromNonEmpty(
       NonEmpty.mk(Seq, head, tail: _*)
     )
 
-    def apply(
+    def fromNonEmpty(
         converters: NonEmpty[Seq[(ProtobufVersion, VersionedProtoConverter)]]
     ): SupportedProtoVersions = {
 
@@ -245,7 +245,7 @@ trait HasSupportedProtoVersions[ValueClass] {
         s"ProtocolVersion corresponding to lowest proto version should be ${ProtocolVersion.minimum}, found $lowestProtocolVersion",
       )
 
-      new SupportedProtoVersions(sortedConverters) {}
+      SupportedProtoVersions(sortedConverters)
     }
   }
 
@@ -281,6 +281,10 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasRepresentati
   ): Deserializer =
     (original: OriginalByteString, data: DataByteString) =>
       ProtoConverter.protoParser(p.parseFrom)(data).flatMap(fromProto(_)(original))
+
+  def fromByteArray(bytes: Array[Byte]): ParsingResult[ValueClass] = fromByteString(
+    ByteString.copyFrom(bytes)
+  )
 
   def fromByteString(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)

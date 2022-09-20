@@ -20,9 +20,9 @@ import scala.concurrent.Future
   */
 trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
 
-  /** @param pkg Daml package to be stored
-    * @param dar The DAR containing the package
-    * @return Future which gets completed when the package is successfully stored.
+  /** @param pkgs Daml packages to be stored
+    * @param dar The DAR containing the packages
+    * @return Future which gets completed when the packages are successfully stored.
     */
   def append(
       pkgs: List[DamlLf.Archive],

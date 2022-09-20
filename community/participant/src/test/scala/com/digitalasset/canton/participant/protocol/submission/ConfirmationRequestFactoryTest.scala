@@ -270,28 +270,25 @@ class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with Ha
 
         val createdRandomnessMap = randomnessMap(keySeed, participants, cryptoPureApi)
 
-        val encryptedViewMessage: EncryptedViewMessage[TransactionViewType] =
-          testedProtocolVersion match {
-            // TODO(i9423): Migrate to next protocol version
-            case ProtocolVersion.`dev` =>
-              EncryptedViewMessageV1(
-                signature,
-                tree.viewHash,
-                createdRandomnessMap.values.toSeq,
-                encryptedView,
-                transactionFactory.domainId,
-                SymmetricKeyScheme.Aes128Gcm,
-              )(Some(participants))
-
-            case _ =>
-              EncryptedViewMessageV0(
-                signature,
-                tree.viewHash,
-                createdRandomnessMap.fmap(_.encrypted),
-                encryptedView,
-                transactionFactory.domainId,
-              )
-          }
+        val encryptedViewMessage: EncryptedViewMessage[TransactionViewType] = {
+          if (testedProtocolVersion >= ProtocolVersion.v4)
+            EncryptedViewMessageV1(
+              signature,
+              tree.viewHash,
+              createdRandomnessMap.values.toSeq,
+              encryptedView,
+              transactionFactory.domainId,
+              SymmetricKeyScheme.Aes128Gcm,
+            )(Some(participants))
+          else
+            EncryptedViewMessageV0(
+              signature,
+              tree.viewHash,
+              createdRandomnessMap.fmap(_.encrypted),
+              encryptedView,
+              transactionFactory.domainId,
+            )
+        }
 
         OpenEnvelope(
           encryptedViewMessage,

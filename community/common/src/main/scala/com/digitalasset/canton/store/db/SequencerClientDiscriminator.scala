@@ -27,11 +27,11 @@ sealed trait SequencerClientDiscriminator extends NoCopy {
 
 object SequencerClientDiscriminator {
 
-  case class DomainDiscriminator private (domainId: DomainId, override val index: Int)
+  case class DomainDiscriminator(domainId: DomainId, override val index: Int)
       extends NoCopy
       with SequencerClientDiscriminator
 
-  case class DomainMemberDiscriminator private (member: DomainMember, override val index: Int)
+  case class DomainMemberDiscriminator(member: DomainMember, override val index: Int)
       extends NoCopy
       with SequencerClientDiscriminator
 

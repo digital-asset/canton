@@ -58,14 +58,6 @@ object SerializableRawContractInstance {
   ): SetParameter[SerializableRawContractInstance] = (c, pp) =>
     pp >> c.getCryptographicEvidence.toByteArray
 
-  // Make the apply method inaccessible such that creation must happen through factory methods
-  private[this] def apply(
-      contractInstance: LfContractInst
-  )(deserializedFrom: Option[ByteString]): SerializableRawContractInstance =
-    throw new UnsupportedOperationException(
-      "Use a factory method for creating SerializableRawContractInstance"
-    )
-
   def create(
       contractInstance: LfContractInst
   ): Either[ValueCoder.EncodeError, SerializableRawContractInstance] =

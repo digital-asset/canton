@@ -413,7 +413,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   }
 
   /** @throws InvalidActionDescription if the `chosen_value` cannot be serialized */
-  sealed abstract case class ExerciseActionDescription private (
+  final case class ExerciseActionDescription private (
       inputContractId: LfContractId,
       choice: LfChoiceName,
       interfaceId: Option[LfInterfaceId],
@@ -424,8 +424,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       override val version: LfTransactionVersion,
       failed: Boolean,
   )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription
-      with NoCopy {
+      extends ActionDescription {
 
     private val serializedChosenValue: ByteString = serializeChosenValue(chosenValue, version)
       .valueOr(err => throw InvalidActionDescription(s"Failed to serialize chosen value: ${err}"))
@@ -525,7 +524,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         )
 
         action <- Either.catchOnly[InvalidActionDescription](
-          new ExerciseActionDescription(
+          ExerciseActionDescription(
             inputContractId,
             choice,
             interfaceId,
@@ -535,7 +534,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
             seed,
             version,
             failed,
-          )(protocolVersion) {}
+          )(protocolVersion)
         )
       } yield action
     }
@@ -577,8 +576,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       key: LfGlobalKey,
       override val version: LfTransactionVersion,
   )(val representativeProtocolVersion: RepresentativeProtocolVersion[ActionDescription])
-      extends ActionDescription
-      with NoCopy {
+      extends ActionDescription {
 
     private val serializedKey =
       GlobalKeySerialization
@@ -606,12 +604,6 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   }
 
   object LookupByKeyActionDescription {
-    private[this] def apply(
-        key: LfGlobalKey,
-        version: LfTransactionVersion,
-    ): LookupByKeyActionDescription =
-      throw new UnsupportedOperationException("Use the other factory methods")
-
     def tryCreate(
         key: LfGlobalKey,
         version: LfTransactionVersion,

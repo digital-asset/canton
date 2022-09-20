@@ -25,7 +25,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ProtocolVersionCompatibility
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -117,7 +117,7 @@ class DomainNodeSequencerClientFactory(
       cantonParameterConfig.loggingConfig,
       clientLoggerFactory,
       supportedProtocolVersions =
-        ProtocolVersion.supportedProtocolsDomain(includeDevelopmentVersions =
+        ProtocolVersionCompatibility.supportedProtocolsDomain(includeUnstableVersions =
           cantonParameterConfig.devVersionSupport
         ),
       minimumProtocolVersion = None,

@@ -24,6 +24,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{ErrorUtil, retry}
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 
 import scala.concurrent.duration._
@@ -70,6 +71,7 @@ object ParticipantNodePersistentState extends HasLoggerName {
       maxDeduplicationDurationO: Option[NonNegativeFiniteDuration],
       uniqueContractKeysO: Option[Boolean],
       parameters: ParticipantStoreConfig,
+      releaseProtocolVersion: ReleaseProtocolVersion,
       metrics: ParticipantMetrics,
       indexedStringStore: IndexedStringStore,
       timeouts: ProcessingTimeout,
@@ -81,15 +83,27 @@ object ParticipantNodePersistentState extends HasLoggerName {
   ): Future[ParticipantNodePersistentState] = {
     val settingsStore = ParticipantSettingsStore(storage, timeouts, loggerFactory)
     val participantEventLog =
-      ParticipantEventLog(storage, indexedStringStore, timeouts, loggerFactory)
+      ParticipantEventLog(
+        storage,
+        indexedStringStore,
+        releaseProtocolVersion,
+        timeouts,
+        loggerFactory,
+      )
     val inFlightSubmissionStore = InFlightSubmissionStore(
       storage,
       parameters.maxItemsInSqlClause,
       parameters.dbBatchAggregationConfig,
+      releaseProtocolVersion,
       timeouts,
       loggerFactory,
     )
-    val commandDeduplicationStore = CommandDeduplicationStore(storage, timeouts, loggerFactory)
+    val commandDeduplicationStore = CommandDeduplicationStore(
+      storage,
+      timeouts,
+      releaseProtocolVersion,
+      loggerFactory,
+    )
     val pruningStore = ParticipantPruningStore(storage, timeouts, loggerFactory)
 
     implicit val loggingContext: NamedLoggingContext =

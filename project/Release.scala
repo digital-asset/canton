@@ -2,25 +2,13 @@ import sbt.Keys.streams
 import sbt.internal.util.ManagedLogger
 import sbt.{IO, Setting, complete, inputKey}
 
+import cats.syntax.either._
+
 object Release {
   private val SemVerDigitsRegex = """(0|[1-9]\d*)"""
 
   // Utility class to hold args of release fix functions
-  private object ParsedVersion {
-    def apply(
-        major: String,
-        minor: String,
-        patch: String,
-        suffix: Option[String],
-        fileToCheck: java.io.File,
-    ): ParsedVersion = {
-      new ParsedVersion(major, minor, patch, suffix.map(_.toLowerCase))(
-        fileToCheck: java.io.File
-      ) {}
-    }
-  }
-
-  sealed abstract case class ParsedVersion(
+  final case class ParsedVersion(
       major: String,
       minor: String,
       patch: String,
@@ -126,11 +114,12 @@ object Release {
     val versionRegexString =
       s""".*ReleaseVersion\\($SemVerDigitsRegex, $SemVerDigitsRegex, $SemVerDigitsRegex(?:, Some\\("(.*)"\\))?\\)$$"""
     val versionRegex = versionRegexString.r
+
     val lines = IO.readLines(releaseArgs.fileToCheck)
 
     def parseLine(s: String) = s match {
       case versionRegex(ma, mi, p, su) =>
-        ParsedVersion(ma, mi, p, Option(su), releaseArgs.fileToCheck)
+        ParsedVersion(ma, mi, p, Option(su))(releaseArgs.fileToCheck)
     }
 
     checkOrUpdateVersionFile(
@@ -160,7 +149,7 @@ object Release {
     val parseLine: String => (ParsedVersion, String) = {
       case versionRegex(major, minor, patch, suffix, protocolVersions) =>
         (
-          ParsedVersion(major, minor, patch, Option(suffix), releaseArgs.fileToCheck),
+          ParsedVersion(major, minor, patch, Option(suffix))(releaseArgs.fileToCheck),
           protocolVersions,
         )
     }
@@ -178,6 +167,29 @@ object Release {
     )
   }
 
+  private def parseSemver(
+      version: String
+  ): Either[String, (String, String, String, Option[String])] = {
+    // `?:` removes the capturing group, so we get a cleaner pattern-match statement
+    val regex = raw"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,4})(?:-(.*))?".r
+
+    version match {
+      case regex(rawMajor, rawMinor, rawPatch, suffix) =>
+        val parsedDigits = List(rawMajor, rawMinor, rawPatch)
+        parsedDigits match {
+          case List(major, minor, patch) =>
+            // `suffix` is `null` if no suffix is given
+            Right((major, minor, patch, Option(suffix)))
+          case _ => Left(s"Unexpected error while parsing version `$version`")
+        }
+
+      case _ =>
+        Left(
+          s"Unable to convert string `$version` to a valid release version."
+        )
+    }
+  }
+
   lazy val releaseChecksSettings: Seq[Setting[_]] = {
     lazy val fixReleaseVersions =
       inputKey[Unit]("Ensure release version and protocol version mappings are defined")
@@ -186,21 +198,21 @@ object Release {
         import complete.DefaultParsers._
         implicit val log: ManagedLogger = streams.value.log
 
-        val args = spaceDelimited("<arg>").parsed
-        val releaseVersionArgs = ParsedVersion(
-          args.head,
-          args(1),
-          args(2),
-          if (args(3).isBlank) None else Some(args(3)),
-          new java.io.File(args(4)),
-        )
-        val releaseToProtocolVersionArgs = ParsedVersion(
-          args.head,
-          args(1),
-          args(2),
-          if (args(3).isBlank) None else Some(args(3)),
-          new java.io.File(args(5)),
-        )
+        val args: Seq[String] = spaceDelimited("<arg>").parsed
+
+        val (major, minor, patch, suffix) = parseSemver(args.head).valueOr { err =>
+          throw new IllegalArgumentException(err)
+        }
+
+        val releaseVersionArgs =
+          ParsedVersion(major = major, minor = minor, patch = patch, suffix = suffix)(
+            fileToCheck = new java.io.File(args(1))
+          )
+
+        val releaseToProtocolVersionArgs =
+          ParsedVersion(major = major, minor = minor, patch = patch, suffix = suffix)(
+            new java.io.File(args(2))
+          )
 
         fixReleaseVersion(releaseVersionArgs)
         fixReleaseToProtocolVersion(releaseToProtocolVersionArgs)

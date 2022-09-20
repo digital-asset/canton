@@ -43,6 +43,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
     TransactionSubmissionTrackingData(
       completionInfo,
       TransactionSubmissionTrackingData.TimeoutCause,
+      testedProtocolVersion,
     )
   lazy val trackingData3 = TransactionSubmissionTrackingData(
     completionInfo,
@@ -51,6 +52,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
         .Error(DeliverErrorReason.BatchInvalid("Some invalid batch"))
         .createRejection
     ),
+    testedProtocolVersion,
   )
   lazy val submission1 = InFlightSubmission(
     changeId1,

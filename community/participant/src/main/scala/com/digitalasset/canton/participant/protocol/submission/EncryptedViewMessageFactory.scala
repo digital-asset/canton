@@ -77,9 +77,8 @@ object EncryptedViewMessageFactory {
           .compressed[VT](cryptoPureApi, symmetricViewKey, viewType, protocolVersion)(viewTree)
           .leftMap(FailedToEncryptViewMessage)
       )
-      message = protocolVersion match {
-        // TODO(i9423): Migrate to next protocol version
-        case ProtocolVersion.`dev` =>
+      message =
+        if (protocolVersion >= ProtocolVersion.v4) {
           val randomnessV1 = randomnessMap.values.toSeq
           EncryptedViewMessageV1[VT](
             signature,
@@ -89,7 +88,7 @@ object EncryptedViewMessageFactory {
             viewTree.domainId,
             viewEncryptionScheme,
           )(Some(informeeParticipants))
-        case _ =>
+        } else {
           val randomnessMapV0 = randomnessMap.fmap(_.encrypted)
           EncryptedViewMessageV0[VT](
             signature,
@@ -98,7 +97,7 @@ object EncryptedViewMessageFactory {
             encryptedView,
             viewTree.domainId,
           )
-      }
+        }
     } yield message
   }
 

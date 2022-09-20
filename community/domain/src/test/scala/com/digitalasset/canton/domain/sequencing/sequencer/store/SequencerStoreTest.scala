@@ -19,7 +19,12 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
 }
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.{Member, ParticipantId}
+import com.digitalasset.canton.topology.{
+  Member,
+  ParticipantId,
+  UnauthenticatedMemberId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -805,6 +810,25 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         _ <- store.disableMember(aliceId)
         _ <- store.disableMember(bobId)
         _ <- store.disableMember(caroleId)
+      } yield succeed
+    }
+
+    "unregister unauthenticated members" in {
+      val env = Env()
+      import env._
+
+      val unauthenticatedAlice: UnauthenticatedMemberId =
+        UnauthenticatedMemberId(UniqueIdentifier.tryCreate("alice_unauthenticated", "fingerprint"))
+
+      for {
+        id <- store.registerMember(unauthenticatedAlice, ts1)
+        aliceLookup1 <- store.lookupMember(unauthenticatedAlice)
+        _ = aliceLookup1 shouldBe Some(RegisteredMember(id, ts1))
+        _ <- store.unregisterUnauthenticatedMember(unauthenticatedAlice)
+        aliceLookup2 <- store.lookupMember(unauthenticatedAlice)
+        _ = aliceLookup2 shouldBe empty
+        // should also be idempotent
+        _ <- store.unregisterUnauthenticatedMember(unauthenticatedAlice)
       } yield succeed
     }
 

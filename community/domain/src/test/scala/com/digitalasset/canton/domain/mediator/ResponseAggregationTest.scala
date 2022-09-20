@@ -56,8 +56,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         salt(54171),
         testedProtocolVersion,
       )
-    val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
-    val view1 = TransactionView(hashOps)(viewCommonData1, b(8), view2 :: Nil)
+    val view2 = TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil)
+    val view1 = TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), view2 :: Nil)
 
     val requestId = RequestId(CantonTimestamp.Epoch)
 
@@ -125,7 +125,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             testedProtocolVersion,
           )
         val viewThresholdTooLow =
-          TransactionView(hashOps)(viewcommonDataThresholdTooLow, b(100), Nil)
+          TransactionView.tryCreate(hashOps)(viewcommonDataThresholdTooLow, b(100), Nil)
         val fullInformeeTreeThresholdTooLow = FullInformeeTree(
           GenTransactionTree(hashOps)(
             b(0),
@@ -383,8 +383,8 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         salt(54171),
         testedProtocolVersion,
       )
-      val view2 = TransactionView(hashOps)(viewCommonData2, b(100), Nil)
-      val view1 = TransactionView(hashOps)(viewCommonData1, b(8), Nil)
+      val view2 = TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil)
+      val view1 = TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil)
 
       val informeeMessage = InformeeMessage(
         FullInformeeTree(

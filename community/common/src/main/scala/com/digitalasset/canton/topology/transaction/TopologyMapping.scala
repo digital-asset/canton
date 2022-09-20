@@ -14,7 +14,6 @@ import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version._
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
@@ -231,15 +230,14 @@ object SignedLegalIdentityClaim {
     } yield SignedLegalIdentityClaim(claim.uid, value.claim, signature)
 }
 
-sealed abstract case class LegalIdentityClaim private (
+final case class LegalIdentityClaim private (
     uid: UniqueIdentifier,
     evidence: LegalIdentityClaimEvidence,
 )(
     val representativeProtocolVersion: RepresentativeProtocolVersion[LegalIdentityClaim],
     override val deserializedFrom: Option[ByteString],
 ) extends ProtocolVersionedMemoizedEvidence
-    with HasProtocolVersionedWrapper[LegalIdentityClaim]
-    with NoCopy {
+    with HasProtocolVersionedWrapper[LegalIdentityClaim] {
 
   override def companionObj = LegalIdentityClaim
 
@@ -272,21 +270,21 @@ object LegalIdentityClaim extends HasMemoizedProtocolVersionedWrapperCompanion[L
       evidence: LegalIdentityClaimEvidence,
       protocolVersion: ProtocolVersion,
   ): LegalIdentityClaim =
-    new LegalIdentityClaim(uid, evidence)(
+    LegalIdentityClaim(uid, evidence)(
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
-  def fromProtoV0(
+  private def fromProtoV0(
       claimP: v0.LegalIdentityClaim
   )(bytes: ByteString): ParsingResult[LegalIdentityClaim] =
     for {
       uid <- UniqueIdentifier.fromProtoPrimitive(claimP.uniqueIdentifier, "uniqueIdentifier")
       evidence <- LegalIdentityClaimEvidence.fromProtoOneOf(claimP.evidence)
-    } yield new LegalIdentityClaim(uid, evidence)(
+    } yield LegalIdentityClaim(uid, evidence)(
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
 }
 
 sealed trait LegalIdentityClaimEvidence {

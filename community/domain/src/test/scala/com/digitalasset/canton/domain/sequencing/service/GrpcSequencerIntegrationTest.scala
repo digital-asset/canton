@@ -54,7 +54,7 @@ import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySn
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.version.{
-  ProtocolVersion,
+  ProtocolVersionCompatibility,
   ReleaseVersion,
   RepresentativeProtocolVersion,
 }
@@ -201,8 +201,8 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         CommonMockMetrics.sequencerClient,
         LoggingConfig(),
         loggerFactory,
-        ProtocolVersion.supportedProtocolsParticipant(
-          includeDevelopmentVersions = BaseTest.testedProtocolVersion.isDev
+        ProtocolVersionCompatibility.supportedProtocolsParticipant(
+          includeUnstableVersions = BaseTest.testedProtocolVersion.isUnstable
         ),
         Some(BaseTest.testedProtocolVersion),
       ).create(

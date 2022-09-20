@@ -7,6 +7,7 @@ import cats.Order
 import cats.data.Validated
 import cats.syntax.either._
 import cats.syntax.functor._
+import com.daml.jwt.JwtTimestampLeeway
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances._
 import com.daml.platform.apiserver.SeedService.Seeding
@@ -374,9 +375,7 @@ trait CantonConfig {
         participantParameters.maxUnzippedDarSize,
         participantParameters.stores,
         participantConfig.caching,
-        participantParameters.contractIdSeeding,
         participantConfig.sequencerClient,
-        participantParameters.indexer,
         participantParameters.transferTimeProofFreshnessProportion,
         ParticipantProtocolConfig(
           minimumProtocolVersion = participantParameters.minimumProtocolVersion.map(_.unwrap),
@@ -387,6 +386,7 @@ trait CantonConfig {
         participantConfig.init.parameters.uniqueContractKeys,
         participantConfig.init.parameters.unsafeEnableCausalityTracking,
         participantParameters.unsafeEnableDamlLfDevVersion,
+        participantParameters.ledgerApiServerParameters,
       )
     }
 
@@ -460,10 +460,10 @@ object CantonConfig {
 
   implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
 
+  import com.daml.nonempty.NonEmptyUtil.instances._
   import pureconfig.ConfigReader
   import pureconfig.generic.semiauto._
   import pureconfig.module.cats._
-  import com.daml.nonempty.NonEmptyUtil.instances._
 
   final case class NonNegativeFiniteDurationError(input: String, reason: String)
       extends FailureReason {
@@ -739,6 +739,8 @@ object CantonConfig {
     lazy implicit val clockConfigSimClockReader: ConfigReader[ClockConfig.SimClock.type] =
       deriveReader[ClockConfig.SimClock.type]
     lazy implicit val clockConfigReader: ConfigReader[ClockConfig] = deriveReader[ClockConfig]
+    lazy implicit val jwtTimestampLeewayConfigReader: ConfigReader[JwtTimestampLeeway] =
+      deriveReader[JwtTimestampLeeway]
     lazy implicit val authServiceConfigUnsafeJwtHmac256Reader
         : ConfigReader[AuthServiceConfig.UnsafeJwtHmac256] =
       deriveReader[AuthServiceConfig.UnsafeJwtHmac256]
@@ -883,6 +885,9 @@ object CantonConfig {
       deriveReader[AdminWorkflowConfig]
     lazy implicit val participantStoreConfigReader: ConfigReader[ParticipantStoreConfig] =
       deriveReader[ParticipantStoreConfig]
+    lazy implicit val ledgerApiServerParametersConfigReader
+        : ConfigReader[LedgerApiServerParametersConfig] =
+      deriveReader[LedgerApiServerParametersConfig]
     lazy implicit val participantNodeParameterConfigReader
         : ConfigReader[ParticipantNodeParameterConfig] =
       deriveReader[ParticipantNodeParameterConfig]
@@ -1092,6 +1097,8 @@ object CantonConfig {
     lazy implicit val clockConfigSimClockWriter: ConfigWriter[ClockConfig.SimClock.type] =
       deriveWriter[ClockConfig.SimClock.type]
     lazy implicit val clockConfigWriter: ConfigWriter[ClockConfig] = deriveWriter[ClockConfig]
+    lazy implicit val jwtTimestampLeewayConfigWriter: ConfigWriter[JwtTimestampLeeway] =
+      deriveWriter[JwtTimestampLeeway]
     lazy implicit val authServiceConfigJwtEs256CrtWriter
         : ConfigWriter[AuthServiceConfig.JwtEs256Crt] =
       deriveWriter[AuthServiceConfig.JwtEs256Crt]
@@ -1234,6 +1241,9 @@ object CantonConfig {
       deriveWriter[AdminWorkflowConfig]
     lazy implicit val participantStoreConfigWriter: ConfigWriter[ParticipantStoreConfig] =
       deriveWriter[ParticipantStoreConfig]
+    lazy implicit val ledgerApiServerParametersConfigWriter
+        : ConfigWriter[LedgerApiServerParametersConfig] =
+      deriveWriter[LedgerApiServerParametersConfig]
     lazy implicit val participantNodeParameterConfigWriter
         : ConfigWriter[ParticipantNodeParameterConfig] =
       deriveWriter[ParticipantNodeParameterConfig]

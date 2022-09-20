@@ -127,9 +127,9 @@ class ConfirmationResponseFactory(
         else if (existing.nonEmpty)
           Map(
             logged(
-              LocalReject.ConsistencyRejections.CreatesExistingContracts
+              LocalReject.MalformedRejects.CreatesExistingContracts
                 .Reject(existing.toSeq.map(_.coid))(protocolVersion)
-            ) -> hostedConfirmingParties
+            ) -> Set.empty // We can't specify confirming parties, as the verdict is Malformed.
           )
         else {
           val verdicts = mutable.Map.empty[LocalVerdict, Set[LfPartyId]]

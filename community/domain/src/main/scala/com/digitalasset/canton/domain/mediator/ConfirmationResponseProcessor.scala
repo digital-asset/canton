@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{AlarmStreamer, RequestId, RootHash, v0}
+import com.digitalasset.canton.protocol.{RequestId, RootHash, v0}
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.time.DomainTimeTracker
@@ -43,7 +43,6 @@ private[mediator] class ConfirmationResponseProcessor(
     crypto: DomainSyncCryptoClient,
     timeTracker: DomainTimeTracker,
     val mediatorState: MediatorState,
-    alarmer: AlarmStreamer,
     protocolVersion: ProtocolVersion,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)

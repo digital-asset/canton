@@ -17,13 +17,13 @@ import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset, RequestCounter}
+import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc._
 
@@ -34,6 +34,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
     override val id: Id,
     override protected val storage: DbStorage,
     indexedStringStore: IndexedStringStore,
+    releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit override protected val executionContext: ExecutionContext)
@@ -49,16 +50,15 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
 
   private def log_id: Int = id.index
 
-  private implicit val protocolVersion = ProtocolVersion.v2Todo_i8793
-
   private implicit val setParameterTraceContext: SetParameter[TraceContext] =
-    TraceContext.getVersionedSetParameter(protocolVersion)
+    TraceContext.getVersionedSetParameter(releaseProtocolVersion.v)
   private implicit val setParameterCausalityUpdate: SetParameter[CausalityUpdate] =
     CausalityUpdate.getVersionedSetParameter
   private implicit val setParameterCausalityUpdateO: SetParameter[Option[CausalityUpdate]] =
     CausalityUpdate.getVersionedSetParameterO
-  private implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
-    ParticipantStorageImplicits.setLedgerSyncEvent(protocolVersion)
+  private implicit val setParameterSerializableLedgerSyncEvent
+      : SetParameter[SerializableLedgerSyncEvent] =
+    SerializableLedgerSyncEvent.getVersionedSetParameter
 
   override def insertsUnlessEventIdClash(
       events: Seq[TimestampedEventAndCausalChange]
@@ -175,7 +175,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
               pp >> event.requestSequencerCounter
               pp >> event.eventId
               pp >> associatedDomainIdO.map(_.index)
-              pp >> event.event
+              pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
               pp >> event.traceContext
               pp >> clock
             }
@@ -195,7 +195,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
                 pp >> event.requestSequencerCounter
                 pp >> event.eventId
                 pp >> associatedDomainIdO.map(_.index)
-                pp >> event.event
+                pp >> SerializableLedgerSyncEvent(event.event, releaseProtocolVersion.v)
                 pp >> event.traceContext
                 pp >> clock
             }

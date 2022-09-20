@@ -46,7 +46,8 @@ class ParticipantDomainTopologyServiceTest
         TopologyElementId.tryCreate("submissionId"),
         OwnerToKeyMapping(participantId, SymbolicCrypto.signingPublicKey("keyId")),
       ),
-    )(testedProtocolVersion),
+      testedProtocolVersion,
+    ),
     SymbolicCrypto.signingPublicKey("keyId"),
     SymbolicCrypto.emptySignature,
   )(signedTransactionProtocolVersionRepresentative, None)

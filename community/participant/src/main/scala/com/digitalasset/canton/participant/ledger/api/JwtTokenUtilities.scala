@@ -7,6 +7,8 @@ import com.daml.jwt.JwtSigner
 import com.daml.jwt.domain.{DecodedJwt, Jwt}
 import com.daml.ledger.api.auth.{AuthServiceJWTCodec, CustomDamlJWTPayload}
 
+import java.time.Instant
+
 /** some helpers in other to use with ad-hoc JWT authentication */
 object JwtTokenUtilities {
 
@@ -17,12 +19,13 @@ object JwtTokenUtilities {
       actAs: List[String],
       ledgerId: Option[String] = None,
       applicationId: Option[String] = None,
+      exp: Option[Instant] = None,
   ): String = {
     val payload = CustomDamlJWTPayload(
       ledgerId = ledgerId,
       None,
       applicationId = applicationId,
-      None,
+      exp = exp,
       admin = admin,
       readAs = readAs,
       actAs = actAs,

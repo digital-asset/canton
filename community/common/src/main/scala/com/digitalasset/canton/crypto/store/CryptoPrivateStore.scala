@@ -87,7 +87,7 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
   ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]]
 
   @VisibleForTesting
-  private[store] def listPrivateKeys(purpose: KeyPurpose)(implicit
+  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]]
 

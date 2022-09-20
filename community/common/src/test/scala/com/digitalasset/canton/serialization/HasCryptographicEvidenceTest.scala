@@ -154,7 +154,7 @@ class MemoizedEvidenceWithFailureTest
   }
 }
 
-sealed case class MemoizedEvidenceWithFailureSUT private (b: Byte)(
+final case class MemoizedEvidenceWithFailureSUT private (b: Byte)(
     fail: Boolean,
     override val deserializedFrom: Option[ByteString],
 ) extends MemoizedEvidenceWithFailure[Unit] {
@@ -172,11 +172,6 @@ sealed case class MemoizedEvidenceWithFailureSUT private (b: Byte)(
 }
 
 object MemoizedEvidenceWithFailureSUT {
-  private[this] def apply(
-      b: Byte
-  )(fail: Boolean, deserializedFrom: Option[ByteString]): MemoizedEvidenceWithFailureSUT =
-    throw new UnsupportedOperationException("Use the public apply method instead")
-
   def apply(b: Byte)(fail: Boolean): MemoizedEvidenceWithFailureSUT =
     new MemoizedEvidenceWithFailureSUT(b)(fail, None)
 
