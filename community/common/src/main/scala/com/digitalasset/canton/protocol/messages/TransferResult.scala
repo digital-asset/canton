@@ -21,7 +21,6 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedConten
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version._
 import com.google.protobuf.ByteString
 
@@ -29,7 +28,7 @@ import com.google.protobuf.ByteString
   *
   * @param requestId timestamp of the corresponding [[TransferOutRequest]] on the source domain
   */
-sealed abstract case class TransferResult[+Domain <: TransferDomainId](
+case class TransferResult[+Domain <: TransferDomainId] private (
     override val requestId: RequestId,
     informees: Set[LfPartyId],
     domain: Domain, // For transfer-out, this is the source domain. For transfer-in, this is the target domain.
@@ -41,7 +40,6 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
     override val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
     with HasProtocolVersionedWrapper[TransferResult[TransferDomainId]]
-    with NoCopy
     with PrettyPrinting {
 
   override def domainId: DomainId = domain.unwrap
@@ -100,15 +98,15 @@ sealed abstract case class TransferResult[+Domain <: TransferDomainId](
     F.map(f(domain)) { newDomain =>
       if (newDomain eq domain) this.asInstanceOf[TransferResult[Domain2]]
       else if (newDomain == domain)
-        new TransferResult(requestId, informees, newDomain, verdict)(
+        TransferResult(requestId, informees, newDomain, verdict)(
           representativeProtocolVersion,
           deserializedFrom,
-        ) {}
+        )
       else
-        new TransferResult(requestId, informees, newDomain, verdict)(
+        TransferResult(requestId, informees, newDomain, verdict)(
           representativeProtocolVersion,
           None,
-        ) {}
+        )
     }
 
   override def pretty: Pretty[TransferResult[_ <: TransferDomainId]] =
@@ -131,7 +129,7 @@ object TransferResult
       _.toProtoV0.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev, // TODO(i10131): make this stable
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferResult)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -144,10 +142,10 @@ object TransferResult
       verdict: Verdict,
       protocolVersion: ProtocolVersion,
   ): TransferResult[Domain] =
-    new TransferResult[Domain](requestId, informees, domain, verdict)(
+    TransferResult[Domain](requestId, informees, domain, verdict)(
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
   private def fromProtoV0(transferResultP: v0.TransferResult)(
       bytes: ByteString
@@ -175,10 +173,10 @@ object TransferResult
           verdict <- ProtoConverter
             .required("TransferResult.verdict", maybeVerdictP)
             .flatMap(Verdict.fromProtoV0)
-        } yield new TransferResult(requestId, informees.toSet, domain, verdict)(
+        } yield TransferResult(requestId, informees.toSet, domain, verdict)(
           protocolVersionRepresentativeFor(ProtobufVersion(0)),
           Some(bytes),
-        ) {}
+        )
     }
 
   private def fromProtoV1(transferResultP: v1.TransferResult)(
@@ -205,10 +203,10 @@ object TransferResult
       verdict <- ProtoConverter
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV1)
-    } yield new TransferResult(requestId, informees.toSet, domain, verdict)(
+    } yield TransferResult(requestId, informees.toSet, domain, verdict)(
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
   }
 
   implicit def transferResultCast[Kind <: TransferDomainId](implicit

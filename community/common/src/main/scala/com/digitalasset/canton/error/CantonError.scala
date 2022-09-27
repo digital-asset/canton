@@ -191,9 +191,6 @@ object BaseCantonError {
 
 object CantonError {
 
-  val SECURITY_SENSITIVE_MESSAGE_ON_API =
-    "An error occurred. Please contact the operator and inquire about the request"
-
   abstract class Impl(
       override val cause: String,
       override val throwableO: Option[Throwable] = None,

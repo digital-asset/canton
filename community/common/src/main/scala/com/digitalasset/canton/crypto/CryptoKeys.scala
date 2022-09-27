@@ -17,7 +17,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.SafeSimpleString
-import com.digitalasset.canton.util.NoCopy
 import com.google.protobuf.ByteString
 import io.circe.Encoder
 import slick.jdbc.{GetResult, SetParameter}
@@ -28,10 +27,9 @@ trait CryptoKey extends Product with Serializable {
 }
 
 /** a human readable fingerprint of a key that serves as a unique identifier */
-final case class Fingerprint private (protected val str: String68)
+final case class Fingerprint(protected val str: String68)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting
-    with NoCopy {
+    with PrettyPrinting {
   def toLengthLimitedString: String68 = str
 
   override def pretty: Pretty[Fingerprint] = prettyOfParam(_.unwrap.readableHash)

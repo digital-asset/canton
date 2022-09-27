@@ -9,7 +9,6 @@ import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals
 import com.digitalasset.canton.protocol.DomainParameters
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.util.NoCopy
 
 import java.time.temporal.ChronoUnit
 import scala.annotation.tailrec
@@ -23,10 +22,10 @@ import scala.math.Ordering.Implicits._
   * @param validUntil The data contained in the intervals is valid only
   *                   for timestamps <= `validUntil`.
   */
-sealed abstract case class SortedReconciliationIntervals private (
+final case class SortedReconciliationIntervals private (
     intervals: List[ReconciliationInterval],
     validUntil: CantonTimestamp,
-) extends NoCopy {
+) {
 
   /** Check whether `ts` is on a commitment tick.
     * @return [[scala.None$]] if `ts > validUntil`
@@ -142,7 +141,7 @@ sealed abstract case class SortedReconciliationIntervals private (
 
 object SortedReconciliationIntervals {
   val empty: SortedReconciliationIntervals =
-    new SortedReconciliationIntervals(Nil, CantonTimestamp.MinValue) {}
+    SortedReconciliationIntervals(Nil, CantonTimestamp.MinValue)
 
   case class ReconciliationInterval(
       validFrom: CantonTimestamp,
@@ -187,7 +186,7 @@ object SortedReconciliationIntervals {
             ReconciliationInterval(validFrom, validUntil, reconciliationInterval)
         }.toList
 
-        Right(new SortedReconciliationIntervals(intervals, validUntil) {})
+        Right(SortedReconciliationIntervals(intervals, validUntil))
     }
   }
 }

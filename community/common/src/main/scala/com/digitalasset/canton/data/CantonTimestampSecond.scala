@@ -7,7 +7,6 @@ import cats.kernel.Order
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.{LfTimestamp, ProtoDeserializationError}
 import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
 import slick.jdbc.{GetResult, SetParameter}
@@ -19,17 +18,16 @@ import java.time.{Duration, Instant}
   *
   * @param underlying A [[LfTimestamp]], holding the value of this [[CantonTimestampSecond]].
   */
-sealed abstract case class CantonTimestampSecond(underlying: LfTimestamp)
+final case class CantonTimestampSecond private (underlying: LfTimestamp)
     extends Ordered[CantonTimestampSecond]
-    with Timestamp
-    with NoCopy {
+    with Timestamp {
 
   require(microsOverSecond() == 0, s"Timestamp $underlying must be rounded to the second")
 
   def forgetSecond: CantonTimestamp = CantonTimestamp(underlying)
 
   def plusSeconds(seconds: Long): CantonTimestampSecond =
-    new CantonTimestampSecond(underlying.add(Duration.ofSeconds(seconds))) {}
+    CantonTimestampSecond(underlying.add(Duration.ofSeconds(seconds)))
 
   def minusSeconds(seconds: Long): CantonTimestampSecond = plusSeconds(-seconds)
 
@@ -40,13 +38,13 @@ sealed abstract case class CantonTimestampSecond(underlying: LfTimestamp)
   def -(other: CantonTimestampSecond): Duration =
     Duration.ofNanos(1000L * (this.underlying.micros - other.underlying.micros))
 
-  def +(duration: PositiveSeconds): CantonTimestampSecond = new CantonTimestampSecond(
+  def +(duration: PositiveSeconds): CantonTimestampSecond = CantonTimestampSecond(
     underlying.add(duration.duration)
-  ) {}
+  )
 
-  def -(duration: PositiveSeconds): CantonTimestampSecond = new CantonTimestampSecond(
+  def -(duration: PositiveSeconds): CantonTimestampSecond = CantonTimestampSecond(
     underlying.add(Duration.ZERO.minus(duration.duration))
-  ) {}
+  )
 
   def >(other: CantonTimestamp): Boolean = forgetSecond > other
   def >=(other: CantonTimestamp): Boolean = forgetSecond >= other
@@ -75,9 +73,9 @@ object CantonTimestampSecond {
     }
   }
 
-  def Epoch = new CantonTimestampSecond(LfTimestamp.Epoch) {}
+  def Epoch = CantonTimestampSecond(LfTimestamp.Epoch)
 
-  def MinValue = new CantonTimestampSecond(LfTimestamp.MinValue) {}
+  def MinValue = CantonTimestampSecond(LfTimestamp.MinValue)
 
   def fromProtoPrimitive(ts: ProtoTimestamp): ParsingResult[CantonTimestampSecond] = {
     for {
@@ -90,18 +88,18 @@ object CantonTimestampSecond {
   }
 
   def ofEpochSecond(seconds: Long): CantonTimestampSecond =
-    new CantonTimestampSecond(LfTimestamp.assertFromLong(micros = seconds * 1000 * 1000)) {}
+    CantonTimestampSecond(LfTimestamp.assertFromLong(micros = seconds * 1000 * 1000))
 
   def fromInstant(i: Instant): Either[String, CantonTimestampSecond] =
     for {
       _ <- Either.cond(i.getNano == 0, (), s"Timestamp $i is not rounded to the second")
       ts <- LfTimestamp.fromInstant(i)
-    } yield new CantonTimestampSecond(ts) {}
+    } yield CantonTimestampSecond(ts)
 
   def fromCantonTimestamp(ts: CantonTimestamp): Either[String, CantonTimestampSecond] =
     Either.cond(
       ts.microsOverSecond() == 0,
-      new CantonTimestampSecond(ts.underlying) {},
+      CantonTimestampSecond(ts.underlying),
       s"Timestamp $ts is not rounded to the second",
     )
 
@@ -109,22 +107,20 @@ object CantonTimestampSecond {
     * @return `ts` if `ts` is already rounded to the second, the previous rounded timestamp otherwise.
     */
   def floor(ts: CantonTimestamp): CantonTimestampSecond =
-    if (ts.microsOverSecond() == 0) new CantonTimestampSecond(ts.underlying) {}
+    if (ts.microsOverSecond() == 0) CantonTimestampSecond(ts.underlying)
     else CantonTimestampSecond.ofEpochSecond(ts.getEpochSecond)
 
   /** @param ts
     * @return `ts` if `ts` is already rounded to the second, the next rounded timestamp otherwise.
     */
   def ceil(ts: CantonTimestamp): CantonTimestampSecond =
-    if (ts.microsOverSecond() == 0) new CantonTimestampSecond(ts.underlying) {}
+    if (ts.microsOverSecond() == 0) CantonTimestampSecond(ts.underlying)
     else CantonTimestampSecond.ofEpochSecond(ts.getEpochSecond + 1)
 
   // TODO(error handling) these throw an IllegalArgumentException with the error message "cannot interpret ... as Timestamp"
   // Consider changing the error message or removing these methods
-  def assertFromInstant(i: Instant) = new CantonTimestampSecond(LfTimestamp.assertFromInstant(i)) {}
-  def assertFromLong(micros: Long) = new CantonTimestampSecond(
-    LfTimestamp.assertFromLong(micros)
-  ) {}
+  def assertFromInstant(i: Instant) = CantonTimestampSecond(LfTimestamp.assertFromInstant(i))
+  def assertFromLong(micros: Long) = CantonTimestampSecond(LfTimestamp.assertFromLong(micros))
 
   implicit val orderCantonTimestampSecond: Order[CantonTimestampSecond] = Order.fromOrdering
 

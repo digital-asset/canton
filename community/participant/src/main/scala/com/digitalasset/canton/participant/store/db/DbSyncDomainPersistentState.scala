@@ -19,7 +19,7 @@ import com.digitalasset.canton.store.db.{
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 
 import scala.concurrent.ExecutionContext
 
@@ -43,6 +43,7 @@ class DbSyncDomainPersistentState(
     DomainEventLogId(domainId),
     storage,
     indexedStringStore,
+    ReleaseProtocolVersion.latest,
     processingTimeouts,
     loggerFactory,
   )

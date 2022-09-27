@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.ContractSta
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, NoCopy, SingleUseCell}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SingleUseCell}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -523,7 +523,7 @@ object NaiveRequestTracker {
     *                             As long as this cell is not filled, the request tracker will not progress beyond the request's
     *                             commit time.
     */
-  private[NaiveRequestTracker] case class RequestData private[RequestData] (
+  private[NaiveRequestTracker] case class RequestData private (
       sequencerCounter: SequencerCounter,
       requestTimestamp: CantonTimestamp,
       decisionTime: CantonTimestamp,
@@ -533,22 +533,9 @@ object NaiveRequestTracker {
       val timeoutResult: Promise[TimeoutResult],
       val finalizationDataCell: SingleUseCell[FinalizationData],
       val commitSetPromise: Promise[CommitSet],
-  ) extends NoCopy
+  )
 
   private[NaiveRequestTracker] object RequestData {
-    private[this] def apply(
-        sequencerCounter: SequencerCounter,
-        requestTimestamp: CantonTimestamp,
-        decisionTime: CantonTimestamp,
-        activenessSet: ActivenessSet,
-    )(
-        activenessResult: Promise[ActivenessResult],
-        timeoutResult: Promise[TimeoutResult],
-        finalizationDataCell: SingleUseCell[FinalizationData],
-        commitSetPromise: Promise[CommitSet],
-    ): RequestData =
-      throw new UnsupportedOperationException("Use the mk method instead")
-
     def mk(
         sc: SequencerCounter,
         requestTimestamp: CantonTimestamp,

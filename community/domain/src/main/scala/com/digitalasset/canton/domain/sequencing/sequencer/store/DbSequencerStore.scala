@@ -27,7 +27,7 @@ import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.DbStorage._
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
@@ -342,6 +342,23 @@ class DbSequencerStore(
           .head
       } yield id,
       "registerMember",
+    )
+
+  def unregisterUnauthenticatedMember(member: UnauthenticatedMemberId)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
+    for {
+      memberRemoved <- storage.update(
+        {
+          sqlu"""
+            delete from sequencer_members where member = $member
+           """
+        },
+        functionFullName,
+      )
+      _ = evictFromCache(member)
+    } yield logger.debug(
+      s"Removed at least $memberRemoved unauthenticated members"
     )
 
   protected override def lookupMemberInternal(member: Member)(implicit

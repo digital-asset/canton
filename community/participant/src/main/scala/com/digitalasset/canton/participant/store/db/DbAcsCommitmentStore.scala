@@ -38,7 +38,7 @@ import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeDomain}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{ErrorUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
@@ -60,13 +60,13 @@ class DbAcsCommitmentStore(
     extends AcsCommitmentStore
     with DbPrunableByTimeDomain[AcsCommitmentStoreError]
     with DbStore {
-
   import DbStorage.Implicits._
   import storage.api._
   import storage.converters._
 
   override protected[this] val pruning_status_table = "commitment_pruning"
 
+  private val markSafeQueue = new SimpleExecutionQueue()
   implicit val getSignedCommitment: GetResult[SignedProtocolMessage[AcsCommitment]] = GetResult(r =>
     SignedProtocolMessage
       .fromByteString(cryptoApi)(ByteString.copyFrom(r.<<[Array[Byte]]))
@@ -426,23 +426,28 @@ class DbAcsCommitmentStore(
       } yield ()
     }
 
-    for {
-      /*
-        That could be wrong if a period is marked as outstanding between the point where we
-        fetch the approximate timestamp of the topology client and the query for the sorted
-        reconciliation intervals.
-        Such a period would be kept as outstanding even if it contains no tick. On the other
-        hand, only commitment periods around restarts could be "empty" (not contain any tick).
-       */
-      sortedReconciliationIntervals <-
-        sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
-      _ <- storage.queryAndUpdate(
-        dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
-          TransactionIsolation.Serializable
-        ),
-        operationName = "commitments: mark period safe",
-      )
-    } yield ()
+    markSafeQueue.execute(
+      {
+        for {
+          /*
+          That could be wrong if a period is marked as outstanding between the point where we
+          fetch the approximate timestamp of the topology client and the query for the sorted
+          reconciliation intervals.
+          Such a period would be kept as outstanding even if it contains no tick. On the other
+          hand, only commitment periods around restarts could be "empty" (not contain any tick).
+           */
+          sortedReconciliationIntervals <-
+            sortedReconciliationIntervalsProvider.approximateReconciliationIntervals
+          _ <- storage.queryAndUpdate(
+            dbQueries(sortedReconciliationIntervals).transactionally.withTransactionIsolation(
+              TransactionIsolation.Serializable
+            ),
+            operationName = "commitments: mark period safe",
+          )
+        } yield ()
+      },
+      "Run mark period safe DB query",
+    )
   }
 
   override def doPrune(
@@ -548,7 +553,15 @@ class DbAcsCommitmentStore(
   override val queue =
     new DbCommitmentQueue(storage, domainId, protocolVersion, timeouts, loggerFactory)
 
-  override def onClosed(): Unit = Lifecycle.close(runningCommitments, queue)(logger)
+  override def onClosed(): Unit = {
+    import TraceContext.Implicits.Empty._
+
+    Lifecycle.close(
+      runningCommitments,
+      queue,
+      markSafeQueue.asCloseable("markSafeQueue", timeouts.closing.unwrap),
+    )(logger)
+  }
 }
 
 class DbIncrementalCommitmentStore(

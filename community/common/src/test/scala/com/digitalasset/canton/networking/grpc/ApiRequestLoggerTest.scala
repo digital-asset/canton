@@ -479,7 +479,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     val observer = new RecordingStreamObserver[Hello.Response]
     client.helloStreamed(Request, observer)
-    assertClientFailure(observer.completion, serverStatus, serverTrailers, clientCause)
+    assertClientFailure(observer.result, serverStatus, serverTrailers, clientCause)
     if (checkResponses) {
       observer.responses should have size 2
     }
@@ -546,7 +546,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
         val observer = new RecordingStreamObserver[Hello.Response]
         client.helloStreamed(Request, observer)
-        observer.completion.futureValue
+        observer.result.futureValue
         observer.responses should have size 2
 
         assertRequestAndResponsesLogged
@@ -823,7 +823,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
           val observer = new RecordingStreamObserver[Hello.Response]
           client.helloStreamed(Request, observer)
-          observer.completion.futureValue
+          observer.result.futureValue
           observer.responses should have size 2
 
           assertRequestAndResponsesLogged

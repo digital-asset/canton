@@ -38,7 +38,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
-import org.slf4j.event.Level
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
@@ -690,6 +689,17 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
 
   }
 
+  @Explanation("""The topology manager has received a malformed message from another node.""")
+  @Resolution("Inspect the error message for details.")
+  object TopologyManagerAlarm extends AlarmErrorCode(id = "TOPOLOGY_MANAGER_ALARM") {
+    case class Warn(override val cause: String)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends Alarm(cause)
+        with TopologyManagerError {
+      override lazy val logOnCreation: Boolean = false
+    }
+  }
+
   @Explanation(
     """This error indicates that the secret key with the respective fingerprint can not be found."""
   )
@@ -732,18 +742,11 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   @Resolution(
     "Ensure that the transaction is valid and uses a crypto version understood by this participant."
   )
-  object InvalidSignatureError
-      extends ErrorCode(
-        id = "INVALID_TOPOLOGY_TX_SIGNATURE_ERROR",
-        ErrorCategory.InvalidIndependentOfSystemState,
-      ) {
+  object InvalidSignatureError extends AlarmErrorCode(id = "INVALID_TOPOLOGY_TX_SIGNATURE_ERROR") {
 
-    override def logLevel: Level = Level.WARN
-
-    case class Failure(error: SignatureCheckError)(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
-          cause = "Transaction signature verification failed"
-        )
+    case class Failure(error: SignatureCheckError)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends Alarm(cause = "Transaction signature verification failed")
         with TopologyManagerError
   }
 
@@ -827,15 +830,10 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   @Resolution(
     """Inspect the topology state and ensure that valid namespace or identifier delegations of the signing key exist or upload them before adding this transaction."""
   )
-  object UnauthorizedTransaction
-      extends ErrorCode(
-        id = "UNAUTHORIZED_TOPOLOGY_TRANSACTION",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
-      ) {
-    case class Failure()(implicit val loggingContext: ErrorLoggingContext)
-        extends CantonError.Impl(
-          cause = "Topology transaction is not properly authorized"
-        )
+  object UnauthorizedTransaction extends AlarmErrorCode(id = "UNAUTHORIZED_TOPOLOGY_TRANSACTION") {
+
+    case class Failure()(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm(cause = "Topology transaction is not properly authorized")
         with TopologyManagerError
   }
 

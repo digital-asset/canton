@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.implicits._
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.daml.lf.CantonOnly
-import com.daml.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String255}
 import com.digitalasset.canton.config.{
@@ -27,7 +26,7 @@ import com.digitalasset.canton.participant.admin.{
   ResourceManagementService,
 }
 import com.digitalasset.canton.participant.config.{
-  IndexerConfig,
+  LedgerApiServerParametersConfig,
   ParticipantNodeParameters,
   ParticipantProtocolConfig,
   ParticipantStoreConfig,
@@ -100,9 +99,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       dbBatchAggregationConfig = BatchAggregatorConfig.defaultsForTesting,
     ),
     cachingConfigs = CachingConfigs(),
-    contractIdSeeding = Seeding.Strong, // not used
     sequencerClient = SequencerClientConfig(),
-    indexer = IndexerConfig(),
     transferTimeProofFreshnessProportion = NonNegativeInt.tryCreate(3),
     protocolConfig = ParticipantProtocolConfig(
       Some(testedProtocolVersion),
@@ -113,6 +110,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     uniqueContractKeys = false,
     enableCausalityTracking = true,
     unsafeEnableDamlLfDevVersion = false,
+    ledgerApiServerParameters = LedgerApiServerParametersConfig(),
   )
 
   case class Fixture() {
@@ -273,7 +271,8 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
                   ParticipantPermission.Submission,
                 ),
               ),
-            )(testedProtocolVersion)
+              testedProtocolVersion,
+            )
           ),
           eqTo(None),
           eqTo(testedProtocolVersion),

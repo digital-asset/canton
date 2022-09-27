@@ -55,7 +55,8 @@ class PackageInspectionOpsForTesting(
     val tx: TopologyTransaction[TopologyChangeOp] = TopologyStateUpdate(
       TopologyChangeOp.Remove,
       TopologyStateUpdateElement(TopologyElementId.generate(), mapping),
-    )(BaseTest.testedProtocolVersion)
+      BaseTest.testedProtocolVersion,
+    )
 
     EitherT.rightT(tx)
   }

@@ -22,10 +22,12 @@ import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
+  HasProtocolVersionedCompanion,
+  HasProtocolVersionedWrapper,
+  ProtobufVersion,
   ProtocolVersion,
-  VersionedMessage,
+  ProtocolVersionedCompanionDbHelpers,
+  RepresentativeProtocolVersion,
 }
 import com.google.protobuf.empty.Empty
 
@@ -38,8 +40,12 @@ import com.google.protobuf.empty.Empty
 trait SubmissionTrackingData
     extends Product
     with Serializable
-    with HasVersionedWrapper[VersionedMessage[SubmissionTrackingData]]
+    with HasProtocolVersionedWrapper[SubmissionTrackingData]
     with PrettyPrinting {
+
+  override protected def companionObj = SubmissionTrackingData
+
+  protected def toProtoV0: v0.SubmissionTrackingData
 
   /** Produce a rejection event for the unsequenced submission using the given record time. */
   def rejectionEvent(recordTime: CantonTimestamp)(implicit
@@ -57,9 +63,16 @@ trait SubmissionTrackingData
   ): Option[UnsequencedSubmission]
 }
 
-object SubmissionTrackingData extends HasVersionedMessageCompanion[SubmissionTrackingData] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SubmissionTrackingData)(fromProtoV0)
+object SubmissionTrackingData
+    extends HasProtocolVersionedCompanion[SubmissionTrackingData]
+    with ProtocolVersionedCompanionDbHelpers[SubmissionTrackingData] {
+
+  val supportedProtoVersions = SupportedProtoVersions(
+    ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SubmissionTrackingData)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "submission tracking data"
@@ -77,10 +90,11 @@ object SubmissionTrackingData extends HasVersionedMessageCompanion[SubmissionTra
 }
 
 /** Tracking data for transactions */
-case class TransactionSubmissionTrackingData(
+final case class TransactionSubmissionTrackingData(
     completionInfo: CompletionInfo,
     rejectionCause: TransactionSubmissionTrackingData.RejectionCause,
-) extends SubmissionTrackingData
+)(val representativeProtocolVersion: RepresentativeProtocolVersion[SubmissionTrackingData])
+    extends SubmissionTrackingData
     with HasLoggerName {
 
   override def rejectionEvent(
@@ -89,7 +103,6 @@ case class TransactionSubmissionTrackingData(
 
     val reasonTemplate = rejectionCause.asRejectionReasonTemplate(recordTime)
     CommandRejected(recordTime.toLf, completionInfo, reasonTemplate)
-
   }
 
   override def updateOnNotSequenced(timestamp: CantonTimestamp, reason: DeliverErrorReason)(implicit
@@ -98,15 +111,13 @@ case class TransactionSubmissionTrackingData(
     val deliverError = TransactionProcessor.SubmissionErrors.SequencerDeliver.Error(reason)
     UnsequencedSubmission(
       timestamp,
-      this.copy(rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(deliverError)),
+      this.copy(rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(deliverError))(
+        representativeProtocolVersion
+      ),
     ).some
   }
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[SubmissionTrackingData] = VersionedMessage(toProtoV0.toByteString, 0)
-
-  private def toProtoV0: v0.SubmissionTrackingData = {
+  protected def toProtoV0: v0.SubmissionTrackingData = {
     val completionInfoP = SerializableCompletionInfo(completionInfo).toProtoV0
     val transactionTracking = v0.TransactionSubmissionTrackingData(
       completionInfo = completionInfoP.some,
@@ -122,6 +133,15 @@ case class TransactionSubmissionTrackingData(
 }
 
 object TransactionSubmissionTrackingData {
+  def apply(
+      completionInfo: CompletionInfo,
+      rejectionCause: TransactionSubmissionTrackingData.RejectionCause,
+      protocolVersion: ProtocolVersion,
+  ): TransactionSubmissionTrackingData =
+    TransactionSubmissionTrackingData(completionInfo, rejectionCause)(
+      SubmissionTrackingData.protocolVersionRepresentativeFor(protocolVersion)
+    )
+
   def fromProtoV0(
       tracking: v0.TransactionSubmissionTrackingData
   ): ParsingResult[TransactionSubmissionTrackingData] = {
@@ -133,7 +153,9 @@ object TransactionSubmissionTrackingData {
         completionInfoP,
       )
       cause <- ProtoConverter.parseRequired(RejectionCause.fromProtoV0, "rejection cause", causeP)
-    } yield TransactionSubmissionTrackingData(completionInfo, cause)
+    } yield TransactionSubmissionTrackingData(completionInfo, cause)(
+      SubmissionTrackingData.protocolVersionRepresentativeFor(ProtobufVersion(0))
+    )
   }
 
   trait RejectionCause extends Product with Serializable with PrettyPrinting {

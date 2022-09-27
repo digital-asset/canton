@@ -35,6 +35,7 @@ trait DbSingleDimensionEventLogTest
         id,
         storage,
         InMemoryIndexedStringStore(),
+        testedReleaseProtocolVersion,
         timeouts,
         loggerFactory,
       )

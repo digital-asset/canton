@@ -77,7 +77,7 @@ class DbRequestJournalStore(
     (s: RequestState, pp: PositionedParameters) => pp.setInt(s.index)
 
   implicit val getResultRequestData: GetResult[RequestData] = GetResult(r =>
-    new RequestData(
+    RequestData(
       r.nextLong(),
       getResultRequestState(r),
       GetResult[CantonTimestamp].apply(r),

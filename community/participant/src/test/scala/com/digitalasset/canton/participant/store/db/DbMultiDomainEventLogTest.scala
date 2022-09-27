@@ -5,9 +5,12 @@ package com.digitalasset.canton.participant.store.db
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLogTest}
+import com.digitalasset.canton.participant.store.{
+  EventLogId,
+  MultiDomainEventLogTest,
+  SerializableLedgerSyncEvent,
+}
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.resource.{DbStorage, IdempotentInsert}
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
@@ -67,17 +70,20 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
 
     @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
       TraceContext.getVersionedSetParameter(testedProtocolVersion)
-    @nowarn("cat=unused") implicit val setParameterLedgerSyncEvent: SetParameter[LedgerSyncEvent] =
-      ParticipantStorageImplicits.setLedgerSyncEvent(testedProtocolVersion)
+    @nowarn("cat=unused") implicit val setParameterSerializableLedgerSyncEvent
+        : SetParameter[SerializableLedgerSyncEvent] =
+      SerializableLedgerSyncEvent.getVersionedSetParameter
 
     val queries = events.map {
       case (id, tsEvent @ TimestampedEvent(event, localOffset, requestSequencerCounter, eventId)) =>
+        val serializableLedgerSyncEvent = SerializableLedgerSyncEvent(event, testedProtocolVersion)
+
         IdempotentInsert.insertIgnoringConflicts(
           storage,
           "event_log pk_event_log",
           sql"""event_log (log_id, local_offset, ts, request_sequencer_counter, event_id, content, trace_context)
                values (${id.index}, $localOffset, ${tsEvent.timestamp}, $requestSequencerCounter, 
-                 $eventId, $event, ${tsEvent.traceContext})""",
+                 $eventId, $serializableLedgerSyncEvent, ${tsEvent.traceContext})""",
         )
     }
 

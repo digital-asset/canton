@@ -539,7 +539,7 @@ class ExampleTransactionFactory(
       protocolVersion,
     )
 
-    TransactionView(cryptoOps)(viewCommonData, viewParticipantData, subviews)
+    TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, subviews)
   }
 
   def mkMetadata(seeds: Map[LfNodeId, LfHash] = Map.empty): TransactionMetadata =
@@ -563,7 +563,9 @@ class ExampleTransactionFactory(
       Salt.tryDeriveSalt(transactionSeed, 0, cryptoOps),
       DefaultDamlValues.submissionId().some,
       DeduplicationDuration(JDuration.ofSeconds(100)),
-    )(cryptoOps, protocolVersion)
+      cryptoOps,
+      protocolVersion,
+    )
 
   val commonMetadata: CommonMetadata =
     CommonMetadata(cryptoOps)(
@@ -598,7 +600,7 @@ class ExampleTransactionFactory(
   ): TransactionView =
     view match {
       case TransactionView(viewCommonData, viewParticipantData, _) =>
-        TransactionView(cryptoOps)(viewCommonData, blinded(viewParticipantData), subviews)
+        TransactionView.tryCreate(cryptoOps)(viewCommonData, blinded(viewParticipantData), subviews)
     }
 
   def informeeTree(rootViews: MerkleTree[TransactionView]*): InformeeTree =
@@ -624,7 +626,11 @@ class ExampleTransactionFactory(
   def leafsBlinded(view: TransactionView, subviews: MerkleTree[TransactionView]*): TransactionView =
     view match {
       case TransactionView(viewCommonData, viewParticipantData, _) =>
-        TransactionView(cryptoOps)(blinded(viewCommonData), blinded(viewParticipantData), subviews)
+        TransactionView.tryCreate(cryptoOps)(
+          blinded(viewCommonData),
+          blinded(viewParticipantData),
+          subviews,
+        )
     }
 
   def nonRootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =

@@ -161,7 +161,7 @@ object Encrypted {
     Right(new Encrypted[M](byteString))
 }
 
-case class AsymmetricEncrypted[+M] private[crypto] (
+case class AsymmetricEncrypted[+M](
     ciphertext: ByteString,
     encryptedFor: Fingerprint,
 ) extends NoCopy {
@@ -392,7 +392,7 @@ final case class EncryptionPrivateKey private[crypto] (
   def toStored(name: Option[KeyName], wrapperKeyId: Option[String300]): StoredPrivateKey = {
     new StoredPrivateKey(
       id,
-      //todo #9957: verify correctness of hardcoded protocol version
+      // TODO(#9957) verify correctness of hardcoded protocol version
       toByteString(ProtocolVersion.latest),
       purpose,
       name,

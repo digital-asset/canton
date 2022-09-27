@@ -32,6 +32,7 @@ object ReleaseVersionToProtocolVersions {
     ReleaseVersions.v2_3_2 -> List(v2, v3),
     ReleaseVersions.v2_3_3 -> List(v2, v3),
     ReleaseVersions.v2_3_4 -> List(v2, v3),
+    ReleaseVersions.v2_4_0_rc1 -> List(v2, v3),
     ReleaseVersions.v2_4_0_snapshot -> List(v2, v3),
   ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
 }

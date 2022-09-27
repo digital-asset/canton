@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.config
 
+import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
@@ -154,14 +155,13 @@ case class ParticipantNodeParameters(
     maxUnzippedDarSize: Int,
     stores: ParticipantStoreConfig,
     override val cachingConfigs: CachingConfigs,
-    contractIdSeeding: Seeding,
     override val sequencerClient: SequencerClientConfig,
-    indexer: IndexerConfig,
     transferTimeProofFreshnessProportion: NonNegativeInt,
     protocolConfig: ParticipantProtocolConfig,
     uniqueContractKeys: Boolean,
     enableCausalityTracking: Boolean,
     unsafeEnableDamlLfDevVersion: Boolean,
+    ledgerApiServerParameters: LedgerApiServerParametersConfig,
 ) extends LocalNodeParameters {
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -738,16 +738,14 @@ object TestingTimeServiceConfig {
 /** General participant node parameters
   *
   * @param adminWorkflow Configuration options for Canton admin workflows
-  * @param partyChangeNotification   Determines how eagerly the participant nodes notify the ledger api of party changes.
-  *                                  By default ensure that parties are added via at least one domain before ACKing party creation to ledger api server indexer.
-  *                                  This not only avoids flakiness in tests, but reflects that a party is not actually usable in canton until it's
-  *                                  available through at least one domain.
-  * @param maxUnzippedDarSize        maximum allowed size of unzipped DAR files (in bytes) the participant can accept for uploading. Defaults to 1GB.
-  * @param contractIdSeeding         test-only way to override the contract-id seeding scheme. Must be Strong in production (and Strong is the default).
-  *                                  Only configurable to reduce the amount of secure random numbers consumed by tests and to avoid flaky timeouts during continuous integration.
+  * @param partyChangeNotification Determines how eagerly the participant nodes notify the ledger api of party changes.
+  *                                By default ensure that parties are added via at least one domain before ACKing party creation to ledger api server indexer.
+  *                                This not only avoids flakiness in tests, but reflects that a party is not actually usable in canton until it's
+  *                                available through at least one domain.
+  * @param maxUnzippedDarSize maximum allowed size of unzipped DAR files (in bytes) the participant can accept for uploading. Defaults to 1GB.
+  * @param ledgerApiServerParameters ledger api server parameters
   *
   * The following specialized participant node performance tuning parameters may be grouped once a more final set of configs emerges.
-  * @param indexer                   parameters how the participant populates the index db used to serve the ledger api
   * @param transferTimeProofFreshnessProportion Proportion of the target domain exclusivity timeout that is used as a freshness bound when
   *                                             requesting a time proof. Setting to 3 means we'll take a 1/3 of the target domain exclusivity timeout
   *                                             and potentially we reuse a recent timeout if one exists within that bound, otherwise a new time proof
@@ -766,9 +764,7 @@ case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
     partyChangeNotification: PartyNotificationConfig = PartyNotificationConfig.ViaDomain,
     maxUnzippedDarSize: Int = 1024 * 1024 * 1024,
-    contractIdSeeding: Seeding = Seeding.Strong,
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
-    indexer: IndexerConfig = IndexerConfig(),
     transferTimeProofFreshnessProportion: NonNegativeInt = NonNegativeInt.tryCreate(3),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
       ParticipantProtocolVersion(
@@ -784,6 +780,7 @@ case class ParticipantNodeParameterConfig(
     warnIfOverloadedFor: Option[NonNegativeFiniteDuration] = Some(
       NonNegativeFiniteDuration.ofSeconds(20)
     ),
+    ledgerApiServerParameters: LedgerApiServerParametersConfig = LedgerApiServerParametersConfig(),
 )
 
 /** Parameters for the participant node's stores
@@ -802,4 +799,17 @@ case class ParticipantStoreConfig(
     maxPruningBatchSize: Int = 1000,
     acsPruningInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(60),
     dbBatchAggregationConfig: BatchAggregatorConfig = BatchAggregatorConfig.Batching(),
+)
+
+/** Parameters for the ledger api server
+  *
+  * @param contractIdSeeding  test-only way to override the contract-id seeding scheme. Must be Strong in production (and Strong is the default).
+  *                           Only configurable to reduce the amount of secure random numbers consumed by tests and to avoid flaky timeouts during continuous integration.
+  * @param indexer            parameters how the participant populates the index db used to serve the ledger api
+  * @param jwtTimestampLeeway leeway parameters for JWTs
+  */
+case class LedgerApiServerParametersConfig(
+    contractIdSeeding: Seeding = Seeding.Strong,
+    indexer: IndexerConfig = IndexerConfig(),
+    jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
 )

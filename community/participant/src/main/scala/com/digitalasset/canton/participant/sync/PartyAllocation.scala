@@ -194,5 +194,6 @@ private[sync] class PartyAllocation(
         ParticipantPermission.Submission,
       ),
     ),
-  )(protocolVersion)
+    protocolVersion,
+  )
 }

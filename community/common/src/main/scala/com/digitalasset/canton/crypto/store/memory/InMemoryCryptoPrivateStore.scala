@@ -112,7 +112,7 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
     }
   }
 
-  override private[store] def listPrivateKeys(purpose: KeyPurpose)(implicit
+  override private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     EitherT.rightT(

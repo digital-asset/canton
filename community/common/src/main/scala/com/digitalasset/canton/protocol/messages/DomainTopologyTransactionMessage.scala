@@ -12,7 +12,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   ProtobufVersion,
@@ -23,7 +22,7 @@ import com.google.protobuf.ByteString
 
 import scala.concurrent.{ExecutionContext, Future}
 
-sealed abstract case class DomainTopologyTransactionMessage private (
+case class DomainTopologyTransactionMessage private (
     domainTopologyManagerSignature: Signature,
     transactions: List[SignedTopologyTransaction[TopologyChangeOp]],
     override val domainId: DomainId,
@@ -33,8 +32,7 @@ sealed abstract case class DomainTopologyTransactionMessage private (
     ]
 ) extends ProtocolMessage
     with ProtocolMessageV0
-    with ProtocolMessageV1
-    with NoCopy {
+    with ProtocolMessageV1 {
   def hashToSign(hashOps: HashOps): Hash =
     DomainTopologyTransactionMessage.hash(transactions, domainId, hashOps)
 
@@ -99,11 +97,11 @@ object DomainTopologyTransactionMessage
     syncCrypto
       .sign(hashToSign)
       .map(signature =>
-        new DomainTopologyTransactionMessage(
+        DomainTopologyTransactionMessage(
           signature,
           transactions,
           domainId,
-        )(protocolVersionRepresentativeFor(protocolVersion)) {}
+        )(protocolVersionRepresentativeFor(protocolVersion))
       )
   }
 
@@ -142,11 +140,11 @@ object DomainTopologyTransactionMessage
         message.signature,
       )
       domainUid <- UniqueIdentifier.fromProtoPrimitive(message.domainId, "domainId")
-    } yield new DomainTopologyTransactionMessage(
+    } yield DomainTopologyTransactionMessage(
       signature,
       succeededContent,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0))) {}
+    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
   }
 
   override protected def name: String = "DomainTopologyTransactionMessage"

@@ -13,7 +13,6 @@ import com.digitalasset.canton.protocol.{RequestId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version._
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
@@ -25,7 +24,7 @@ import com.google.protobuf.ByteString
   * @param verdict          the finalized verdict on the request
   * @param notificationTree the informee tree unblinded for the parties hosted by the receiving participant
   */
-sealed abstract case class TransactionResultMessage(
+case class TransactionResultMessage private (
     override val requestId: RequestId,
     override val verdict: Verdict,
     notificationTree: InformeeTree,
@@ -33,7 +32,6 @@ sealed abstract case class TransactionResultMessage(
     val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionResultMessage],
     val deserializedFrom: Option[ByteString],
 ) extends RegularMediatorResult
-    with NoCopy
     with HasProtocolVersionedWrapper[TransactionResultMessage]
     with PrettyPrinting {
 
@@ -96,7 +94,7 @@ object TransactionResultMessage
       _.toProtoV0.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev, // TODO(i10131): make stable
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransactionResultMessage)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -108,10 +106,10 @@ object TransactionResultMessage
       notificationTree: InformeeTree,
       protocolVersion: ProtocolVersion,
   ): TransactionResultMessage =
-    new TransactionResultMessage(requestId, verdict, notificationTree)(
+    TransactionResultMessage(requestId, verdict, notificationTree)(
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
   private def fromProtoV0(hashOps: HashOps, protoResultMessage: v0.TransactionResultMessage)(
       bytes: ByteString
@@ -128,10 +126,10 @@ object TransactionResultMessage
         .required("notification_tree", protoResultMessage.notificationTree)
         .leftWiden[ProtoDeserializationError]
       notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
-    } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
+    } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
 
   private def fromProtoV1(hashOps: HashOps, protoResultMessage: v1.TransactionResultMessage)(
       bytes: ByteString
@@ -147,10 +145,10 @@ object TransactionResultMessage
       notificationTree <- ProtoConverter
         .required("notification_tree", notificationTreePO)
         .flatMap(InformeeTree.fromProtoV0(hashOps, _))
-    } yield new TransactionResultMessage(requestId, transactionResult, notificationTree)(
+    } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
       protocolVersionRepresentativeFor(ProtobufVersion(1)),
       Some(bytes),
-    ) {}
+    )
   }
 
   implicit val transactionResultMessageCast: SignedMessageContentCast[TransactionResultMessage] = {

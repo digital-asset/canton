@@ -20,7 +20,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
@@ -223,7 +222,7 @@ class X509CertificateGenerator(
           .sign(receiver.bytes, signignKeyId)
           .leftMap(signingError => X509CertificateError.SigningError(signingError))
         certificate <- getCertificate(
-          new SignatureProvider(signature.toByteString(ProtocolVersion.v2Todo_i8793))
+          new SignatureProvider(signature.toByteString(ProtocolVersion.v2Todo_i9957))
         )
       } yield X509Certificate(certificate)
     }
@@ -387,17 +386,13 @@ sealed trait X509CertificateEncoder[Encoding] {
 }
 
 /** A X509 Certificate serialized in PEM format. */
-case class X509CertificatePem private (private val bytes: ByteString) extends NoCopy {
+case class X509CertificatePem private (private val bytes: ByteString) {
   def unwrap: ByteString = bytes
 
   override def toString: String = bytes.toStringUtf8
 }
 
 object X509CertificatePem extends X509CertificateEncoder[X509CertificatePem] {
-
-  private def apply(bytes: ByteString): X509CertificatePem =
-    throw new UnsupportedOperationException("Use the other constructor methods instead")
-
   def fromString(pem: String): Either[String, X509CertificatePem] =
     fromBytes(ByteString.copyFromUtf8(pem))
 
@@ -418,16 +413,13 @@ object X509CertificatePem extends X509CertificateEncoder[X509CertificatePem] {
 }
 
 /** A X509 Certificate serialized in DER format. */
-case class X509CertificateDer private (private val bytes: ByteString) extends NoCopy {
+case class X509CertificateDer private (private val bytes: ByteString) {
   def unwrap: ByteString = bytes
 
   override def toString: String = bytes.toStringUtf8
 }
 
 object X509CertificateDer extends X509CertificateEncoder[X509CertificateDer] {
-  private def apply(bytes: ByteString): X509CertificateDer =
-    throw new UnsupportedOperationException("Use the other constructor methods instead")
-
   override def fromBytes(der: ByteString): Either[String, X509CertificateDer] = Right(
     new X509CertificateDer(der)
   )

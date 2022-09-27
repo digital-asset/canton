@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   TimeoutType,
 }
 import com.digitalasset.canton.admin.api.client.data.{DarMetadata, ListConnectedDomainsResult}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.grpc.TransferSearchResult
 import com.digitalasset.canton.participant.admin.v0.DomainConnectivityServiceGrpc.DomainConnectivityServiceStub
@@ -56,9 +57,9 @@ object ParticipantAdminCommands {
         PackageServiceGrpc.stub(channel)
     }
 
-    final case class List(limit: Option[Int])
+    final case class List(limit: PositiveInt)
         extends PackageCommand[ListPackagesRequest, ListPackagesResponse, Seq[PackageDescription]] {
-      override def createRequest() = Right(ListPackagesRequest(limit.getOrElse(0)))
+      override def createRequest() = Right(ListPackagesRequest(limit.value))
 
       override def submitRequest(
           service: PackageServiceStub,
@@ -236,10 +237,10 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class ListDars(limit: Option[Int])
+    final case class ListDars(limit: PositiveInt)
         extends PackageCommand[ListDarsRequest, ListDarsResponse, Seq[DarDescription]] {
       override def createRequest(): Either[String, ListDarsRequest] = Right(
-        ListDarsRequest(limit.getOrElse(0))
+        ListDarsRequest(limit.value)
       )
 
       override def submitRequest(

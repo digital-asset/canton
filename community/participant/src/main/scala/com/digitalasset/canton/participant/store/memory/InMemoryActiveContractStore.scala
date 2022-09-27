@@ -310,7 +310,7 @@ object InMemoryActiveContractStore {
       changes: ChangeJournal,
       latestCreation: Option[TimeOfChange],
       earliestArchival: Option[TimeOfChange],
-  ) extends NoCopy {
+  ) {
     import IndividualChange.{archive, create, transferIn, transferOut}
 
     private[InMemoryActiveContractStore] def addCreation(

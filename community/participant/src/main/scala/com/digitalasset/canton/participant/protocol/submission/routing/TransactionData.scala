@@ -25,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * @param prescribedDomainO If non-empty, thInvalidWorkflowIde prescribed domain will be chosen for routing.
   *                          In case this domain is not admissible, submission will fail.
   */
-private[routing] sealed abstract case class TransactionData(
+private[routing] final case class TransactionData private (
     transaction: LfVersionedTransaction,
     requiredPackagesPerParty: Map[LfPartyId, Set[LfPackageId]],
     submitters: Set[LfPartyId],
@@ -53,13 +53,13 @@ private[routing] object TransactionData {
       contractsDomainData <- EitherT.liftF(
         ContractsDomainData.create(domainOfContracts, inputContractsMetadata)
       )
-    } yield new TransactionData(
+    } yield TransactionData(
       transaction = transaction,
       requiredPackagesPerParty = Blinding.partyPackages(transaction),
       submitters = submitters,
       inputContractsDomainData = contractsDomainData,
       prescribedDomainO = prescribedDomainO,
-    ) {}
+    )
   }
 
   def create(

@@ -12,7 +12,6 @@ import com.digitalasset.canton.protocol.{RequestId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtocolVersionedWrapper,
@@ -29,7 +28,7 @@ import com.google.protobuf.ByteString
   * @param domainId The domain ID of the mediator
   * @param verdict The rejection reason as a verdict
   */
-sealed abstract case class MalformedMediatorRequestResult(
+case class MalformedMediatorRequestResult private (
     override val requestId: RequestId,
     override val domainId: DomainId,
     override val viewType: ViewType,
@@ -42,7 +41,6 @@ sealed abstract case class MalformedMediatorRequestResult(
 ) extends MediatorResult
     with SignedProtocolMessageContent
     with HasProtocolVersionedWrapper[MalformedMediatorRequestResult]
-    with NoCopy
     with PrettyPrinting {
 
   override def hashPurpose: HashPurpose = HashPurpose.MalformedMediatorRequestResult
@@ -93,7 +91,7 @@ object MalformedMediatorRequestResult
       _.toProtoV0.toByteString,
     ),
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev, // TODO(i10131): make stable
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.MalformedMediatorRequestResult)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -106,10 +104,10 @@ object MalformedMediatorRequestResult
       verdict: Verdict.MediatorReject,
       protocolVersion: ProtocolVersion,
   ): MalformedMediatorRequestResult =
-    new MalformedMediatorRequestResult(requestId, domainId, viewType, verdict)(
+    MalformedMediatorRequestResult(requestId, domainId, viewType, verdict)(
       protocolVersionRepresentativeFor(protocolVersion),
       None,
-    ) {}
+    )
 
   private def fromProtoV0(protoResultMsg: v0.MalformedMediatorRequestResult)(
       bytes: ByteString
@@ -125,10 +123,10 @@ object MalformedMediatorRequestResult
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(MediatorReject.fromProtoV0, "rejection", rejectP)
-    } yield new MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
+    } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
       protocolVersionRepresentativeFor(ProtobufVersion(0)),
       Some(bytes),
-    ) {}
+    )
   }
 
   private def fromProtoV1(malformedMediatorRequestResultP: v1.MalformedMediatorRequestResult)(
@@ -144,10 +142,10 @@ object MalformedMediatorRequestResult
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "domain_id")
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(MediatorReject.fromProtoV1, "rejection", rejectionPO)
-    } yield new MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
+    } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
       protocolVersionRepresentativeFor(ProtobufVersion(1)),
       Some(bytes),
-    ) {}
+    )
   }
 
   implicit val malformedMediatorRequestResultCast

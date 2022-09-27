@@ -80,7 +80,6 @@ object BaseQuery {
 class GrpcTopologyManagerReadService(
     stores: => Future[Seq[TopologyStore[TopologyStoreId]]],
     ips: IdentityProvidingServiceClient,
-    initialProtocolVersion: ProtocolVersion,
     crypto: Crypto,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)

@@ -14,6 +14,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -22,6 +23,7 @@ class DbParticipantEventLog(
     id: ParticipantEventLogId,
     storage: DbStorage,
     indexedStringStore: IndexedStringStore,
+    releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -29,6 +31,7 @@ class DbParticipantEventLog(
       id,
       storage,
       indexedStringStore,
+      releaseProtocolVersion,
       timeouts,
       loggerFactory,
     )

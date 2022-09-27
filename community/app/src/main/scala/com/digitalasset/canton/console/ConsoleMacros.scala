@@ -23,7 +23,7 @@ import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.ContractData
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits._
 import com.digitalasset.canton.external.{BackgroundRunnerHandler, BackgroundRunnerHelpers}
@@ -698,7 +698,7 @@ object DebuggingHelpers extends LazyLogging {
 
   def get_active_contracts(
       ref: LocalParticipantReference,
-      limit: Int = 1000000,
+      limit: PositiveInt = PositiveInt.tryCreate(1000000),
   ): (Map[String, String], Map[String, String]) =
     get_active_contracts_helper(
       ref,
@@ -708,13 +708,13 @@ object DebuggingHelpers extends LazyLogging {
   def get_active_contracts_from_internal_db_state(
       ref: ParticipantReference,
       state: SyncStateInspection,
-      limit: Int = 1000000,
+      limit: PositiveInt = PositiveInt.tryCreate(1000000),
   ): (Map[String, String], Map[String, String]) =
     get_active_contracts_helper(
       ref,
       alias =>
         TraceContext.withNewTraceContext(implicit traceContext =>
-          state.findContracts(alias, None, None, None, limit)
+          state.findContracts(alias, None, None, None, limit.value)
         ),
     )
 

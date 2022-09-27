@@ -17,7 +17,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  * Unstable tests are still periodically executed and failures are reported to DataDog.
  * But pull requests can still be merged, even if unstable tests fail.
  *
- * The UnstableTest annotation and tag have currently no effect on Fabric/Ethereum/Ccf tests.
+ * The UnstableTest annotation and tag have currently no effect on Fabric/Ethereum/Ccf/Nightly tests.
  */
 @org.scalatest.TagAnnotation
 @Inherited

@@ -48,7 +48,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         s(999),
         testedProtocolVersion,
       )
-    val view = TransactionView(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
+    val view = TransactionView.tryCreate(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
     val commonMetadata = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,
       domainId,

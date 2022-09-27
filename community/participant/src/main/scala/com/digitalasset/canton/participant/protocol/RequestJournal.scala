@@ -485,15 +485,6 @@ object RequestJournal {
   }
 
   object RequestData {
-    private[this] def apply(
-        rc: RequestCounter,
-        state: RequestState,
-        requestTimestamp: CantonTimestamp,
-        commitTime: Option[CantonTimestamp],
-        repairContext: Option[RepairContext],
-    ): RequestCounter =
-      throw new UnsupportedOperationException("Use the other factory methods")
-
     def apply(
         requestCounter: RequestCounter,
         state: NonterminalRequestState,

@@ -174,6 +174,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         None,
         uniqueContractKeysO = Some(false),
         ParticipantStoreConfig(),
+        testedReleaseProtocolVersion,
         ParticipantTestMetrics,
         indexedStringStore,
         timeouts,

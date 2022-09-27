@@ -17,6 +17,7 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -60,6 +61,7 @@ object ParticipantEventLog {
   def apply(
       storage: Storage,
       indexedStringStore: IndexedStringStore,
+      releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ParticipantEventLog =
@@ -71,6 +73,7 @@ object ParticipantEventLog {
           ProductionParticipantEventLogId,
           dbStorage,
           indexedStringStore,
+          releaseProtocolVersion,
           timeouts,
           loggerFactory,
         )

@@ -403,6 +403,15 @@ class CantonSyncService(
             err.lastSafeOffset.fold("")(UpstreamOffsetConvert.fromGlobalOffset(_).toHexString),
           )
         )
+      case Left(err: LedgerPruningOffsetUnsafeDomain) =>
+        logger.info(s"Unsafe to prune ${err.domain}: ${err.message}")
+        Left(
+          PruningServiceError.UnsafeToPrune.Error(
+            s"no suitable offset for domain ${err.domain}",
+            err.message,
+            "none",
+          )
+        )
       case Left(err) =>
         logger.warn(s"Internal error while pruning: $err")
         Left(PruningServiceError.InternalServerError.Error(err.message))
@@ -1864,6 +1873,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
         )
         with SyncServiceError
 
+  }
+
+  @Explanation("The participant has detected that another node is behaving maliciously.")
+  @Resolution("Contact support.")
+  object SyncServiceAlarm extends AlarmErrorCode("SYNC_SERVICE_ALARM") {
+    case class Warn(override val cause: String) extends Alarm(cause)
   }
 
   case class SyncServiceStartupError(override val errors: NonEmpty[Seq[SyncServiceError]])(implicit

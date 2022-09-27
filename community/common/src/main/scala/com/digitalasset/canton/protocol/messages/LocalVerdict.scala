@@ -12,6 +12,7 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.LocalRejectionGroup
 import com.digitalasset.canton.error._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.messages.LocalReject.MalformedRejects.CreatesExistingContracts
 import com.digitalasset.canton.protocol.messages.LocalVerdict.protocolVersionRepresentativeFor
 import com.digitalasset.canton.protocol.{messages, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -53,7 +54,7 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
         _.toByteString,
       ),
       ProtobufVersion(1) -> VersionedProtoConverter(
-        ProtocolVersion.dev, // TODO(i10131): make stable
+        ProtocolVersion.v4,
         supportedProtoVersion(v1.LocalVerdict)(fromProtoV1),
         _.toByteString,
       ),
@@ -405,25 +406,6 @@ object LocalReject extends LocalRejectionGroup {
             _resourcesType = Some(CantonErrorResource.ContractKey),
           )
     }
-
-    @Explanation(
-      """This error indicates that the transaction would create already existing contracts."""
-    )
-    @Resolution("This error indicates either faulty or malicious behaviour.")
-    object CreatesExistingContracts
-        extends LocalRejectErrorCode(
-          id = "LOCAL_VERDICT_CREATES_EXISTING_CONTRACTS",
-          ErrorCategory.MaliciousOrFaultyBehaviour,
-          v0.LocalReject.Code.CreatesExistingContract,
-        ) {
-      case class Reject(override val _resources: Seq[String])(
-          override val protocolVersion: ProtocolVersion
-      ) extends LocalRejectImpl(
-            _causePrefix = "Rejected transaction would create contract(s) that already exist ",
-            _resourcesType = Some(CantonErrorResource.ContractKey),
-          )
-    }
-
   }
 
   object TimeRejects extends ErrorGroup() {
@@ -561,6 +543,23 @@ object LocalReject extends LocalRejectionGroup {
           override val protocolVersion: ProtocolVersion
       ) extends Malformed(
             _causePrefix = "Rejected transaction due to bad root hash error messages. "
+          )
+    }
+
+    @Explanation(
+      """This error indicates that the transaction would create already existing contracts."""
+    )
+    @Resolution("This error indicates either faulty or malicious behaviour.")
+    object CreatesExistingContracts
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_CREATES_EXISTING_CONTRACTS",
+          v0.LocalReject.Code.CreatesExistingContract,
+        ) {
+      case class Reject(override val _resources: Seq[String])(
+          override val protocolVersion: ProtocolVersion
+      ) extends Malformed(
+            _causePrefix = "Rejected transaction would create contract(s) that already exist ",
+            _resourcesType = Some(CantonErrorResource.ContractId),
           )
     }
   }

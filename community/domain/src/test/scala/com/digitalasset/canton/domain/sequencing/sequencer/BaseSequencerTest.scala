@@ -70,6 +70,12 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): EitherT[Future, SendAsyncError, Unit] =
       EitherT.pure[Future, SendAsyncError](())
+    override protected def sendAsyncSignedInternal(
+        signedSubmission: SignedContent[SubmissionRequest]
+    )(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SendAsyncError, Unit] =
+      EitherT.pure[Future, SendAsyncError](())
     override def isRegistered(member: Member)(implicit
         traceContext: TraceContext
     ): Future[Boolean] =

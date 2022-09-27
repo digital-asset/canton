@@ -20,7 +20,6 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.NoCopy
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap
@@ -109,7 +108,7 @@ object InMemoryContractKeyJournal {
   private type ChangeJournal = SortedMap[TimeOfChange, Status]
 
   // Invariant: All values in the change journal are non-negative.
-  case class KeyStatus private (changes: ChangeJournal) extends NoCopy {
+  case class KeyStatus private (changes: ChangeJournal) {
 
     def latest: Option[ContractKeyState] = changes.headOption.map { case (toc, status) =>
       ContractKeyState(status, toc)

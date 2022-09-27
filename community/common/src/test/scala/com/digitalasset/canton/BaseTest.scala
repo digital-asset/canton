@@ -17,7 +17,11 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
-import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
+import com.digitalasset.canton.version.{
+  ProtocolVersion,
+  ReleaseProtocolVersion,
+  RepresentativeProtocolVersion,
+}
 import io.opentelemetry.api.trace.Tracer
 import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
 import org.scalacheck.Test
@@ -70,6 +74,8 @@ trait BaseTest
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
   protected lazy val testedProtocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
+  protected lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion =
+    BaseTest.testedReleaseProtocolVersion
   protected lazy val defaultStaticDomainParameters: StaticDomainParameters =
     BaseTest.defaultStaticDomainParameters
 
@@ -352,6 +358,10 @@ object BaseTest {
 
   lazy val testedProtocolVersion: ProtocolVersion =
     ProtocolVersion.tryGetOptFromEnv.getOrElse(ProtocolVersion.latest)
+
+  lazy val testedReleaseProtocolVersion: ReleaseProtocolVersion = ReleaseProtocolVersion(
+    testedProtocolVersion
+  )
 
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")

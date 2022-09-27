@@ -16,23 +16,18 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
+import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.lifecycle.{
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
   FutureUnlessShutdown,
   SyncCloseable,
 }
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  HasLoggerName,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
+import com.digitalasset.canton.logging._
 import com.digitalasset.canton.participant.event.{AcsChange, AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.PruningMetrics
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.protocol.ContractIdSyntax._
 import com.digitalasset.canton.protocol.messages.{
@@ -565,10 +560,11 @@ class AcsCommitmentProcessor(
         else Future.unit
     } yield {
       if (!validSig) {
-        // TODO(M40): Somebody is being Byzantine, but we don't know who (we don't necessarily know the sender). Raise alarm?
-        logger.error(
-          s"""Received wrong signature for ACS commitment at timestamp $timestamp; purported sender: ${commitment.sender}; commitment: $commitment"""
-        )
+        AcsCommitmentAlarm
+          .Warn(
+            s"""Received wrong signature for ACS commitment at timestamp $timestamp; purported sender: ${commitment.sender}; commitment: $commitment"""
+          )
+          .report()
       }
     }
 
@@ -641,8 +637,7 @@ class AcsCommitmentProcessor(
   )(implicit traceContext: TraceContext): Boolean = {
     if (local.isEmpty) {
       if (lastPruningTime.forall(_ < remote.period.toInclusive.forgetSecond)) {
-        // TODO(M40): This signifies a Byzantine sender (the signature passes). Alarms should be raised.
-        Errors.MismatchError.NoSharedContracts.Mismatch(domainId, remote)
+        Errors.MismatchError.NoSharedContracts.Mismatch(domainId, remote).report()
       } else
         logger.info(s"Ignoring incoming commitment for a pruned period: $remote")
       false
@@ -655,8 +650,9 @@ class AcsCommitmentProcessor(
           true
         }
         case mismatches => {
-          // TODO(M40): This signifies a Byzantine sender (the signature passes). Alarms should be raised.
-          Errors.MismatchError.CommitmentsMismatch.Mismatch(domainId, remote, mismatches.toSeq)
+          Errors.MismatchError.CommitmentsMismatch
+            .Mismatch(domainId, remote, mismatches.toSeq)
+            .report()
           false
         }
       }
@@ -1084,14 +1080,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
         """Please contact the other participant in order to check the cause of the mismatch. Either repair
           |the store of this participant or of the counterparty."""
       )
-      object NoSharedContracts
-          extends ErrorCode(
-            id = "ACS_MISMATCH_NO_SHARED_CONTRACTS",
-            ErrorCategory.BackgroundProcessDegradationWarning,
-          ) {
-        case class Mismatch(domain: DomainId, remote: AcsCommitment)(implicit
-            val loggingContext: ErrorLoggingContext
-        ) extends CantonError.Impl(
+      object NoSharedContracts extends AlarmErrorCode(id = "ACS_MISMATCH_NO_SHARED_CONTRACTS") {
+        case class Mismatch(domain: DomainId, remote: AcsCommitment)
+            extends Alarm(
               cause = "Received a commitment where we have no shared contract with the sender"
             )
       }
@@ -1105,23 +1096,19 @@ object AcsCommitmentProcessor extends HasLoggerName {
         """Please contact the other participant in order to check the cause of the mismatch. Either repair
           |the store of this participant or of the counterparty."""
       )
-      object CommitmentsMismatch
-          extends ErrorCode(
-            id = "ACS_COMMITMENT_MISMATCH",
-            ErrorCategory.BackgroundProcessDegradationWarning,
-          ) {
+      object CommitmentsMismatch extends AlarmErrorCode(id = "ACS_COMMITMENT_MISMATCH") {
         case class Mismatch(
             domain: DomainId,
             remote: AcsCommitment,
             local: Seq[(CommitmentPeriod, AcsCommitment.CommitmentType)],
-        )(implicit val loggingContext: ErrorLoggingContext)
-            extends CantonError.Impl(
-              cause = "The local commitment does not match the remote commitment"
-            )
+        ) extends Alarm(cause = "The local commitment does not match the remote commitment")
       }
 
+      @Explanation("The participant has detected that another node is behaving maliciously.")
+      @Resolution("Contact support.")
+      object AcsCommitmentAlarm extends AlarmErrorCode(id = "ACS_COMMITMENT_ALARM") {
+        case class Warn(override val cause: String) extends Alarm(cause)
+      }
     }
-
   }
-
 }

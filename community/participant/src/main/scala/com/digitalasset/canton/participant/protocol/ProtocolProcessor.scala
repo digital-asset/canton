@@ -23,11 +23,7 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   WrapsProcessorError,
 }
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
-import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.{
-  RequestNotFound,
-  ResultAlreadyExists,
-  TimeoutResult,
-}
+import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.TimeoutResult
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessSet,
   CommitSet,
@@ -40,12 +36,13 @@ import com.digitalasset.canton.participant.protocol.submission.{
   UnsequencedSubmission,
 }
 import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphemeralState}
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.{RequestCounter, store}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.messages.Verdict.Approve
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
+import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.client._
 import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology.MediatorId
@@ -101,11 +98,6 @@ abstract class ProtocolProcessor[
 
   import ProtocolProcessor._
   import com.digitalasset.canton.util.ShowUtil._
-
-  private val alarmer = new LoggingAlarmStreamer(logger)
-
-  private def alarm(message: String)(implicit traceContext: TraceContext): Future[Unit] =
-    alarmer.alarm(message)
 
   private[this] def withKind(message: String): String = s"${steps.requestKind}: $message"
 
@@ -744,8 +736,6 @@ abstract class ProtocolProcessor[
   }
 
   @VisibleForTesting
-  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   private[protocol] def performResultProcessing(
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]],
       result: Either[MalformedMediatorRequestResult, Result],
@@ -774,9 +764,11 @@ abstract class ProtocolProcessor[
       _ <- result.merge.verdict match {
         case _: MediatorError.Timeout.Reject
             if ts <= domainParameters.participantResponseDeadlineFor(requestId.unwrap) =>
-          alarmer.alarm(
-            s"Received mediator timeout message at $ts before response deadline for request ${requestId}"
-          )
+          SyncServiceAlarm
+            .Warn(
+              s"Received mediator timeout message at $ts before response deadline for request $requestId."
+            )
+            .report()
           ephemeral.requestTracker.tick(sc, ts)
           EitherT.leftT[Future, Unit](steps.embedResultError(TimeoutResultTooEarly(requestId)))
         case _ => EitherT.rightT[Future, steps.ResultError](()) // everything ok
@@ -1009,52 +1001,25 @@ abstract class ProtocolProcessor[
     for {
       _ <- EitherT
         .fromEither[Future](ephemeral.requestTracker.addResult(rc, sc, resultTimestamp, commitTime))
-        .leftMap(handleRequestTrackerResultError(requestId))
+        .leftMap(e => {
+          SyncServiceAlarm.Warn(s"Failed to add result for $requestId. $e").report()
+          e
+        })
       commitSetF = commitSetOF.getOrElse(Future.successful(CommitSet.empty))
       commitSetT <- EitherT.right(commitSetF.transform(Success(_)))
       commitFuture <- EitherT
         .fromEither[Future](ephemeral.requestTracker.addCommitSet(rc, commitSetT))
-        .leftMap(handleCommitSetError(requestId))
-    } yield commitFuture.foldF(
-      irregularities =>
-        alarm(withRc(rc, s"Result message causes ACS irregularities: $irregularities")).map(_ =>
-          commitSetT.fold(throw _, identity)
-        ),
-      _ => Future.fromTry(commitSetT),
-    )
-  }
-
-  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
-  private def handleCommitSetError(requestId: RequestId)(
-      e: RequestTracker.CommitSetError
-  )(implicit traceContext: TraceContext): RequestTracker.RequestTrackerError = {
-    /* The request tracker must have evicted the request between the previous call to `addTransactionResult`
-     * and this call. Since `addTransactionResult` marks the request as not having timed out,
-     * eviction can only happen if another transaction result processing has been interleaved,
-     * so we must have received two transaction result messages.
-     */
-    alarm(s"Received a second result message for request $requestId")
-    e
-  }
-
-  // TODO(#8744) avoid discarded future as part of AlarmStreamer design
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
-  private def handleRequestTrackerResultError(requestId: RequestId)(
-      error: RequestTracker.ResultError
-  )(implicit traceContext: TraceContext): RequestTracker.RequestTrackerError = {
-    error match {
-      case _: RequestNotFound =>
-        /* The request tracker evicts a request only when it times out or a commit set has been provided.
-         * So if the result timestamp is before the decision time, a commit set must have already been added with an
-         * earlier timestamp. So there must have been an earlier transaction result for the request.
-         */
-        alarm(s"Received a second result message for request $requestId.")
-
-      case _: ResultAlreadyExists =>
-        alarm(s"Received a second result message for request $requestId")
-    }
-    error
+        .leftMap(e => {
+          SyncServiceAlarm.Warn(s"Unexpected mediator result message for $requestId. $e").report()
+          e: RequestTracker.RequestTrackerError
+        })
+    } yield commitFuture
+      .valueOr(e =>
+        SyncServiceAlarm
+          .Warn(withRc(rc, s"An error occurred while persisting commit set: $e"))
+          .report()
+      )
+      .flatMap(_ => Future.fromTry(commitSetT))
   }
 
   private def handleTimeout(

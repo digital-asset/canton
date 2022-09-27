@@ -16,7 +16,6 @@ import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.{LfPartyId, checked}
 import io.circe.Encoder
@@ -44,7 +43,6 @@ object SafeSimpleString {
   */
 final case class Identifier private (protected val str: String185)
     extends LengthLimitedStringWrapper
-    with NoCopy
     with PrettyPrinting {
   def toLengthLimitedString: String185 = str
 
@@ -52,10 +50,6 @@ final case class Identifier private (protected val str: String185)
 }
 
 object Identifier {
-
-  private[this] def apply(str: String185): Identifier =
-    throw new UnsupportedOperationException("Use the (try)create method instead")
-
   def create(str: String): Either[String, Identifier] =
     for {
       idString <- SafeSimpleString.fromProtoPrimitive(str)

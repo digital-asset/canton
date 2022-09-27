@@ -18,6 +18,7 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -135,6 +136,7 @@ object InFlightSubmissionStore {
       storage: Storage,
       maxItemsInSqlInClause: PositiveNumeric[Int],
       registerBatchAggregatorConfig: BatchAggregatorConfig,
+      releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -146,6 +148,7 @@ object InFlightSubmissionStore {
         jdbc,
         maxItemsInSqlInClause,
         registerBatchAggregatorConfig,
+        releaseProtocolVersion,
         timeouts,
         loggerFactory,
       )

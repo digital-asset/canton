@@ -323,7 +323,7 @@ class TransactionTreeFactoryImplV3(
     } yield {
       // Compute the result
       val transactionView =
-        TransactionView(cryptoOps)(viewCommonData, viewParticipantData, childViews)
+        TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, childViews)
 
       checkCsmStateMatchesView(state.csmState, transactionView, viewPosition)
 

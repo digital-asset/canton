@@ -17,9 +17,19 @@ import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
+import com.digitalasset.canton.sequencing.protocol.{
+  SendAsyncError,
+  SignedContent,
+  SubmissionRequest,
+}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology.{DomainId, DomainTopologyManagerId, Member}
+import com.digitalasset.canton.topology.{
+  AuthenticatedMember,
+  DomainId,
+  DomainTopologyManagerId,
+  Member,
+  UnauthenticatedMemberId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -199,6 +209,12 @@ class DatabaseSequencer(
   ): EitherT[Future, SendAsyncError, Unit] =
     writer.send(submission)
 
+  override protected def sendAsyncSignedInternal(
+      signedSubmission: SignedContent[SubmissionRequest]
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] =
+    // TODO(Danilo): implement signature check for db sequencer
+    sendAsyncInternal(signedSubmission.content)
+
   override def readInternal(member: Member, offset: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] =
@@ -217,7 +233,15 @@ class DatabaseSequencer(
 
   def disableMember(member: Member)(implicit traceContext: TraceContext): Future[Unit] = {
     logger.info(show"Disabling member at the sequencer: $member")
-    withExpectedRegisteredMember(member, "Disable member")(store.disableMember)
+    withExpectedRegisteredMember(member, "Disable member") { memberId =>
+      member match {
+        // Unauthenticated members being disabled get automatically unregistered
+        case unauthenticated: UnauthenticatedMemberId =>
+          store.unregisterUnauthenticatedMember(unauthenticated)
+        case _: AuthenticatedMember =>
+          store.disableMember(memberId)
+      }
+    }
   }
 
   /** helper for performing operations that are expected to be called with a registered member so will just throw if we

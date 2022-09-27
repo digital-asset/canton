@@ -10,7 +10,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPr
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
-import com.digitalasset.canton.util.NoCopy
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -49,8 +48,7 @@ object HmacAlgorithm {
 }
 
 final case class Hmac private (private val hmac: ByteString, private val algorithm: HmacAlgorithm)
-    extends PrettyPrinting
-    with NoCopy {
+    extends PrettyPrinting {
 
   require(!hmac.isEmpty, "HMAC must not be empty")
   require(
@@ -73,9 +71,6 @@ final case class Hmac private (private val hmac: ByteString, private val algorit
 object Hmac {
 
   import HmacError._
-
-  private[this] def apply(hmac: ByteString, algorithm: HmacAlgorithm): Hmac =
-    throw new UnsupportedOperationException("Use the generate methods instead")
 
   private[crypto] def create(
       hmac: ByteString,
@@ -121,9 +116,7 @@ object Hmac {
     } yield hmac
 }
 
-final case class HmacSecret private (private val secret: ByteString)
-    extends NoCopy
-    with PrettyPrinting {
+final case class HmacSecret private (private val secret: ByteString) extends PrettyPrinting {
 
   require(!secret.isEmpty, "HMAC secret cannot be empty")
 
@@ -154,9 +147,6 @@ object HmacSecret {
 
   /** Recommended length for HMAC secret keys is 128 bits */
   val defaultLength = 16
-
-  private[this] def apply(bytes: ByteString): HmacSecret =
-    throw new UnsupportedOperationException("Use the generate methods instead")
 
   private[crypto] def create(bytes: ByteString): Either[HmacError, HmacSecret] =
     Either.cond(!bytes.isEmpty, new HmacSecret(bytes), HmacError.EmptyHmacSecret)

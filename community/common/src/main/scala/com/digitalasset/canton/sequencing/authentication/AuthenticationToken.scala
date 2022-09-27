@@ -9,13 +9,12 @@ import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.RandomOps
 import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
-import com.digitalasset.canton.util.{HexString, NoCopy}
+import com.digitalasset.canton.util.HexString
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
 
 case class AuthenticationToken private (private val bytes: ByteString)
-    extends NoCopy
-    with HasCryptographicEvidence {
+    extends HasCryptographicEvidence {
   def toProtoPrimitive: ByteString = bytes
 
   def toLengthLimitedHexString: String300 =
@@ -32,9 +31,6 @@ object AuthenticationToken {
     * See the documentation at [[com.digitalasset.canton.config.RequireTypes.LengthLimitedString]] for more details.
     */
   val length: Int = 20
-
-  private[this] def apply(bytes: ByteString): AuthenticationToken =
-    throw new UnsupportedOperationException("Use the generate methods instead")
 
   def generate(randomOps: RandomOps): AuthenticationToken = {
     new AuthenticationToken(randomOps.generateRandomByteString(length))

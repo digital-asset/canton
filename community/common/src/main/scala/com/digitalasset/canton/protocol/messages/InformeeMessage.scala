@@ -101,9 +101,8 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
       supportedProtoVersion(v0.InformeeMessage)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
     ),
-    // TODO(i9423): Migrate to next protocol version
     ProtobufVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.InformeeMessage)((hashOps, proto) => fromProtoV1(hashOps)(proto)),
       _.toProtoV1.toByteString,
     ),
