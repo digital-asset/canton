@@ -27,7 +27,7 @@ trait DbCryptoPublicStoreTest extends AsyncWordSpec with CryptoPublicStoreTest {
 
   "DbCryptoPublicStore" can {
     behave like cryptoPublicStore(
-      new DbCryptoPublicStore(storage, timeouts, loggerFactory),
+      new DbCryptoPublicStore(storage, testedReleaseProtocolVersion, timeouts, loggerFactory),
       backedByDatabase = true,
     )
   }

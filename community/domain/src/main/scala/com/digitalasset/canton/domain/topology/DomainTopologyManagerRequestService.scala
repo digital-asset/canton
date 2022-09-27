@@ -11,7 +11,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.config.TopologyConfig
 import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.ParticipantNotInitialized
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown.syntax._
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult

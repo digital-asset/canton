@@ -7,12 +7,11 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.util.PriorityBlockingQueueUtil
+import com.digitalasset.canton.tracing.TraceContext
 
-import java.util.concurrent.PriorityBlockingQueue
-import java.util.concurrent.locks.ReentrantLock
+import java.util.PriorityQueue
 import scala.annotation.tailrec
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.{Future, Promise, blocking}
 import scala.jdk.CollectionConverters._
 
 /** Utility to implement a time awaiter
@@ -51,13 +50,11 @@ trait TimeAwaiter {
 
   protected def awaitKnownTimestampUS(
       timestamp: CantonTimestamp
-  ): Option[FutureUnlessShutdown[Unit]] = if (isClosing)
-    Some(FutureUnlessShutdown.abortedDueToShutdown)
-  else {
-    awaitKnownTimestampGen(timestamp, new ShutdownAware()).map(x =>
-      FutureUnlessShutdown(x.promise.future)
-    )
-  }
+  )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]] =
+    performUnlessClosing(s"await known timestamp at $timestamp") {
+      awaitKnownTimestampGen(timestamp, new ShutdownAware())
+    }.map(_.map(awaiter => FutureUnlessShutdown(awaiter.promise.future)))
+      .onShutdown(Some(FutureUnlessShutdown.abortedDueToShutdown))
 
   private def awaitKnownTimestampGen[T](
       timestamp: CantonTimestamp,
@@ -67,7 +64,9 @@ trait TimeAwaiter {
     if (current >= timestamp) None
     else {
       val awaiter = create
-      awaitTimestampFutures.offer(timestamp -> awaiter)
+      blocking(awaitTimestampFuturesLock.synchronized {
+        awaitTimestampFutures.offer(timestamp -> awaiter)
+      })
       // If the timestamp has been advanced while we're inserting into the priority queue,
       // make sure that we're completing the future.
       val newCurrent = currentKnownTime
@@ -76,29 +75,29 @@ trait TimeAwaiter {
     }
   }
 
-  private val awaitTimestampFutures: PriorityBlockingQueue[(CantonTimestamp, Awaiting[_])] =
-    new PriorityBlockingQueue[(CantonTimestamp, Awaiting[_])](
-      PriorityBlockingQueueUtil.DefaultInitialCapacity,
-      Ordering.by[(CantonTimestamp, Awaiting[_]), CantonTimestamp](_._1),
+  /** Queue of timestamps that are being awaited on, ordered by timestamp.
+    * Access is synchronized via [[awaitTimestampFuturesLock]].
+    */
+  private val awaitTimestampFutures: PriorityQueue[(CantonTimestamp, Awaiting[_])] =
+    new PriorityQueue[(CantonTimestamp, Awaiting[_])](
+      Ordering.by[(CantonTimestamp, Awaiting[_]), CantonTimestamp](_._1)
     )
-  private val awaitTimestampFuturesLock: ReentrantLock = new ReentrantLock()
+  private val awaitTimestampFuturesLock: AnyRef = new Object()
 
   protected def notifyAwaitedFutures(upToInclusive: CantonTimestamp): Unit = {
     @tailrec def go(): Unit = Option(awaitTimestampFutures.peek()) match {
-      case Some((timestamp, _)) if timestamp <= upToInclusive =>
-        // run success on the current head as there might have been a racy insert into the priority queue between the peek and the take
-        // this is fine, as any new promise will have a timestamp <= as the one we just checked
-        val (_, currentHead) = awaitTimestampFutures.take()
-        currentHead.success()
+      case Some((timestamp, awaiter)) if timestamp <= upToInclusive =>
+        // Thanks to the synchronization, the priority queue cannot be modified concurrently,
+        // so we get discard the head here.
+        awaitTimestampFutures.poll().discard
+        awaiter.success()
         go()
       case _ =>
     }
-    try {
-      awaitTimestampFuturesLock.lock()
+
+    blocking(awaitTimestampFuturesLock.synchronized {
       go()
-    } finally {
-      awaitTimestampFuturesLock.unlock()
-    }
+    })
   }
 
 }

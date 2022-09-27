@@ -5,6 +5,7 @@ package com.digitalasset.canton.crypto.store.memory
 
 import cats.data.EitherT
 import cats.syntax.either._
+import cats.syntax.traverse._
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
@@ -23,16 +24,19 @@ import com.digitalasset.canton.crypto.{
   SigningPrivateKey,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TrieMapUtil
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The in-memory store does not provide any persistence and keys during runtime are stored in the generic caching layer.
   */
-class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLoggerFactory)(
+class InMemoryCryptoPrivateStore(
+    override protected val releaseProtocolVersion: ReleaseProtocolVersion,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(
     override implicit val ec: ExecutionContext
 ) extends CryptoPrivateStore
     with NamedLogging {
@@ -41,6 +45,18 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
   private val storedDecryptionKeyMap: TrieMap[Fingerprint, EncryptionPrivateKeyWithName] =
     TrieMap.empty
 
+  private def wrapPrivateKeyInToStored(pk: PrivateKey, name: Option[KeyName]): StoredPrivateKey =
+    new StoredPrivateKey(
+      id = pk.id,
+      data = (pk: @unchecked) match {
+        case spk: SigningPrivateKey => spk.toByteString(releaseProtocolVersion.v)
+        case epk: EncryptionPrivateKey => epk.toByteString(releaseProtocolVersion.v)
+      },
+      purpose = pk.purpose,
+      name = name,
+      wrapperKeyId = None,
+    )
+
   private def errorDuplicate[K <: PrivateKeyWithName](
       keyId: Fingerprint,
       oldKey: K,
@@ -48,86 +64,107 @@ class InMemoryCryptoPrivateStore(override protected val loggerFactory: NamedLogg
   ): CryptoPrivateStoreError =
     CryptoPrivateStoreError.KeyAlreadyExists(keyId, oldKey.name.map(_.unwrap))
 
-  override private[crypto] def readPrivateKey(keyId: Fingerprint, purpose: KeyPurpose)(implicit
+  private[crypto] def readPrivateKey(keyId: Fingerprint, purpose: KeyPurpose)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]] =
-    EitherT.rightT {
-      purpose match {
-        case Signing =>
-          storedSigningKeyMap
-            .get(keyId)
-            .map(_.toStored)
+  ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]] = {
+    (purpose match {
+      case Signing =>
+        storedSigningKeyMap
+          .get(keyId)
+          .map(pk =>
+            EitherT.rightT[Future, CryptoPrivateStoreError](
+              wrapPrivateKeyInToStored(pk.privateKey, pk.name)
+            )
+          )
+      case Encryption =>
+        storedDecryptionKeyMap
+          .get(keyId)
+          .map(pk =>
+            EitherT.rightT[Future, CryptoPrivateStoreError](
+              wrapPrivateKeyInToStored(pk.privateKey, pk.name)
+            )
+          )
+    }).sequence
+  }
 
-        case Encryption =>
-          storedDecryptionKeyMap
-            .get(keyId)
-            .map(_.toStored)
-      }
-    }
-
-  override private[crypto] def writePrivateKey(
+  private[crypto] def writePrivateKey(
       key: StoredPrivateKey
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] = {
 
     def parseAndWritePrivateKey[A <: PrivateKey, B <: PrivateKeyWithName](
-        privateKey: ParsingResult[A],
+        pk: A,
         cache: TrieMap[Fingerprint, B],
         buildKeyWithNameFunc: (A, Option[KeyName]) => B,
-    ): EitherT[Future, CryptoPrivateStoreError, Unit] = {
-      privateKey match {
+    ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+      TrieMapUtil
+        .insertIfAbsent(
+          cache,
+          key.id,
+          buildKeyWithNameFunc(pk, key.name),
+          errorDuplicate[B] _,
+        )
+        .toEitherT
+
+    val storedKey = key.purpose match {
+      case Signing => SigningPrivateKey.fromByteString(key.data)
+      case Encryption => EncryptionPrivateKey.fromByteString(key.data)
+    }
+
+    for {
+      res <- storedKey match {
         case Left(parseErr) =>
           EitherT.leftT[Future, Unit](
             CryptoPrivateStoreError.FailedToInsertKey(
               key.id,
               s"could not parse stored key (it can either be corrupted or encrypted): ${parseErr.toString}",
-            )
+            ): CryptoPrivateStoreError
           )
-        case Right(pk) =>
-          TrieMapUtil
-            .insertIfAbsent(
-              cache,
+        case Right(spk: SigningPrivateKey) =>
+          parseAndWritePrivateKey[SigningPrivateKey, SigningPrivateKeyWithName](
+            spk,
+            storedSigningKeyMap,
+            (privateKey, name) => SigningPrivateKeyWithName(privateKey, name),
+          )
+        case Right(epk: EncryptionPrivateKey) =>
+          parseAndWritePrivateKey[EncryptionPrivateKey, EncryptionPrivateKeyWithName](
+            epk,
+            storedDecryptionKeyMap,
+            (privateKey, name) => EncryptionPrivateKeyWithName(privateKey, name),
+          )
+        case _ =>
+          EitherT.leftT[Future, Unit](
+            CryptoPrivateStoreError.FailedToInsertKey(
               key.id,
-              buildKeyWithNameFunc(pk, key.name),
-              errorDuplicate[B] _,
-            )
-            .toEitherT
+              s"key type does not match any of the known types",
+            ): CryptoPrivateStoreError
+          )
       }
-    }
-
-    key.purpose match {
-      case Signing =>
-        parseAndWritePrivateKey[SigningPrivateKey, SigningPrivateKeyWithName](
-          SigningPrivateKey.fromStored(key),
-          storedSigningKeyMap,
-          (privateKey, name) => SigningPrivateKeyWithName(privateKey, name),
-        )
-      case Encryption =>
-        parseAndWritePrivateKey[EncryptionPrivateKey, EncryptionPrivateKeyWithName](
-          EncryptionPrivateKey.fromStored(key),
-          storedDecryptionKeyMap,
-          (privateKey, name) => EncryptionPrivateKeyWithName(privateKey, name),
-        )
-    }
+    } yield res
   }
 
-  override private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
-    EitherT.rightT(
-      purpose match {
-        case Signing =>
-          storedSigningKeyMap.values.toSet
-            .map((x: SigningPrivateKeyWithName) => x.privateKey.toStored(x.name, None))
+    (purpose match {
+      case Signing =>
+        storedSigningKeyMap.values.toSeq
+          .map((x: SigningPrivateKeyWithName) =>
+            EitherT.rightT[Future, CryptoPrivateStoreError](
+              wrapPrivateKeyInToStored(x.privateKey, x.name)
+            )
+          )
+      case Encryption =>
+        storedDecryptionKeyMap.values.toSeq
+          .map((x: EncryptionPrivateKeyWithName) =>
+            EitherT.rightT[Future, CryptoPrivateStoreError](
+              wrapPrivateKeyInToStored(x.privateKey, x.name)
+            )
+          )
+    }).sequence.map(_.toSet)
 
-        case Encryption =>
-          storedDecryptionKeyMap.values.toSet
-            .map((x: EncryptionPrivateKeyWithName) => x.privateKey.toStored(x.name, None))
-      }
-    )
-
-  override private[crypto] def deletePrivateKey(
+  private[crypto] def deletePrivateKey(
       keyId: Fingerprint
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit] = {
     storedSigningKeyMap.remove(keyId)

@@ -298,7 +298,7 @@ class SequencerRuntime(
     authenticationConfig.check,
     clock,
     maxRatePerParticipantLookup,
-    staticDomainParameters.maxBatchMessageSize,
+    staticDomainParameters.maxInboundMessageSize,
     localNodeParameters.processingTimeouts,
     loggerFactory,
   )

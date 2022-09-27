@@ -165,7 +165,7 @@ final case class OwnerToKeyMapping(owner: KeyOwner, key: PublicKey)
   def toProtoV0: v0.OwnerToKeyMapping =
     v0.OwnerToKeyMapping(
       keyOwner = owner.toProtoPrimitive,
-      publicKey = Some(key.toProtoPublicKey),
+      publicKey = Some(key.toProtoPublicKeyV0),
     )
 
   override def uniquePath(id: TopologyElementId): UniquePath =

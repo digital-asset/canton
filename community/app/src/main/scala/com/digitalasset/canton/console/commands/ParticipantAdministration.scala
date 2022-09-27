@@ -1546,7 +1546,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 class ParticipantHealthAdministration(
     runner: AdminCommandRunner,
     val consoleEnvironment: ConsoleEnvironment,
-    val loggerFactory: NamedLoggerFactory,
+    override val loggerFactory: NamedLoggerFactory,
 ) extends HealthAdministration[ParticipantStatus](
       runner,
       consoleEnvironment,

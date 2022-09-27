@@ -83,9 +83,11 @@ class DefaultMessageDispatcher(
       case CausalityMessageKind => run
       case MalformedMessage => run
       case UnspecifiedMessageKind => run
-      case MalformedMediatorRequestMessage => run
       case RequestKind(_) => run
-      case ResultKind(_) => run
+
+      case ResultKind(_) => runAsyncResult(run)
+      case MalformedMediatorRequestMessage => runAsyncResult(run)
+
       case DeliveryMessageKind => run
     }
   }

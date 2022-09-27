@@ -140,7 +140,7 @@ trait PublicKey extends CryptoKeyPairKey {
     * Each child class that implements this trait can be serialized with `toProto` to their corresponding protobuf
     * message. With the following method, it can be serialized to this trait's protobuf message.
     */
-  def toProtoPublicKey: v0.PublicKey = v0.PublicKey(key = toProtoPublicKeyKeyV0)
+  def toProtoPublicKeyV0: v0.PublicKey = v0.PublicKey(key = toProtoPublicKeyKeyV0)
 }
 
 object PublicKey {
@@ -173,7 +173,9 @@ trait PublicKeyWithName extends Product with Serializable {
 
   def toProtoV0: v0.PublicKeyWithName =
     v0.PublicKeyWithName(
-      publicKey = Some(publicKey.toProtoPublicKey),
+      publicKey = Some(
+        publicKey.toProtoPublicKeyV0
+      ),
       name = name.map(_.unwrap).getOrElse(""),
     )
 }

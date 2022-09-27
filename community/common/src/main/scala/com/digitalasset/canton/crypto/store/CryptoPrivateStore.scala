@@ -6,16 +6,16 @@ package com.digitalasset.canton.crypto.store
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
+import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.store.db.{DbCryptoPrivateStore, StoredPrivateKey}
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
-import com.digitalasset.canton.crypto.{KeyName, _}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -32,17 +32,6 @@ case class SigningPrivateKeyWithName(
     override val name: Option[KeyName],
 ) extends PrivateKeyWithName {
   type K = SigningPrivateKey
-
-  def toStored: StoredPrivateKey = privateKey.toStored(name, None)
-}
-
-object SigningPrivateKeyWithName {
-  def fromStored(storedKey: StoredPrivateKey): ParsingResult[PrivateKeyWithName] = {
-    SigningPrivateKey.fromStored(storedKey) match {
-      case Left(parseErr) => Left(parseErr)
-      case Right(spk) => Right(SigningPrivateKeyWithName(spk, storedKey.name))
-    }
-  }
 }
 
 case class EncryptionPrivateKeyWithName(
@@ -50,16 +39,6 @@ case class EncryptionPrivateKeyWithName(
     override val name: Option[KeyName],
 ) extends PrivateKeyWithName {
   type K = EncryptionPrivateKey
-
-  def toStored: StoredPrivateKey = privateKey.toStored(name, None)
-}
-
-object EncryptionPrivateKeyWithName {
-  def fromStored(storedKey: StoredPrivateKey): ParsingResult[PrivateKeyWithName] = {
-    EncryptionPrivateKey
-      .fromStored(storedKey)
-      .map(epk => EncryptionPrivateKeyWithName(epk, storedKey.name))
-  }
 }
 
 /** A store for cryptographic private material such as signing/encryption private keys and hmac secrets.
@@ -70,6 +49,8 @@ object EncryptionPrivateKeyWithName {
 trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
 
   implicit val ec: ExecutionContext
+
+  protected val releaseProtocolVersion: ReleaseProtocolVersion
 
   // Cached values for keys and secret
   protected val signingKeyMap: TrieMap[Fingerprint, SigningPrivateKeyWithName] = TrieMap.empty
@@ -174,30 +155,31 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
       keyFingerprint =>
         readAndParsePrivateKey[SigningPrivateKey, SigningPrivateKeyWithName](
           Signing,
-          key => SigningPrivateKey.fromStored(key),
+          key => SigningPrivateKey.fromByteString(key.data),
           (privateKey, name) => SigningPrivateKeyWithName(privateKey, name),
         )(keyFingerprint),
     )(signingKeyId)
 
-  private[crypto] def storeSigningKeyWithWrapperKey(
-      key: SigningPrivateKey,
-      name: Option[KeyName],
-      wrapperKeyId: Option[String300],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    writePrivateKey(key.toStored(name, wrapperKeyId))
-      .map { _ =>
-        signingKeyMap.put(key.id, SigningPrivateKeyWithName(key, name)).discard
-      }
-
-  def storeSigningKey(
+  private[crypto] def storeSigningKey(
       key: SigningPrivateKey,
       name: Option[KeyName],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    storeSigningKeyWithWrapperKey(key, name, None)
+    for {
+      _ <- writePrivateKey(
+        new StoredPrivateKey(
+          id = key.id,
+          data = key.toByteString(releaseProtocolVersion.v),
+          purpose = key.purpose,
+          name = name,
+          wrapperKeyId = None,
+        )
+      )
+        .map { _ =>
+          signingKeyMap.put(key.id, SigningPrivateKeyWithName(key, name)).discard
+        }
+    } yield ()
 
   def existsSigningKey(signingKeyId: Fingerprint)(implicit
       traceContext: TraceContext
@@ -212,31 +194,32 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
       keyFingerprint =>
         readAndParsePrivateKey[EncryptionPrivateKey, EncryptionPrivateKeyWithName](
           Encryption,
-          key => EncryptionPrivateKey.fromStored(key),
+          key => EncryptionPrivateKey.fromByteString(key.data),
           (privateKey, name) => EncryptionPrivateKeyWithName(privateKey, name),
         )(keyFingerprint),
     )(encryptionKeyId)
   }
 
-  private[crypto] def storeDecryptionKeyWithWrapperKey(
-      key: EncryptionPrivateKey,
-      name: Option[KeyName],
-      wrapperKeyId: Option[String300],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    writePrivateKey(key.toStored(name, wrapperKeyId))
-      .map { _ =>
-        decryptionKeyMap.put(key.id, EncryptionPrivateKeyWithName(key, name)).discard
-      }
-
-  def storeDecryptionKey(
+  private[crypto] def storeDecryptionKey(
       key: EncryptionPrivateKey,
       name: Option[KeyName],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-    storeDecryptionKeyWithWrapperKey(key, name, None)
+    for {
+      _ <- writePrivateKey(
+        new StoredPrivateKey(
+          id = key.id,
+          data = key.toByteString(releaseProtocolVersion.v),
+          purpose = key.purpose,
+          name = name,
+          wrapperKeyId = None,
+        )
+      )
+        .map { _ =>
+          decryptionKeyMap.put(key.id, EncryptionPrivateKeyWithName(key, name)).discard
+        }
+    } yield ()
 
   def existsDecryptionKey(decryptionKeyId: Fingerprint)(implicit
       traceContext: TraceContext
@@ -261,6 +244,7 @@ object CryptoPrivateStore {
   trait CryptoPrivateStoreFactory {
     def create(
         storage: Storage,
+        releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore]
@@ -269,17 +253,18 @@ object CryptoPrivateStore {
   class CommunityCryptoPrivateStoreFactory extends CryptoPrivateStoreFactory {
     override def create(
         storage: Storage,
+        releaseProtocolVersion: ReleaseProtocolVersion,
         timeouts: ProcessingTimeout,
         loggerFactory: NamedLoggerFactory,
     )(implicit ec: ExecutionContext): EitherT[Future, CryptoPrivateStoreError, CryptoPrivateStore] =
       storage match {
         case _: MemoryStorage =>
           EitherT.rightT[Future, CryptoPrivateStoreError](
-            new InMemoryCryptoPrivateStore(loggerFactory)
+            new InMemoryCryptoPrivateStore(releaseProtocolVersion, loggerFactory)
           )
         case jdbc: DbStorage =>
           EitherT.rightT[Future, CryptoPrivateStoreError](
-            new DbCryptoPrivateStore(jdbc, timeouts, loggerFactory)
+            new DbCryptoPrivateStore(jdbc, releaseProtocolVersion, timeouts, loggerFactory)
           )
       }
   }

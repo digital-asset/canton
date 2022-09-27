@@ -26,6 +26,7 @@ class X509CertificateTest extends FixtureAsyncWordSpec with BaseTest {
         CommunityCryptoConfig(),
         new MemoryStorage(),
         new CommunityCryptoPrivateStoreFactory,
+        testedReleaseProtocolVersion,
         timeouts,
         loggerFactory,
       )

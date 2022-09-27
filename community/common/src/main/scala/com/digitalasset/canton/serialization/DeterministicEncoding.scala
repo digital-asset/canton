@@ -16,7 +16,7 @@ case class DeserializationError(message: String, bytes: ByteString) extends Pret
   override def pretty: Pretty[DeserializationError] =
     prettyOfClass(
       param("message", _.message.unquoted),
-      param("bytes", _.bytes.toStringUtf8.limit(128)),
+      param("bytes", _.bytes),
     )
 }
 

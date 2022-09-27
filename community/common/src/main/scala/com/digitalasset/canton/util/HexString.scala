@@ -10,6 +10,18 @@ object HexString {
 
   def toHexString(bytes: ByteString): String = toHexString(bytes.toByteArray)
 
+  /** Convert a ByteString to hex-string.
+    * The output size will be equal to the length configured if it's even, or
+    * to the length + 1 if it's odd.
+    */
+  def toHexString(bytes: ByteString, length: Int): String = {
+    // Every byte is 2 Hex characters, this is why we devise by 2
+    val maxlength = bytes.size() min Math.round(length / 2.toDouble).toInt
+    toHexString(
+      bytes.substring(0, maxlength).toByteArray
+    )
+  }
+
   def toHexString(bytes: Array[Byte]): String = bytes.map(b => f"$b%02x").mkString("")
 
   /** Parse a hex-string `s` to a byte array. */

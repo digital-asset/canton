@@ -4,19 +4,22 @@
 package com.digitalasset.canton.console
 
 import better.files.File
+import cats.data.NonEmptyList
+import cats.syntax.traverse.*
 import com.codahale.metrics
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, CommunityCantonStatus}
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.health.admin.data.NodeStatus
-import com.digitalasset.canton.metrics.MetricsSnapshot
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.version.ReleaseVersion
-import io.circe.generic.semiauto.deriveEncoder
-import io.circe.syntax._
+import com.digitalasset.canton.tracing.NoTracing
 import io.circe.{Encoder, KeyEncoder}
 
 import java.time.Instant
-import scala.annotation.nowarn
 import scala.concurrent.duration.TimeUnit
+import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
+import scala.util.control.NonFatal
+import scala.util.{Failure, Success, Try}
 
 object CantonHealthAdministrationEncoders {
   implicit val timeUnitEncoder: Encoder[TimeUnit] = Encoder.encodeString.contramap(_.toString)
@@ -55,109 +58,105 @@ object CantonHealthAdministrationEncoders {
     Encoder.encodeString.contramap(_.toString)
   implicit val threadKeyEncoder: KeyEncoder[Thread] = (thread: Thread) => thread.getName
 
-  implicit val participantRefKeyEncoder: KeyEncoder[ParticipantReference] =
-    (ref: InstanceReference) => ref.name
-  implicit val domainRefKeyEncoder: KeyEncoder[DomainReference] = (ref: InstanceReference) =>
-    ref.name
   implicit val domainIdEncoder: KeyEncoder[DomainId] = (ref: DomainId) => ref.toString
 }
 
-trait CantonHealthAdministration[Status <: CantonStatus] extends Helpful {
-
-  protected implicit val statusEncoder: Encoder[Status]
-  protected val consoleEnv: ConsoleEnvironment
-
-  def status(): Status
-
-  @Help.Summary("Generate and write a dump of Canton's state for a bug report")
-  @nowarn("cat=unused")
-  @nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
-  def dump(): String = {
-    import io.circe.generic.auto._
-    import CantonHealthAdministrationEncoders._
-
-    case class EnvironmentInfo(os: String, javaVersion: String)
-
-    case class CantonDump(
-        releaseVersion: String,
-        environment: EnvironmentInfo,
-        config: String,
-        status: Status,
-        metrics: MetricsSnapshot,
-        traces: Map[Thread, Array[StackTraceElement]],
-    )
-
-    val javaVersion = System.getProperty("java.version")
-    val cantonVersion = ReleaseVersion.current.fullVersion
-    val env = EnvironmentInfo(sys.props("os.name"), javaVersion)
-
-    val metricsSnapshot = MetricsSnapshot(consoleEnv.environment.metricsFactory.registry)
-    val config = consoleEnv.environment.config.dumpString
-
-    val traces = {
-      import scala.jdk.CollectionConverters._
-      Thread.getAllStackTraces.asScala.toMap
-    }
-
-    val dump = CantonDump(cantonVersion, env, config, status(), metricsSnapshot, traces)
-
+object CantonHealthAdministration {
+  def defaultHealthDumpName: File = {
     // Replace ':' in the timestamp as they are forbidden on windows
-    val ts = Instant.now().toString.replace(':', '-')
-    val filename = s"canton-dump-$ts.zip"
-    val logFile = File(sys.env.getOrElse("LOG_FILE_NAME", "log/canton.log"))
-    val logLastErrorsFile = File(
-      sys.env.getOrElse("LOG_LAST_ERRORS_FILE_NAME", "log/canton_errors.log")
-    )
-
-    File.usingTemporaryFile("canton-dump-", ".json") { tmpFile =>
-      tmpFile.append(dump.asJson.spaces2)
-      val files = Iterator(logFile, logLastErrorsFile, tmpFile).filter(_.nonEmpty)
-      File(filename).zipIn(files)
-    }
-
-    filename
-  }
-
-  protected def splitSuccessfulAndFailedStatus[Ref <: InstanceReference](
-      refs: Seq[Ref]
-  ): (Map[Ref, Ref#Status], Map[Ref, NodeStatus.Failure]) = {
-    val map: Map[Ref, NodeStatus[Ref#Status]] =
-      refs.map(s => s -> s.health.status).toMap
-    val status: Map[Ref, Ref#Status] =
-      map.collect { case (n, NodeStatus.Success(status)) =>
-        n -> status
-      }
-    val unreachable: Map[Ref, NodeStatus.Failure] =
-      map.collect {
-        case (s, entry: NodeStatus.Failure) => s -> entry
-        case (s, _: NodeStatus.NotInitialized) =>
-          s -> NodeStatus.Failure(s"$s has not been initialized")
-      }
-    (status, unreachable)
+    val name = s"canton-dump-${Instant.now().toString.replace(':', '-')}.zip"
+    File(name)
   }
 }
 
-@nowarn("cat=lint-byname-implicit") // https://github.com/scala/bug/issues/12072
+trait CantonHealthAdministration[Status <: CantonStatus]
+    extends Helpful
+    with NamedLogging
+    with NoTracing {
+  protected val consoleEnv: ConsoleEnvironment
+  implicit private val ec: ExecutionContext = consoleEnv.environment.executionContext
+  override val loggerFactory: NamedLoggerFactory = consoleEnv.environment.loggerFactory
+
+  protected def statusMap[A <: InstanceReference](
+      nodes: NodeReferences[A, _, _]
+  ): Map[String, () => NodeStatus[A#Status]] = {
+    nodes.all.map { node => node.name -> (() => node.health.status) }.toMap
+  }
+
+  def status(): Status
+
+  @Help.Summary("Generate and write a health dump of Canton's state for a bug report")
+  @Help.Description(
+    "Gathers information about the current Canton process and/or remote nodes if using the console" +
+      " with a remote config. The outputFile argument can be used to write the health dump to a specific path." +
+      " The timeout argument can be increased when retrieving large health dumps from remote nodes." +
+      " The chunkSize argument controls the size of the byte chunks streamed back from remote nodes. This can be used" +
+      " if encountering errors due to gRPC max inbound message size being too low."
+  )
+  def dump(
+      outputFile: File = CantonHealthAdministration.defaultHealthDumpName,
+      timeout: NonNegativeDuration = consoleEnv.commandTimeouts.ledgerCommand,
+      chunkSize: Option[Int] = None,
+  ): String = {
+    val remoteDumps = consoleEnv.nodes.remote.toList.traverse { n =>
+      Future {
+        n.health.dump(
+          File.newTemporaryFile(s"remote-${n.name}-"),
+          timeout,
+          chunkSize,
+        )
+      }
+    }
+
+    // Try to get a local dump by going through the local nodes and returning the first one that succeeds
+    def getLocalDump(nodes: NonEmptyList[InstanceReference]): Future[String] = {
+      Future {
+        nodes.head.health.dump(
+          File.newTemporaryFile(s"local-"),
+          timeout,
+          chunkSize,
+        )
+      }.recoverWith { case NonFatal(e) =>
+        NonEmptyList.fromList(nodes.tail) match {
+          case Some(tail) =>
+            logger.info(
+              s"Could not get health dump from ${nodes.head.name}, trying the next local node",
+              e,
+            )
+            getLocalDump(tail)
+          case None => Future.failed(e)
+        }
+      }
+    }
+
+    val localDump = NonEmptyList
+      // The sorting is not necessary but makes testing easier
+      .fromList(consoleEnv.nodes.local.toList.sortBy(_.name))
+      .traverse(getLocalDump)
+      .map(_.toList)
+
+    consoleEnv.run {
+      val zippedHealthDump = List(remoteDumps, localDump).flatSequence.map { allDumps =>
+        outputFile.zipIn(allDumps.map(File(_)).iterator).pathAsString
+      }
+      Try(Await.result(zippedHealthDump, timeout.duration)) match {
+        case Success(result) => CommandSuccessful(result)
+        case Failure(e: TimeoutException) =>
+          CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
+        case Failure(exception) => CommandErrors.CommandInternalError.ErrorWithException(exception)
+      }
+    }
+  }
+}
+
 class CommunityCantonHealthAdministration(override val consoleEnv: ConsoleEnvironment)
     extends CantonHealthAdministration[CommunityCantonStatus] {
 
-  override protected implicit val statusEncoder: Encoder[CommunityCantonStatus] = {
-    import io.circe.generic.auto._
-    import CantonHealthAdministrationEncoders._
-    deriveEncoder[CommunityCantonStatus]
-  }
-
   @Help.Summary("Aggregate status info of all participants and domains")
   def status(): CommunityCantonStatus = {
-    val (domainStatus, unreachableDomains) = splitSuccessfulAndFailedStatus(consoleEnv.domains.all)
-    val (participantStatus, unreachableParticipants) = splitSuccessfulAndFailedStatus(
-      consoleEnv.participants.all
-    )
-    CommunityCantonStatus(
-      domainStatus,
-      unreachableDomains,
-      participantStatus,
-      unreachableParticipants,
+    CommunityCantonStatus.getStatus(
+      statusMap[DomainReference](consoleEnv.domains),
+      statusMap[ParticipantReference](consoleEnv.participants),
     )
   }
 }

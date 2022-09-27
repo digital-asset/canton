@@ -83,7 +83,7 @@ object GrpcSequencerService {
       authenticationCheck: AuthenticationCheck,
       clock: Clock,
       maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt],
-      maxRequestSize: NonNegativeInt,
+      maxInboundMessageSize: NonNegativeInt,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
@@ -96,7 +96,7 @@ object GrpcSequencerService {
       new SubscriptionPool[GrpcManagedSubscription](clock, metrics, timeouts, loggerFactory),
       new DirectSequencerSubscriptionFactory(sequencer, timeouts, loggerFactory),
       maxRatePerParticipantLookup,
-      maxRequestSize,
+      maxInboundMessageSize,
       timeouts,
     )
 
@@ -133,7 +133,7 @@ class GrpcSequencerService(
     subscriptionPool: SubscriptionPool[GrpcManagedSubscription],
     directSequencerSubscriptionFactory: DirectSequencerSubscriptionFactory,
     maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt],
-    maxRequestSize: NonNegativeInt,
+    maxInBoundMessageSize: NonNegativeInt,
     override protected val timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext)
     extends v0.SequencerServiceGrpc.SequencerService
@@ -302,9 +302,10 @@ class GrpcSequencerService(
         .authenticate(sender)
         .leftMap(err => refuse(messageIdP, sender)(s"$sender is not authorized to send: $err"))
 
+      // TODO(i10107): remove this check because it's redundant (done by the client and by the netty channel)
       _ <- refuseUnless(sender)(
-        requestSize <= maxRequestSize.unwrap,
-        s"Request from '$sender' of size ($requestSize bytes) is exceeding maximum size ($maxRequestSize bytes).",
+        requestSize <= maxInBoundMessageSize.unwrap,
+        s"Request from '$sender' of size ($requestSize bytes) is exceeding maximum size ($maxInBoundMessageSize bytes).",
       )
 
       _ = {

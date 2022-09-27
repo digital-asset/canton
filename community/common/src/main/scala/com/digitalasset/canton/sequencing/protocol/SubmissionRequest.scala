@@ -32,14 +32,13 @@ case class SubmissionRequest private (
     override val deserializedFrom: Option[ByteString] = None,
 ) extends HasProtocolVersionedWrapper[SubmissionRequest]
     with ProtocolVersionedMemoizedEvidence {
-
-  // Caches the serialized compressed batch to be able to do checks on its size without re-serializing
-  lazy val batchProtoV0: protocol.v0.CompressedBatch = batch.toProtoV0
+  private lazy val batchProtoV0: protocol.v0.CompressedBatch = batch.toProtoV0
 
   override val companionObj: HasProtocolVersionedWrapperCompanion[SubmissionRequest] =
     SubmissionRequest
 
-  def toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
+  // Caches the serialized request to be able to do checks on its size without re-serializing
+  lazy val toProtoV0: v0.SubmissionRequest = v0.SubmissionRequest(
     sender = sender.toProtoPrimitive,
     messageId = messageId.toProtoPrimitive,
     isRequest = isRequest,

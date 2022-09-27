@@ -33,6 +33,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.W3CTraceContext
+import com.digitalasset.canton.util.ShowUtil.HashLength
 import com.digitalasset.canton.util.{ErrorUtil, HexString}
 import com.digitalasset.canton.{LedgerApplicationId, LfPartyId, LfTimestamp}
 import com.google.protobuf.ByteString
@@ -126,7 +127,7 @@ trait PrettyInstances {
   def prettyString: Pretty[String] = prettyOfString(identity)
 
   implicit val prettyByteString: Pretty[ByteString] =
-    prettyOfString(b => HexString.toHexString(b).readableHash.toString)
+    prettyOfString(b => HexString.toHexString(b, HashLength).readableHash.toString)
 
   implicit def prettyDumpInfo: Pretty[DumpInfo] = {
     implicit def prettyDumpInfoChild: Pretty[(String, Dumpable)] = { case (label, child) =>

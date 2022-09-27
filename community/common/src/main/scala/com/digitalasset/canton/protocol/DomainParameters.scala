@@ -61,14 +61,6 @@ final case class StaticDomainParameters(
 
   val companionObj = StaticDomainParameters
 
-  /** Compute the max size limit for the sum of the envelope payloads of a batch
-    *
-    * taking 0.9 of the max inbound size, assuming that this will be enough to accommodate any metadata
-    * and the list of recipients.
-    */
-  def maxBatchMessageSize: NonNegativeInt =
-    NonNegativeInt.tryCreate((0.9 * maxInboundMessageSize.unwrap).toInt)
-
   def toProtoV0: protoV0.StaticDomainParameters =
     protoV0.StaticDomainParameters(
       reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),

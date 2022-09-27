@@ -204,6 +204,10 @@ trait GrpcRemoteInstanceReference extends RemoteInstanceReference {
     )
 }
 
+object DomainReference {
+  val InstanceType = "Domain"
+}
+
 trait DomainReference
     extends InstanceReference
     with DomainAdministration
@@ -213,7 +217,7 @@ trait DomainReference
 
   override type InstanceId = DomainId
 
-  override protected val instanceType = "Domain"
+  override protected val instanceType: String = DomainReference.InstanceType
 
   override type Status = DomainStatus
 
@@ -395,6 +399,10 @@ object ExternalLedgerApiClient {
   }
 }
 
+object ParticipantReference {
+  val InstanceType = "Participant"
+}
+
 abstract class ParticipantReference(
     override val consoleEnvironment: ConsoleEnvironment,
     val name: String,
@@ -405,7 +413,7 @@ abstract class ParticipantReference(
 
   override type InstanceId = ParticipantId
 
-  override protected val instanceType = "Participant"
+  override protected val instanceType: String = ParticipantReference.InstanceType
 
   override protected val loggerFactory: NamedLoggerFactory =
     consoleEnvironment.environment.loggerFactory.append("participant", name)

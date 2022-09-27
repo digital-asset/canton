@@ -34,12 +34,18 @@ trait ServerConfig extends Product with Serializable {
 
   /** Port to be listening on (must be greater than 0). If the port is None, a default port will be assigned on startup.
     *
-    * NOTE: If you rename this field, adapt the corresponding product hint for config reading.
+    * NOTE: If you rename this field, adapt the corresponding product hint for config reading. In the configuration the
+    * field is still called `port` for usability reasons.
     */
-  val internalPort: Option[Port]
+  protected val internalPort: Option[Port]
 
-  /** Returns the configured or the default port that must be assigned after config loading and before config usage */
-  lazy val port: Port =
+  /** Returns the configured or the default port that must be assigned after config loading and before config usage.
+    *
+    * We split between `port` and `internalPort` to offer a clean API to users of the config in the form of `port`,
+    * which must always return a configured or default port, and the internal representation that may be None before
+    * being assigned a default port.
+    */
+  def port: Port =
     internalPort.getOrElse(
       throw new IllegalStateException("Accessing server port before default was set")
     )

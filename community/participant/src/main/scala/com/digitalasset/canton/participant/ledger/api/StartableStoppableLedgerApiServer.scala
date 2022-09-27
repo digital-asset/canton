@@ -17,11 +17,7 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
 import com.daml.platform.LedgerApiServer
 import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
-import com.daml.platform.configuration.{
-  IndexServiceConfig => LedgerIndexServiceConfig,
-  PartyConfiguration,
-  ServerRole,
-}
+import com.daml.platform.configuration.{IndexServiceConfig => LedgerIndexServiceConfig, ServerRole}
 import com.daml.platform.index.IndexServiceOwner
 import com.daml.platform.indexer.{
   IndexerConfig => DamlIndexerConfig,
@@ -238,7 +234,6 @@ class StartableStoppableLedgerApiServer(
           None, // CantonSyncService provides ledger configuration via ReadService bypassing the WriteService
         managementServiceTimeout = config.serverConfig.managementServiceTimeout.toScala,
         maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
-        party = PartyConfiguration.Default,
         port = Port(config.serverConfig.port.unwrap),
         portFile = None,
         rateLimit = config.serverConfig.rateLimit,

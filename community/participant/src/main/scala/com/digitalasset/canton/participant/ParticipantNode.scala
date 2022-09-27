@@ -25,6 +25,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
 }
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.domain.api.v0.DomainTimeServiceGrpc
+import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -108,6 +109,7 @@ class ParticipantNodeBootstrap(
     isReplicated: Boolean,
     futureSupervisor: FutureSupervisor,
     parentLogger: NamedLoggerFactory,
+    writeHealthDumpToFile: HealthDumpFunction,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -126,6 +128,7 @@ class ParticipantNodeBootstrap(
       storageFactory,
       cryptoPrivateStoreFactory,
       parentLogger.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
+      writeHealthDumpToFile,
     ) {
 
   /** per session created admin token for in-process connections to ledger-api */
@@ -658,6 +661,7 @@ object ParticipantNodeBootstrap {
         testingConfig: TestingConfigInternal,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -677,6 +681,7 @@ object ParticipantNodeBootstrap {
         testingConfigInternal: TestingConfigInternal,
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
+        writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -716,6 +721,7 @@ object ParticipantNodeBootstrap {
             isReplicated = false,
             futureSupervisor,
             loggerFactory,
+            writeHealthDumpToFile,
           )
         )
         .leftMap(_.toString)

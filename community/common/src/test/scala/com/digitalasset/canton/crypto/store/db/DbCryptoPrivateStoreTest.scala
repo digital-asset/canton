@@ -28,7 +28,7 @@ trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreTest
 
   "DbCryptoPrivateStore" can {
     behave like cryptoPrivateStore(
-      new DbCryptoPrivateStore(storage, timeouts, loggerFactory),
+      new DbCryptoPrivateStore(storage, testedReleaseProtocolVersion, timeouts, loggerFactory),
       encrypted = false,
     )
   }

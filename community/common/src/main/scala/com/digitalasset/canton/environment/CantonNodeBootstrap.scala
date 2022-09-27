@@ -4,6 +4,7 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
+import better.files.File
 import cats.data.{EitherT, OptionT}
 import cats.syntax.functorFilter._
 import cats.syntax.option._
@@ -21,6 +22,7 @@ import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
+import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService
@@ -55,7 +57,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import io.functionmeta.functionFullName
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
@@ -63,6 +65,10 @@ import io.opentelemetry.api.trace.Tracer
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration._
 import scala.concurrent.{Future, blocking}
+
+object CantonNodeBootstrap {
+  type HealthDumpFunction = () => Future[File]
+}
 
 /** When a canton node is created it first has to obtain an identity before most of its services can be started.
   * This process will begin when `start` is called and will try to perform as much as permitted by configuration automatically.
@@ -103,6 +109,7 @@ abstract class CantonNodeBootstrapBase[
     storageFactory: StorageFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     val loggerFactory: NamedLoggerFactory,
+    writeHealthDumpToFile: HealthDumpFunction,
 )(
     implicit val executionContext: ExecutionContextIdlenessExecutorService,
     implicit val actorSystem: ActorSystem,
@@ -189,7 +196,14 @@ abstract class CantonNodeBootstrapBase[
 
   override val crypto: Crypto = timeouts.unbounded.await("initialize CryptoFactory")(
     CryptoFactory
-      .create(cryptoConfig, storage, cryptoPrivateStoreFactory, timeouts, loggerFactory)
+      .create(
+        cryptoConfig,
+        storage,
+        cryptoPrivateStoreFactory,
+        ReleaseProtocolVersion.latest,
+        timeouts,
+        loggerFactory,
+      )
       .valueOr(err => throw new RuntimeException(s"Failed to initialize crypto: $err"))
   )
   val certificateGenerator = new X509CertificateGenerator(crypto, loggerFactory)
@@ -219,8 +233,18 @@ abstract class CantonNodeBootstrapBase[
       )
 
     val registry = builder.mutableHandlerRegistry()
+
     val server = builder
-      .addService(StatusServiceGrpc.bindService(new GrpcStatusService(status), executionContext))
+      .addService(
+        StatusServiceGrpc.bindService(
+          new GrpcStatusService(
+            status,
+            writeHealthDumpToFile,
+            parameterConfig.processingTimeouts,
+          ),
+          executionContext,
+        )
+      )
       .addService(
         VaultServiceGrpc.bindService(
           new GrpcVaultService(crypto, certificateGenerator, loggerFactory),

@@ -35,6 +35,7 @@ trait CryptoPublicStoreTest extends BaseTest { this: AsyncWordSpec =>
           CommunityCryptoConfig(),
           new MemoryStorage,
           new CommunityCryptoPrivateStoreFactory,
+          testedReleaseProtocolVersion,
           timeouts,
           loggerFactory,
         )

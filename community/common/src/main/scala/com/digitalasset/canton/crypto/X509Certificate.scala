@@ -21,7 +21,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x500.style.{BCStyle, IETFUtils}
@@ -222,7 +221,7 @@ class X509CertificateGenerator(
           .sign(receiver.bytes, signignKeyId)
           .leftMap(signingError => X509CertificateError.SigningError(signingError))
         certificate <- getCertificate(
-          new SignatureProvider(signature.toByteString(ProtocolVersion.v2Todo_i9957))
+          new SignatureProvider(signature.unwrap)
         )
       } yield X509Certificate(certificate)
     }

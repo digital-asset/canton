@@ -33,7 +33,6 @@ import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.v0.CompressedBatch
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing._
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
@@ -307,7 +306,15 @@ class SequencerClient(
           " Update it if more versions are supported",
       )
 
-      val unitOrBatchSizeErr = verifyBatchSize(request.batchProtoV0)
+      val serializedRequestSize = request.toProtoV0.serializedSize
+      val maxInboundMessageSize = staticDomainParameters.maxInboundMessageSize.unwrap
+      val unitOrRequestSizeErr = Either.cond(
+        serializedRequestSize <= maxInboundMessageSize,
+        (),
+        SendAsyncClientError.RequestInvalid(
+          s"Batch size ($serializedRequestSize bytes) is exceeding maximum size (${maxInboundMessageSize} bytes) for domain $domainId"
+        ),
+      )
 
       def trackSend: EitherT[Future, SendAsyncClientError, Unit] =
         sendTracker
@@ -319,7 +326,7 @@ class SequencerClient(
 
       if (replayEnabled) {
         EitherT.fromEither(for {
-          _ <- unitOrBatchSizeErr
+          _ <- unitOrRequestSizeErr
         } yield {
           // Invoke the callback immediately, because it will not be triggered by replayed messages,
           // as they will very likely have mismatching message ids.
@@ -338,7 +345,7 @@ class SequencerClient(
         })
       } else {
         for {
-          _ <- EitherT.fromEither[Future](unitOrBatchSizeErr)
+          _ <- EitherT.fromEither[Future](unitOrRequestSizeErr)
           _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
           _ <- performSend(messageId, request, requiresAuthentication)
@@ -377,20 +384,6 @@ class SequencerClient(
         logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
         sendTracker.cancelPendingSend(messageId).map(_ => err)
       }
-  }
-
-  private def verifyBatchSize(
-      compressedBatch: CompressedBatch
-  ): Either[SendAsyncClientError, Unit] = {
-    val batchSerializedSize = compressedBatch.serializedSize
-    val maxBatchMessageSize = staticDomainParameters.maxBatchMessageSize.unwrap
-    Either.cond(
-      batchSerializedSize <= maxBatchMessageSize,
-      (),
-      SendAsyncClientError.RequestInvalid(
-        s"Batch size ($batchSerializedSize bytes) is exceeding maximum size (${maxBatchMessageSize} bytes) for domain $domainId"
-      ),
-    )
   }
 
   override def generateMaxSequencingTime: CantonTimestamp =

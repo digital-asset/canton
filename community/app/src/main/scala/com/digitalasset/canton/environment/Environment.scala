@@ -4,22 +4,25 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.concurrent._
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.concurrent.*
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleGrpcAdminCommandRunner,
   ConsoleOutput,
+  GrpcAdminCommandRunner,
+  HealthDumpGenerator,
   StandardConsoleOutput,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeBootstrap
-import com.digitalasset.canton.environment.Environment._
+import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
+import com.digitalasset.canton.environment.Environment.*
 import com.digitalasset.canton.health.HealthServer
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -27,18 +30,19 @@ import com.digitalasset.canton.metrics.MetricsFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.resource.DbMigrationsFactory
-import com.digitalasset.canton.time._
+import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
+import com.digitalasset.canton.util.{AkkaUtil, SingleUseCell}
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
+import io.opentelemetry.api.trace.Tracer
 import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
-import scala.concurrent.{Await, blocking}
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, Future, blocking}
 import scala.util.control.NonFatal
 
 /** Holds all significant resources held by this process.
@@ -64,7 +68,58 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       consoleOutput: ConsoleOutput = StandardConsoleOutput,
       createAdminCommandRunner: ConsoleEnvironment => ConsoleGrpcAdminCommandRunner =
         new ConsoleGrpcAdminCommandRunner(_),
+  ): Console = {
+    val console = _createConsole(consoleOutput, createAdminCommandRunner)
+    healthDumpGenerator.putIfAbsent(createHealthDumpGenerator(console.grpcAdminCommandRunner))
+    console
+  }
+
+  protected def _createConsole(
+      consoleOutput: ConsoleOutput = StandardConsoleOutput,
+      createAdminCommandRunner: ConsoleEnvironment => ConsoleGrpcAdminCommandRunner =
+        new ConsoleGrpcAdminCommandRunner(_),
   ): Console
+
+  protected def createHealthDumpGenerator(
+      commandRunner: GrpcAdminCommandRunner
+  ): HealthDumpGenerator[_]
+
+  /* We can't reliably use the health administration instance of the console because:
+   * 1) it's tied to the console environment, which we don't have access to yet when the environment is instantiated
+   * 2) there might never be a console environment when running in daemon mode
+   * Therefore we create an immutable lazy value for the health administration that can be set either with the console
+   * health admin when/if it gets created, or with a headless health admin, whichever comes first.
+   */
+  private val healthDumpGenerator = new SingleUseCell[HealthDumpGenerator[_]]
+
+  // Function passed down to the node boostrap used to generate a health dump file
+  val writeHealthDumpToFile: HealthDumpFunction = () =>
+    Future {
+      healthDumpGenerator
+        .getOrElse {
+          val tracerProvider =
+            TracerProvider.Factory(config.monitoring.tracing.tracer, "admin_command_runner")
+          implicit val tracer: Tracer = tracerProvider.tracer
+
+          val commandRunner = new GrpcAdminCommandRunner(this, config.parameters.timeouts.console)
+          val newGenerator = createHealthDumpGenerator(commandRunner)
+          val previous = healthDumpGenerator.putIfAbsent(newGenerator)
+          previous match {
+            // If somehow the cell was set concurrently in the meantime, close the newly created command runner and use
+            // the existing one
+            case Some(value) =>
+              commandRunner.close()
+              value
+            case None =>
+              newGenerator
+          }
+        }
+        .generateHealthDump(
+          better.files.File.newTemporaryFile(
+            prefix = "canton-remote-health-dump"
+          )
+        )
+    }
 
   installJavaUtilLoggingBridge()
   logger.debug(config.portDescription)
@@ -329,6 +384,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         testingConfig,
         futureSupervisor,
         loggerFactory,
+        writeHealthDumpToFile,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create participant bootstrap: $err"))
   }
@@ -348,6 +404,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         metricsFactory.forDomain(name),
         futureSupervisor,
         loggerFactory,
+        writeHealthDumpToFile,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create domain bootstrap: $err"))
 
@@ -371,10 +428,14 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
     val closeHealthServer: AutoCloseable = () => healthServer.foreach(_.close())
 
+    val closeHeadlessHealthAdministration: AutoCloseable =
+      () => healthDumpGenerator.get.foreach(_.grpcAdminCommandRunner.close())
+
     // the allNodes list is ordered in ideal startup order, so reverse to shutdown
     val instances =
       monitorO.toList ++ userCloseables ++ allNodes.reverse :+ metricsFactory :+ clock :+ closeHealthServer :+
-        executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+ closeScheduler
+        closeHeadlessHealthAdministration :+ executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+
+        closeScheduler
     Lifecycle.close((instances.toSeq): _*)(logger)
   })
 }

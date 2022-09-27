@@ -104,6 +104,7 @@ class LocalSecretKeyAdministration(
         keyPair <- ProtoConverter
           .parse(
             cryptoproto.CryptoKeyPair.parseFrom,
+            // TODO(#9957) replace fromProtoCryptoKeyPairV0 with a more generic versioning
             com.digitalasset.canton.crypto.CryptoKeyPair.fromProtoCryptoKeyPairV0,
             keyPairContent,
           )
@@ -232,7 +233,8 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     """Import a public key and store it together with a name used to provide some context to that key."""
   )
   def upload(key: PublicKey, name: Option[String]): Fingerprint = consoleEnvironment.run {
-    adminCommand(VaultAdminCommands.ImportPublicKey(key.toProtoPublicKey.toByteString, name))
+    // TODO(#9957) replace toProtoPublicVersion with a more generic versioning (e.g. VersionWrapper)
+    adminCommand(VaultAdminCommands.ImportPublicKey(key.toProtoPublicKeyV0.toByteString, name))
   }
 
   @Help.Summary("Upload public key")
@@ -252,7 +254,11 @@ class PublicKeyAdministration(runner: AdminCommandRunner, consoleEnvironment: Co
     if (keys.sizeCompare(1) == 0) { // vector doesn't like matching on Nil
       val key = keys.headOption.getOrElse(sys.error("no key"))
       outputFile.foreach { filename =>
-        BinaryFileUtil.writeByteStringToFile(filename, key.publicKey.toProtoPublicKey.toByteString)
+        // TODO(#9957) replace toProtoPublicVersion with a more generic versioning (e.g. VersionWrapper)
+        BinaryFileUtil.writeByteStringToFile(
+          filename,
+          key.publicKey.toProtoPublicKeyV0.toByteString,
+        )
       }
       key
     } else {

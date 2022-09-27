@@ -43,7 +43,9 @@ class SymbolicCryptoTest
   "SymbolicCrypto" can {
 
     def symbolicCrypto(): Future[Crypto] =
-      Future.successful(SymbolicCrypto.create(timeouts, loggerFactory))
+      Future.successful(
+        SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
+      )
 
     behave like signingProvider(SymbolicCryptoProvider.supportedSigningKeySchemes, symbolicCrypto())
     behave like encryptionProvider(

@@ -7,27 +7,15 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
 
+  def protocolVersion: ProtocolVersion = ProtocolVersion.latest
+
   def uniqueKeyName(name: String): String =
     name + getClass.getSimpleName
-
-  def toPrivateKeyWithName(
-      storedKeys: Set[StoredPrivateKey]
-  ): Set[ParsingResult[PrivateKeyWithName]] = {
-    storedKeys.map(x => {
-      x.purpose match {
-        case KeyPurpose.Signing =>
-          SigningPrivateKeyWithName.fromStored(x)
-        case KeyPurpose.Encryption =>
-          EncryptionPrivateKeyWithName.fromStored(x)
-      }
-    })
-  }
 
   // the tag is used to distinguish keys created for the clear and encrypted crypto private store tests
   def cryptoPrivateStore(newStore: => CryptoPrivateStore, encrypted: Boolean): Unit = {
@@ -41,14 +29,20 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
     val sigKey1: SigningPrivateKey = SymbolicCrypto.signingPrivateKey(sigKey1Name)
     val sigKey1WithName: SigningPrivateKeyWithName =
       SigningPrivateKeyWithName(sigKey1, Some(KeyName.tryCreate(sigKey1Name)))
+    val sigKey1BytesWithName = (sigKey1.toByteString(protocolVersion), sigKey1WithName.name)
+
     val sigKey2: SigningPrivateKey = SymbolicCrypto.signingPrivateKey(sigKey2Name)
     val sigKey2WithName: SigningPrivateKeyWithName = SigningPrivateKeyWithName(sigKey2, None)
+    val sigKey2BytesWithName = (sigKey2.toByteString(protocolVersion), sigKey2WithName.name)
 
     val encKey1: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey(encKey1Name)
     val encKey1WithName: EncryptionPrivateKeyWithName =
       EncryptionPrivateKeyWithName(encKey1, Some(KeyName.tryCreate(encKey1Name)))
+    val encKey1BytesWithName = (encKey1.toByteString(protocolVersion), encKey1WithName.name)
+
     val encKey2: EncryptionPrivateKey = SymbolicCrypto.encryptionPrivateKey(encKey2Name)
     val encKey2WithName: EncryptionPrivateKeyWithName = EncryptionPrivateKeyWithName(encKey2, None)
+    val encKey2BytesWithName = (encKey2.toByteString(protocolVersion), encKey2WithName.name)
 
     "store encryption keys correctly when added incrementally" in {
       val store = newStore
@@ -59,9 +53,9 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         _ <- store.storeDecryptionKey(encKey2, None).valueOrFail("store key 2")
         result <- store.listPrivateKeys(Encryption, encrypted).valueOrFail("list keys")
       } yield {
-        toPrivateKeyWithName(result) shouldEqual Set(
-          Right(encKey1WithName),
-          Right(encKey2WithName),
+        result.map(storedKey => (storedKey.data, storedKey.name)) shouldEqual Set(
+          encKey1BytesWithName,
+          encKey2BytesWithName,
         )
       }
     }
@@ -73,9 +67,9 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         _ <- store.storeSigningKey(sigKey2, None).valueOrFail("store key 2")
         result <- store.listPrivateKeys(Signing, encrypted).valueOrFail("list keys")
       } yield {
-        toPrivateKeyWithName(result) shouldEqual Set(
-          Right(sigKey1WithName),
-          Right(sigKey2WithName),
+        result.map(storedKey => (storedKey.data, storedKey.name)) shouldEqual Set(
+          sigKey1BytesWithName,
+          sigKey2BytesWithName,
         )
       }
     }
@@ -98,7 +92,9 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         result <- store.listPrivateKeys(Encryption, encrypted)
       } yield {
         failedInsert.left.value shouldBe a[CryptoPrivateStoreError]
-        toPrivateKeyWithName(result) shouldEqual Set(Right(encKey1WithName))
+        result.map(storedKey => (storedKey.data, storedKey.name)) shouldEqual Set(
+          encKey1BytesWithName
+        )
       }
     }
 
@@ -120,7 +116,9 @@ trait CryptoPrivateStoreTest extends BaseTest { this: AsyncWordSpec =>
         result <- store.listPrivateKeys(Signing, encrypted)
       } yield {
         failedInsert.left.value shouldBe a[CryptoPrivateStoreError]
-        toPrivateKeyWithName(result) shouldEqual Set(Right(sigKey1WithName))
+        result.map(storedKey => (storedKey.data, storedKey.name)) shouldEqual Set(
+          sigKey1BytesWithName
+        )
       }
     }
 

@@ -17,4 +17,7 @@ object TextFileUtil {
     */
   def readStringFromFile(inputFile: File): Either[Throwable, String] =
     ResourceUtil.withResourceEither(Source.fromFile(inputFile))(_.getLines().mkString("\n"))
+
+  def tryReadStringFromFile(inputFile: File): String =
+    TextFileUtil.readStringFromFile(inputFile).fold(ex => throw ex, x => x)
 }
