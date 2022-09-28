@@ -17,10 +17,10 @@ import com.digitalasset.canton.resource.DbStorage.Implicits._
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
-import slick.jdbc.{GetResult, SetParameter}
+import slick.jdbc.GetResult
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -58,6 +58,7 @@ object StoredPrivateKey {
 
 class DbCryptoPrivateStore(
     override protected val storage: DbStorage,
+    override protected val releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)
@@ -65,18 +66,11 @@ class DbCryptoPrivateStore(
     with DbStore {
 
   import storage.api._
-  import storage.converters._
 
   private val insertTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-insert")
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
-
-  private val protocolVersion = ProtocolVersion.v2Todo_i9957
-  private implicit val setParameterEncryptionPrivateKey: SetParameter[EncryptionPrivateKey] =
-    EncryptionPrivateKey.getVersionedSetParameter(protocolVersion)
-  private implicit val setParameterSigningPrivateKey: SetParameter[SigningPrivateKey] =
-    SigningPrivateKey.getVersionedSetParameter(protocolVersion)
 
   private def queryKeys(purpose: KeyPurpose): DbAction.ReadOnly[Set[StoredPrivateKey]] =
     sql"select key_id, data, purpose, name, wrapper_key_id from crypto_private_keys where purpose = $purpose"
@@ -153,7 +147,7 @@ class DbCryptoPrivateStore(
     }
   }
 
-  override private[crypto] def readPrivateKey(
+  private[crypto] def readPrivateKey(
       keyId: Fingerprint,
       purpose: KeyPurpose,
   )(implicit
@@ -169,14 +163,14 @@ class DbCryptoPrivateStore(
       err => CryptoPrivateStoreError.FailedToReadKey(keyId, err.toString),
     )
 
-  override private[crypto] def writePrivateKey(
+  private[crypto] def writePrivateKey(
       key: StoredPrivateKey
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     insertKey(key)
 
-  override private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     EitherTUtil
@@ -189,7 +183,7 @@ class DbCryptoPrivateStore(
         err => CryptoPrivateStoreError.FailedToListKeys(err.toString),
       )
 
-  override private[crypto] def deletePrivateKey(keyId: Fingerprint)(implicit
+  private[crypto] def deletePrivateKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     EitherTUtil.fromFuture(

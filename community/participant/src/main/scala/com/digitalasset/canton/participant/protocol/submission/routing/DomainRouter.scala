@@ -52,7 +52,6 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
 
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
 /** The domain router routes transaction submissions from upstream to the right domain.
@@ -65,7 +64,6 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class DomainRouter(
     participantId: ParticipantId,
-    getConnectedDomains: () => Set[DomainId],
     domainOfContracts: Seq[LfContractId] => Future[Map[LfContractId, DomainId]],
     domainIdResolver: DomainAlias => Option[DomainId],
     submit: DomainId => (
@@ -127,7 +125,7 @@ class DomainRouter(
         inputContractsMetadata,
       )
 
-      domainSelector <- domainSelectorFactory.create(transactionData, getConnectedDomains())
+      domainSelector <- domainSelectorFactory.create(transactionData)
 
       inputDomains = transactionData.inputContractsDomainData.domains
 
@@ -182,8 +180,7 @@ class DomainRouter(
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, DomainRank] =
     for {
       _ <- checkValidityOfMultiDomain(
-        domainSelector.connectedDomains,
-        domainSelector.transactionData,
+        domainSelector.transactionData
       )
       domainRankTarget <- domainSelector.forMultiDomain
     } yield domainRankTarget
@@ -205,15 +202,14 @@ class DomainRouter(
   }
 
   private def checkValidityOfMultiDomain(
-      connectedDomains: Set[DomainId],
-      transactionData: TransactionData,
+      transactionData: TransactionData
   ): EitherT[Future, TransactionRoutingError, Unit] = {
     val inputContractsDomainData = transactionData.inputContractsDomainData
 
     val allContractsHaveDomainData: Boolean = inputContractsDomainData.withoutDomainData.isEmpty
     val contractData = inputContractsDomainData.withDomainData
     val contractsDomainNotConnected = contractData.filterNot { contractData =>
-      connectedDomains.contains(contractData.domain)
+      snapshotProvider(contractData.domain).map(_ => true).getOrElse(false)
     }
 
     // Check that at least one submitter is a stakeholder so that we can transfer the contract if needed. This check
@@ -291,7 +287,6 @@ object DomainRouter {
 
     new DomainRouter(
       participantId,
-      () => getConnectedDomains(connectedDomainsMap),
       domainOfContract(connectedDomainsMap),
       domainIdResolver,
       submit(connectedDomainsMap),
@@ -302,14 +297,6 @@ object DomainRouter {
       timeouts,
       loggerFactory,
     )
-  }
-
-  private def getConnectedDomains(
-      connectedDomainsMap: mutable.Map[DomainId, SyncDomain]
-  ): Set[DomainId] = {
-    connectedDomainsMap.collect {
-      case (domainId, syncService) if syncService.readyForSubmission => domainId
-    }.toSet
   }
 
   private def domainOfContract(connectedDomains: collection.Map[DomainId, SyncDomain])(

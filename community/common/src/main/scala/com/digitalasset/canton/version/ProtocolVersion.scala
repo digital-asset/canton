@@ -168,9 +168,6 @@ object ProtocolVersion {
   lazy val v3: ProtocolVersion = ProtocolVersion(3)
   lazy val v4: ProtocolVersion = ProtocolVersion(4)
 
-  // TODO(i9957): remove hardcoded protocol version for crypto tooling
-  lazy val v2Todo_i9957: ProtocolVersion = v2
-
   // TODO(i10354): remove hardcoded protocol version in MerkleTree
   lazy val v2Todo_i10354: ProtocolVersion = v2
 

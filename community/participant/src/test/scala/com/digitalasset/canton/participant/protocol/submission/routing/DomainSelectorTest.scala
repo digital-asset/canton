@@ -18,10 +18,6 @@ import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityCh
   UnknownPackage,
 }
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
-import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId.{
-  NotAllInformeeAreOnDomain,
-  NotConnected,
-}
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.NoDomainForSubmission
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.UnableToQueryTopologySnapshot
 import com.digitalasset.canton.participant.sync.{
@@ -95,13 +91,14 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
 
     "return an error when not connected to the domain" in {
       val selector = selectorForExerciseByInterface(connectedDomains = Set())
+      val expected = TransactionRoutingError.UnableToQueryTopologySnapshot.Failed(da)
 
       // Single domain
-      selector.forSingleDomain.leftValue shouldBe NotConnected(da)
+      selector.forSingleDomain.leftValue shouldBe expected
 
       // Multi domain
       selector.forMultiDomain.leftValue shouldBe NoDomainForSubmission.Error(
-        Map(da -> TransactionRoutingError.UnableToQueryTopologySnapshot.Failed(da).toString)
+        Map(da -> expected.toString)
       )
     }
 
@@ -112,10 +109,11 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       )
 
       // Single domain: failure
-      selector.forSingleDomain.leftValue shouldBe NotAllInformeeAreOnDomain(
-        da,
-        domainsOfAllInformee = NonEmpty.mk(Set, acme),
-      )
+      selector.forSingleDomain.leftValue shouldBe InvalidPrescribedDomainId
+        .NotAllInformeeAreOnDomain(
+          da,
+          domainsOfAllInformee = NonEmpty.mk(Set, acme),
+        )
 
       // Multi domain: transfer proposal (da -> acme)
       val domainRank = transfersDaToAcme(selector.inputContractIds)
@@ -230,10 +228,11 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
           )
 
         // Multi domain
-        selector.forMultiDomain.leftValue shouldBe NotAllInformeeAreOnDomain(
-          acme,
-          domainsOfAllInformee = NonEmpty.mk(Set, da),
-        )
+        selector.forMultiDomain.leftValue shouldBe InvalidPrescribedDomainId
+          .NotAllInformeeAreOnDomain(
+            acme,
+            domainsOfAllInformee = NonEmpty.mk(Set, da),
+          )
       }
 
       "propose transfers when needed" in {
@@ -501,7 +500,6 @@ private[routing] object DomainSelectorTest {
           new DomainSelector(
             participantId = submitterParticipantId,
             transactionData = transactionData,
-            connectedDomains = connectedDomains,
             domainsOfSubmittersAndInformees = domainsOfSubmittersAndInformees,
             priorityOfDomain = priorityOfDomain,
             domainRankComputation = domainRankComputation,

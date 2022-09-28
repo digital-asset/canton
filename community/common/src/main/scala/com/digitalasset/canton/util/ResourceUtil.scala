@@ -49,7 +49,7 @@ object ResourceUtil {
     }
   }
 
-  private def closeAndAddSuppressed(e: Option[Throwable], resource: AutoCloseable): Unit =
+  def closeAndAddSuppressed(e: Option[Throwable], resource: AutoCloseable): Unit =
     e.fold(resource.close()) { exception =>
       try {
         resource.close()

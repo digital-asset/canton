@@ -48,15 +48,13 @@ private[routing] class DomainSelectorFactory(
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext) {
   def create(
-      transactionData: TransactionData,
-      connectedDomains: Set[DomainId],
+      transactionData: TransactionData
   ): EitherT[Future, TransactionRoutingError, DomainSelector] = {
     for {
       domainsOfSubmittersAndInformees <- domainsOfSubmittersAndInformees(transactionData)
     } yield new DomainSelector(
       participantId,
       transactionData,
-      connectedDomains,
       domainsOfSubmittersAndInformees,
       priorityOfDomain,
       domainRankComputation,
@@ -68,7 +66,6 @@ private[routing] class DomainSelectorFactory(
 }
 
 /** Selects the best domain for routing.
-  * @param connectedDomains The set of connected domains
   * @param domainsOfSubmittersAndInformees Domains that host both submitters and informees of the transaction:
   *                                          - submitters have to be hosted on the local participant
   *                                          - informees have to be hosted on some participant
@@ -82,7 +79,6 @@ private[routing] class DomainSelectorFactory(
 private[routing] class DomainSelector(
     participantId: ParticipantId,
     val transactionData: TransactionData,
-    val connectedDomains: Set[DomainId],
     domainsOfSubmittersAndInformees: NonEmpty[Set[DomainId]],
     priorityOfDomain: DomainId => Int,
     domainRankComputation: DomainRankComputation,
@@ -209,14 +205,6 @@ private[routing] class DomainSelector(
     } yield usableDomainsNE.toSet
   }
 
-  private def validateConnectedTo(
-      domainId: DomainId
-  ): EitherT[Future, TransactionRoutingErrorWithDomain, Unit] =
-    EitherTUtil.condUnitET[Future](
-      connectedDomains.contains(domainId),
-      TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId.NotConnected(domainId),
-    )
-
   private def singleDomainValidatePrescribedDomain(
       domainId: DomainId,
       transactionVersion: TransactionVersion,
@@ -262,7 +250,8 @@ private[routing] class DomainSelector(
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, Unit] = {
 
     for {
-      _ <- validateConnectedTo(domainId)
+      domainState <- EitherT.fromEither[Future](domainStateProvider(domainId))
+      (snapshot, protocolVersion) = domainState
 
       // Informees and submitters should reside on the selected domain
       _ <- EitherTUtil.condUnitET[Future](
@@ -275,9 +264,6 @@ private[routing] class DomainSelector(
       )
 
       // Further validations
-      domainState <- EitherT.fromEither[Future](domainStateProvider(domainId))
-      (snapshot, protocolVersion) = domainState
-
       domainUsabilityChecker = new DomainUsabilityCheckerFull(
         domainId = domainId,
         protocolVersion = protocolVersion,

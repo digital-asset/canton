@@ -227,7 +227,6 @@ case class RemoteParticipantConfig(
   * @param internalPort              ledger api server port.
   * @param maxEventCacheWeight       ledger api server event cache maximum weight (caffeine cache size)
   * @param maxContractCacheWeight    ledger api server contract cache maximum weight (caffeine cache size)
-  * @param maxDeduplicationDuration  Deprecated. Use maxDeduplicationDuration in the `init` object of the participant config instead
   * @param tls                       tls configuration setting from ledger api server.
   * @param configurationLoadTimeout  ledger api server startup delay if no timemodel has been sent by canton via ReadService
   * @param eventsPageSize            database / akka page size for batching of ledger api server index ledger events queries.
@@ -345,7 +344,6 @@ object LedgerApiServerConfig {
       _initialLedgerConfiguration, // not used by canton - always None
       managementServiceTimeout,
       _maxInboundMessageSize, // configured via participant.maxInboundMessageSize
-      _party,
       port,
       _portFile,
       _rateLimitingConfig,
@@ -752,8 +750,6 @@ object TestingTimeServiceConfig {
   *                                             will be requested.
   *                                             Setting to zero will disable reusing recent time proofs and will instead always fetch a new proof.
   * @param minimumProtocolVersion The minimum protocol version that this participant will speak when connecting to a domain
-  * @param uniqueContractKeys Deprecated. Use uniqueContractKeys in the `init` object of the participant config instead
-  * @param enableCausalityTracking Deprecated. Use unsafeEnableCausalityTracking in the `init` object of the participant config instead
   * @param unsafeEnableDamlLfDevVersion If set to true (default false), packages referring to the `dev` LF version can be used with Canton.
   * @param initialProtocolVersion The initial protocol version used by the participant (default latest), e.g., used to create the initial topology transactions.
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.

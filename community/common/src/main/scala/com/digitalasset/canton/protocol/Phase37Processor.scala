@@ -8,6 +8,7 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.{Deliver, SignedContent}
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
@@ -32,20 +33,20 @@ trait Phase37Processor[RequestBatch] {
       timestamp: CantonTimestamp,
       sequencerCounter: SequencerCounter,
       signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  )(implicit traceContext: TraceContext): HandlerResult
 
   /** Processes a result message, commits the changes or rolls them back and emits events via the
     * [[com.digitalasset.canton.participant.event.RecordOrderPublisher]].
     *
     * @param signedResultBatch The signed result batch to process. The batch must contain exactly one message.
-    * @return The future completes when the request has reached the state
+    * @return The [[com.digitalasset.canton.sequencing.HandlerResult]] completes when the request has reached the state
     *         [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Clean]]
     *         and the event has been sent to the [[com.digitalasset.canton.participant.event.RecordOrderPublisher]],
     *         or if the processing aborts with an error.
     */
   def processResult(signedResultBatch: SignedContent[Deliver[DefaultOpenEnvelope]])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
+  ): HandlerResult
 }
 
 /** Request messages, along with the root hash message and the mediator ID that received the root hash message */

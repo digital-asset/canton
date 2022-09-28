@@ -72,9 +72,6 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
   val mediatorId = MediatorId(domainId)
   val mediatorId2 = MediatorId(UniqueIdentifier.tryCreate("another", "mediator"))
 
-  private val protocolMessagePVRepresentative =
-    EncryptedViewMessage.protocolVersionRepresentativeFor(testedProtocolVersion)
-
   case class Fixture(
       messageDispatcher: MessageDispatcher,
       requestTracker: RequestTracker,
@@ -114,7 +111,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
         initRc: RequestCounter = 0L,
         cleanReplaySequencerCounter: SequencerCounter = 0L,
         processingRequestF: => FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit,
-        processingResultF: => FutureUnlessShutdown[Unit] = FutureUnlessShutdown.unit,
+        processingResultF: => HandlerResult = HandlerResult.done,
     ): Fixture = {
       val requestTracker = mock[RequestTracker]
 

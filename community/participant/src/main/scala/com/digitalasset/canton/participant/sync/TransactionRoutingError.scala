@@ -90,13 +90,6 @@ object TransactionRoutingError extends RoutingErrorGroup {
           )
           with TransactionRoutingErrorWithDomain
 
-      case class NotConnected(domainId: DomainId)
-          extends TransactionErrorImpl(
-            cause =
-              s"Cannot submit transaction to prescribed domain `$domainId` because the participant is not connected to this domain"
-          )
-          with TransactionRoutingErrorWithDomain
-
       case class Generic(domainId: DomainId, reason: String)
           extends TransactionErrorImpl(
             cause = s"Cannot submit transaction to prescribed domain `$domainId` because: $reason"

@@ -28,6 +28,7 @@ class TinkCryptoTest
           CommunityCryptoConfig(provider = Tink),
           new MemoryStorage,
           new CommunityCryptoPrivateStoreFactory,
+          testedReleaseProtocolVersion,
           timeouts,
           loggerFactory,
         )

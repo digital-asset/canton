@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.functor._
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.BaseTest.testedReleaseProtocolVersion
 import com.digitalasset.canton.concurrent.{
   DirectExecutionContext,
   FutureSupervisor,
@@ -429,6 +430,7 @@ class TestingIdentityFactory(
     SymbolicCrypto.tryCreate(
       signingFingerprintsOrOwner,
       fingerprintSuffixesOrOwner,
+      testedReleaseProtocolVersion,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     )

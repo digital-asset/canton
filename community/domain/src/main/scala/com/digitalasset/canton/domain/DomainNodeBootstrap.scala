@@ -36,6 +36,7 @@ import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerVersionSer
 import com.digitalasset.canton.domain.sequencing.{SequencerRuntime, SequencerRuntimeFactory}
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.topology._
+import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.admin.data.{DomainStatus, TopologyQueueStatus}
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -84,6 +85,7 @@ class DomainNodeBootstrap(
     storageFactory: StorageFactory,
     cryptoPrivateStoreFactory: CryptoPrivateStoreFactory,
     futureSupervisor: FutureSupervisor,
+    writeHealthDumpToFile: HealthDumpFunction,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -96,6 +98,7 @@ class DomainNodeBootstrap(
       storageFactory,
       cryptoPrivateStoreFactory,
       parentLogger.append(DomainNodeBootstrap.LoggerFactoryKeyName, name.unwrap),
+      writeHealthDumpToFile,
     )
     with DomainTopologyManagerIdentityInitialization {
 
@@ -497,6 +500,7 @@ object DomainNodeBootstrap {
         metrics: DomainMetrics,
         futureSupervisor: FutureSupervisor,
         parentLogger: NamedLoggerFactory = NamedLoggerFactory.root,
+        writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         actorSystem: ActorSystem,
         ec: ExecutionContextIdlenessExecutorService,
@@ -515,6 +519,7 @@ object DomainNodeBootstrap {
         metrics: DomainMetrics,
         futureSupervisor: FutureSupervisor,
         parentLogger: NamedLoggerFactory,
+        writeHealthDumpToFile: HealthDumpFunction,
     )(implicit
         actorSystem: ActorSystem,
         executionContext: ExecutionContextIdlenessExecutorService,
@@ -537,6 +542,7 @@ object DomainNodeBootstrap {
         new CommunityStorageFactory(config.storage),
         new CommunityCryptoPrivateStoreFactory,
         futureSupervisor,
+        writeHealthDumpToFile,
       )
 
     }

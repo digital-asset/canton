@@ -5,10 +5,13 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either._
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.health.admin.v0.{HealthDumpChunk, HealthDumpRequest}
 import com.digitalasset.canton.health.admin.{data, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.empty.Empty
-import io.grpc.ManagedChannel
+import io.grpc.Context.CancellableContext
+import io.grpc.stub.StreamObserver
+import io.grpc.{Context, ManagedChannel}
 
 import scala.concurrent.Future
 
@@ -36,6 +39,30 @@ object StatusAdminCommands {
           deserialize(status).map(data.NodeStatus.Success(_))
         case v0.NodeStatus.Response.Empty => Left(ProtoDeserializationError.FieldNotSet("response"))
       }): ParsingResult[data.NodeStatus[S]]).leftMap(_.toString)
+  }
+
+  class GetHealthDump(
+      observer: StreamObserver[HealthDumpChunk],
+      chunkSize: Option[Int],
+  ) extends GrpcAdminCommand[HealthDumpRequest, CancellableContext, CancellableContext] {
+    override type Svc = v0.StatusServiceGrpc.StatusServiceStub
+    override def createService(channel: ManagedChannel): v0.StatusServiceGrpc.StatusServiceStub =
+      v0.StatusServiceGrpc.stub(channel)
+    override def submitRequest(
+        service: v0.StatusServiceGrpc.StatusServiceStub,
+        request: HealthDumpRequest,
+    ): Future[CancellableContext] = {
+      val context = Context.current().withCancellation()
+      context.run(() => service.healthDump(request, observer))
+      Future.successful(context)
+    }
+    override def createRequest(): Either[String, HealthDumpRequest] = Right(
+      HealthDumpRequest(chunkSize)
+    )
+    override def handleResponse(response: CancellableContext): Either[String, CancellableContext] =
+      Right(
+        response
+      )
   }
 
   object IsRunning

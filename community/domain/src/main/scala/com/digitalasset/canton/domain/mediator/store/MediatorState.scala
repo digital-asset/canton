@@ -102,7 +102,8 @@ private[mediator] class MediatorState(
     def storeFinalized: OptionT[Future, Unit] = OptionT.liftF {
       finalizedResponseStore.store(newValue) map { _ =>
         // keep the request around for a while to avoid a database lookup under contention
-        Option(finishedRequests.put(requestId, newValue)) match {
+        finishedRequests.put(requestId, newValue) match {
+          // request was not yet present, ensure we schedule the eviction
           case None =>
             // request was not yet present, remember it for some time and remove an older request
             evictionQueue.offer(requestId)

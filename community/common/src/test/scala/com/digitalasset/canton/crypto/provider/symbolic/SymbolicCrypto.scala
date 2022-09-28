@@ -13,6 +13,7 @@ import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPublicStore,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
@@ -76,6 +77,7 @@ object SymbolicCrypto extends LazyLogging {
     signature(ByteString.EMPTY, Fingerprint.create(ByteString.EMPTY, HashAlgorithm.Sha256))
 
   def create(
+      releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
@@ -83,7 +85,7 @@ object SymbolicCrypto extends LazyLogging {
 
     val pureCrypto = new SymbolicPureCrypto()
     val cryptoPublicStore = new InMemoryCryptoPublicStore
-    val cryptoPrivateStore = new InMemoryCryptoPrivateStore(loggerFactory)
+    val cryptoPrivateStore = new InMemoryCryptoPrivateStore(releaseProtocolVersion, loggerFactory)
     val privateCrypto = new SymbolicPrivateCrypto(pureCrypto, cryptoPrivateStore)
 
     // Conversion to java keys is not supported by symbolic crypto
@@ -124,6 +126,7 @@ object SymbolicCrypto extends LazyLogging {
   def tryCreate(
       signingFingerprints: Seq[Fingerprint],
       fingerprintSuffixes: Seq[String],
+      releaseProtocolVersion: ReleaseProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
@@ -131,7 +134,7 @@ object SymbolicCrypto extends LazyLogging {
     implicit val loggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
 
-    val crypto = SymbolicCrypto.create(timeouts, loggerFactory)
+    val crypto = SymbolicCrypto.create(releaseProtocolVersion, timeouts, loggerFactory)
 
     def runStorage[A](op: EitherT[Future, _, A], description: String): A =
       timeouts.io

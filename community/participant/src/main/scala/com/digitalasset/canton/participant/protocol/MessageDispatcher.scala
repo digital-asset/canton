@@ -592,11 +592,11 @@ object MessageDispatcher {
   case class RequestKind(viewType: ViewType) extends MessageKind[Unit] {
     override def pretty: Pretty[RequestKind] = prettyOfParam(unnamedParam(_.viewType))
   }
-  case class ResultKind(viewType: ViewType) extends MessageKind[Unit] {
+  case class ResultKind(viewType: ViewType) extends MessageKind[AsyncResult] {
     override def pretty: Pretty[ResultKind] = prettyOfParam(unnamedParam(_.viewType))
   }
   case object AcsCommitment extends MessageKind[Unit]
-  case object MalformedMediatorRequestMessage extends MessageKind[Unit]
+  case object MalformedMediatorRequestMessage extends MessageKind[AsyncResult]
   case object MalformedMessage extends MessageKind[Unit]
   case object UnspecifiedMessageKind extends MessageKind[Unit]
   case object CausalityMessageKind extends MessageKind[Unit]
@@ -623,7 +623,7 @@ object MessageDispatcher {
         requestTracker: RequestTracker,
         requestProcessors: RequestProcessors,
         tracker: SingleDomainCausalTracker,
-        identityProcessor: (
+        topologyProcessor: (
             SequencerCounter,
             CantonTimestamp,
             Traced[List[DefaultOpenEnvelope]],
@@ -706,7 +706,7 @@ object MessageDispatcher {
         requestTracker: RequestTracker,
         requestProcessors: RequestProcessors,
         tracker: SingleDomainCausalTracker,
-        identityProcessor: (
+        topologyProcessor: (
             SequencerCounter,
             CantonTimestamp,
             Traced[List[DefaultOpenEnvelope]],
@@ -725,7 +725,7 @@ object MessageDispatcher {
         requestTracker,
         requestProcessors,
         tracker,
-        identityProcessor,
+        topologyProcessor,
         acsCommitmentProcessor,
         requestCounterAllocator,
         recordOrderPublisher,

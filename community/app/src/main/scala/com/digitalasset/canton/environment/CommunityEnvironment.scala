@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.{CantonCommunityConfig, TestingConfigInter
 import com.digitalasset.canton.console.{
   CantonHealthAdministration,
   CommunityCantonHealthAdministration,
+  CommunityHealthDumpGenerator,
   CommunityLocalDomainReference,
   CommunityRemoteDomainReference,
   ConsoleEnvironment,
@@ -15,6 +16,8 @@ import com.digitalasset.canton.console.{
   ConsoleOutput,
   DomainReference,
   FeatureFlag,
+  GrpcAdminCommandRunner,
+  HealthDumpGenerator,
   Help,
   LocalDomainReference,
   LocalInstanceReference,
@@ -43,7 +46,7 @@ class CommunityEnvironment(
     DomainNodeBootstrap.CommunityDomainFactory
   override type Console = CommunityConsoleEnvironment
 
-  override def createConsole(
+  override protected def _createConsole(
       consoleOutput: ConsoleOutput,
       createAdminCommandRunner: ConsoleEnvironment => ConsoleGrpcAdminCommandRunner,
   ): CommunityConsoleEnvironment =
@@ -54,6 +57,11 @@ class CommunityEnvironment(
 
   override def isEnterprise: Boolean = false
 
+  def createHealthDumpGenerator(
+      commandRunner: GrpcAdminCommandRunner
+  ): HealthDumpGenerator[CommunityCantonStatus] = {
+    new CommunityHealthDumpGenerator(this, commandRunner)
+  }
 }
 
 object CommunityEnvironmentFactory extends EnvironmentFactory[CommunityEnvironment] {
@@ -80,7 +88,7 @@ class CommunityConsoleEnvironment(
 
   @Help.Summary("Environment health inspection")
   @Help.Group("Health")
-  override def health: CantonHealthAdministration[CommunityCantonStatus] =
+  override def health: CantonHealthAdministration[Status] =
     health_
 
   override def startupOrderPrecedence(instance: LocalInstanceReference): Int = instance match {

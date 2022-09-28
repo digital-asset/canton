@@ -3,21 +3,58 @@
 
 package com.digitalasset.canton.console.commands
 
+import better.files.File
 import com.digitalasset.canton.admin.api.client.commands.{HttpAdminCommand, StatusAdminCommands}
-import com.digitalasset.canton.console.CommandErrors.CommandError
+import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
+import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.ConsoleMacros.utils
+import com.digitalasset.canton.console.commands.HealthAdministration.HealthDumpObserver
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
+  CantonHealthAdministration,
+  CommandErrors,
   CommandSuccessful,
   ConsoleCommandResult,
   ConsoleEnvironment,
   Help,
   Helpful,
 }
+import com.digitalasset.canton.health.admin.v0.HealthDumpChunk
 import com.digitalasset.canton.health.admin.{data, v0}
+import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.ResourceUtil
+import io.grpc.StatusRuntimeException
+import io.grpc.stub.StreamObserver
 
+import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{Await, Promise, TimeoutException}
+import scala.util.{Failure, Success, Try}
+
+object HealthAdministration {
+  class HealthDumpObserver(healthDumpFile: File, requestComplete: Promise[String])
+      extends StreamObserver[HealthDumpChunk] {
+    private val os: FileOutputStream = healthDumpFile.newFileOutputStream(append = false)
+
+    override def onNext(value: HealthDumpChunk): Unit = {
+      Try(os.write(value.chunk.toByteArray)) match {
+        case Failure(exception) =>
+          ResourceUtil.closeAndAddSuppressed(Some(exception), os)
+          throw exception
+        case Success(_) => // all good
+      }
+    }
+    override def onError(t: Throwable): Unit = {
+      requestComplete.tryFailure(t)
+      ResourceUtil.closeAndAddSuppressed(None, os)
+    }
+    override def onCompleted(): Unit = {
+      requestComplete.trySuccess(healthDumpFile.pathAsString)
+      ResourceUtil.closeAndAddSuppressed(None, os)
+    }
+  }
+}
 
 class HealthAdministration[S <: data.NodeStatus.Status](
     runner: AdminCommandRunner,
@@ -25,6 +62,7 @@ class HealthAdministration[S <: data.NodeStatus.Status](
     deserialize: v0.NodeStatus.Status => ParsingResult[S],
 ) extends Helpful {
   private val initializedCache = new AtomicReference[Boolean](false)
+  private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
 
   import runner._
 
@@ -34,6 +72,36 @@ class HealthAdministration[S <: data.NodeStatus.Status](
       case CommandSuccessful(success) => success
       case err: CommandError => data.NodeStatus.Failure(err.cause)
     })
+  }
+
+  @Help.Summary(
+    "Creates a zip file containing diagnostic information about the canton process running this node"
+  )
+  def dump(
+      outputFile: File = CantonHealthAdministration.defaultHealthDumpName,
+      timeout: NonNegativeDuration = timeouts.ledgerCommand,
+      chunkSize: Option[Int] = None,
+  ): String = consoleEnvironment.run {
+    val requestComplete = Promise[String]()
+    val responseObserver = new HealthDumpObserver(outputFile, requestComplete)
+
+    def call = consoleEnvironment.run {
+      adminCommand(new StatusAdminCommands.GetHealthDump(responseObserver, chunkSize))
+    }
+
+    try {
+      ResourceUtil.withResource(call) { _ =>
+        CommandSuccessful(
+          Await.result(requestComplete.future, timeout.duration)
+        )
+      }
+    } catch {
+      case sre: StatusRuntimeException =>
+        GenericCommandError(GrpcError("Generating health dump file", "dump", sre).toString)
+      case _: TimeoutException =>
+        outputFile.delete(swallowIOExceptions = true)
+        CommandErrors.ConsoleTimeout.Error(timeout.asJavaApproximation)
+    }
   }
 
   private def runningCommand =

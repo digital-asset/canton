@@ -15,7 +15,7 @@ import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -23,6 +23,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DbCryptoPublicStore(
     override protected val storage: DbStorage,
+    protected val releaseProtocolVersion: ReleaseProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override implicit val ec: ExecutionContext)
@@ -37,11 +38,10 @@ class DbCryptoPublicStore(
   private val queryTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-public-store-query")
 
-  private val protocolVersion = ProtocolVersion.v2Todo_i9957
   private implicit val setParameterEncryptionPublicKey: SetParameter[EncryptionPublicKey] =
-    EncryptionPublicKey.getVersionedSetParameter(protocolVersion)
+    EncryptionPublicKey.getVersionedSetParameter(releaseProtocolVersion.v)
   private implicit val setParameterSigningPublicKey: SetParameter[SigningPublicKey] =
-    SigningPublicKey.getVersionedSetParameter(protocolVersion)
+    SigningPublicKey.getVersionedSetParameter(releaseProtocolVersion.v)
 
   private def queryKeys[K: GetResult](purpose: KeyPurpose): DbAction.ReadOnly[Set[K]] =
     sql"select data, name from crypto_public_keys where purpose = $purpose"

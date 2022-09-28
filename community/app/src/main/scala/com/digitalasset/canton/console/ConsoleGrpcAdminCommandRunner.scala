@@ -12,7 +12,8 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   ServerEnforcedTimeout,
 }
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.{ClientConfig, NonNegativeDuration}
+import com.digitalasset.canton.config.{ClientConfig, ConsoleCommandTimeout, NonNegativeDuration}
+import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableChannel
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
@@ -26,19 +27,21 @@ import scala.concurrent.{ExecutionContextExecutor, blocking}
 
 /** Attempt to run a grpc admin-api command against whatever is pointed at in the config
   */
-class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
+class GrpcAdminCommandRunner(
+    environment: Environment,
+    val commandTimeouts: ConsoleCommandTimeout,
+)(implicit tracer: Tracer)
     extends NamedLogging
     with AutoCloseable
     with Spanning {
 
   private implicit val executionContext: ExecutionContextExecutor =
-    consoleEnvironment.environment.executionContext
-  override val loggerFactory: NamedLoggerFactory = consoleEnvironment.environment.loggerFactory
-  implicit val tracer: Tracer = consoleEnvironment.tracer
+    environment.executionContext
+  override val loggerFactory: NamedLoggerFactory = environment.loggerFactory
 
   private val grpcRunner = new GrpcCtlRunner(
-    consoleEnvironment.environment.config.monitoring.logging.api.maxMessageLines,
-    consoleEnvironment.environment.config.monitoring.logging.api.maxStringLength,
+    environment.config.monitoring.logging.api.maxMessageLines,
+    environment.config.monitoring.logging.api.maxStringLength,
     loggerFactory,
   )
   private val channels = TrieMap[(String, String, Port), CloseableChannel]()
@@ -51,7 +54,6 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
   ): ConsoleCommandResult[Result] =
     withNewTrace[ConsoleCommandResult[Result]](command.fullName) { implicit traceContext => span =>
       span.setAttribute("instance_name", instanceName)
-      val commandTimeouts = consoleEnvironment.commandTimeouts
       val awaitTimeout = command.timeoutType match {
         case CustomClientTimeout(timeout) => timeout
         // If a custom timeout for a console command is set, it involves some non-gRPC timeout mechanism
@@ -98,3 +100,9 @@ class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
     channels.clear()
   }
 }
+
+class ConsoleGrpcAdminCommandRunner(consoleEnvironment: ConsoleEnvironment)
+    extends GrpcAdminCommandRunner(
+      consoleEnvironment.environment,
+      consoleEnvironment.commandTimeouts,
+    )(consoleEnvironment.tracer)

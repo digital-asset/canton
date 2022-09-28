@@ -7,8 +7,6 @@ import cats.Order
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.config.RequireTypes.String300
-import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
   CryptoPrivateStore,
   CryptoPrivateStoreError,
@@ -383,17 +381,6 @@ final case class SigningPrivateKey private[crypto] (
     with HasVersionedWrapper[VersionedMessage[SigningPrivateKey]]
     with NoCopy {
 
-  def toStored(name: Option[KeyName], wrapperKeyId: Option[String300]): StoredPrivateKey = {
-    new StoredPrivateKey(
-      id,
-      // TODO(#9957) verify correctness of hardcoded protocol version
-      toByteString(ProtocolVersion.latest),
-      purpose,
-      name,
-      wrapperKeyId,
-    )
-  }
-
   override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPrivateKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
@@ -425,10 +412,6 @@ object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey]
       scheme: SigningKeyScheme,
   ): SigningPrivateKey =
     throw new UnsupportedOperationException("Use keypair generate or deserialization methods")
-
-  def fromStored(storedKey: StoredPrivateKey): ParsingResult[SigningPrivateKey] = {
-    fromByteString(storedKey.data)
-  }
 
   def fromProtoV0(
       privateKeyP: v0.SigningPrivateKey
