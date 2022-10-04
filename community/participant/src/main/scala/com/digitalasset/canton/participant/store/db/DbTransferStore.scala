@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.either._
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -13,7 +12,6 @@ import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore
 import com.digitalasset.canton.participant.store.TransferStore._
@@ -32,6 +30,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
+import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -104,7 +103,7 @@ class DbTransferStore(
     TransferData(
       sourceProtocolVersion = sourceProtocolVersion,
       transferOutTimestamp = GetResult[CantonTimestamp].apply(r),
-      transferOutRequestCounter = r.nextLong(),
+      transferOutRequestCounter = GetResult[RequestCounter].apply(r),
       transferOutRequest = getResultFullTransferOutTree(r),
       transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),

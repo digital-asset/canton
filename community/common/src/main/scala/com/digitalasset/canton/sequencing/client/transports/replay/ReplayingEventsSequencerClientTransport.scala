@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
   HandshakeRequest,
   HandshakeResponse,
+  SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
 }
@@ -63,6 +64,14 @@ class ReplayingEventsSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
+
+  /** Does nothing */
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+    EitherT.rightT(())
 
   /** Does nothing */
   override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit

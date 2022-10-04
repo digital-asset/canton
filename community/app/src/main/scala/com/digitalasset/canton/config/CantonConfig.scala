@@ -361,6 +361,7 @@ trait CantonConfig {
   private lazy val participantNodeParameters_ : Map[InstanceName, ParticipantNodeParameters] =
     participants.fmap { participantConfig =>
       val participantParameters = participantConfig.parameters
+
       ParticipantNodeParameters(
         monitoring.tracing,
         monitoring.delayLoggingThreshold,
@@ -387,6 +388,8 @@ trait CantonConfig {
         participantConfig.init.parameters.unsafeEnableCausalityTracking,
         participantParameters.unsafeEnableDamlLfDevVersion,
         participantParameters.ledgerApiServerParameters,
+        maxDbConnections = participantConfig.storage.maxConnectionsCanton(true, false, false).value,
+        participantParameters.excludeInfrastructureTransactions,
       )
     }
 

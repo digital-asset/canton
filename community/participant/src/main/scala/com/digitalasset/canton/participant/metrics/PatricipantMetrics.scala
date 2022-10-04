@@ -7,7 +7,13 @@ import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.{MetricName, Metrics => LedgerApiServerMetrics}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
-import com.digitalasset.canton.metrics.MetricHandle.{GaugeM, MeterM, NodeMetrics, VarGaugeM}
+import com.digitalasset.canton.metrics.MetricHandle.{
+  CounterM,
+  GaugeM,
+  MeterM,
+  NodeMetrics,
+  VarGaugeM,
+}
 import com.digitalasset.canton.metrics._
 
 import scala.collection.concurrent.TrieMap
@@ -67,6 +73,15 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
   }
 
   object transactionProcessing extends TransactionProcessingMetrics(prefix, registry)
+
+  @MetricDoc.Tag(
+    summary = "Size of conflict detection task queue",
+    description = """The task scheduler will schedule tasks to run at a given timestamp. This metric
+                    |exposes the number of tasks that are waiting in the task queue for the right time to pass.
+                    |A huge number does not necessarily indicate a bottleneck;
+                    |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
+  )
+  val numDirtyRequests: CounterM = counter(prefix :+ "dirty-requests")
 
   object recordOrderPublisher extends TaskSchedulerMetrics {
 

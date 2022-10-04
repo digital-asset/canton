@@ -78,11 +78,14 @@ case class TransferOutMediatorMessage(
   def toProtoV0: v0.TransferOutMediatorMessage =
     v0.TransferOutMediatorMessage(tree = Some(tree.toProtoV0))
 
+  def toProtoV1: v1.TransferOutMediatorMessage =
+    v1.TransferOutMediatorMessage(tree = Some(tree.toProtoV1))
+
   override def toProtoEnvelopeContentV0: v0.EnvelopeContent =
     v0.EnvelopeContent(v0.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
 
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
-    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV0))
+    v1.EnvelopeContent(v1.EnvelopeContent.SomeEnvelopeContent.TransferOutMediatorMessage(toProtoV1))
 
   override def rootHash: Option[RootHash] = Some(tree.rootHash)
 
@@ -99,7 +102,14 @@ object TransferOutMediatorMessage
         fromProtoV0(hashOps)(proto)
       ),
       _.toProtoV0.toByteString,
-    )
+    ),
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.TransferOutMediatorMessage)((hashOps, proto) =>
+        fromProtoV1(hashOps)(proto)
+      ),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def fromProtoV0(hashOps: HashOps)(
@@ -109,6 +119,23 @@ object TransferOutMediatorMessage
       tree <- ProtoConverter
         .required("TransferOutMediatorMessage.tree", transferOutMediatorMessageP.tree)
         .flatMap(TransferOutViewTree.fromProtoV0(hashOps))
+      _ <- EitherUtil.condUnitE(
+        tree.commonData.isFullyUnblinded,
+        OtherError(s"Transfer-out common data is blinded in request ${tree.rootHash}"),
+      )
+      _ <- EitherUtil.condUnitE(
+        tree.view.isBlinded,
+        OtherError(s"Transfer-out view data is not blinded in request ${tree.rootHash}"),
+      )
+    } yield TransferOutMediatorMessage(tree)
+
+  def fromProtoV1(hashOps: HashOps)(
+      transferOutMediatorMessageP: v1.TransferOutMediatorMessage
+  ): ParsingResult[TransferOutMediatorMessage] =
+    for {
+      tree <- ProtoConverter
+        .required("TransferOutMediatorMessage.tree", transferOutMediatorMessageP.tree)
+        .flatMap(TransferOutViewTree.fromProtoV1(hashOps))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-out common data is blinded in request ${tree.rootHash}"),

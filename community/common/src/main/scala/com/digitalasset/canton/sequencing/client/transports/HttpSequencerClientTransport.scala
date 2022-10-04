@@ -62,6 +62,15 @@ class HttpSequencerClientTransport(
   ): EitherT[Future, SendAsyncClientError, Unit] =
     client.sendAsync(request, requiresAuthentication = true)
 
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
+    // http sequencers don't check signatures, so just use regular send
+    sendAsync(request.content, timeout, protocolVersion)
+  }
+
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,
       timeout: Duration,

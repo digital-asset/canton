@@ -8,7 +8,6 @@ import cats.syntax.alternative._
 import cats.syntax.functorFilter._
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.ViewType.{
   TransactionViewType,
   TransferInViewType,
@@ -18,7 +17,6 @@ import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -41,6 +39,7 @@ import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, Participa
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -160,11 +159,11 @@ trait MessageDispatcher { this: NamedLogging =>
    *  The dishonest submitter of a transaction `tx1` involving `act` sends a root hash message only for `P1` but not for `P2`.
    *  `P2` thus does not process `tx1` at all, whereas `P1` does process `tx1` and locks `c` for deactivation.
    *  Then, another transaction `tx2`, which uses `c`, arrives before the mediator has rejected `tx1`.
-   *  `P1` approves `tx2` on behalf of `A` as `c` is not locked on `P1`.
-   *  In contrast, `P2` rejects `tx2` on behalf of `A` as `c` is locked on `P2`.
-   *  If `P1`'s approval arrives before `P2`'s rejection at the mediator, the mediator approves `tx2`.
-   *  When `P2` receives the mediator approval for `tx2`, it crashes because a request that failed the activeness check is to be committed.
-   *  Conversely, if `P2`'s rejection arrives before `P1`'s approval, the mediator may raise an alarm when it receives the approval.
+   *  `P2` approves `tx2` on behalf of `A` as `c` is not locked on `P2`.
+   *  In contrast, `P1` rejects `tx2` on behalf of `A` as `c` is locked on `P1`.
+   *  If `P2`'s approval arrives before `P1`'s rejection at the mediator, the mediator approves `tx2`.
+   *  When `P1` receives the mediator approval for `tx2`, it crashes because a request that failed the activeness check is to be committed.
+   *  Conversely, if `P1`'s rejection arrives before `P2`'s approval, the mediator may raise an alarm when it receives the approval.
    */
   protected def processBatch(
       event: SignedContent[Deliver[DefaultOpenEnvelope]]
@@ -190,7 +189,7 @@ trait MessageDispatcher { this: NamedLogging =>
       identityResult <- processTopologyTransactions(sc, ts, envelopesWithCorrectDomainId)
       causalityProcessed <- processCausalityMessages(envelopesWithCorrectDomainId)
       acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, ts)
-      transactionTransferResult <- processTransactionTransferMessages(
+      transactionTransferResult <- processTransactionAndTransferMessages(
         event,
         sc,
         ts,
@@ -235,7 +234,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   }
 
-  private def processTransactionTransferMessages(
+  private def processTransactionAndTransferMessages(
       event: SignedContent[Deliver[DefaultOpenEnvelope]],
       sc: SequencerCounter,
       ts: CantonTimestamp,
@@ -551,7 +550,7 @@ trait MessageDispatcher { this: NamedLogging =>
   ): Unit = SyncServiceAlarm.Warn(s"(sequencer counter: $sc, timestamp: $ts): $msg").report()
 }
 
-object MessageDispatcher {
+private[participant] object MessageDispatcher {
 
   trait RequestProcessors {
     /* A bit of a round-about way to make the Scala compiler recognize that pattern matches on `viewType` refine

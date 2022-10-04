@@ -11,7 +11,6 @@ import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Encrypted, TestHa
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, NotInserted}
 import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue}
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor._
@@ -60,7 +59,13 @@ import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology._
-import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
+import com.digitalasset.canton.{
+  BaseTest,
+  DiscardOps,
+  HasExecutionContext,
+  RequestCounter,
+  SequencerCounter,
+}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -100,7 +105,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         callback(
           Success(
             Deliver.create(
-              0L,
+              SequencerCounter(0),
               CantonTimestamp.Epoch,
               domain,
               Some(messageId),
@@ -120,9 +125,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
   when(trm.verdict).thenAnswer(Verdict.Approve(testedProtocolVersion))
 
   private val requestId = RequestId(CantonTimestamp.Epoch)
-  private val requestSc = 0L
-  private val resultSc = 1L
-  private val rc = 0L
+  private val requestSc = SequencerCounter(0)
+  private val resultSc = SequencerCounter(1)
+  private val rc = RequestCounter(0)
   private val parameters =
     DynamicDomainParameters.initialValues(NonNegativeFiniteDuration.Zero, testedProtocolVersion)
 
@@ -404,7 +409,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
               requestSc + 1,
               CantonTimestamp.Epoch.minusSeconds(10),
             ),
-            GenesisRequestCounter,
+            RequestCounter.Genesis.asLocalOffset,
             None,
           ),
         )
@@ -656,7 +661,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
             requestSc + 10,
             CantonTimestamp.Epoch.plusSeconds(30),
           ),
-          GenesisRequestCounter,
+          RequestCounter.Genesis.asLocalOffset,
           None,
         ),
         pendingRequest = CleanReplayData(rc, requestSc, Set.empty),
@@ -715,7 +720,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
             requestSc - 1L,
             CantonTimestamp.Epoch.minusSeconds(11),
           ),
-          rc - 1L,
+          rc.asLocalOffset - 1L,
           Some(CursorPrehead(requestSc, requestTimestamp)),
         )
       )

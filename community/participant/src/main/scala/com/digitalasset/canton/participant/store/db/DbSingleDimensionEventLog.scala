@@ -13,11 +13,11 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.CausalityUpdate
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
@@ -316,7 +316,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   }
 
   override def deleteSince(
-      inclusive: RequestCounter
+      inclusive: LocalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.metric.event {
       storage.update_(

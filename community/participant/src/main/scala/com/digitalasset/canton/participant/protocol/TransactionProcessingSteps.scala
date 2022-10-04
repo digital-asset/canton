@@ -23,6 +23,7 @@ import com.digitalasset.canton.data._
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -51,7 +52,6 @@ import com.digitalasset.canton.participant.protocol.validation._
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync._
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages._
@@ -70,6 +70,7 @@ import com.digitalasset.canton.{
   LedgerSubmissionId,
   LfKeyResolver,
   LfPartyId,
+  RequestCounter,
   SequencerCounter,
   WorkflowId,
   checked,
@@ -483,7 +484,7 @@ class TransactionProcessingSteps(
       ): Either[DeserializationError, LightTransactionViewTree] =
         LightTransactionViewTree
           .fromByteString(pureCrypto)(bytes)
-          .leftMap(err => DeserializationError(err.message, bytes))
+          .leftMap(err => DeserializationError(err.message))
 
       type DecryptionError = EncryptedViewMessageDecryptionError[TransactionViewType]
 
@@ -953,7 +954,7 @@ class TransactionProcessingSteps(
 
       TimestampedEvent(
         LedgerSyncEvent.CommandRejected(ts.toLf, completionInfo, rejection),
-        rc,
+        rc.asLocalOffset,
         Some(sc),
       )
     } -> None // Transaction processing doesn't use pending submissions
@@ -1009,7 +1010,7 @@ class TransactionProcessingSteps(
     val tse = submitterParticipantSubmitterInfo.map(info =>
       TimestampedEvent(
         LedgerSyncEvent.CommandRejected(requestTime.toLf, info, rejection),
-        requestCounter,
+        requestCounter.asLocalOffset,
         Some(requestSequencerCounter),
       )
     )
@@ -1129,7 +1130,7 @@ class TransactionProcessingSteps(
 
       timestampedEvent = TimestampedEvent(
         acceptedEvent,
-        pendingRequestData.requestCounter,
+        pendingRequestData.requestCounter.asLocalOffset,
         Some(pendingRequestData.requestSequencerCounter),
       )
     } yield CommitAndStoreContractsAndPublishEvent(

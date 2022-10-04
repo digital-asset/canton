@@ -104,9 +104,9 @@ object EnvelopeContent extends HasProtocolVersionedWithContextCompanion[Envelope
       case Content.SignedMessage(messageP) =>
         SignedProtocolMessage.fromProtoV0(hashOps, messageP)
       case Content.TransferOutMediatorMessage(messageP) =>
-        TransferOutMediatorMessage.fromProtoV0(hashOps)(messageP)
+        TransferOutMediatorMessage.fromProtoV1(hashOps)(messageP)
       case Content.TransferInMediatorMessage(messageP) =>
-        TransferInMediatorMessage.fromProtoV0(hashOps)(messageP)
+        TransferInMediatorMessage.fromProtoV1(hashOps)(messageP)
       case Content.RootHashMessage(messageP) =>
         RootHashMessage.fromProtoV0(SerializedRootHashMessagePayload.fromByteString)(messageP)
       case Content.RegisterTopologyTransactionRequest(messageP) =>

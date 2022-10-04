@@ -10,7 +10,7 @@ import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 /** Defines the contracts and transfers for conflict detection.
   * Transfers are not locked because the transferred contracts are already being locked.
   */
-case class ActivenessSet(
+final case class ActivenessSet(
     contracts: ActivenessCheck[LfContractId],
     transferIds: Set[TransferId],
     keys: ActivenessCheck[LfGlobalKey],
@@ -40,7 +40,7 @@ object ActivenessSet {
   * @throws java.lang.IllegalArgumentException if [[ActivenessCheck.checkFresh]], [[ActivenessCheck.checkFree]],
   *                                            and [[ActivenessCheck.checkActive]] are not pairwise disjoint.
   */
-case class ActivenessCheck[Key](
+private[participant] final case class ActivenessCheck[Key](
     checkFresh: Set[Key],
     checkFree: Set[Key],
     checkActive: Set[Key],
@@ -62,7 +62,7 @@ case class ActivenessCheck[Key](
   )
 }
 
-object ActivenessCheck {
+private[participant] object ActivenessCheck {
   def empty[Key: Pretty]: ActivenessCheck[Key] =
     ActivenessCheck(Set.empty, Set.empty, Set.empty, Set.empty)
 }

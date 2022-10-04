@@ -9,6 +9,7 @@ import akka.{Done, NotUsed}
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.option._
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -30,7 +31,6 @@ import com.digitalasset.canton.util.AkkaUtil.CombinedKillSwitch
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -206,7 +206,7 @@ class SequencerReader(
           Future.successful(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
-            (event.counter > GenesisSequencerCounter) && member.isAuthenticated &&
+            (event.counter > SequencerCounter.Genesis) && member.isAuthenticated &&
               protocolVersion != ProtocolVersion.v2
           SyncCryptoClient
             .getSnapshotForTimestamp(
@@ -504,14 +504,14 @@ object SequencerReader {
       nextReadTimestamp: CantonTimestamp,
       latestTopologyClientRecipientTimestamp: Option[CantonTimestamp],
       lastBatchWasFull: Boolean = false,
-      nextCounterAccumulator: SequencerCounter = 0L,
+      nextCounterAccumulator: SequencerCounter = SequencerCounter.Genesis,
   ) extends PrettyPrinting {
 
     /** Update the state after reading a new page of results */
     def update(storedEvents: Seq[Sequenced[_]], batchSize: Int): ReadState = {
       copy(
         // increment the counter by the number of events we've now processed
-        nextCounterAccumulator = nextCounterAccumulator + storedEvents.size,
+        nextCounterAccumulator = nextCounterAccumulator + storedEvents.size.toLong,
         // set the timestamp to the last record of the batch, or our current timestamp if we got no results
         nextReadTimestamp = storedEvents.lastOption.map(_.timestamp).getOrElse(nextReadTimestamp),
         // did we receive a full batch of events on this update

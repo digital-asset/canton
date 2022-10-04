@@ -79,4 +79,6 @@ object HashPurpose {
   val LegalIdentityClaim = HashPurpose(32, "LegalIdentityClaim")
   val DbLockId = HashPurpose(33, "DbLockId")
   val AcsCommitmentDb = HashPurpose(34, "AcsCommitmentDb")
+  val SubmissionRequestSignature = HashPurpose(35, "SubmissionRequestSignature")
+
 }

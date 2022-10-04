@@ -163,7 +163,7 @@ object SequencedEventStore {
 
     def toProtoV0: v0.PossiblyIgnoredSequencedEvent =
       v0.PossiblyIgnoredSequencedEvent(
-        counter = counter,
+        counter = counter.toProtoPrimitive,
         timestamp = Some(timestamp.toProtoPrimitive),
         traceContext = Some(traceContext.toProtoV0),
         isIgnored = isIgnored,
@@ -269,8 +269,10 @@ object SequencedEventStore {
         traceContextPO,
         isIgnored,
         underlyingPO,
-      ) =
-        possiblyIgnoredSequencedEventP
+      ) = possiblyIgnoredSequencedEventP
+
+      val sequencerCounter = SequencerCounter(counter)
+
       for {
         underlyingO <- underlyingPO.traverse(
           SignedContent.fromProtoV0(SequencedEvent.fromByteString(envelopeFromProtoV0), _)
@@ -283,7 +285,7 @@ object SequencedEventStore {
           .flatMap(TraceContext.fromProtoV0)
         possiblyIgnoredSequencedEvent <-
           if (isIgnored) {
-            Right(IgnoredSequencedEvent(timestamp, counter, underlyingO)(traceContext))
+            Right(IgnoredSequencedEvent(timestamp, sequencerCounter, underlyingO)(traceContext))
           } else
             ProtoConverter
               .required("underlying", underlyingO)

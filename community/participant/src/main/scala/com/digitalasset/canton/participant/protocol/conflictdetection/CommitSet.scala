@@ -34,7 +34,7 @@ import com.digitalasset.canton.util.SetsUtil.requireDisjoint
   * @throws java.lang.IllegalArgumentException if `transferOuts` overlap with `archivals`
   *                                            or `creations` overlaps with `transferIns`.
   */
-case class CommitSet(
+final case class CommitSet(
     archivals: Map[LfContractId, WithContractHash[Set[LfPartyId]]],
     creations: Map[LfContractId, WithContractHash[ContractMetadata]],
     transferOuts: Map[LfContractId, WithContractHash[(DomainId, Set[LfPartyId])]],

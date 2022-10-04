@@ -121,9 +121,8 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           result <- loggerFactory.assertLogs(
             sut.replace(newVersion, newVersion).value,
             _.shouldBeCantonError(
-              MediatorError.InternalError.Reject(
-                s"Request ${currentVersion.requestId} has an unexpected version ${currentVersion.requestId.unwrap} (expected version: $newVersion, new version: $newVersion)."
-              )
+              MediatorError.InternalError,
+              _ shouldBe s"Request ${currentVersion.requestId} has an unexpected version ${currentVersion.requestId.unwrap} (expected version: ${newVersion.version}, new version: ${newVersion.version}).",
             ),
           )
         } yield result shouldBe None

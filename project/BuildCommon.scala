@@ -746,13 +746,14 @@ object BuildCommon {
     // TODO(#9883) remove when no longer needed
     lazy val `akka-fork` = project
       .in(file("community/lib/akka"))
-      .disablePlugins(WartRemover)
-      .disablePlugins(ScalafixPlugin)
+      .disablePlugins(ScalafixPlugin, ScalafmtPlugin, WartRemover)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
           akka_stream,
+          akka_stream_testkit % Test,
           akka_slf4j,
+          scalatest % Test,
         ),
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",

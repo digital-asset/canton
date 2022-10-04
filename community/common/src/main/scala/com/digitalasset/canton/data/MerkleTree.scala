@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto._
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
 import com.digitalasset.canton.data.MerkleTree._
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{RootHash, v0}
+import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
@@ -222,7 +222,7 @@ object MerkleTree {
   case object RevealIfNeedBe extends BlindingCommand
 
   /** Map a Merkle tree node to its protobuf node */
-  def toBlindableNode(node: MerkleTree[_ <: HasVersionedToByteString]): v0.BlindableNode =
+  def toBlindableNodeV0(node: MerkleTree[_ <: HasVersionedToByteString]): v0.BlindableNode =
     v0.BlindableNode(blindedOrNot = node.unwrap match {
       case Left(h) => v0.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
       case Right(n) =>
@@ -231,12 +231,40 @@ object MerkleTree {
         )
     })
 
+  def toBlindableNodeV1(node: MerkleTree[_ <: HasVersionedToByteString]): v1.BlindableNode =
+    v1.BlindableNode(blindedOrNot = node.unwrap match {
+      case Left(h) => v1.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
+      case Right(n) =>
+        v1.BlindableNode.BlindedOrNot.Unblinded(
+          n.toByteString(ProtocolVersion.v4)
+        )
+    })
+
   /** Deserialize a blindable protobuf node to a blinded or an unblinded tree node depending on the contents of protoNode */
-  def fromProtoOption[NodeType](
+  def fromProtoOptionV0[NodeType](
       protoNode: Option[v0.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
     import v0.BlindableNode.{BlindedOrNot => BON}
+    protoNode.map(_.blindedOrNot) match {
+      case Some(BON.BlindedHash(hashBytes)) =>
+        RootHash
+          .fromProtoPrimitive(hashBytes)
+          .bimap(
+            e => ProtoDeserializationError.OtherError(s"Failed to deserialize root hash: $e"),
+            hash => BlindedNode.apply[NodeType](hash),
+          )
+      case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode)
+      case Some(BON.Empty) | None =>
+        Left(ProtoDeserializationError.OtherError(s"Missing blindedOrNot specification"))
+    }
+  }
+
+  def fromProtoOptionV1[NodeType](
+      protoNode: Option[v1.BlindableNode],
+      f: ByteString => ParsingResult[MerkleTree[NodeType]],
+  ): ParsingResult[MerkleTree[NodeType]] = {
+    import v1.BlindableNode.{BlindedOrNot => BON}
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash

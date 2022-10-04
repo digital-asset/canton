@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -83,7 +83,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     val rootViewTrees = views.map(_._1)
     val commonData = TransactionProcessingSteps.tryCommonData(rootViewTrees)
     val keyResolvers = views.forgetNE.toMap
-    mcc.check(rootViewTrees, keyResolvers, 0L, ips, commonData)
+    mcc.check(rootViewTrees, keyResolvers, RequestCounter(0), ips, commonData)
   }
 
   "A model conformance checker" when {

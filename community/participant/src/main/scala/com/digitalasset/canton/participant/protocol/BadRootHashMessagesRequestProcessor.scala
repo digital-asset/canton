@@ -8,7 +8,6 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
 import com.digitalasset.canton.protocol.messages.{LocalReject, MediatorResponse}
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
@@ -18,7 +17,7 @@ import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{SequencerCounter, checked}
+import com.digitalasset.canton.{RequestCounter, SequencerCounter, checked}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.ExecutionContext

@@ -9,13 +9,13 @@ import cats.syntax.traverse._
 import cats.syntax.traverseFilter._
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String100}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
@@ -105,7 +105,7 @@ class DbActiveContractStore(
       StoredActiveContract(
         ChangeType.getResultChangeType(r),
         GetResult[CantonTimestamp].apply(r),
-        r.nextLong(),
+        GetResult[RequestCounter].apply(r),
         r.nextIntOption(),
       )
     )

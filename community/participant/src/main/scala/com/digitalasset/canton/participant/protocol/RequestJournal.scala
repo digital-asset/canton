@@ -4,20 +4,26 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.OptionT
-import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue, SynchronizedPeanoTreeQueue}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  Counter,
+  PeanoQueue,
+  SynchronizedPeanoTreeQueue,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
+import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.{Clean, Pending}
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.store.CursorPrehead
+import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, HasFlushFuture, NoCopy}
+import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.ConcurrentModificationException
-import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
@@ -40,7 +46,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   * </ul>
   *
   * The <strong>head request</strong> for a state value is a
-  * [[com.digitalasset.canton.participant.RequestCounter]]
+  * [[com.digitalasset.canton.RequestCounter]]
   * defined as follows:
   *
   * <ul>
@@ -58,23 +64,22 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   */
 class RequestJournal(
     store: RequestJournalStore,
+    metrics: SyncDomainMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
     initRc: RequestCounter,
 )(implicit ec: ExecutionContext)
     extends RequestJournalReader
     with NamedLogging
     with HasFlushFuture {
-  import RequestJournal._
+  import RequestJournal.*
 
   /* The request journal implementation is interested only in the front of the PeanoQueues, not its head.
    * To avoid memory leaks, we therefore drain the queues whenever we insert a RequestCounter. */
   private val pendingCursor: PeanoQueue[RequestCounter, CursorInfo] =
-    new SynchronizedPeanoTreeQueue[CursorInfo](initRc)
+    new SynchronizedPeanoTreeQueue[RequestCounterDiscriminator, CursorInfo](initRc)
 
   private val cleanCursor: PeanoQueue[RequestCounter, CursorInfo] =
-    new SynchronizedPeanoTreeQueue[CursorInfo](initRc)
-
-  private val numDirty: AtomicInteger = new AtomicInteger(0)
+    new SynchronizedPeanoTreeQueue[RequestCounterDiscriminator, CursorInfo](initRc)
 
   override def query(
       rc: RequestCounter
@@ -88,7 +93,8 @@ class RequestJournal(
     * This can be tolerated, as the SyncDomain should be restarted after such an exception and that will
     * reset the request journal.
     */
-  def numberOfDirtyRequests: Int = numDirty.get()
+  def numberOfDirtyRequests: Int = numDirtyRequestsM.getCount.toInt
+  private def numDirtyRequestsM: com.codahale.metrics.Counter = metrics.numDirtyRequests.metric
 
   /** Insert a new request into the request journal.
     * The insertion will become visible immediately.
@@ -112,8 +118,8 @@ class RequestJournal(
     for {
       _ <- Future {
         ErrorUtil.requireArgument(
-          rc != RequestCounter.MaxValue,
-          s"The request counter ${RequestCounter.MaxValue} cannot be used.",
+          rc.isNotMaxValue,
+          s"The request counter ${Counter.MaxValue} cannot be used.",
         )
         val pendingFront = pendingCursor.front
         if (rc < pendingFront)
@@ -135,7 +141,8 @@ class RequestJournal(
       data = RequestData(rc, RequestState.Pending, requestTimestamp)
       _ <- store.insert(data)
 
-      _ = numDirty.incrementAndGet()
+      _ = numDirtyRequestsM.inc()
+      _ = logger.debug(s"The number of dirty requests is $numberOfDirtyRequests.")
 
       // Synchronously add the new entry to the cursor queue
       info = CursorInfo(requestTimestamp, Promise())
@@ -298,7 +305,7 @@ class RequestJournal(
       .fold(
         handleError,
         { _ =>
-          if (newState == Clean) numDirty.decrementAndGet()
+          if (newState == Clean) numDirtyRequestsM.dec()
           updateCursors()
         },
       )
@@ -350,13 +357,13 @@ class RequestJournal(
     */
   private def drain(
       pq: PeanoQueue[RequestCounter, CursorInfo]
-  ): Option[(CursorPrehead[RequestCounter], Promise[Unit])] = {
+  ): Option[(RequestCounterCursorPrehead, Promise[Unit])] = {
 
     val completionPromise = Promise[Unit]()
 
     @tailrec def drain(
-        currentPrehead: Option[CursorPrehead[RequestCounter]]
-    ): Option[CursorPrehead[RequestCounter]] =
+        currentPrehead: Option[RequestCounterCursorPrehead]
+    ): Option[RequestCounterCursorPrehead] =
       pq.poll() match {
         case None => currentPrehead
         case Some((requestCounter, CursorInfo(requestTimestamp, promise))) =>
@@ -509,7 +516,7 @@ object RequestJournal {
 }
 
 trait RequestJournalReader {
-  import RequestJournal._
+  import RequestJournal.*
 
   /** Returns the [[RequestJournal.RequestData]] associated with the given request counter, if any.
     * Modifications done through the [[RequestJournal]] interface show up eventually, not necessarily immediately.

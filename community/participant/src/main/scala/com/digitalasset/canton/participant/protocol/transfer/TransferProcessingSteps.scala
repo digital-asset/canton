@@ -13,7 +13,6 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
@@ -41,7 +40,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, SequencerCounter}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter}
 
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}

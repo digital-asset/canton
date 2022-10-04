@@ -34,7 +34,8 @@ import org.scalatest.exceptions.TestFailedException
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait ConflictDetectionHelpers { this: AsyncTestSuite with BaseTest with HasExecutorService =>
+private[protocol] trait ConflictDetectionHelpers {
+  this: AsyncTestSuite with BaseTest with HasExecutorService =>
 
   import ConflictDetectionHelpers._
 
@@ -86,7 +87,7 @@ trait ConflictDetectionHelpers { this: AsyncTestSuite with BaseTest with HasExec
   }
 }
 
-object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
+private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
 
   def insertEntriesAcs(
       acs: ActiveContractStore,

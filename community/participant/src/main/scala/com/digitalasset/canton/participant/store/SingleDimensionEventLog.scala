@@ -131,7 +131,7 @@ trait SingleDimensionEventLog[+Id <: EventLogId] extends SingleDimensionEventLog
       traceContext: TraceContext
   ): Future[Boolean]
 
-  /** Deletes all events whose request counter is at least `inclusive`.
+  /** Deletes all events whose local offset is at least `inclusive`.
     * This operation need not execute atomically.
     */
   def deleteSince(inclusive: LocalOffset)(implicit traceContext: TraceContext): Future[Unit]

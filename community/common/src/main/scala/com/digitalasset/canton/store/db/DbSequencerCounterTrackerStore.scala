@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store.db
 
-import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -21,14 +21,15 @@ class DbSequencerCounterTrackerStore(
     extends SequencerCounterTrackerStore
     with FlagCloseable
     with NamedLogging {
-  override protected[store] val cursorStore = new DbCursorPreheadStore[SequencerCounter](
-    client,
-    storage,
-    DbSequencerCounterTrackerStore.cursorTable,
-    storage.metrics.loadGaugeM("sequencer-counter-tracker-store"),
-    timeouts,
-    loggerFactory,
-  )
+  override protected[store] val cursorStore =
+    new DbCursorPreheadStore[SequencerCounterDiscriminator](
+      client,
+      storage,
+      DbSequencerCounterTrackerStore.cursorTable,
+      storage.metrics.loadGaugeM("sequencer-counter-tracker-store"),
+      timeouts,
+      loggerFactory,
+    )
 
   override def onClosed(): Unit = Lifecycle.close(cursorStore)(logger)
 }

@@ -12,11 +12,10 @@ import java.nio.{ByteBuffer, ByteOrder}
 import java.time.Instant
 import scala.annotation.tailrec
 
-case class DeserializationError(message: String, bytes: ByteString) extends PrettyPrinting {
+case class DeserializationError(message: String) extends PrettyPrinting {
   override def pretty: Pretty[DeserializationError] =
     prettyOfClass(
-      param("message", _.message.unquoted),
-      param("bytes", _.bytes),
+      param("message", _.message.unquoted)
     )
 }
 
@@ -31,13 +30,13 @@ object DeterministicEncoding {
   ): ByteString => Either[DeserializationError, T] =
     bytes =>
       deserialize(bytes).flatMap { case (key, rest) =>
-        Either.cond(rest.isEmpty, key, DeserializationError("Too many bytes", rest))
+        Either.cond(rest.isEmpty, key, DeserializationError("Too many bytes"))
       }
 
   /** Tests that the given [[com.google.protobuf.ByteString]] has at least `len` bytes and splits the [[com.google.protobuf.ByteString]] at `len`. */
   def splitAt(len: Int, bytes: ByteString): Either[DeserializationError, (ByteString, ByteString)] =
     if (bytes.size < len)
-      Left(DeserializationError(s"Expected $len bytes", bytes))
+      Left(DeserializationError(s"Expected $len bytes"))
     else
       Right((bytes.substring(0, len), bytes.substring(len)))
 
@@ -46,7 +45,7 @@ object DeterministicEncoding {
     for {
       byteAndRest <- splitAt(1, bytes)
       (byte, rest) = byteAndRest
-      _ <- Either.cond(byte.byteAt(0) == b, (), DeserializationError(s"Expected byte $b", bytes))
+      _ <- Either.cond(byte.byteAt(0) == b, (), DeserializationError(s"Expected byte $b"))
     } yield rest
 
   /** Encode a [[scala.Byte]] into a [[com.google.protobuf.ByteString]]. */
@@ -116,7 +115,7 @@ object DeterministicEncoding {
     }
 
     decodeUVarIntBytes(0, 0, 0).bimap(
-      err => DeserializationError(s"Failed to decode unsigned var-int: $err", bytes),
+      err => DeserializationError(s"Failed to decode unsigned var-int: $err"),
       { case (output, index) =>
         (output, bytes.substring(index + 1))
       },
@@ -132,12 +131,12 @@ object DeterministicEncoding {
       _ <- Either.cond(
         len >= 0,
         (),
-        DeserializationError(s"Negative length of $len in encoded data", bytes),
+        DeserializationError(s"Negative length of $len in encoded data"),
       )
       _ <- Either.cond(
         len <= rest.size,
         (),
-        DeserializationError(s"Length $len is larger than received bytes", bytes),
+        DeserializationError(s"Length $len is larger than received bytes"),
       )
     } yield intAndB
 

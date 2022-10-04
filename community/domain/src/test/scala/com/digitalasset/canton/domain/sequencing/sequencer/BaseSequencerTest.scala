@@ -8,6 +8,7 @@ import akka.stream.scaladsl.{Keep, Source}
 import akka.stream.{KillSwitches, Materializer}
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   CreateSubscriptionError,
@@ -61,6 +62,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         loggerFactory,
         None,
         new SimClock(CantonTimestamp.Epoch, loggerFactory),
+        _ => req => EitherT.rightT(req),
       )
       with FlagCloseable {
     val newlyRegisteredMembers =
@@ -130,31 +132,39 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
   }
 
-  "sendAsync" should {
-    "topology manager sends should automatically register all unknown members" in {
-      val sequencer = new StubSequencer(existingMembers = Set(participant1))
-      val request = submission(from = domainManager, to = Set(participant1, participant2))
+  Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>
+    def send(sequencer: Sequencer)(submission: SubmissionRequest) =
+      if (useSignedSend)
+        sequencer.sendAsyncSigned(SignedContent(submission, Signature.noSignature, None))
+      else sequencer.sendAsync(submission)
 
-      for {
-        _ <- sequencer.sendAsync(request).value
-      } yield sequencer.newlyRegisteredMembers should contain only participant2
-    }
+    name should {
+      "topology manager sends should automatically register all unknown members" in {
+        val sequencer = new StubSequencer(existingMembers = Set(participant1))
+        val request = submission(from = domainManager, to = Set(participant1, participant2))
 
-    "sends from an unauthenticated member should auto register this member" in {
-      val sequencer = new StubSequencer(existingMembers = Set(participant1))
-      val request = submission(from = unauthenticatedMemberId, to = Set(participant1, participant2))
-      for {
-        _ <- sequencer.sendAsync(request).value
-      } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
-    }
+        for {
+          _ <- send(sequencer)(request).value
+        } yield sequencer.newlyRegisteredMembers should contain only participant2
+      }
 
-    "sends from anyone else should not auto register" in {
-      val sequencer = new StubSequencer(existingMembers = Set(participant1))
-      val request = submission(from = participant1, to = Set(participant1, participant2))
+      "sends from an unauthenticated member should auto register this member" in {
+        val sequencer = new StubSequencer(existingMembers = Set(participant1))
+        val request =
+          submission(from = unauthenticatedMemberId, to = Set(participant1, participant2))
+        for {
+          _ <- send(sequencer)(request).value
+        } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
+      }
 
-      for {
-        _ <- sequencer.sendAsync(request).value
-      } yield sequencer.newlyRegisteredMembers shouldBe empty
+      "sends from anyone else should not auto register" in {
+        val sequencer = new StubSequencer(existingMembers = Set(participant1))
+        val request = submission(from = participant1, to = Set(participant1, participant2))
+
+        for {
+          _ <- send(sequencer)(request).value
+        } yield sequencer.newlyRegisteredMembers shouldBe empty
+      }
     }
   }
 
@@ -163,7 +173,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
       val sequencer = new StubSequencer(existingMembers = Set(participant1))
       for {
         _ <- sequencer
-          .read(unauthenticatedMemberId, 0L)
+          .read(unauthenticatedMemberId, SequencerCounter(0))
           .value
       } yield sequencer.newlyRegisteredMembers should contain only unauthenticatedMemberId
     }

@@ -2,60 +2,66 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
+
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import org.scalatest.wordspec.AnyWordSpec
 
 trait PeanoQueueTest extends BaseTest { this: AnyWordSpec =>
 
-  def peanoQueue(mk: Long => PeanoQueue[Long, String]): Unit = {
+  def peanoQueue[Discr](mk: Counter[Discr] => PeanoQueue[Counter[Discr], String]): Unit = {
+    import scala.language.implicitConversions
+    implicit def toCounter(i: Long): Counter[Discr] = Counter[Discr](i)
 
-    val testCases = Table[String, Long, Seq[(Seq[(Long, String)], Long, Seq[String])]](
-      ("name", "initial head", "inserts, expected front, expected polled values"),
-      ("empty", 0, Seq.empty),
-      ("start with 5", 5, Seq.empty),
-      ("start with MinValue", Long.MinValue, Seq.empty),
-      (
-        "insert",
-        0,
-        Seq(
-          (Seq((1, "one"), (0, "zero"), (3, "three")), 2, Seq("zero", "one")),
-          (Seq((2, "two")), 4, Seq("two", "three")),
-        ),
-      ),
-      (
-        "complex",
-        2,
-        Seq(
-          (Seq((10, "ten"), (12, "twelve")), 2, Seq.empty),
-          (Seq((2, "two"), (5, "five"), (3, "three"), (4, "four")), 6, Seq.empty),
-          (Seq((8, "eight"), (7, "seven"), (6, "six")), 9, Seq("two")),
-          (
-            Seq((9, "nine")),
-            11,
-            Seq("three", "four", "five", "six", "seven", "eight", "nine", "ten"),
-          ),
-          (Seq.empty, 11, Seq.empty),
-          (Seq((11, "eleven")), 13, Seq("eleven", "twelve")),
-        ),
-      ),
-      (
-        "idempotent insert",
-        0,
-        Seq(
-          (
-            Seq((1, "one"), (2, "two"), (0, "zero"), (1, "one"), (4, "four")),
-            3,
-            Seq("zero", "one", "two"),
-          ),
-          (
-            Seq((-10, "negative ten"), (4, "four"), (3, "three"), (5, "five")),
-            6,
-            Seq("three", "four", "five"),
+    val testCases =
+      Table[String, Counter[Discr], Seq[
+        (Seq[(Counter[Discr], String)], Counter[Discr], Seq[String])
+      ]](
+        ("name", "initial head", "inserts, expected front, expected polled values"),
+        ("empty", 0, Seq.empty),
+        ("start with 5", 5, Seq.empty),
+        ("start with MinValue", Counter.MinValue, Seq.empty),
+        (
+          "insert",
+          0,
+          Seq(
+            (Seq((1, "one"), (0, "zero"), (3, "three")), 2, Seq("zero", "one")),
+            (Seq((2, "two")), 4, Seq("two", "three")),
           ),
         ),
-      ),
-    )
+        (
+          "complex",
+          2,
+          Seq(
+            (Seq((10, "ten"), (12, "twelve")), 2, Seq.empty),
+            (Seq((2, "two"), (5, "five"), (3, "three"), (4, "four")), 6, Seq.empty),
+            (Seq((8, "eight"), (7, "seven"), (6, "six")), 9, Seq("two")),
+            (
+              Seq((9, "nine")),
+              11,
+              Seq("three", "four", "five", "six", "seven", "eight", "nine", "ten"),
+            ),
+            (Seq.empty, 11, Seq.empty),
+            (Seq((11, "eleven")), 13, Seq("eleven", "twelve")),
+          ),
+        ),
+        (
+          "idempotent insert",
+          0,
+          Seq(
+            (
+              Seq((1, "one"), (2, "two"), (0, "zero"), (1, "one"), (4, "four")),
+              3,
+              Seq("zero", "one", "two"),
+            ),
+            (
+              Seq((-10, "negative ten"), (4, "four"), (3, "three"), (5, "five")),
+              6,
+              Seq("three", "four", "five"),
+            ),
+          ),
+        ),
+      )
 
     forEvery(testCases) { (name, initHead, insertsPolls) =>
       name should {
@@ -122,14 +128,14 @@ trait PeanoQueueTest extends BaseTest { this: AnyWordSpec =>
         val last = pq.dropUntilFront()
         assert(pq.poll().isEmpty)
         assert(pq.head == pq.front)
-        assert(last == Some(1 -> "one"))
+        assert(last == Some(Counter(1) -> "one"))
       }
 
       "return None if nothing moves" in {
         val pq = mk(0)
         pq.insert(1, "one")
         assert(pq.dropUntilFront().isEmpty)
-        assert(pq.head == 0)
+        assert(pq.head == Counter(0))
       }
     }
 
@@ -147,11 +153,11 @@ trait PeanoQueueTest extends BaseTest { this: AnyWordSpec =>
         assert(pq.insert(0L, "zero"))
         assertThrows[IllegalArgumentException](pq.insert(0L, "ZERO"))
         assert(pq.insert(0L, "zero"))
-        assert(pq.poll().contains((0L, "zero")), "polling 0")
+        assert(pq.poll().contains((Counter(0), "zero")), "polling 0")
         assert(!pq.insert(0L, "zero"))
         assert(!pq.insert(0L, "Zero"))
-        assert(pq.poll().contains((1L, "one")), "polling 1")
-        assert(pq.poll().contains((2L, "two")), "polling 2")
+        assert(pq.poll().contains((Counter(1), "one")), "polling 1")
+        assert(pq.poll().contains((Counter(2), "two")), "polling 2")
         assert(pq.poll().isEmpty, "cannot poll 3")
         assert(pq.insert(3L, "three"))
       }
@@ -183,27 +189,34 @@ trait PeanoQueueTest extends BaseTest { this: AnyWordSpec =>
 class PeanoTreeQueueTest extends AnyWordSpec with PeanoQueueTest with BaseTest {
 
   "PeanoTreeQueue" should {
-    behave like peanoQueue(PeanoTreeQueue.apply[String])
+    behave like peanoQueue(PeanoTreeQueue.apply[PeanoTreeQueueTest.Discriminator, String])
 
     "maintain the invariant" must {
-      behave like peanoQueue(init => new PeanoTreeQueueTest.PeanoTreeQueueHelper[String](init))
+      behave like peanoQueue[PeanoTreeQueueTest.Discriminator](init =>
+        new PeanoTreeQueueTest.PeanoTreeQueueHelper[String](init)
+      )
     }
   }
 }
 
 object PeanoTreeQueueTest {
-  class PeanoTreeQueueHelper[V](initHead: Long) extends PeanoTreeQueue[V](initHead) {
+  case object Discriminator
+  type Discriminator = Discriminator.type
+  type LocalCounter = Counter[Discriminator]
+
+  class PeanoTreeQueueHelper[V](initHead: LocalCounter)
+      extends PeanoTreeQueue[Discriminator, V](initHead) {
 
     assertInvariant("initialization")
 
-    override def insert(key: Long, value: V): Boolean = {
+    override def insert(key: LocalCounter, value: V): Boolean = {
       val added = super.insert(key, value)
 
       assertInvariant(s"insert ($key -> $value)")
       added
     }
 
-    override def poll(): Option[(Long, V)] = {
+    override def poll(): Option[(LocalCounter, V)] = {
       val result = super.poll()
 
       assertInvariant(s"poll with result $result")
@@ -218,6 +231,8 @@ object PeanoTreeQueueTest {
 
 class SynchronizedPeanoTreeQueueTest extends AnyWordSpec with PeanoQueueTest with BaseTest {
   "SynchronizedPeanoTreeQueue" should {
-    behave like peanoQueue(initHead => new SynchronizedPeanoTreeQueue[String](initHead))
+    behave like peanoQueue[PeanoTreeQueueTest.Discriminator](initHead =>
+      new SynchronizedPeanoTreeQueue[PeanoTreeQueueTest.Discriminator, String](initHead)
+    )
   }
 }

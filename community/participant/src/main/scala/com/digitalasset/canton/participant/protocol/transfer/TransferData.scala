@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
 import com.digitalasset.canton.topology.{DomainId, MediatorId}

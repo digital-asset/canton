@@ -1523,13 +1523,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |As the rate of commands is checked and updated immediately after receiving a new command submission,
         |an application cannot exceed the maximum rate, even when it sends a "burst" of commands.
         |
-        |To determine a suitable value for `max_dirty_requests`, you should test the system under high load.
-        |If you choose a higher value, throughput may increase, as more commands are validated in parallel.
-        |If you observe a high latency (time between submission and observing a command completion) 
-        |or even command timeouts, you should choose a lower value.
-        |Once a suitable value for `max_dirty_requests` has been found, you should include "bursts" into the tests
-        |to also find a suitable value for `max_rate`.
-        |
         |Resource limits can only be changed, if the server runs Canton enterprise.
         |In the community edition, the server uses fixed limits that cannot be changed."""
     )

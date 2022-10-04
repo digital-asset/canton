@@ -8,6 +8,8 @@ import com.digitalasset.canton.serialization.DeserializationError
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.nio.charset.Charset
+
 // Reused among compression methods that work on arrays and byte strings
 trait GzipCompressionTests extends AnyWordSpec with BaseTest {
 
@@ -80,9 +82,8 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       val inputCompressed = HexString.parseToByteString(compressedHex).value
       val uncompressed = decompressGzip(inputCompressed)
 
-      inside(uncompressed) { case Left(DeserializationError(err, bytes)) =>
+      inside(uncompressed) { case Left(DeserializationError(err)) =>
         err should include(expectedError)
-        bytes shouldBe inputCompressed
       }
     }
   }
@@ -92,7 +93,7 @@ class ByteStringUtilTest extends AnyWordSpec with BaseTest with GzipCompressionT
   override def compressGzip(str: ByteString): ByteString = ByteStringUtil.compressGzip(str)
 
   override def decompressGzip(str: ByteString): Either[DeserializationError, ByteString] =
-    ByteStringUtil.decompressGzip(str)
+    ByteStringUtil.decompressGzip(str, maxBytesLimit = None)
 
   "ByteStringUtilTest" should {
 
@@ -122,6 +123,18 @@ class ByteStringUtilTest extends AnyWordSpec with BaseTest with GzipCompressionT
         assert(result(order.compare(bs1, bs2)), name)
         assert(dual(result)(order.compare(bs2, bs1)), name + " dual")
       }
+    }
+    "decompress with max bytes to read" in {
+      val uncompressed = "a" * 1000000
+      val uncompressedByteString = ByteString.copyFrom(uncompressed, Charset.defaultCharset())
+      val compressed = compressGzip(uncompressedByteString)
+
+      val res1 = ByteStringUtil.decompressGzip(compressed, maxBytesLimit = Some(1000000))
+      res1 shouldBe Right(uncompressedByteString)
+      val res2 = ByteStringUtil.decompressGzip(compressed, maxBytesLimit = Some(777))
+      res2 shouldBe Left(
+        DeserializationError("Max bytes to decompress is exceeded. The limit is 777 bytes.")
+      )
     }
   }
 }

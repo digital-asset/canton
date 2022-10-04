@@ -131,7 +131,7 @@ object Salt {
       saltAlgorithm <- SaltAlgorithm.fromProtoOneOf("algorithm", saltP.algorithm)
       salt <- create(saltP.salt, saltAlgorithm).leftMap(err =>
         ProtoDeserializationError.CryptoDeserializationError(
-          DeserializationError(err.toString, saltP.toByteString)
+          DeserializationError(err.toString)
         )
       )
     } yield salt

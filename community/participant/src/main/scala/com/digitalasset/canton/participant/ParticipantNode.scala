@@ -12,6 +12,8 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -110,6 +112,7 @@ class ParticipantNodeBootstrap(
     futureSupervisor: FutureSupervisor,
     parentLogger: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
+    meteringReportKey: MeteringReportKey,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -210,6 +213,7 @@ class ParticipantNodeBootstrap(
             loggerFactory,
             tracerProvider,
             metrics.ledgerApiServer,
+            meteringReportKey,
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
@@ -722,6 +726,7 @@ object ParticipantNodeBootstrap {
             futureSupervisor,
             loggerFactory,
             writeHealthDumpToFile,
+            meteringReportKey = CommunityKey,
           )
         )
         .leftMap(_.toString)

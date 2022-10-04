@@ -25,7 +25,7 @@ import com.digitalasset.canton.topology._
 import com.digitalasset.canton.util.{Checked, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
@@ -45,7 +45,7 @@ trait TransferStoreTest {
     )
     val transferOutResult = mkTransferOutResult(transferData)
     val withTransferOutResult = transferData.copy(transferOutResult = Some(transferOutResult))
-    val toc = TimeOfChange(0L, CantonTimestamp.ofEpochSecond(3))
+    val toc = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(3))
 
     "lookup" should {
       "find previously stored transfers" in {
@@ -270,7 +270,7 @@ trait TransferStoreTest {
           checked <- store
             .completeTransfer(
               transfer2.transferId,
-              TimeOfChange(3L, CantonTimestamp.Epoch.plusSeconds(3)),
+              TimeOfChange(RequestCounter(3), CantonTimestamp.Epoch.plusSeconds(3)),
             )
             .value
           lookup <- store.findAfter(None, 10)
@@ -440,11 +440,12 @@ trait TransferStoreTest {
 
       "detect mismatches" in {
         val store = mk(targetDomain)
-        val toc2 = TimeOfChange(0L, CantonTimestamp.ofEpochSecond(4))
-        val modifiedTransferData = transferData.copy(transferOutRequestCounter = 100L)
+        val toc2 = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(4))
+        val modifiedTransferData =
+          transferData.copy(transferOutRequestCounter = RequestCounter(100))
         val modifiedTransferOutResult = transferOutResult.copy(
           result = transferOutResult.result.copy(content =
-            transferOutResult.result.content.copy(counter = 120L)
+            transferOutResult.result.content.copy(counter = SequencerCounter(120))
           )
         )
 
@@ -466,7 +467,7 @@ trait TransferStoreTest {
 
       "store the first completion" in {
         val store = mk(targetDomain)
-        val toc2 = TimeOfChange(1L, CantonTimestamp.ofEpochSecond(4))
+        val toc2 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(4))
         for {
           _ <- valueOrFail(store.addTransfer(transferData))("add failed")
           _ <- valueOrFail(store.addTransferOutResult(transferOutResult))("addResult failed")
@@ -531,8 +532,8 @@ trait TransferStoreTest {
     "deleteCompletionsSince" should {
       "remove the completions from the criterion on" in {
         val store = mk(targetDomain)
-        val toc1 = TimeOfChange(1L, CantonTimestamp.ofEpochSecond(5))
-        val toc2 = TimeOfChange(2L, CantonTimestamp.ofEpochSecond(7))
+        val toc1 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(5))
+        val toc2 = TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(7))
 
         for {
           aliceTransfer <-
@@ -545,7 +546,7 @@ trait TransferStoreTest {
           _ <- valueOrFail(store.completeTransfer(transfer10, toc))("completion alice failed")
           _ <- valueOrFail(store.completeTransfer(transfer11, toc1))("completion bob failed")
           _ <- valueOrFail(store.completeTransfer(transfer20, toc2))("completion eve failed")
-          _ <- store.deleteCompletionsSince(1L)
+          _ <- store.deleteCompletionsSince(RequestCounter(1))
           alice <- leftOrFail(store.lookup(transfer10))("alice must still be completed")
           bob <- valueOrFail(store.lookup(transfer11))("bob must not be completed")
           eve <- valueOrFail(store.lookup(transfer20))("eve must not be completed")
@@ -649,7 +650,7 @@ object TransferStoreTest {
       TransferData(
         SourceProtocolVersion(protocolVersion),
         transferId.requestTimestamp,
-        0L,
+        RequestCounter(0),
         fullTransferOutViewTree,
         CantonTimestamp.ofEpochSecond(10),
         contract,
@@ -681,7 +682,7 @@ object TransferStoreTest {
       val batch = Batch.of(protocolVersion, signedResult -> RecipientsTest.testInstance)
       val deliver =
         Deliver.create(
-          1L,
+          SequencerCounter(1),
           CantonTimestamp.ofEpochMilli(10),
           transferData.sourceDomain,
           Some(MessageId.tryCreate("1")),

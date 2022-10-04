@@ -171,8 +171,8 @@ object Hash {
       (length, hashBytes) = lengthAndBytes
       algorithm <- HashAlgorithm
         .lookup(index, length)
-        .leftMap(err => DeserializationError(s"Invalid hash algorithm: $err", bytes))
-      hash <- create(hashBytes, algorithm).leftMap(err => DeserializationError(err, bytes))
+        .leftMap(err => DeserializationError(s"Invalid hash algorithm: $err"))
+      hash <- create(hashBytes, algorithm).leftMap(err => DeserializationError(err))
     } yield hash
 
   /** Decode a serialized [[Hash]] using [[fromByteString]] except for the empty [[com.google.protobuf.ByteString]],
@@ -184,7 +184,7 @@ object Hash {
   def fromHexString(hexString: String): Either[DeserializationError, Hash] =
     HexString
       .parse(hexString)
-      .toRight(DeserializationError(s"Failed to parse hex string: $hexString", ByteString.EMPTY))
+      .toRight(DeserializationError(s"Failed to parse hex string: $hexString"))
       .map(ByteString.copyFrom)
       .flatMap(fromByteString)
 

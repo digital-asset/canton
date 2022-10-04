@@ -28,7 +28,7 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DiscardOps, GenesisSequencerCounter, SequencerCounter}
+import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import java.io.{ByteArrayOutputStream, PrintStream}
@@ -36,7 +36,7 @@ import java.nio.file.Path
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration.{Duration, _}
+import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.DurationConverters._
 
@@ -194,7 +194,7 @@ class ReplayingSendsSequencerClientTransport(
 
   def waitForIdle(
       duration: FiniteDuration,
-      startFromCounter: SequencerCounter = GenesisSequencerCounter,
+      startFromCounter: SequencerCounter = SequencerCounter.Genesis,
   ): Future[EventsReceivedReport] = {
     val monitor = new SimpleIdlenessMonitor(startFromCounter, duration, timeouts, loggerFactory)
 
@@ -347,6 +347,14 @@ class ReplayingSendsSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
+
+  /** We're replaying sends so shouldn't allow the app to send any new ones */
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+    EitherT.rightT(())
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,

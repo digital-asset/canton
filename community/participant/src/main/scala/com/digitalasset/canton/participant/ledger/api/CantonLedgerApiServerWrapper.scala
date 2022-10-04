@@ -11,6 +11,7 @@ import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
 import com.daml.platform.apiserver._
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey
 import com.daml.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
 import com.daml.platform.store.DbSupport
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -86,6 +87,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       override val loggerFactory: NamedLoggerFactory,
       tracerProvider: TracerProvider,
       metrics: Metrics,
+      meteringReportKey: MeteringReportKey,
   ) extends NamedLogging {
     override def logger: TracedLogger = super.logger
 

@@ -92,9 +92,9 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
     def readAsSeq(
         member: Member,
         limit: Int,
-        offset: SequencerCounter = 0L,
+        sc: SequencerCounter = SequencerCounter(0),
     ): Future[Seq[OrdinarySerializedEvent]] =
-      valueOrFail(sequencer.readInternal(member, offset))(
+      valueOrFail(sequencer.readInternal(member, sc))(
         s"read for $member"
       ) flatMap {
         _.take(limit.toLong)

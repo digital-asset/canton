@@ -185,6 +185,6 @@ object ConfirmationPolicy {
       case (Vip.name, _) => Right(Vip)
       case (Signatory.name, _) => Right(Signatory)
       case (badName, badBytes) =>
-        Left(DeserializationError(s"Invalid confirmation policy $badName", badBytes))
+        Left(DeserializationError(s"Invalid confirmation policy $badName"))
     }
 }

@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
   HandshakeRequest,
   HandshakeResponse,
+  SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
 }
@@ -56,6 +57,15 @@ class DirectSequencerClientTransport(
   ): EitherT[Future, SendAsyncClientError, Unit] =
     sequencer
       .sendAsync(request)
+      .leftMap(SendAsyncClientError.RequestRefused)
+
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+    sequencer
+      .sendAsyncSigned(request)
       .leftMap(SendAsyncClientError.RequestRefused)
 
   override def sendAsyncUnauthenticated(

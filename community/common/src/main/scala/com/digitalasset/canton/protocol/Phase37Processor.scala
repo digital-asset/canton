@@ -4,7 +4,6 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.messages._
@@ -12,6 +11,7 @@ import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.{Deliver, SignedContent}
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
 trait Phase37Processor[RequestBatch] {
 
@@ -25,8 +25,13 @@ trait Phase37Processor[RequestBatch] {
     *         [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Confirmed]]
     *         and the response has been sent, or if an error aborts processing.
     */
-  def processRequest(ts: CantonTimestamp, rc: Long, sc: SequencerCounter, batch: RequestBatch)(
-      implicit traceContext: TraceContext
+  def processRequest(
+      ts: CantonTimestamp,
+      rc: RequestCounter,
+      sc: SequencerCounter,
+      batch: RequestBatch,
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
   def processMalformedMediatorRequestResult(

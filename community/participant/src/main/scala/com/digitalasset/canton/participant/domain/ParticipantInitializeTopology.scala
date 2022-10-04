@@ -137,6 +137,7 @@ object ParticipantInitializeTopology {
           unauthenticatedMember,
           new InMemorySequencedEventStore(loggerFactory),
           new InMemorySendTrackerStore(),
+          _ => _ => EitherT.leftT("Unauthenticated members do not sign submission requests"),
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

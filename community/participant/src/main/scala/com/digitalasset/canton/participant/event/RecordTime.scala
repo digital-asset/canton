@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.event
 
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -18,7 +19,7 @@ case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extends Pret
   )
 
   /** Note that there is no guarantee that this will result in a time of change with an existing request counter. */
-  def toTimeOfChange: TimeOfChange = TimeOfChange(tieBreaker, timestamp)
+  def toTimeOfChange: TimeOfChange = TimeOfChange(RequestCounter(tieBreaker), timestamp)
 }
 object RecordTime {
   val lowestTiebreaker: Long = Long.MinValue
@@ -28,6 +29,5 @@ object RecordTime {
   implicit val recordTimeOrdering: Ordering[RecordTime] =
     Ordering.by(rt => (rt.timestamp -> rt.tieBreaker))
 
-  def fromTimeOfChange(toc: TimeOfChange): RecordTime = RecordTime(toc.timestamp, toc.rc)
-
+  def fromTimeOfChange(toc: TimeOfChange): RecordTime = RecordTime(toc.timestamp, toc.rc.unwrap)
 }

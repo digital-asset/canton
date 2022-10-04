@@ -69,10 +69,10 @@ class TopologyTransactionProcessorTest
   private def process(
       proc: TopologyTransactionProcessor,
       ts: CantonTimestamp,
-      sc: SequencerCounter,
+      sc: Long,
       txs: List[SignedTopologyTransaction[TopologyChangeOp]],
   ): Future[Unit] =
-    proc.process(SequencedTime(ts), EffectiveTime(ts), sc, txs).onShutdown(fail())
+    proc.process(SequencedTime(ts), EffectiveTime(ts), SequencerCounter(sc), txs).onShutdown(fail())
 
   private def validate(
       observed: List[TopologyStateElement[TopologyMapping]],

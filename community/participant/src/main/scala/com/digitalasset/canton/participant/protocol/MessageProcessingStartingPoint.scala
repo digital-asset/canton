@@ -3,14 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.syntax.either._
-import com.digitalasset.canton._
+import cats.syntax.either.*
+import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints.InvalidStartingPointsException
-import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
-import com.digitalasset.canton.store.CursorPrehead
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 
 /** Summarizes the counters and timestamps where request processing or replay can start
   *
@@ -42,8 +41,8 @@ case class MessageProcessingStartingPoint(
 object MessageProcessingStartingPoint {
   def default: MessageProcessingStartingPoint =
     MessageProcessingStartingPoint(
-      GenesisRequestCounter,
-      GenesisSequencerCounter,
+      RequestCounter.Genesis,
+      SequencerCounter.Genesis,
       CantonTimestamp.MinValue,
     )
 }
@@ -68,7 +67,7 @@ case class ProcessingStartingPoints private (
     cleanReplay: MessageProcessingStartingPoint,
     processing: MessageProcessingStartingPoint,
     eventPublishingNextLocalOffset: LocalOffset,
-    rewoundSequencerCounterPrehead: Option[CursorPrehead[SequencerCounter]],
+    rewoundSequencerCounterPrehead: Option[SequencerCounterCursorPrehead],
 ) extends PrettyPrinting {
 
   if (cleanReplay.prenextTimestamp > processing.prenextTimestamp)
@@ -93,7 +92,7 @@ case class ProcessingStartingPoints private (
     * In such a case, this method returns `false.`
     */
   def processingAfterPublished: Boolean =
-    processing.nextRequestCounter >= eventPublishingNextLocalOffset
+    processing.nextRequestCounter.asLocalOffset >= eventPublishingNextLocalOffset
 
   override def pretty: Pretty[ProcessingStartingPoints] = prettyOfClass(
     param("clean replay", _.cleanReplay),
@@ -110,7 +109,7 @@ object ProcessingStartingPoints {
       cleanReplay: MessageProcessingStartingPoint,
       processing: MessageProcessingStartingPoint,
       eventPublishingNextLocalOffset: LocalOffset,
-      rewoundSequencerCounterPrehead: Option[CursorPrehead[SequencerCounter]],
+      rewoundSequencerCounterPrehead: Option[SequencerCounterCursorPrehead],
   ): ProcessingStartingPoints =
     new ProcessingStartingPoints(
       cleanReplay,
@@ -123,7 +122,7 @@ object ProcessingStartingPoints {
       cleanReplay: MessageProcessingStartingPoint,
       processing: MessageProcessingStartingPoint,
       eventPublishingNextLocalOffset: LocalOffset,
-      rewoundSequencerCounterPrehead: Option[CursorPrehead[SequencerCounter]],
+      rewoundSequencerCounterPrehead: Option[SequencerCounterCursorPrehead],
   ): Either[String, ProcessingStartingPoints] =
     Either
       .catchOnly[InvalidStartingPointsException](
@@ -138,9 +137,9 @@ object ProcessingStartingPoints {
 
   def default: ProcessingStartingPoints =
     new ProcessingStartingPoints(
-      MessageProcessingStartingPoint.default,
-      MessageProcessingStartingPoint.default,
-      GenesisRequestCounter,
-      None,
+      cleanReplay = MessageProcessingStartingPoint.default,
+      processing = MessageProcessingStartingPoint.default,
+      eventPublishingNextLocalOffset = RequestCounter.Genesis.asLocalOffset,
+      rewoundSequencerCounterPrehead = None,
     )
 }

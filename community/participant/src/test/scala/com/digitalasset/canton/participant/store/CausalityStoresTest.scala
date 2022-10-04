@@ -5,14 +5,20 @@ package com.digitalasset.canton.participant.store
 
 import com.daml.ledger.participant.state.v2.Update.PublicPackageUploadRejected
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.store.db.DbEventLogTestResources
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerSubmissionId, LfPartyId}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  LedgerSubmissionId,
+  LfPartyId,
+  RequestCounter,
+}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
@@ -58,7 +64,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
           val deps =
             Map(alice -> Map(writeToDomain -> txOutTs), bob -> Map(writeToDomain -> txOutTs))
           val causalityWrite =
-            store.updateStateAndStore(0, txOutTs, deps, Some(txOutId))
+            store.updateStateAndStore(RequestCounter(0), txOutTs, deps, Some(txOutId))
 
           val () = causalityWrite.futureValue.finished.finished.futureValue
 
@@ -97,7 +103,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
           val singleDomainCausalDependencyStore = testedStores.singleDomainCausalDependencyStore
           val multiDomainCausalityStore = testedStores.multiDomainCausalityStore
 
-          def transferOutBlocks(transferId: TransferId, rc: Long) = {
+          def transferOutBlocks(transferId: TransferId, rc: RequestCounter) = {
             val ts = transferId.requestTimestamp
 
             val seen =
@@ -128,17 +134,17 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
           val () = singleDomainCausalDependencyStore.initialize(None).futureValue
 
-          transferOutBlocks(transferId = txOutId, 0)
-          transferOutBlocks(transferId = txOut2Id, 1)
+          transferOutBlocks(transferId = txOutId, RequestCounter(0))
+          transferOutBlocks(transferId = txOut2Id, RequestCounter(1))
         }
       }
 
       s"maintain the per-domain, per-party causal state" should {
         val aliceBobRequestTs = txOutTs
-        val aliceBobRc = 0L
+        val aliceBobRc = RequestCounter(0)
 
         val charlieRequestTs = aliceBobRequestTs.plusSeconds(1)
-        val charlieRc = 1L
+        val charlieRc = RequestCounter(1)
         val charlieDepTs = aliceBobRequestTs.plusSeconds(2)
 
         val aliceBobState =
@@ -207,9 +213,8 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
 
         if (persistence) "initialise the per-domain highest timestamps upon startup" in {
 
-          def tsOfRc(requestCounter: RequestCounter) = {
-            txOutTs.plusSeconds(requestCounter)
-          }
+          def tsOfRc(requestCounter: RequestCounter): CantonTimestamp =
+            txOutTs.plusSeconds(requestCounter.v)
 
           def timestampedEvent(
               requestCounter: RequestCounter
@@ -220,7 +225,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
                 tsOfRc(requestCounter).toLf,
                 s"rejectionReason(${this.getClass})",
               ): LedgerSyncEvent,
-              requestCounter,
+              requestCounter.asLocalOffset,
               None,
             )
 
@@ -235,10 +240,10 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
           val unpublishedEvents = Seq(writeToDomain -> 6, domain4 -> 7)
 
           val events = (publishedEventOrder.map { case (id, rc) =>
-            (id, timestampedEvent(rc.longValue()), true)
+            (id, timestampedEvent(RequestCounter(rc)), true)
           } ++ unpublishedEvents
             .map { case (id, rc) =>
-              (id, timestampedEvent(rc.longValue()), false)
+              (id, timestampedEvent(RequestCounter(rc)), false)
             })
             .map { case (id, x, y) =>
               val eventLogId: EventLogId =
@@ -257,7 +262,7 @@ trait CausalityStoresTest extends AnyWordSpec with BaseTest with HasExecutionCon
               .map { case (domainId, events) =>
                 val highestEvent = events.map { case (_, rc) => rc }.maxOption.value
                 val domainStr = domainId
-                val ts = tsOfRc(highestEvent.longValue())
+                val ts = tsOfRc(RequestCounter(highestEvent.toLong))
                 domainStr -> ts
               }
 

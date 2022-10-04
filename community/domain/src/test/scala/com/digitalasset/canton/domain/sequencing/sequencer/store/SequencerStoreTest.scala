@@ -413,15 +413,15 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
         for {
           aliceId <- env.store.registerMember(alice, ts1)
-          checkpointO <- env.store.fetchClosestCheckpointBefore(aliceId, 0L)
+          checkpointO <- env.store.fetchClosestCheckpointBefore(aliceId, SequencerCounter(0))
         } yield checkpointO shouldBe None
       }
 
       "return the counter at the point queried" in {
         val env = Env()
 
-        val checkpoint1 = checkpoint(0L, ts2)
-        val checkpoint2 = checkpoint(1L, ts3, Some(ts1))
+        val checkpoint1 = checkpoint(SequencerCounter(0), ts2)
+        val checkpoint2 = checkpoint(SequencerCounter(1), ts3, Some(ts1))
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           _ <- valueOrFail(env.store.saveCounterCheckpoint(aliceId, checkpoint1))(
@@ -430,8 +430,14 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           _ <- valueOrFail(env.store.saveCounterCheckpoint(aliceId, checkpoint2))(
             "save second checkpoint"
           )
-          firstCheckpoint <- env.store.fetchClosestCheckpointBefore(aliceId, 0L + 1)
-          secondCheckpoint <- env.store.fetchClosestCheckpointBefore(aliceId, 1L + 1)
+          firstCheckpoint <- env.store.fetchClosestCheckpointBefore(
+            aliceId,
+            SequencerCounter(0L + 1),
+          )
+          secondCheckpoint <- env.store.fetchClosestCheckpointBefore(
+            aliceId,
+            SequencerCounter(1L + 1),
+          )
         } yield {
           firstCheckpoint.value shouldBe checkpoint1
           secondCheckpoint.value shouldBe checkpoint2
@@ -442,8 +448,8 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         val env = Env()
 
         val futureTs = ts1.plusSeconds(50)
-        val checkpoint1 = checkpoint(10L, ts2, Some(ts1))
-        val checkpoint2 = checkpoint(42L, futureTs, Some(ts2))
+        val checkpoint1 = checkpoint(SequencerCounter(10), ts2, Some(ts1))
+        val checkpoint2 = checkpoint(SequencerCounter(42), futureTs, Some(ts2))
 
         for {
           aliceId <- env.store.registerMember(alice, ts1)
@@ -453,8 +459,14 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           _ <- valueOrFail(env.store.saveCounterCheckpoint(aliceId, checkpoint2))(
             "save second checkpoint"
           )
-          checkpointForCounterAfterFirst <- env.store.fetchClosestCheckpointBefore(aliceId, 20L)
-          checkpointForCounterAfterSecond <- env.store.fetchClosestCheckpointBefore(aliceId, 50L)
+          checkpointForCounterAfterFirst <- env.store.fetchClosestCheckpointBefore(
+            aliceId,
+            SequencerCounter(20),
+          )
+          checkpointForCounterAfterSecond <- env.store.fetchClosestCheckpointBefore(
+            aliceId,
+            SequencerCounter(50),
+          )
         } yield {
           checkpointForCounterAfterFirst.value shouldBe checkpoint1
           checkpointForCounterAfterSecond.value shouldBe checkpoint2
@@ -464,8 +476,8 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       "ignore saving existing checkpoint if timestamps are the same" in {
         val env = Env()
 
-        val checkpoint1 = checkpoint(10L, ts1)
-        val checkpoint2 = checkpoint(20L, ts2, Some(ts1))
+        val checkpoint1 = checkpoint(SequencerCounter(10), ts1)
+        val checkpoint2 = checkpoint(SequencerCounter(20), ts2, Some(ts1))
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           _ <- valueOrFail(env.store.saveCounterCheckpoint(aliceId, checkpoint1))(
@@ -486,23 +498,23 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       "should return error if there is an existing checkpoint with different timestamp" in {
         val env = Env()
 
-        val checkpoint1 = checkpoint(10L, ts1)
+        val checkpoint1 = checkpoint(SequencerCounter(10), ts1)
         for {
           aliceId <- env.store.registerMember(alice, ts1)
           _ <- valueOrFail(env.store.saveCounterCheckpoint(aliceId, checkpoint1))(
             "save first checkpoint"
           )
           wrongTimestamp <- env.store
-            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(10), ts2))
             .value // note different timestamp value
           wrongTimestampAndTopologyTimestamp <- env.store
-            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2, Some(ts2)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(10), ts2, Some(ts2)))
             .value // note different timestamp value
           allowedDuplicateInsert <- env.store
-            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts1, Some(ts2)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(10), ts1, Some(ts2)))
             .value // note different topology client timestamp value
           wrongTimestamp2 <- env.store
-            .saveCounterCheckpoint(aliceId, checkpoint(10L, ts2))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(10), ts2))
             .value // note different topology client timestamp value
         } yield {
           wrongTimestamp shouldBe Left(
@@ -640,19 +652,19 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           )
           // save an earlier counter checkpoint that should be removed
           _ <- store
-            .saveCounterCheckpoint(aliceId, checkpoint(1, ts(2)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(1), ts(2)))
             .valueOrFail("alice counter checkpoint")
           _ <- store
-            .saveCounterCheckpoint(aliceId, checkpoint(2, ts(5)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(2), ts(5)))
             .valueOrFail("alice counter checkpoint")
           _ <- store
-            .saveCounterCheckpoint(bobId, checkpoint(1, ts(5)))
+            .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(1), ts(5)))
             .valueOrFail("bob counter checkpoint")
           _ <- store
-            .saveCounterCheckpoint(aliceId, checkpoint(3, ts(6)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(3), ts(6)))
             .valueOrFail("alice counter checkpoint")
           _ <- store
-            .saveCounterCheckpoint(bobId, checkpoint(2, ts(6)))
+            .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(2), ts(6)))
             .valueOrFail("bob counter checkpoint")
           _ <- store.acknowledge(aliceId, ts(6))
           _ <- store.acknowledge(bobId, ts(6))
@@ -686,7 +698,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           for {
             aliceId <- store.registerMember(alice, ts(1))
             _ <- store
-              .saveCounterCheckpoint(aliceId, checkpoint(3, ts(3)))
+              .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(3), ts(3)))
               .valueOrFail("saveCounterCheckpoint")
             _ <- store.acknowledge(aliceId, ts(5))
             status <- store.status(CantonTimestamp.Epoch)
@@ -710,10 +722,10 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
           for {
             aliceId <- store.registerMember(alice, ts(1))
             _ <- store
-              .saveCounterCheckpoint(aliceId, checkpoint(3, ts(3)))
+              .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(3), ts(3)))
               .valueOrFail("saveCounterCheckpoint1")
             _ <- store
-              .saveCounterCheckpoint(aliceId, checkpoint(5, ts(5)))
+              .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(5), ts(5)))
               .valueOrFail("saveCounterCheckpoint2")
             // clients have acknowledgements at different points
             _ <- store.acknowledge(aliceId, ts(4))
@@ -737,10 +749,10 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
             aliceId <- store.registerMember(alice, ts(1))
             bobId <- store.registerMember(bob, ts(2))
             _ <- store
-              .saveCounterCheckpoint(aliceId, checkpoint(3, ts(3)))
+              .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(3), ts(3)))
               .valueOrFail("saveCounterCheckpoint1")
             _ <- store
-              .saveCounterCheckpoint(bobId, checkpoint(5, ts(5)))
+              .saveCounterCheckpoint(bobId, checkpoint(SequencerCounter(5), ts(5)))
               .valueOrFail("saveCounterCheckpoint2")
             // clients have acknowledgements at different points
             _ <- store.acknowledge(aliceId, ts(4))

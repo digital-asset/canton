@@ -22,7 +22,6 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -67,7 +66,7 @@ import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import org.slf4j.event.Level
 
 import scala.collection.{concurrent, mutable}
@@ -261,7 +260,7 @@ class TransferOutProcessingSteps(
       ) { bytes =>
         FullTransferOutTree
           .fromByteString(sourceSnapshot.pureCrypto)(bytes)
-          .leftMap(e => DeserializationError(e.toString, bytes))
+          .leftMap(e => DeserializationError(e.toString))
       }
       .map(WithRecipients(_, envelope.recipients))
   }

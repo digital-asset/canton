@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.Ordered.orderingToOrdered
 import scala.concurrent.{Future, Promise}
 
-trait LockableState[Status <: PrettyPrinting] extends PrettyPrinting {
+private[conflictdetection] trait LockableState[Status <: PrettyPrinting] extends PrettyPrinting {
 
   /** [[scala.None$]] for no pre-fetched state
     * [[scala.Some$]]`(`[[scala.None$]]`)` for the state where the underlying store has no entry.
@@ -42,7 +42,7 @@ trait LockableState[Status <: PrettyPrinting] extends PrettyPrinting {
   )
 }
 
-object LockableState {
+private[conflictdetection] object LockableState {
 
   sealed trait ConflictDetectionCounterModule[T] {
     def empty: T
@@ -120,7 +120,7 @@ object LockableState {
   private[this] def uintToString(i: Int): String = (i.toLong & 0xffffffffL).toString
 }
 
-case class ImmutableLockableState[Status <: PrettyPrinting](
+private[conflictdetection] final case class ImmutableLockableState[Status <: PrettyPrinting](
     override val versionedState: Option[Option[StateChange[Status]]],
     override val pendingActivenessChecks: PendingActivenessCheckCounter,
     override val lock: LockCounter,
@@ -133,7 +133,7 @@ case class ImmutableLockableState[Status <: PrettyPrinting](
   *                     [[scala.Some$]]`(`[[scala.None$]]`)` for the pre-fetched state where the underlying store has not entry.
   *                     [[scala.Some$]]`(`[[scala.Some$]]`(...))` for the pre-fetched state `...` from the underlying store.`
   */
-class MutableLockableState[Status <: PrettyPrinting](
+private[conflictdetection] class MutableLockableState[Status <: PrettyPrinting](
     initialState: Option[Option[StateChange[Status]]]
 ) extends LockableState[Status]
     with PrettyPrinting {

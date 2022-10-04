@@ -4,8 +4,10 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
+import cats.instances.future._
 import cats.syntax.traverse._
 import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, HashPurpose}
 import com.digitalasset.canton.domain.sequencing.sequencer.errors._
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -34,6 +36,11 @@ abstract class BaseSequencer(
     protected val loggerFactory: NamedLoggerFactory,
     healthConfig: Option[SequencerHealthConfig],
     clock: Clock,
+    checkSignature: TraceContext => SignedContent[SubmissionRequest] => EitherT[
+      Future,
+      SendAsyncError,
+      SignedContent[SubmissionRequest],
+    ],
 )(implicit executionContext: ExecutionContext, trace: Tracer)
     extends Sequencer
     with NamedLogging
@@ -101,7 +108,8 @@ abstract class BaseSequencer(
       span.setAttribute("message_id", submission.messageId.unwrap)
       for {
         _ <- checkMemberRegistration(submission)
-        _ <- sendAsyncSignedInternal(signedSubmission)
+        signedSubmissionWithFixedTs <- checkSignature(traceContext)(signedSubmission)
+        _ <- sendAsyncSignedInternal(signedSubmissionWithFixedTs)
       } yield ()
   }
 
@@ -190,5 +198,37 @@ abstract class BaseSequencer(
 
   override def onClosed(): Unit =
     periodicHealthCheck.foreach(Lifecycle.close(_)(logger))
+
+}
+
+object BaseSequencer {
+  def checkSignature(
+      cryptoApi: DomainSyncCryptoClient
+  )(implicit
+      executionContext: ExecutionContext
+  ): TraceContext => SignedContent[SubmissionRequest] => EitherT[
+    Future,
+    SendAsyncError,
+    SignedContent[SubmissionRequest],
+  ] =
+    traceContext =>
+      signedSubmission => {
+        val snapshot = cryptoApi.headSnapshot(traceContext)
+        val timestamp = snapshot.ipsSnapshot.timestamp
+        signedSubmission
+          .verifySignature(
+            snapshot,
+            signedSubmission.content.sender,
+            HashPurpose.SubmissionRequestSignature,
+          )
+          .leftMap(error => {
+            SendAsyncError.RequestRefused(
+              s"Sequencer could not verify client's signature ${signedSubmission.timestampOfSigningKey
+                .fold("")(ts => s"at $ts ")}on submission request with sequencer's head snapshot at $timestamp. Error: $error"
+            ): SendAsyncError
+          })
+          // set timestamp to the one used by the receiving sequencer's head snapshot timestamp
+          .map(_ => signedSubmission.copy(timestampOfSigningKey = Some(timestamp)))
+      }
 
 }

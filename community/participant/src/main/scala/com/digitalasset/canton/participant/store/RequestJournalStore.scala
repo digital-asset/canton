@@ -6,12 +6,13 @@ package com.digitalasset.canton.participant.store
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
-import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
+import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.store.CursorPreheadStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -20,7 +21,7 @@ trait RequestJournalStore { this: NamedLogging =>
 
   private[store] implicit def ec: ExecutionContext
 
-  private[store] val cleanPreheadStore: CursorPreheadStore[RequestCounter]
+  private[store] val cleanPreheadStore: CursorPreheadStore[RequestCounterDiscriminator]
 
   /** Adds the initial request information to the store.
     *
@@ -100,25 +101,27 @@ trait RequestJournalStore { this: NamedLogging =>
   /** Gets the prehead for the clean cursor. */
   def preheadClean(implicit
       traceContext: TraceContext
-  ): Future[Option[CursorPrehead[RequestCounter]]] =
+  ): Future[Option[RequestCounterCursorPrehead]] =
     cleanPreheadStore.prehead
 
   /** Forces an update to the prehead for clean requests. Only use this for testing. */
   @VisibleForTesting
   private[participant] def overridePreheadCleanForTesting(
-      rc: Option[CursorPrehead[RequestCounter]]
+      rc: Option[RequestCounterCursorPrehead]
   )(implicit traceContext: TraceContext): Future[Unit] = cleanPreheadStore.overridePreheadUnsafe(rc)
 
   /** Sets the prehead counter for clean requests to `rc` with timestamp `timestamp`
     * unless it has previously been set to the same or a higher value.
     */
-  def advancePreheadCleanTo(newPrehead: CursorPrehead[RequestCounter])(implicit
+  def advancePreheadCleanTo(newPrehead: RequestCounterCursorPrehead)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     cleanPreheadStore.advancePreheadTo(newPrehead)
 
   /** [[advancePreheadCleanTo]] as a [[com.digitalasset.canton.resource.TransactionalStoreUpdate]] */
-  def advancePreheadCleanToTransactionalUpdate(newPrehead: CursorPrehead[RequestCounter])(implicit
+  def advancePreheadCleanToTransactionalUpdate(
+      newPrehead: RequestCounterCursorPrehead
+  )(implicit
       traceContext: TraceContext
   ): TransactionalStoreUpdate =
     cleanPreheadStore.advancePreheadToTransactionalStoreUpdate(newPrehead)

@@ -9,14 +9,19 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventPerPartyCausalState
 import com.digitalasset.canton.participant.protocol._
-import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore.CausalityWriteFinished
 import com.digitalasset.canton.participant.store.memory.SingleDomainCausalTrackerTest._
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId, RepeatableTestSuiteTest}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutionContext,
+  LfPartyId,
+  RepeatableTestSuiteTest,
+  RequestCounter,
+}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Future
@@ -49,12 +54,18 @@ class SingleDomainCausalTrackerTest
         )
 
       val updates = List(
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain1, 0, testedProtocolVersion),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch,
+          domain1,
+          RequestCounter(0),
+          testedProtocolVersion,
+        ),
         TransactionUpdate(
           Set(bob),
           CantonTimestamp.Epoch.plusSeconds(1),
           domain1,
-          1,
+          RequestCounter(1),
           testedProtocolVersion,
         ),
       )
@@ -62,10 +73,7 @@ class SingleDomainCausalTrackerTest
       val events = runUpdates(sut, updates)
 
       val expectedEvents = updates.map { u =>
-        EventPerPartyCausalState((u.domain), u.ts, u.rc)(
-          Map.empty,
-          CausalityWriteFinished(Future.unit),
-        )
+        EventPerPartyCausalState((u.domain), u.ts, u.rc.asLocalOffset)(Map.empty)
       }
 
       events shouldBe expectedEvents
@@ -88,12 +96,18 @@ class SingleDomainCausalTrackerTest
       val outTime = CantonTimestamp.Epoch.plusSeconds(5)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0, testedProtocolVersion),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch,
+          domain2,
+          RequestCounter(0),
+          testedProtocolVersion,
+        ),
         TransferInUpdate(
           Set(alice),
           CantonTimestamp.Epoch.plusSeconds(1),
           domain2,
-          1,
+          RequestCounter(1),
           id,
           TargetProtocolVersion(testedProtocolVersion),
         ),
@@ -101,7 +115,7 @@ class SingleDomainCausalTrackerTest
           Set(alice),
           CantonTimestamp.Epoch.plusSeconds(2),
           domain2,
-          2,
+          RequestCounter(2),
           testedProtocolVersion,
         ),
       )
@@ -129,9 +143,8 @@ class SingleDomainCausalTrackerTest
           // For this test, the next event clock is the previous event clock plus any extra causal dependencies
           val map = eventsList.headOption.map(c => c.waitOn).getOrElse(Map.empty) ++ delta
           val next =
-            EventPerPartyCausalState((update.domain), update.ts, update.rc)(
-              Map(alice -> map),
-              CausalityWriteFinished(Future.unit),
+            EventPerPartyCausalState((update.domain), update.ts, update.rc.asLocalOffset)(
+              Map(alice -> map)
             )
 
           next :: eventsList
@@ -154,31 +167,32 @@ class SingleDomainCausalTrackerTest
       val id = TransferId(sourceDomain = domain2, requestTimestamp = outTime)
 
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain2, 0, testedProtocolVersion),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch,
+          domain2,
+          RequestCounter(0),
+          testedProtocolVersion,
+        ),
         TransferOutUpdate(
           Set(alice),
           outTime,
           id,
-          1,
+          RequestCounter(1),
           SourceProtocolVersion(testedProtocolVersion),
         ),
         TransactionUpdate(
           Set(alice),
           CantonTimestamp.Epoch.plusSeconds(2),
           domain2,
-          2,
+          RequestCounter(2),
           testedProtocolVersion,
         ),
       )
 
       val events = runUpdates(sut, updates)
       val expectedEvents =
-        updates.map(u =>
-          EventPerPartyCausalState((u.domain), u.ts, u.rc)(
-            Map.empty,
-            CausalityWriteFinished(Future.unit),
-          )
-        )
+        updates.map(u => EventPerPartyCausalState((u.domain), u.ts, u.rc.asLocalOffset)(Map.empty))
 
       events shouldBe expectedEvents
 
@@ -211,12 +225,18 @@ class SingleDomainCausalTrackerTest
 
       // Represents a transfer in to domain d4 followed by a transfer out
       val updates: List[CausalityUpdate] = List[CausalityUpdate](
-        TransactionUpdate(Set(alice), CantonTimestamp.Epoch, domain4, 0, testedProtocolVersion),
+        TransactionUpdate(
+          Set(alice),
+          CantonTimestamp.Epoch,
+          domain4,
+          RequestCounter(0),
+          testedProtocolVersion,
+        ),
         TransferInUpdate(
           Set(alice, bob),
           CantonTimestamp.Epoch.plusSeconds(1),
           domain4,
-          1,
+          RequestCounter(1),
           transfer1ID,
           TargetProtocolVersion(testedProtocolVersion),
         ),
@@ -224,21 +244,21 @@ class SingleDomainCausalTrackerTest
           Set(alice),
           CantonTimestamp.Epoch.plusSeconds(2),
           domain4,
-          2,
+          RequestCounter(2),
           testedProtocolVersion,
         ),
         TransactionUpdate(
           Set(bob),
           CantonTimestamp.Epoch.plusSeconds(3),
           domain4,
-          3,
+          RequestCounter(3),
           testedProtocolVersion,
         ),
         TransferOutUpdate(
           Set(alice, bob),
           outTime,
           transfer2ID,
-          4,
+          RequestCounter(4),
           SourceProtocolVersion(testedProtocolVersion),
         ),
       )
@@ -314,8 +334,8 @@ class SingleDomainCausalTrackerTest
             EventPerPartyCausalState(
               (causalityUpdate.domain),
               causalityUpdate.ts,
-              causalityUpdate.rc,
-            )(updatedCausalDependencies, CausalityWriteFinished(Future.unit))
+              causalityUpdate.rc.asLocalOffset,
+            )(updatedCausalDependencies)
 
           val nextList = next :: events
           (nextList, updatedCausalDependencies)

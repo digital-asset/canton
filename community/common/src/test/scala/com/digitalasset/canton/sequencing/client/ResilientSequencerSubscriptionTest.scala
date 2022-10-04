@@ -140,14 +140,14 @@ class ResilientSequencerSubscriptionTest
 
       for {
         subscription1 <- subscription1F
-        _ = subscription1.subscribedCounter shouldBe 0L
+        _ = subscription1.subscribedCounter shouldBe SequencerCounter(0)
         // indicate that we've processed the next event
-        _ <- subscription1.handleCounter(43L)
+        _ <- subscription1.handleCounter(43)
         // fail this subscription
         _ = subscription1.closeWithReason(RetryableError)
         // wait for the next subscription to occur
         subscription2 <- subscription2F
-      } yield subscription2.subscribedCounter shouldBe 43L
+      } yield subscription2.subscribedCounter shouldBe SequencerCounter(43)
     }
 
     "correctly indicates whether we've received items when calculating the next retry delay" in {
@@ -175,7 +175,9 @@ class ResilientSequencerSubscriptionTest
         subscription1 <- subscription1F
         _ <-
           // provide an event then close with a recoverable error
-          subscription1.handleCounter(1L).map(_ => subscription1.closeWithReason(RetryableError))
+          subscription1
+            .handleCounter(1)
+            .map(_ => subscription1.closeWithReason(RetryableError))
         subscription2 <- subscription2F
         _ = {
           // don't provide an event and close immediately
@@ -216,7 +218,7 @@ class ResilientSequencerSubscriptionTest
 
       val resilientSequencerSubscription = new ResilientSequencerSubscription[TestHandlerError](
         "test",
-        0L,
+        SequencerCounter(0),
         _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
         subscriptionFactory,
         retryDelay(),
@@ -305,7 +307,7 @@ trait ResilientSequencerSubscriptionTestUtils {
   ): ResilientSequencerSubscription[TestHandlerError] = {
     val subscription = new ResilientSequencerSubscription(
       "test",
-      0L,
+      SequencerCounter(0),
       _ => Future.successful[Either[TestHandlerError, Unit]](Right(())),
       subscriptionTestFactory,
       retryDelayRule,
@@ -409,8 +411,8 @@ trait ResilientSequencerSubscriptionTestUtils {
         case None => fail("subscriber has not yet subscribed")
       }
 
-    def handleCounter(counter: SequencerCounter): Future[Either[TestHandlerError, Unit]] =
-      fromSubscriber(_._2)(OrdinarySequencedEvent(deliverEvent(counter))(traceContext))
+    def handleCounter(sc: Long): Future[Either[TestHandlerError, Unit]] =
+      fromSubscriber(_._2)(OrdinarySequencedEvent(deliverEvent(sc))(traceContext))
 
     def subscribedCounter: SequencerCounter = fromSubscriber(_._1)
 
@@ -423,9 +425,9 @@ trait ResilientSequencerSubscriptionTestUtils {
     def subscription: MockedSequencerSubscription = fromSubscriber(_._3)
 
     private def deliverEvent(
-        counter: SequencerCounter
+        sc: Long
     ): SignedContent[SequencedEvent[ClosedEnvelope]] = {
-      val deliver = SequencerTestUtils.mockDeliver(counter)
+      val deliver = SequencerTestUtils.mockDeliver(sc)
       SignedContent(deliver, SymbolicCrypto.emptySignature, None)
     }
   }

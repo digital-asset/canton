@@ -4,7 +4,6 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,6 +18,7 @@ import com.digitalasset.canton.sequencing.protocol._
 import com.digitalasset.canton.topology._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.mockito.MockitoSugar
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -135,7 +135,7 @@ class DomainTopologyManagerEventHandlerTest extends AsyncWordSpec with BaseTest 
             Seq(
               Traced(
                 Deliver.create(
-                  0,
+                  SequencerCounter(0),
                   CantonTimestamp.MinValue,
                   domainId,
                   Some(MessageId.tryCreate("messageId")),

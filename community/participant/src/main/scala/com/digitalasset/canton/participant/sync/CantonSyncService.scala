@@ -7,22 +7,22 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.daml_lf_dev.DamlLf
-import com.daml.error._
+import com.daml.error.*
 import com.daml.error.definitions.PackageServiceError
 import com.daml.ledger.api.health.HealthStatus
-import com.daml.ledger.configuration._
+import com.daml.ledger.configuration.*
 import com.daml.ledger.participant.state
-import com.daml.ledger.participant.state.v2._
+import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.command.DisclosedContract
-import com.daml.lf.data.ImmArray
+import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.engine.Engine
 import com.daml.lf.transaction.Versioned
 import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
 import com.daml.telemetry.TelemetryContext
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String256M}
@@ -30,7 +30,7 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
@@ -38,12 +38,12 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.Pruning._
-import com.digitalasset.canton.participant._
-import com.digitalasset.canton.participant.admin._
+import com.digitalasset.canton.participant.Pruning.*
+import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
+import com.digitalasset.canton.participant.admin.{workflows, _}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
-import com.digitalasset.canton.participant.domain._
+import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.GlobalCausalOrderer
@@ -58,25 +58,25 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferCoordinatio
 import com.digitalasset.canton.participant.pruning.{NoOpPruningProcessor, PruningProcessor}
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.MissingConfigForAlias
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceDomainBecamePassive,
   SyncServiceDomainDisabledUs,
   SyncServiceDomainDisconnect,
   SyncServiceFailedDomainConnection,
 }
-import com.digitalasset.canton.participant.topology._
+import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
@@ -87,7 +87,7 @@ import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.FutureConverters._
+import scala.jdk.FutureConverters.*
 import scala.util.{Failure, Right, Success}
 
 /** The Canton-based synchronization service.
@@ -161,6 +161,13 @@ class CantonSyncService(
     ),
     initialRecordTime = LedgerSyncRecordTime.Epoch,
   )
+
+  private val excludedPackageIds = if (parameters.excludeInfrastructureTransactions) {
+    Set(workflows.PackageID.PingPong, workflows.PackageID.DarDistribution)
+      .map(Ref.PackageId.assertFromString)
+  } else {
+    Set.empty[Ref.PackageId]
+  }
 
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -526,22 +533,27 @@ class CantonSyncService(
   // Augment event with transaction statistics "as late as possible" as stats are redundant data and so that
   // we don't need to persist stats and deal with versioning stats changes. Also every event is usually consumed
   // only once.
-  private def augmentTransactionStatistics(event: LedgerSyncEvent): LedgerSyncEvent = event match {
-    case ta @ LedgerSyncEvent.TransactionAccepted(
-          Some(completionInfo),
-          _transactionMeta,
-          transaction,
-          _transactionId,
-          _recordTime,
-          _divulgedContracts,
-          _blindingInfo,
-          _contractMetadata,
-        ) =>
-      ta.copy(optCompletionInfo =
-        Some(completionInfo.copy(statistics = Some(LedgerTransactionNodeStatistics(transaction))))
-      )
-    case event => event
-  }
+  private[sync] def augmentTransactionStatistics(event: LedgerSyncEvent): LedgerSyncEvent =
+    event match {
+      case ta @ LedgerSyncEvent.TransactionAccepted(
+            Some(completionInfo),
+            _transactionMeta,
+            transaction,
+            _transactionId,
+            _recordTime,
+            _divulgedContracts,
+            _blindingInfo,
+            _contractMetadata,
+          ) =>
+        ta.copy(optCompletionInfo =
+          Some(
+            completionInfo.copy(statistics =
+              Some(LedgerTransactionNodeStatistics(transaction, excludedPackageIds))
+            )
+          )
+        )
+      case event => event
+    }
 
   override def allocateParty(
       hint: Option[LfPartyId],

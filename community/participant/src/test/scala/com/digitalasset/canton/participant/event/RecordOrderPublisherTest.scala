@@ -33,7 +33,14 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{BaseTest, DefaultDamlValues, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.{
+  BaseTest,
+  DefaultDamlValues,
+  HasExecutionContext,
+  LfPartyId,
+  RequestCounter,
+  SequencerCounter,
+}
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -71,7 +78,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
       when(multiDomainEventLog.publish(any[PublicationData])).thenReturn(Future.unit)
       val sut = new RecordOrderPublisher(
         domain,
-        0L,
+        SequencerCounter(0),
         CantonTimestamp.MinValue,
         eventLog,
         multiDomainEventLog,
@@ -106,12 +113,12 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
       val tse = timestampedEvent(domain1Ts2)
 
       val recover1 = PendingTransferPublish(
-        0L,
+        RequestCounter(0),
         (TransferOutUpdate(
           Set(alice),
           id.requestTimestamp,
           id,
-          0L,
+          RequestCounter(0),
           SourceProtocolVersion(testedProtocolVersion),
         )),
         id.requestTimestamp,
@@ -124,7 +131,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
             Set(alice),
             tse.timestamp,
             domain1,
-            tse.localOffset,
+            RequestCounter(tse.localOffset),
             testedProtocolVersion,
           )
         ),
@@ -158,7 +165,7 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
             Set(alice),
             tse.timestamp,
             domain2,
-            tse.localOffset,
+            RequestCounter(tse.localOffset),
             testedProtocolVersion,
           )
         ),
@@ -169,12 +176,12 @@ class RecordOrderPublisherTest extends AnyWordSpec with BaseTest with HasExecuti
 
       val publishTransferIn =
         PendingTransferPublish(
-          1L,
+          RequestCounter(1),
           TransferInUpdate(
             Set(alice),
             domain2Ts2,
             domain2,
-            1L,
+            RequestCounter(1),
             id,
             TargetProtocolVersion(testedProtocolVersion),
           ),

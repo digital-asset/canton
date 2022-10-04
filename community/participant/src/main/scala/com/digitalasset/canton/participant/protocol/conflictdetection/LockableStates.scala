@@ -6,11 +6,11 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 import cats.syntax.either._
 import cats.syntax.functor._
 import cats.syntax.traverse._
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.{ConflictDetectionStore, HasPrunable}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.tracing.TraceContext
@@ -31,7 +31,11 @@ import scala.reflect.ClassTag
   * @tparam Key Identifier for states
   * @tparam Status The status type for states.
   */
-class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private (
+private[conflictdetection] class LockableStates[
+    Key,
+    Status <: PrettyPrinting with HasPrunable,
+    E,
+] private (
     private val store: ConflictDetectionStore[Key, Status, E],
     protected override val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
@@ -574,7 +578,7 @@ class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private 
   }
 }
 
-object LockableStates {
+private[conflictdetection] object LockableStates {
   def empty[K: Pretty: ClassTag, A <: PrettyPrinting with HasPrunable, E](
       store: ConflictDetectionStore[K, A, E],
       loggerFactory: NamedLoggerFactory,

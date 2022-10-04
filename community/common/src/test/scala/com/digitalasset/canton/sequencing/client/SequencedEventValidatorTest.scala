@@ -35,12 +35,13 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(subscriberId, defaultDomainId)
   private lazy val sequencerCryptoApi: DomainSyncCryptoClient =
     TestingIdentityFactory(loggerFactory).forOwnerAndDomain(sequencerId, defaultDomainId)
-  private lazy val updatedCounter: SequencerCounter = 42L
-  private lazy val dummyHash: Hash = TestHash.digest(0)
+  private lazy val updatedCounter: Long = 42L
 
   private def mkValidator(
       initialEventMetadata: PossiblyIgnoredSerializedEvent =
-        IgnoredSequencedEvent(CantonTimestamp.MinValue, updatedCounter - 1, None)(traceContext),
+        IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter - 1), None)(
+          traceContext
+        ),
       syncCryptoApi: DomainSyncCryptoClient = subscriberCryptoApi,
   ): SequencedEventValidatorImpl = {
     new SequencedEventValidatorImpl(
@@ -58,7 +59,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       domainId: DomainId = defaultDomainId,
       signatureOverride: Option[Signature] = None,
       serializedOverride: Option[ByteString] = None,
-      counter: SequencerCounter = updatedCounter,
+      counter: Long = updatedCounter,
       timestamp: CantonTimestamp = CantonTimestamp.Epoch,
   ): Future[OrdinarySerializedEvent] = {
     import cats.syntax.option._
@@ -68,7 +69,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       InformeeMessage(fullInformeeTree)(testedProtocolVersion)
     }
     val deliver: Deliver[ClosedEnvelope] = Deliver.create[ClosedEnvelope](
-      counter,
+      SequencerCounter(counter),
       timestamp,
       domainId,
       MessageId.tryCreate("test").some,
@@ -94,7 +95,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
   }
 
   private def createEventWithCounterAndTs(
-      counter: SequencerCounter,
+      counter: Long,
       timestamp: CantonTimestamp,
       customSerialization: Option[ByteString] = None,
       messageIdO: Option[MessageId] = None,
@@ -172,7 +173,9 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
     "check the domain Id" in {
       val incorrectDomainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("wrong-domain::id"))
       val validator = mkValidator(
-        IgnoredSequencedEvent(CantonTimestamp.MinValue, updatedCounter, None)(traceContext)
+        IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(updatedCounter), None)(
+          traceContext
+        )
       )
       for {
         wrongDomain <- createEvent(incorrectDomainId)
@@ -199,17 +202,17 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         errContent <- validator.validateOnReconnect(differentContent).leftOrFail("fork on content")
       } yield {
         errCounter shouldBe ForkHappened(
-          updatedCounter,
+          SequencerCounter(updatedCounter),
           differentCounter.signedEvent.content,
           Some(priorEvent.signedEvent.content),
         )
         errTimestamp shouldBe ForkHappened(
-          updatedCounter,
+          SequencerCounter(updatedCounter),
           differentTimestamp.signedEvent.content,
           Some(priorEvent.signedEvent.content),
         )
         errContent shouldBe ForkHappened(
-          updatedCounter,
+          SequencerCounter(updatedCounter),
           differentContent.signedEvent.content,
           Some(priorEvent.signedEvent.content),
         )
@@ -245,7 +248,10 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       for {
         priorEvent <- createEvent(timestamp = CantonTimestamp.Epoch.immediatePredecessor)
         badSig <- sign(ByteString.copyFromUtf8("not-the-message"), CantonTimestamp.Epoch)
-        badEvent <- createEvent(signatureOverride = Some(badSig), counter = priorEvent.counter + 1L)
+        badEvent <- createEvent(
+          signatureOverride = Some(badSig),
+          counter = priorEvent.counter.v + 1L,
+        )
         validator = mkValidator(priorEvent)
         result <- validator.validate(badEvent).leftOrFail("invalid signature")
       } yield {
@@ -261,7 +267,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       )
       when(syncCrypto.topologyKnownUntilTimestamp).thenReturn(CantonTimestamp.MaxValue)
       val validator = mkValidator(
-        IgnoredSequencedEvent(ts(0), 41L, None)(traceContext),
+        IgnoredSequencedEvent(ts(0), SequencerCounter(41), None)(traceContext),
         syncCryptoApi = syncCrypto,
       )
       for {
@@ -272,20 +278,24 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
 
     "reject the same counter-timestamp if passed in repeatedly" in {
       val validator =
-        mkValidator(IgnoredSequencedEvent(CantonTimestamp.MinValue, 41L, None)(traceContext))
+        mkValidator(
+          IgnoredSequencedEvent(CantonTimestamp.MinValue, SequencerCounter(41), None)(traceContext)
+        )
 
       for {
         deliver <- createEventWithCounterAndTs(42, CantonTimestamp.Epoch)
         _ <- validator.validate(deliver).valueOrFail("validate1")
         err <- validator.validate(deliver).leftOrFail("validate2")
       } yield {
-        err shouldBe GapInSequencerCounter(42L, 42L)
+        err shouldBe GapInSequencerCounter(SequencerCounter(42), SequencerCounter(42))
       }
     }
 
     "fail if the counter or timestamp do not increase" in {
       val validator =
-        mkValidator(IgnoredSequencedEvent(CantonTimestamp.Epoch, 41L, None)(traceContext))
+        mkValidator(
+          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(traceContext)
+        )
 
       for {
         deliver1 <- createEventWithCounterAndTs(42, CantonTimestamp.MinValue)
@@ -299,18 +309,20 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       } yield {
         error1 shouldBe NonIncreasingTimestamp(
           CantonTimestamp.MinValue,
-          42L,
+          SequencerCounter(42),
           CantonTimestamp.Epoch,
-          41L,
+          SequencerCounter(41),
         )
-        error2 shouldBe DecreasingSequencerCounter(0L, 41L)
-        error3 shouldBe DecreasingSequencerCounter(0L, 42L)
+        error2 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(41))
+        error3 shouldBe DecreasingSequencerCounter(SequencerCounter(0), SequencerCounter(42))
       }
     }
 
     "fail if there is a counter cap" in {
       val validator =
-        mkValidator(IgnoredSequencedEvent(CantonTimestamp.Epoch, 41L, None)(traceContext))
+        mkValidator(
+          IgnoredSequencedEvent(CantonTimestamp.Epoch, SequencerCounter(41), None)(traceContext)
+        )
 
       for {
         deliver1 <- createEventWithCounterAndTs(43L, CantonTimestamp.ofEpochSecond(1))
@@ -321,8 +333,8 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
         _ <- validator.validate(deliver2).valueOrFail("deliver2")
         result3 <- validator.validate(deliver3).leftOrFail("deliver3")
       } yield {
-        result1 shouldBe GapInSequencerCounter(43L, 41L)
-        result3 shouldBe GapInSequencerCounter(44L, 42L)
+        result1 shouldBe GapInSequencerCounter(SequencerCounter(43), SequencerCounter(41))
+        result3 shouldBe GapInSequencerCounter(SequencerCounter(44), SequencerCounter(42))
       }
     }
   }

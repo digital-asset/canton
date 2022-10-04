@@ -275,6 +275,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
+          SequencerClient.signSubmissionRequest(domainCryptoApi),
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

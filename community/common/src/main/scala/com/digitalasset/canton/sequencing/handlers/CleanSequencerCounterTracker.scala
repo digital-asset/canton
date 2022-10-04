@@ -4,11 +4,17 @@
 package com.digitalasset.canton.sequencing.handlers
 
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue, SynchronizedPeanoTreeQueue}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  Counter,
+  PeanoQueue,
+  SynchronizedPeanoTreeQueue,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.sequencing.{HandlerResult, PossiblyIgnoredApplicationHandler}
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.{CursorPrehead, SequencerCounterTrackerStore}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureUtil
@@ -26,13 +32,15 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class CleanSequencerCounterTracker(
     store: SequencerCounterTrackerStore,
-    onUpdate: Traced[CursorPrehead[SequencerCounter]] => Future[Unit],
+    onUpdate: Traced[SequencerCounterCursorPrehead] => Future[Unit],
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
   /** Counter for the batches of events that we hand out to the application handler. */
-  private type EventBatchCounter = Long
+  private case object EventBatchCounterDiscriminator
+  private type EventBatchCounterDiscriminator = EventBatchCounterDiscriminator.type
+  private type EventBatchCounter = Counter[EventBatchCounterDiscriminator]
 
   /** The counter for the next batch of events that goes to the application handler.
     * The [[EventBatchCounter]] is not persisted anywhere and can therefore be reset upon a restart.
@@ -43,8 +51,10 @@ class CleanSequencerCounterTracker(
     * The [[SequencerCounter]] belongs to the last event in the corresponding event batch.
     */
   private val eventBatchQueue
-      : PeanoQueue[EventBatchCounter, Traced[CursorPrehead[SequencerCounter]]] =
-    new SynchronizedPeanoTreeQueue[Traced[CursorPrehead[SequencerCounter]]](0L)
+      : PeanoQueue[EventBatchCounter, Traced[SequencerCounterCursorPrehead]] =
+    new SynchronizedPeanoTreeQueue[EventBatchCounterDiscriminator, Traced[
+      SequencerCounterCursorPrehead
+    ]](Counter[EventBatchCounterDiscriminator](0L))
 
   def apply[E <: Envelope[_]](
       handler: PossiblyIgnoredApplicationHandler[E]
@@ -68,7 +78,8 @@ class CleanSequencerCounterTracker(
     }
   }
 
-  private[this] def allocateEventBatchCounter(): Long = eventBatchCounterRef.getAndIncrement()
+  private[this] def allocateEventBatchCounter(): EventBatchCounter =
+    Counter[EventBatchCounterDiscriminator](eventBatchCounterRef.getAndIncrement())
 
   private[this] def signalCleanEventBatch(
       eventBatchCounter: EventBatchCounter,

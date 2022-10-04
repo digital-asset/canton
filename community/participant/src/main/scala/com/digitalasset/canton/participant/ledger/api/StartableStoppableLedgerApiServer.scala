@@ -24,6 +24,7 @@ import com.daml.platform.indexer.{
   IndexerServiceOwner,
   IndexerStartupMode,
 }
+import com.daml.platform.partymanagement.PersistentPartyRecordStore
 import com.daml.platform.services.time.TimeProviderType
 import com.daml.platform.store.DbSupport
 import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
@@ -225,6 +226,12 @@ class StartableStoppableLedgerApiServer(
           maxCacheSize = config.serverConfig.userManagementService.maxCacheSize,
           maxRightsPerUser = config.serverConfig.userManagementService.maxRightsPerUser,
         )(executionContext, loggingContext)
+      partyRecordStore = new PersistentPartyRecordStore(
+        dbSupport = dbSupport,
+        metrics = config.metrics,
+        timeProvider = TimeProvider.UTC,
+        executionContext = executionContext,
+      )
       ledgerApiServerConfig = ApiServerConfig(
         address = Some(config.serverConfig.address),
         apiStreamShutdownTimeout = config.serverConfig.apiStreamShutdownTimeout.unwrap.toScala,
@@ -251,6 +258,7 @@ class StartableStoppableLedgerApiServer(
       _ <- ApiServiceOwner(
         indexService = indexService,
         userManagementStore = userManagementStore,
+        partyRecordStore = partyRecordStore,
         ledgerId = config.ledgerId,
         participantId = config.participantId,
         config = ledgerApiServerConfig,
@@ -301,6 +309,7 @@ class StartableStoppableLedgerApiServer(
         ),
         jwtTimestampLeeway =
           config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
+        meteringReportKey = config.meteringReportKey,
       )
     } yield ()
   }

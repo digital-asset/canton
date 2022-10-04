@@ -4,12 +4,9 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{EitherT, NonEmptyChain}
-import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates
 import com.digitalasset.canton.participant.protocol.conflictdetection.NaiveRequestTracker.TimedTask
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
@@ -21,9 +18,10 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
 import scala.concurrent._
-import scala.util.{Success, Try}
+import scala.util.Try
 
 /** The request tracker handles all the tasks around conflict detection that are difficult to parallelize.
   * In detail, it tracks in-flight requests, performs activeness checks, detects conflicts between requests,
@@ -95,14 +93,14 @@ import scala.util.{Success, Try}
   * To describe conflict behavior, we introduce a few concepts:
   *
   * A <strong>conflict detection time</strong> is a triple ([[com.digitalasset.canton.data.CantonTimestamp]], `Kind`, [[SequencerCounter]]).
-  * There are four kinds, and they are ordered by
-  * {{{Result < Finalize < Request < Timeout}}}.
+  * There are three kinds, and they are ordered by
+  * {{{Finalization < Timeout < Activeness}}}.
   * Conflict detection times are ordered lexicographically.
   * In other words, {{{(ts1, kind1, sc1) < (ts2, kind2, sc2)}}} if and only if
   * {{{ts1 < ts2}}} or {{{ts1 == ts2 && kind1 < kind2}}} or {{{ts1 == ts2 && kind1 == kind2 && sc1 < sc2.}}}
   *
   * A request with [[SequencerCounter]] `sc` and [[com.digitalasset.canton.data.CantonTimestamp]] `ts` induces two conflict detection times:
-  * The <strong>sequencing time</strong> at `(ts, ConfirmationRequest, sc)` and the <strong>timeout time</strong> at
+  * The <strong>sequencing time</strong> at `(ts, Activeness, sc)` and the <strong>timeout time</strong> at
   * (decisionTime, Timeout, sc) where `decisionTime` is the decision time of the request.
   * Without logical reordering, the sequencing time is also the request's activeness time.
   * (Technically, the activeness time must lie between the sequencing time and the decision time;
@@ -123,21 +121,21 @@ import scala.util.{Success, Try}
   * A request is <strong>finalized</strong> at some conflict detection time `t`
   * if its finalization time is known and equal or prior to `t`.
   *
-  * A contract is active at time `t` if a request with activeness time at most `t` activates it, and
+  * A contract is <strong>active</strong> at time `t` if a request with activeness time at most `t` activates it, and
   * there is no finalized request at time `t` that has deactivated it.
   * Activation happens through creation and transfer-in.
   * Deactivation happens through archival and transfer-out.
-  * An active contract is locked at time `t` if one of the following cases holds:
+  * An active contract `c` is locked at time `t` if one of the following cases holds:
   * <ul>
-  *   <li>There is an active request at time `t` that activates `t`.
+  *   <li>There is an active request at time `t` that activates `c`.
   *     In that case, we say that the contract is in activation.</li>
-  *   <li>There is an active request at time `t` that deactivates `t` and the request does not activate the contract.</li>
+  *   <li>There is an active request at time `t` that deactivates `c` and the request does not activate `c`.</li>
   * </ul>
   * A contract may be locked because of activation and deactivation at the same time if there are two active requests,
   * one activating the contract and another deactivating it.
   * For example, if one request `r1`
   * creates a contract with sequencing time `t1` and finalization time `t1'` and another request `r2`
-  * with sequencing time `t2` between `t1` and `r2` archives it (despite that `r2`'s activeness check fails),
+  * with sequencing time `t2` between `t1` and `t1'` archives it (despite that `r2`'s activeness check fails),
   * then the contract is created at time `t1` and archived at `t2`.
   *
   * Activeness of contracts is checked at the request's activeness time.
@@ -279,18 +277,6 @@ trait RequestTracker extends AutoCloseable with NamedLogging {
   def addCommitSet(requestCounter: RequestCounter, commitSet: Try[CommitSet])(implicit
       traceContext: TraceContext
   ): Either[CommitSetError, EitherT[Future, NonEmptyChain[RequestTrackerStoreError], Unit]]
-
-  /** Shorthand for `addCommitSet(rc, CommitSet.empty)` */
-  def addEmptyCommitSet(
-      rc: RequestCounter
-  )(implicit traceContext: TraceContext): Either[CommitSetError, Future[Unit]] = {
-    implicit val ec: ExecutionContext = DirectExecutionContext(logger)
-    addCommitSet(rc, Success(CommitSet.empty)).map(
-      _.valueOr(irregularities =>
-        throw new RuntimeException(s"An empty commit set caused irregularities: $irregularities")
-      )
-    )
-  }
 
   /** Returns a possibly outdated state of the contract. */
   def getApproximateStates(coid: Seq[LfContractId])(implicit

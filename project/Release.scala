@@ -15,6 +15,8 @@ object Release {
       suffix: Option[String],
   )(val fileToCheck: java.io.File)
       extends Ordered[ParsedVersion] {
+    def majorMinor: (String, String) = (major, minor)
+
     override def compare(that: ParsedVersion): Int = {
       if (this.major != that.major) this.major compare that.major
       else if (this.minor != that.minor) this.minor compare that.minor
@@ -62,7 +64,8 @@ object Release {
     // Split the version lines according to their order from the current release
     val (lower, matching, higher) =
       releaseLines.foldLeft((Vector.empty[String], Option.empty[String], Vector.empty[String])) {
-        case ((lower, _, higher), line) if parseLine(line) == releaseVersion =>
+        case ((lower, _, higher), line)
+            if parseLine(line).majorMinor == releaseVersion.majorMinor =>
           (lower, Some(line), higher)
         case ((lower, matching, higher), line) if parseLine(line) < releaseVersion =>
           (lower :+ line, matching, higher)

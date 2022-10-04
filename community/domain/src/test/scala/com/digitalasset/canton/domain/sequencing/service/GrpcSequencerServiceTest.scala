@@ -28,7 +28,7 @@ import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySn
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.UntypedVersionedMessage
-import com.digitalasset.canton.{BaseTest, GenesisSequencerCounter}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code._
 import io.grpc.StatusException
@@ -159,7 +159,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     )
   }
 
-  Seq(("send", false), ("sendV1", true)).foreach { case (name, useSignedSend) =>
+  Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>
     name should {
       val content = ByteString.copyFromUtf8("123")
       val defaultRequest: SubmissionRequest = {
@@ -276,12 +276,16 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           {
             sendAndCheckError(
               request.toProtoV0,
-              { case SendAsyncError.RequestRefused(message) =>
-                message should fullyMatch regex "Request from '.*' of size \\(.* bytes\\) is exceeding maximum size \\(1000 bytes\\)\\."
+              { case SendAsyncError.RequestInvalid(message) =>
+                message should include(
+                  "Max bytes to decompress is exceeded. The limit is 1000 bytes."
+                )
               },
             )
           },
-          _.warningMessage should include regex "Request from '.*' of size \\(.* bytes\\) is exceeding maximum size \\(1000 bytes\\)\\.",
+          _.warningMessage should include(
+            "Max bytes to decompress is exceeded. The limit is 1000 bytes."
+          ),
         )
       }
 
@@ -610,7 +614,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val requestP =
         SubscriptionRequest(
           participant,
-          GenesisSequencerCounter,
+          SequencerCounter.Genesis,
         ).toProtoV0
 
       Mockito
@@ -635,7 +639,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val requestP =
         SubscriptionRequest(
           ParticipantId("Wrong participant"),
-          GenesisSequencerCounter,
+          SequencerCounter.Genesis,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {
@@ -652,7 +656,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val requestP =
         SubscriptionRequest(
           participant,
-          GenesisSequencerCounter,
+          SequencerCounter.Genesis,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {
@@ -669,7 +673,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       val requestP =
         SubscriptionRequest(
           unauthenticatedMember,
-          GenesisSequencerCounter,
+          SequencerCounter.Genesis,
         ).toProtoV0
 
       loggerFactory.suppressWarningsAndErrors {

@@ -29,10 +29,10 @@ object ByteArrayUtil {
       Right(decompressed)
     } catch {
       // all exceptions that were observed when testing these methods (see also `GzipCompressionTests`)
-      case ex: ZipException => Left(DeserializationError(ex.getMessage, ByteString.copyFrom(bytes)))
+      case ex: ZipException => Left(DeserializationError(ex.getMessage))
       case _: EOFException =>
         Left(
-          DeserializationError("Compressed byte input ended too early", ByteString.copyFrom(bytes))
+          DeserializationError("Compressed byte input ended too early")
         )
     }
   }

@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
 import com.digitalasset.canton.protocol.v0.TransferViewTree
-import com.digitalasset.canton.protocol.{ViewHash, v0}
+import com.digitalasset.canton.protocol.{ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{HasVersionedWrapper, ProtocolVersion, VersionedMessage}
@@ -37,8 +37,14 @@ abstract class GenTransferViewTree[
 
   def toProtoV0: v0.TransferViewTree =
     v0.TransferViewTree(
-      commonData = Some(MerkleTree.toBlindableNode(commonData)),
-      participantData = Some(MerkleTree.toBlindableNode(participantData)),
+      commonData = Some(MerkleTree.toBlindableNodeV0(commonData)),
+      participantData = Some(MerkleTree.toBlindableNodeV0(participantData)),
+    )
+
+  def toProtoV1: v1.TransferViewTree =
+    v1.TransferViewTree(
+      commonData = Some(MerkleTree.toBlindableNodeV1(commonData)),
+      participantData = Some(MerkleTree.toBlindableNodeV1(participantData)),
     )
 
   def viewHash = ViewHash.fromRootHash(rootHash)
@@ -69,12 +75,30 @@ object GenTransferViewTree {
     val v0.TransferViewTree(commonDataP, viewP) = treeP
     for {
       commonData <- MerkleTree
-        .fromProtoOption(commonDataP, deserializeCommonData(_))
+        .fromProtoOptionV0(commonDataP, deserializeCommonData(_))
         .leftMap(error => OtherError(s"transferCommonData: $error"))
       view <- MerkleTree
-        .fromProtoOption(viewP, deserializeView(_))
+        .fromProtoOptionV0(viewP, deserializeView(_))
         .leftMap(error => OtherError(s"transferView: $error"))
     } yield createTree(commonData, view)
   }
 
+  private[data] def fromProtoV1[CommonData, View, Tree](
+      deserializeCommonData: ByteString => ParsingResult[MerkleTree[
+        CommonData
+      ]],
+      deserializeView: ByteString => ParsingResult[MerkleTree[View]],
+  )(
+      createTree: (MerkleTree[CommonData], MerkleTree[View]) => Tree
+  )(treeP: v1.TransferViewTree): ParsingResult[Tree] = {
+    val v1.TransferViewTree(commonDataP, viewP) = treeP
+    for {
+      commonData <- MerkleTree
+        .fromProtoOptionV1(commonDataP, deserializeCommonData(_))
+        .leftMap(error => OtherError(s"transferCommonData: $error"))
+      view <- MerkleTree
+        .fromProtoOptionV1(viewP, deserializeView(_))
+        .leftMap(error => OtherError(s"transferView: $error"))
+    } yield createTree(commonData, view)
+  }
 }

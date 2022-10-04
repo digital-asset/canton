@@ -4,13 +4,13 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
-import cats.syntax.either.*
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.either._
+import cats.syntax.foldable._
+import cats.syntax.traverse._
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.concurrent.*
-import com.digitalasset.canton.config.*
+import com.digitalasset.canton.concurrent._
+import com.digitalasset.canton.config._
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleGrpcAdminCommandRunner,
@@ -22,7 +22,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
-import com.digitalasset.canton.environment.Environment.*
+import com.digitalasset.canton.environment.Environment._
 import com.digitalasset.canton.health.HealthServer
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -30,7 +30,7 @@ import com.digitalasset.canton.metrics.MetricsFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.resource.DbMigrationsFactory
-import com.digitalasset.canton.time.*
+import com.digitalasset.canton.time._
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.{AkkaUtil, SingleUseCell}
@@ -41,7 +41,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration.*
+import scala.concurrent.duration._
 import scala.concurrent.{Await, Future, blocking}
 import scala.util.control.NonFatal
 
