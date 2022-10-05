@@ -354,7 +354,7 @@ object SyncDomainEphemeralStateFactory {
               processingStartingPoint.prenextTimestamp
             )
             _ = logger.debug(s"First replayed request ${firstReplayedRequest
-              .map(data => s"${data.rc} at ${data.requestTimestamp} committed at ${data.commitTime}")}")
+                .map(data => s"${data.rc} at ${data.requestTimestamp} committed at ${data.commitTime}")}")
             replayStartingPoint <- firstReplayedRequest match {
               case Some(
                     RequestJournal.RequestData(

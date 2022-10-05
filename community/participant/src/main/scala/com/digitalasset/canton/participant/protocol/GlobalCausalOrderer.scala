@@ -137,7 +137,7 @@ class GlobalCausalOrderer(
       val seen = domainCausalityStore.highestSeenOn(id)
       val finished = seen.exists(t => !t.isBefore(timestamp))
       val connected = connectedDomains(id)
-      //TODO(i6180): Revisit this code with respect to changing domain topologies
+      // TODO(i6180): Revisit this code with respect to changing domain topologies
       !finished && connected
     }
     clk.isEmpty

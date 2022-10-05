@@ -93,7 +93,7 @@ object NamespaceDelegation {
     sit.transaction.element.mapping match {
       case nd: NamespaceDelegation =>
         nd.namespace.fingerprint == sit.key.fingerprint && nd.isRootDelegation && nd.target.fingerprint == nd.namespace.fingerprint &&
-          sit.operation == TopologyChangeOp.Add
+        sit.operation == TopologyChangeOp.Add
       case _ => false
     }
 

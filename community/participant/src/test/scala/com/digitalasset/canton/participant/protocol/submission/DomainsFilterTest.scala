@@ -69,7 +69,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       )
     }
 
-    //TODO(i9910) modify v1_dev to v1_15 when available
+    // TODO(i9910) modify v1_dev to v1_15 when available
     "reject domains when the minimum protocol version is not satisfied " in {
       import SimpleTopology._
       val currentDomainPV = ProtocolVersion.v3

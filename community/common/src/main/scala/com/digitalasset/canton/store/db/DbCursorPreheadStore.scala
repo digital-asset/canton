@@ -49,7 +49,7 @@ class DbCursorPreheadStore[Counter <: Long: GetResult](
     processingTime.metric.event {
       val preheadQuery =
         sql"""select prehead_counter, ts from #$cursorTable where client = $client order by prehead_counter desc #${storage
-          .limit(2)}"""
+            .limit(2)}"""
           .as[(Counter, CantonTimestamp)]
       storage.query(preheadQuery, functionFullName).map {
         case Seq() => None

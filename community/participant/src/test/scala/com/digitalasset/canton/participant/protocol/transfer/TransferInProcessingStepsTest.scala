@@ -206,7 +206,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail when a receiving party has no participant on the domain" in {
       val transferOutRequest = TransferOutRequest(
         party1,
-        Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+        Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
         Set.empty,
         coidAbs1,
         transferId.sourceDomain,
@@ -652,7 +652,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferOutRequest = TransferOutRequest(
       party1,
-      Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+      Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
       contractId,
       transferId.sourceDomain,

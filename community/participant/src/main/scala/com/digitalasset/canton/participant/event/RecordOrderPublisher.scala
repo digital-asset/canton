@@ -92,7 +92,9 @@ class RecordOrderPublisher(
       metrics,
       timeouts,
       loggerFactory.appendUnnamedKey("task scheduler owner", "RecordOrderPublisher"),
-    )(executionContextForPublishing)
+    )(
+      executionContextForPublishing
+    )
 
   private val acsChangeListener = new AtomicReference[Option[AcsChangeListener]](None)
 
@@ -351,7 +353,7 @@ class RecordOrderPublisher(
         s"Causal update $update given clock $clock with dependencies ${clock.waitOn}"
       )
       _unit <- {
-        //Block until the event is causally publishable
+        // Block until the event is causally publishable
         singleDomainCausalTracker.globalCausalOrderer.waitPublishable(clock)
       }
     } yield clock

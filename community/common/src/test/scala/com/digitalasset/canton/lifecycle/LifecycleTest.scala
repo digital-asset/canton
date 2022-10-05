@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.lifecycle
+
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.lifecycle.Lifecycle.close
 import com.digitalasset.canton.logging.LogEntry

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
+
 import cats.syntax.either._
 import com.digitalasset.canton.lifecycle.ClosingException
 import com.digitalasset.canton.logging.TracedLogger

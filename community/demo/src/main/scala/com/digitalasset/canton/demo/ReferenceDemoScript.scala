@@ -605,7 +605,9 @@ object ReferenceDemoScript {
         if (adjustPath) Some("./community/demo/target/scala-2.13/resource_managed/main") else None,
       additionalChecks = testScript,
       loggerFactory = loggerFactory,
-    )(consoleEnvironment.environment.executionContext)
+    )(
+      consoleEnvironment.environment.executionContext
+    )
     if (testScript) {
       script.run()
       println("The last emperor is always the worst.")

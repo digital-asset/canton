@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
+
 import com.digitalasset.canton.serialization.{
   DeserializationError,
   DeterministicEncoding,

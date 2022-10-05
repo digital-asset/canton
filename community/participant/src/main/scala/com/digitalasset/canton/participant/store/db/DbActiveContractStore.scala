@@ -354,7 +354,7 @@ class DbActiveContractStore(
           join lateral
             (select ts, change from active_contracts AC2 where domain_id = $domainId
              and AC2.contract_id = AC1.contract_id and ts <= $timestamp order by ts desc, request_counter desc, change asc #${storage
-          .limit(1)}) as AC3 on true
+            .limit(1)}) as AC3 on true
           where AC1.domain_id = $domainId and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids))
           .as[(LfContractId, CantonTimestamp)]
@@ -783,10 +783,10 @@ class DbActiveContractStore(
     val orderQuery = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
         sql" order by ts #$normal_order, request_counter #$normal_order, change #$normal_order #${storage
-          .limit(1)}"
+            .limit(1)}"
       case _ =>
         sql" order by ts #$normal_order, request_counter #$normal_order, change #$reversed_order #${storage
-          .limit(1)}"
+            .limit(1)}"
     }
     val query = baseQuery ++ opFilterQuery ++ orderQuery
 

@@ -244,7 +244,7 @@ class FutureUtilTest extends AnyWordSpec with BaseTest {
       }
     if (failure)
       infos :+ Level.WARN -> s"Task ${task} did not complete within ${cumulativeAwaits.lastOption
-        .getOrElse(0.seconds)}. Stack traces:\n"
+          .getOrElse(0.seconds)}. Stack traces:\n"
     else infos
   }
 

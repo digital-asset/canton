@@ -166,7 +166,7 @@ object BuildCommon {
     val output = processLogger.output()
     if (exitCode != 0) {
       val errorMsg = s"A problem occurred when executing command `$command` in `build.sbt`: ${System
-        .lineSeparator()} $output"
+          .lineSeparator()} $output"
       log.error(errorMsg)
       if (optError.isDefined) log.error(optError.getOrElse(""))
       throw new IllegalStateException(errorMsg)
@@ -481,11 +481,11 @@ object BuildCommon {
           daml_lf_archive_reader,
           daml_lf_engine,
           daml_lf_value_java_proto % "protobuf", // needed for protobuf import
-          daml_lf_transaction, //needed for importing java classes
+          daml_lf_transaction, // needed for importing java classes
           daml_metrics,
           daml_error,
           daml_error_generator,
-          daml_participant_state, //needed for ReadService/Update classes by PrettyInstances
+          daml_participant_state, // needed for ReadService/Update classes by PrettyInstances
           daml_ledger_api_common,
           daml_ledger_api_client,
           daml_nonempty_cats,

@@ -173,8 +173,8 @@ trait CommandDeduplicationStoreTest extends BaseTest { this: AsyncWordSpec =>
               store.storeDefiniteAnswer(changeId1a, answer2, accepted = accept),
               _.getMessage should include(
                 s"Cannot update command deduplication data for ${ChangeIdHash(
-                  changeId1a
-                )} from offset ${answer3.offset} to offset ${answer2.offset}"
+                    changeId1a
+                  )} from offset ${answer3.offset} to offset ${answer2.offset}"
               ),
               _.errorMessage should include(ErrorUtil.internalErrorMessage),
             )

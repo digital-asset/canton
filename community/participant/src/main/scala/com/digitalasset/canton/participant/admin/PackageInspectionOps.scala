@@ -76,7 +76,7 @@ class PackageInspectionOpsImpl(
   override def packageVetted(
       pkg: PackageId
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
-    //TODO(i9505): Consider unit testing this
+    // TODO(i9505): Consider unit testing this
 
     import cats.implicits._
 

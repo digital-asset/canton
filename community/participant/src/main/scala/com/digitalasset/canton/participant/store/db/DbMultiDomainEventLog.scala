@@ -630,7 +630,7 @@ class DbMultiDomainEventLog private[db] (
       storage
         .query(
           sql"""select local_offset from linearized_event_log where log_id = ${id.index} order by local_offset desc #${storage
-            .limit(1)}"""
+              .limit(1)}"""
             .as[LocalOffset]
             .headOption,
           functionFullName,
@@ -652,7 +652,7 @@ class DbMultiDomainEventLog private[db] (
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
       case _ =>
         sql"select global_offset, log_id, local_offset, publication_time from linearized_event_log order by global_offset desc #${storage
-          .limit(count)}"
+            .limit(count)}"
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
     }
     storage.query(query, functionFullName).flatMap { vec =>

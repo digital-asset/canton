@@ -206,7 +206,7 @@ class InFlightSubmissionTracker(
         skippedE.valueOr { skipped =>
           logger.info(
             show"Skipping publication of timely rejections with IDs ${skipped
-              .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped.map(_.localOffset)}"
+                .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped.map(_.localOffset)}"
           )
         }
       }

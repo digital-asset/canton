@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
+
 import cats.data.EitherT
 import cats.syntax.bifunctor._
 import cats.syntax.either._

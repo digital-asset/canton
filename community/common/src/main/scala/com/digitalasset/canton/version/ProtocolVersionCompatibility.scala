@@ -125,8 +125,8 @@ final case class MinProtocolError(
 ) extends HandshakeError {
   override def description: String =
     s"The version required by the domain (${server.toString}) is lower than the minimum version configured by the participant (${clientMinimumProtocolVersion
-      .map(_.toString)
-      .getOrElse("")}). " +
+        .map(_.toString)
+        .getOrElse("")}). " +
       s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the domain and would be able to connect to the domain if the minimum required version is configured to be lower."} "
 }
 

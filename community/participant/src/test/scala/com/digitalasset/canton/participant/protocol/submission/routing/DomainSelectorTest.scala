@@ -382,7 +382,9 @@ private[routing] object DomainSelectorTest {
         )
       )
 
-      new Selector(loggerFactory)(
+      new Selector(
+        loggerFactory
+      )(
         priorityOfDomain,
         domainOfContracts,
         connectedDomains,
@@ -424,7 +426,9 @@ private[routing] object DomainSelectorTest {
         )
       }
 
-      new Selector(loggerFactory)(
+      new Selector(
+        loggerFactory
+      )(
         priorityOfDomain,
         domainOfContracts,
         connectedDomains,

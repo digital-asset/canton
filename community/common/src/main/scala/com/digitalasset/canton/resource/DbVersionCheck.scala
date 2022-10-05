@@ -33,8 +33,8 @@ object DbVersionCheck extends HasLoggerName {
         val expectedPostgresVersions = NonEmpty(Seq, 10, 11, 12, 13, 14)
         val expectedPostgresVersionsStr =
           s"${(expectedPostgresVersions.dropRight(1)).mkString(", ")}, or ${expectedPostgresVersions
-            .takeRight(1)
-            .mkString("")}"
+              .takeRight(1)
+              .mkString("")}"
         val maxPostgresVersion = expectedPostgresVersions.max1
 
         // See https://www.postgresql.org/docs/9.1/sql-show.html

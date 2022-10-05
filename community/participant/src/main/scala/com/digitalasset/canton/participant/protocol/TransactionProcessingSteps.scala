@@ -1340,7 +1340,7 @@ class TransactionProcessingSteps(
 
     val informeeStakeholdersUsedContracts = checkActivenessOrRelative.values.flatten.toSet
 
-    //TODO(i6222): Consider tracking causal dependencies from contract keys
+    // TODO(i6222): Consider tracking causal dependencies from contract keys
     val informeeStakeholders =
       informeeStakeholdersUsedContracts ++ informeeStakeholdersCreatedContracts
 

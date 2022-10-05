@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology
+
 import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.wordspec.AnyWordSpec
 

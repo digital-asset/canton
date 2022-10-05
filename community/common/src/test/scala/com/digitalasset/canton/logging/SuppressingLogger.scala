@@ -352,13 +352,13 @@ class SuppressingLogger private[logging] (
           }
           if (requiredUnmatchedAssertions.nonEmpty) {
             errors += s"No log message has matched the assertions with index ${requiredUnmatchedAssertions.keys
-              .mkString(", ")}.\n"
+                .mkString(", ")}.\n"
           }
 
           if (errors.nonEmpty) {
             errors += s"Matched log messages:${matchedLogEntries
-              .map { case (index, entry) => s"$index:\t$entry" }
-              .mkString("\n", "\n", "\n")}"
+                .map { case (index, entry) => s"$index:\t$entry" }
+                .mkString("\n", "\n", "\n")}"
 
             fail(errors.mkString("\n"))
           }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
+
 import cats.data.EitherT
 import cats.syntax.either._
 import com.digitalasset.canton.data.CantonTimestamp

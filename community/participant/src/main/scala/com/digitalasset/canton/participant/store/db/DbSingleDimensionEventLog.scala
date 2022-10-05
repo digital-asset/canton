@@ -274,7 +274,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
     processingTime.metric.optionTEvent {
       storage.querySingle(
         sql"""select local_offset from event_log where log_id = $log_id order by local_offset desc #${storage
-          .limit(1)}"""
+            .limit(1)}"""
           .as[LocalOffset]
           .headOption,
         functionFullName,

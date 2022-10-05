@@ -264,7 +264,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           .await("auto-connect to local domain")(connectET.value)
       }
     logger.info(s"Auto-connecting local participants ${connectParticipants
-      .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
+        .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
     activeDomains
       .traverse(toDomainConfig)
       .traverse_(config =>

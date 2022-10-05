@@ -384,7 +384,7 @@ private[mediator] class ConfirmationResponseProcessor(
           }
 
         responseAggregation <- mediatorState.fetch(response.requestId).orElse {
-          //we assume that informee message has already been persisted in mediatorStorage before any participant responds
+          // we assume that informee message has already been persisted in mediatorStorage before any participant responds
           ResponseAggregation
             .alarmMediatorRequestNotFound(
               response.requestId,

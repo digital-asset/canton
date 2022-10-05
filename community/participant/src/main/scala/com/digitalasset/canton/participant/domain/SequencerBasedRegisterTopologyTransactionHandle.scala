@@ -157,8 +157,8 @@ private[domain] class ParticipantDomainTopologyService(
 
   private def requestDescription(request: RegisterTopologyTransactionRequest): String =
     s"on behalf of participant ${request.participant}${if (request.requestedBy != request.participant)
-      s" requested by ${request.requestedBy} "
-    else " "}with requestId = ${request.requestId}"
+        s" requested by ${request.requestedBy} "
+      else " "}with requestId = ${request.requestId}"
 
   private[domain] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
     envs.withTraceContext { implicit traceContext => envs =>

@@ -62,7 +62,9 @@ class NaiveRequestTracker(
       taskSchedulerMetrics,
       timeouts,
       loggerFactory.appendUnnamedKey("task scheduler owner", "NaiveRequestTracker"),
-    )(executionContext)
+    )(
+      executionContext
+    )
 
   /** Maps request counters to the data associated with a request.
     *

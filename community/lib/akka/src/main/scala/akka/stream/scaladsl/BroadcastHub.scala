@@ -257,7 +257,7 @@ private[akka] class BroadcastHub[T](bufferSize: Int)
       // TODO: Try to eliminate modulo division somehow...
       val wheelSlot = offset & WheelMask
       var consumersInSlot = consumerWheel(wheelSlot)
-      //debug(s"consumers before removal $consumersInSlot")
+      // debug(s"consumers before removal $consumersInSlot")
       var remainingConsumersInSlot: List[Consumer] = Nil
       var removedConsumer: Consumer = null
 

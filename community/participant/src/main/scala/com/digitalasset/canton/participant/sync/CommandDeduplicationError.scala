@@ -47,7 +47,9 @@ object CommandDeduplicationError extends InjectionErrorGroup {
         // This error is generated only after in-flight submission checking and therefore reported asynchronously,
         // with appropriate submission rank checks
         definiteAnswer = true,
-      )(DuplicateCommand.code)
+      )(
+        DuplicateCommand.code
+      )
 
   // TODO(#7348) add error for submission rank conflicts
 
@@ -62,7 +64,9 @@ object CommandDeduplicationError extends InjectionErrorGroup {
         // This error is generated only after in-flight submission checking and therefore reported asynchronously,
         // with appropriate submission rank checks
         definiteAnswer = true,
-      )(InvalidDeduplicationPeriodField.code)
+      )(
+        InvalidDeduplicationPeriodField.code
+      )
 
   case class DeduplicationPeriodStartsTooEarlyErrorWithDuration(
       changeId: ChangeId,
@@ -73,6 +77,8 @@ object CommandDeduplicationError extends InjectionErrorGroup {
         // This error is generated only after in-flight submission checking and therefore reported asynchronously,
         // with appropriate submission rank checks
         definiteAnswer = true,
-      )(InvalidDeduplicationPeriodField.code)
+      )(
+        InvalidDeduplicationPeriodField.code
+      )
 
 }

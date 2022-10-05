@@ -159,7 +159,7 @@ object FutureUtil {
     def ready(f: Future[T], d: Duration): Try[Future[T]] = Try(Await.ready(f, d))
     def log(level: Level, message: String): Unit = LoggerUtil.logAtLevel(level, message)
 
-    //TODO(i4008) increase the log level to WARN
+    // TODO(i4008) increase the log level to WARN
     val res =
       noisyAwaitResultForTesting(
         future,

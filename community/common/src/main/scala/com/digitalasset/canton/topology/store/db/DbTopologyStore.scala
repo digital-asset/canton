@@ -483,8 +483,8 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   private def asOfQuery(asOf: CantonTimestamp, asOfInclusive: Boolean): SQLActionBuilder = {
 
     sql" AND valid_from #${if (asOfInclusive) "<="
-    else "<"} $asOf AND (valid_until is NULL OR $asOf #${if (asOfInclusive) "<"
-    else "<="} valid_until)"
+      else "<"} $asOf AND (valid_until is NULL OR $asOf #${if (asOfInclusive) "<"
+      else "<="} valid_until)"
   }
 
   override def timestamp(

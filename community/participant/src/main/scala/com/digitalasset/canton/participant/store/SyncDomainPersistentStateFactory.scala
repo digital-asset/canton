@@ -181,7 +181,7 @@ class SyncDomainPersistentStateFactory(
         uckMode == connectToUniqueContractKeys,
         DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
           s"Cannot connect to domain ${domainAlias.unwrap} with${if (!connectToUniqueContractKeys) "out"
-          else ""} unique contract keys semantics as the participant has set unique-contract-keys=$uckMode"
+            else ""} unique contract keys semantics as the participant has set unique-contract-keys=$uckMode"
         ),
       )
       _ <- EitherT.cond[Future](!uckMode, (), ()).leftFlatMap { _ =>
@@ -193,7 +193,7 @@ class SyncDomainPersistentStateFactory(
           allActiveDomains.forall(_ == domainId),
           DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
             s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
-              .mkString(", ")}"
+                .mkString(", ")}"
           ): DomainRegistryError,
         )
       }

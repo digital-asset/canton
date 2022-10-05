@@ -121,7 +121,9 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
       DefaultProcessingTimeouts.testing,
       useCausalityTracking = true,
       loggerFactory,
-    )(executorService)
+    )(
+      executorService
+    )
 
   val engine = CantonOnly.newDamlEngine(uniqueContractKeys = false, enableLfDev = false)
   val mockPackageService =

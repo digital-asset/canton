@@ -241,7 +241,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
         timeouts,
         useCausalityTracking = true,
         loggerFactory,
-      )(parallelExecutionContext)
+      )(
+        parallelExecutionContext
+      )
     )
 
     val steps = new TestProcessingSteps(

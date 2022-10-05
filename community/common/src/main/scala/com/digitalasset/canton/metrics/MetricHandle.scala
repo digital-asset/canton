@@ -140,46 +140,50 @@ object MetricDoc {
 
     // baseClasses includes the entire dependency path, therefore we need to filter that out as otherwise, we get infinite loops
     val symbols = mirroredType.symbol.baseClasses.filter(includeSymbol).toSet
-    symbols.toSeq.flatMap(_.typeSignature.members.flatMap { m =>
-      // do not pick methods
-      if (m.isMethod) {
-        Seq()
-      } else if (m.isModule) {
-        // descend into objects nested in classes (which appear as modules)
-        val ts = m.asInstanceOf[ru.ModuleSymbol]
-        val fm = mirroredType.reflectModule(ts)
-        getItems(fm.instance)
-      } else if (m.isTerm && !m.isJava) {
-        val ts = m.asInstanceOf[ru.TermSymbol]
-        // let's just skip java collections
-        if (includeSymbol(ts)) {
-          try {
-            val rf = mirroredType.reflectField(ts)
-            // ignore java symbols
-            if (rf.symbol.isJava) {
-              Seq()
-            } else {
-              rf.get match {
-                // if it is a metric handle, try to grab the annotation and the name
-                case x: MetricHandle[_] =>
-                  extractTag(rf.symbol.annotations)
-                    .map(tag => Item(tag = tag, name = x.name, metricType = x.metricType))
-                    .toList
-                // otherwise, continue scanning for metrics
-                case _ =>
-                  val fm = rf.get
-                  getItems(fm)
+    symbols.toSeq.flatMap(
+      _.typeSignature.members
+        .flatMap { m =>
+          // do not pick methods
+          if (m.isMethod) {
+            Seq()
+          } else if (m.isModule) {
+            // descend into objects nested in classes (which appear as modules)
+            val ts = m.asInstanceOf[ru.ModuleSymbol]
+            val fm = mirroredType.reflectModule(ts)
+            getItems(fm.instance)
+          } else if (m.isTerm && !m.isJava) {
+            val ts = m.asInstanceOf[ru.TermSymbol]
+            // let's just skip java collections
+            if (includeSymbol(ts)) {
+              try {
+                val rf = mirroredType.reflectField(ts)
+                // ignore java symbols
+                if (rf.symbol.isJava) {
+                  Seq()
+                } else {
+                  rf.get match {
+                    // if it is a metric handle, try to grab the annotation and the name
+                    case x: MetricHandle[_] =>
+                      extractTag(rf.symbol.annotations)
+                        .map(tag => Item(tag = tag, name = x.name, metricType = x.metricType))
+                        .toList
+                    // otherwise, continue scanning for metrics
+                    case _ =>
+                      val fm = rf.get
+                      getItems(fm)
+                  }
+                }
+              } catch {
+                // this is dirty, but we'll get quite a few reflection and class loader errors
+                // just by scanning our objects, and i haven't figured out a way to prevent these to
+                // happen ...
+                case _: Throwable => Seq()
               }
-            }
-          } catch {
-            // this is dirty, but we'll get quite a few reflection and class loader errors
-            // just by scanning our objects, and i haven't figured out a way to prevent these to
-            // happen ...
-            case _: Throwable => Seq()
-          }
-        } else Seq()
-      } else Seq()
-    }.toSeq)
+            } else Seq()
+          } else Seq()
+        }
+        .toSeq
+    )
   }
 
   private def extractTag[T: ClassTag](annotations: Seq[ru.Annotation]): Option[Tag] = {

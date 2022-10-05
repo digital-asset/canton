@@ -24,7 +24,7 @@ class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerF
         )
         logger.info(
           s"Trying to reconnect to give the sequencer the opportunity to become available again (after ${causes
-            .mkString(", ")})"
+              .mkString(", ")})"
         )
         true
 

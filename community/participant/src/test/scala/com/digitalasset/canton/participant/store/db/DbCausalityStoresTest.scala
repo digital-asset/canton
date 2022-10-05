@@ -90,7 +90,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
             sql""" 
                             linearized_event_log (log_id, local_offset, publication_time)
                             values (${id.index}, $localOffset, ${CantonTimestamp
-              .now()})
+                .now()})
             """,
           )
 

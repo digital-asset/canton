@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
+
 import scala.collection.mutable
 
 /** The purpose of a hash serves to avoid hash collisions due to equal encodings for different objects.

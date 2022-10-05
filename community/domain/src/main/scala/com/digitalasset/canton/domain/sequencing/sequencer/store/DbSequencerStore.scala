@@ -1147,7 +1147,7 @@ class DbSequencerStore(
           _ <- EitherTUtil.condUnitET[Future](
             configuredCommitMode.postgresSettings.toList.contains(setting),
             s"Postgres 'synchronous_commit' setting is '$setting' but expecting one of: ${configuredCommitMode.postgresSettings.toList
-              .mkString(",")}",
+                .mkString(",")}",
           )
         } yield ()
     }

@@ -108,7 +108,7 @@ object Help {
         s"Error: method $methodName not found; check your spelling"
       else {
         s"Error: method $methodName not found; are you looking for one of the following?\n  ${similarItems
-          .mkString("\n  ")}"
+            .mkString("\n  ")}"
       }
     }
   }

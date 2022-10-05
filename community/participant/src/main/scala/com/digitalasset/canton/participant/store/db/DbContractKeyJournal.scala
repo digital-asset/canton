@@ -127,16 +127,16 @@ class DbContractKeyJournal(
                   remainingKeys
                     .map(key =>
                       sql"select $domainId domain_id, $key contract_key_hash, ${checked(
-                        updates(key)
-                      )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
+                          updates(key)
+                        )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
                     )
                     .intercalate(sql" union all ")
                 case _ =>
                   remainingKeys
                     .map(key =>
                       sql"""($domainId, $key, CAST(${checked(
-                        updates(key)
-                      )} as key_status), ${toc.timestamp}, ${toc.rc})"""
+                          updates(key)
+                        )} as key_status), ${toc.timestamp}, ${toc.rc})"""
                     )
                     .intercalate(sql", ")
               }

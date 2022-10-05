@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
+
 import cats.syntax.either._
 import cats.syntax.traverse._
 import com.digitalasset.canton.ProtoDeserializationError

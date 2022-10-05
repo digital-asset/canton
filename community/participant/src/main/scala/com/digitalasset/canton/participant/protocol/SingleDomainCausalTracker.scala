@@ -113,7 +113,7 @@ class SingleDomainCausalTracker(
         awaitAndFetchTransferOut(transferId, parties).flatMap { vectorClocksAtTransferOut =>
           logger.info(s"Clock at transfer out: $vectorClocksAtTransferOut")
 
-          //TODO(M40): Handle receiving the wrong causality information
+          // TODO(M40): Handle receiving the wrong causality information
           ErrorUtil.requireState(
             vectorClocksAtTransferOut.keySet == parties,
             s"Transfer in event does not have causality information. Have ${vectorClocksAtTransferOut.keySet}. Need ${parties}.",

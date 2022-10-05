@@ -196,7 +196,7 @@ trait DbMigrations { this: NamedLogging =>
           val elapsed = System.nanoTime() - started
           logger.debug(
             s"Finished setting up database schemas after ${LoggerUtil
-              .roundDurationForHumans(Duration.fromNanos(elapsed))}"
+                .roundDurationForHumans(Duration.fromNanos(elapsed))}"
           )
         }
       }

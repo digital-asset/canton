@@ -964,7 +964,7 @@ class CantonSyncService(
                  if keepRetrying && err.retryable.nonEmpty =>
                if (initial)
                  logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
-                   .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
+                     .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
                else
                  logger.info(
                    s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."

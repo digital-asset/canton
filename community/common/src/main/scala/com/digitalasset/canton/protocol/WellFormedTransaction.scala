@@ -237,7 +237,7 @@ object WellFormedTransaction {
               referenceRbScope.startsWith(createdScope),
               (),
               s"Contract ${refId} created in rollback scope ${createdScope
-                .mkString(".")} referenced outside of visible rollback scope ${referenceRbScope.mkString(".")}",
+                  .mkString(".")} referenced outside of visible rollback scope ${referenceRbScope.mkString(".")}",
             )
           )
         } else Checked.unit
@@ -411,7 +411,7 @@ object WellFormedTransaction {
           if (missingInformees.isEmpty) Checked.unit
           else
             Checked.continue(s"signatory or maintainer not declared as informee: ${missingInformees
-              .mkString(", ")} at node ${nodeId.index}")
+                .mkString(", ")} at node ${nodeId.index}")
         case (_nodeId, _rn: LfNodeRollback) => Checked.unit
       }
     } yield ()

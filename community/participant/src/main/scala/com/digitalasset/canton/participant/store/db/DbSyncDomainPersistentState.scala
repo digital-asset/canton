@@ -115,7 +115,7 @@ class DbSyncDomainPersistentState(
     new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)
   val sequencerCounterTrackerStore =
     new DbSequencerCounterTrackerStore(client, storage, processingTimeouts, loggerFactory)
-  //TODO(i5660): Use the db-based send tracker store
+  // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
   val causalDependencyStore =
     new DbSingleDomainCausalDependencyStore(

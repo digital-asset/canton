@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
+
 import ammonite.compiler.Parsers
 import ammonite.interp.Watchable
 import ammonite.util.{Res, _}

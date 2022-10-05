@@ -382,7 +382,7 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
       throw InvalidTransactionViewTree(
         "The submitter metadata must be unblinded if and only if the represented view is top-level. " +
           s"Submitter metadata: ${tree.submitterMetadata.unwrap
-            .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
+              .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
       )
     }
 

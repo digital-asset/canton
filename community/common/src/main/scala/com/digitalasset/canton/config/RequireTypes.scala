@@ -340,7 +340,7 @@ object RequireTypes {
     require(
       str.length <= maxLength,
       s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
-        .getOrElse("string")} of length ${str.length} ('$str') was given",
+          .getOrElse("string")} of length ${str.length} ('$str') was given",
     )
 
     def unwrap: String = str
@@ -403,7 +403,7 @@ object RequireTypes {
 
     def errorMsg(tooLongStr: String, maxLength: Int, name: Option[String] = None): String =
       s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
-        .getOrElse("string")} of length ${tooLongStr.length} ('${tooLongStr.limit(maxLength + 50)}.') was given"
+          .getOrElse("string")} of length ${tooLongStr.length} ('${tooLongStr.limit(maxLength + 50)}.') was given"
 
     val defaultMaxLength = 255
 

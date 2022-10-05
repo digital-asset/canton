@@ -178,7 +178,7 @@ private[domain] class DomainTopologyDispatcher(
           updateTopologyClientTs(ts.value.validFrom.value)
           logger.info(
             show"Resuming topology dispatching with ${actuallyPending.length} transactions: ${actuallyPending
-              .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
+                .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
           )
           flush()
         case None => logger.debug("Started domain topology dispatching (nothing to catch up)")

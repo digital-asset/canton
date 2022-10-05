@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
+
 import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.funspec.PathAnyFunSpec

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client
+
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
 case class SequencerClientSubscriptionException(error: SequencerClientSubscriptionError)
     extends RuntimeException(

@@ -449,7 +449,7 @@ class GrpcSequencerService(
         (),
         refuse(messageIdP, sender)(
           s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients
-            .mkString(" ,")}."
+              .mkString(" ,")}."
         ),
       )
     case _ => Right(())

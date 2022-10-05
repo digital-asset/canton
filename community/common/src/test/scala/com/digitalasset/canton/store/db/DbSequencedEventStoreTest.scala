@@ -37,7 +37,9 @@ trait DbSequencedEventStoreTest extends AsyncWordSpec with BaseTest with Sequenc
         testedProtocolVersion,
         DefaultProcessingTimeouts.testing,
         loggerFactory,
-      )(ec)
+      )(
+        ec
+      )
     )
   }
 }

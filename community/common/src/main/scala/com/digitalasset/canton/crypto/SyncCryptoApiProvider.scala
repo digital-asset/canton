@@ -356,7 +356,7 @@ class DomainSnapshotSyncCryptoApi(
         else
           SignatureWithWrongKey(
             s"Key ${signature.signedBy} used to generate signature is not a valid key for ${signer}. Valid keys are ${validKeys
-              .map(_.fingerprint.unwrap)}"
+                .map(_.fingerprint.unwrap)}"
           )
       Left(error)
     }

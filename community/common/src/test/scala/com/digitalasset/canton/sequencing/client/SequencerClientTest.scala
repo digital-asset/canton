@@ -832,7 +832,10 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         false,
         LoggingConfig(),
         loggerFactory,
-      )(executionContext, tracer)
+      )(
+        executionContext,
+        tracer,
+      )
       val signedEvents = storedEvents.map(SequencerTestUtils.sign)
 
       for {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client.transports
+
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import cats.data.EitherT

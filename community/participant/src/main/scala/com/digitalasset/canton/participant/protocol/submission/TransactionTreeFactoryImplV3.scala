@@ -411,7 +411,7 @@ class TransactionTreeFactoryImplV3(
     ErrorUtil.requireArgument(
       subviewKeyResolutions.keySet.subsetOf(viewKeyInputs.keySet),
       s"Global key inputs of subview not part of the global key inputs of the parent view. Missing keys: ${subviewKeyResolutions.keySet
-        .diff(viewKeyInputs.keySet)}",
+          .diff(viewKeyInputs.keySet)}",
     )
 
     def resolutionFor(
