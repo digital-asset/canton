@@ -19,6 +19,7 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
 }
+import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.health.admin.v0.HealthDumpChunk
 import com.digitalasset.canton.health.admin.{data, v0}
 import com.digitalasset.canton.networking.grpc.GrpcError
@@ -64,7 +65,7 @@ class HealthAdministration[S <: data.NodeStatus.Status](
   private val initializedCache = new AtomicReference[Boolean](false)
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
 
-  import runner._
+  import runner.*
 
   @Help.Summary("Get human (and machine) readable status info")
   def status: data.NodeStatus[S] = consoleEnvironment.run {
@@ -125,6 +126,13 @@ class HealthAdministration[S <: data.NodeStatus.Status](
   def running(): Boolean =
     // in case the node is not reachable, we assume it is not running
     falseIfUnreachable(runningCommand)
+
+  @Help.Summary("Check if the node is running and is the active instance (mediator, participant)")
+  def active: Boolean = status match {
+    case NodeStatus.Success(status) => status.active
+    case NodeStatus.NotInitialized(active) => active
+    case _ => false
+  }
 
   @Help.Summary("Returns true if node has been initialized.")
   def initialized(): Boolean = initializedCache.updateAndGet {

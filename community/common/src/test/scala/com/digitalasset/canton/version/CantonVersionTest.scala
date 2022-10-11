@@ -7,6 +7,9 @@ import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
 
 class CantonVersionTest extends AnyWordSpec with BaseTest {
+  lazy val v2_1_0_rc1: ReleaseVersion = ReleaseVersion(2, 1, 0, Some("rc1"))
+  lazy val v2_0_0_snapshot: ReleaseVersion = ReleaseVersion(2, 0, 0, Some("SNAPSHOT"))
+
   private def v(rawVersion: String): ReleaseVersion = ReleaseVersion.create(rawVersion).value
   "CantonVersion" should {
     "parse version string if valid" in {
@@ -54,8 +57,8 @@ class CantonVersionTest extends AnyWordSpec with BaseTest {
         1,
         Some("SNAPSHOT-rc"),
       )
-      ReleaseVersion.create("2.0.0-SNAPSHOT").value shouldBe ReleaseVersions.v2_0_0_snapshot
-      ReleaseVersion.create("2.1.0-rc1").value shouldBe ReleaseVersions.v2_1_0_rc1
+      ReleaseVersion.create("2.0.0-SNAPSHOT").value shouldBe v2_0_0_snapshot
+      ReleaseVersion.create("2.1.0-rc1").value shouldBe v2_1_0_rc1
 
       ReleaseVersion.create("1").left.value shouldBe a[String]
       ReleaseVersion.create("1.0.-1").left.value shouldBe a[String]

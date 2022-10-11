@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, NonEmptyChain}
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
@@ -34,23 +34,23 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   UnsequencedSubmission,
 }
+import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.store.{StoredContract, SyncDomainEphemeralState}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.participant.{RequestCounter, store}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.messages.Verdict.Approve
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.client._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{AsyncResult, HandlerResult}
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
-import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
+import com.digitalasset.canton.{DiscardOps, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -96,8 +96,8 @@ abstract class ProtocolProcessor[
     )
     with RequestProcessor[RequestViewType] {
 
-  import ProtocolProcessor._
-  import com.digitalasset.canton.util.ShowUtil._
+  import ProtocolProcessor.*
+  import com.digitalasset.canton.util.ShowUtil.*
 
   private[this] def withKind(message: String): String = s"${steps.requestKind}: $message"
 

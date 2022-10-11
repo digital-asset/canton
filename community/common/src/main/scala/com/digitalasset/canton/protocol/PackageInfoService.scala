@@ -18,7 +18,7 @@ case class PackageDescription(packageId: LfPackageId, sourceDescription: String2
 
 object PackageDescription {
 
-  import com.digitalasset.canton.resource.DbStorage.Implicits._
+  import com.digitalasset.canton.resource.DbStorage.Implicits.*
 
   implicit val getResult: GetResult[PackageDescription] =
     GetResult.createGetTuple2(GetResult[LfPackageId], GetResult[String256M]).andThen {

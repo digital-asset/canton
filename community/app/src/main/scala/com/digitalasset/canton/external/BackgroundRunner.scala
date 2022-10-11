@@ -10,7 +10,7 @@ import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import org.slf4j.event.Level
 
 import java.io.{IOException, InputStream, StringWriter}
@@ -18,7 +18,7 @@ import java.nio.BufferOverflowException
 import java.util.concurrent.TimeUnit
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Handler that exposes lifecycle methods for managing a background process.
   * @tparam ProcessInfo type of information about the process that will show up in error messages
@@ -179,7 +179,7 @@ class BackgroundRunner(
 ) extends NamedLogging
     with FlagCloseable {
 
-  import BackgroundRunner._
+  import BackgroundRunner.*
 
   private def dumpOutputToLogger(parent: InputStream, level: Level): Unit = {
     @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.While"))

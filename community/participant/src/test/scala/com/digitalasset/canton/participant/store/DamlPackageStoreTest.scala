@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, TestHash}

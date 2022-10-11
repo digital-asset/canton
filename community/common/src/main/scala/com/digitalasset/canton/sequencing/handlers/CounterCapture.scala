@@ -20,7 +20,7 @@ class CounterCapture(
     protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  private val currentValue = new AtomicLong(initial)
+  private val currentValue = new AtomicLong(initial.v)
 
   /**  Wrap a handler and capture the counter of a successfully processed event.
     *  It only makes sense to wrap a single handler however this is not enforced.
@@ -35,7 +35,7 @@ class CounterCapture(
         // only update if successful
         result foreach { _ =>
           val counter = event.counter
-          currentValue.set(counter)
+          currentValue.set(counter.v)
           logger.trace(s"Captured sequencer counter ${counter}")
         }
         result
@@ -44,5 +44,5 @@ class CounterCapture(
   }
 
   /** Get the latest offset. */
-  def counter: SequencerCounter = currentValue.get
+  def counter: SequencerCounter = SequencerCounter(currentValue.get)
 }

@@ -5,8 +5,8 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.Functor
 import cats.data.EitherT
-import cats.syntax.traverse._
-import com.digitalasset.canton.crypto._
+import cats.syntax.traverse.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v0
@@ -179,7 +179,7 @@ object SignedContent {
   implicit def prettySignedContent[A <: ProtocolVersionedMemoizedEvidence](implicit
       prettyA: Pretty[A]
   ): Pretty[SignedContent[A]] = {
-    import com.digitalasset.canton.logging.pretty.PrettyUtil._
+    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
     prettyOfClass(
       unnamedParam(_.content),
       param("signature", _.signature),

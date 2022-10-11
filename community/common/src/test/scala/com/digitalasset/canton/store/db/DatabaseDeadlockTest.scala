@@ -23,7 +23,7 @@ trait DatabaseDeadlockTest
   this: DbTest =>
 
   lazy val rawStorage: DbStorage = storage.underlying
-  import rawStorage.api._
+  import rawStorage.api.*
 
   val batchSize = 100
   val roundsNegative = 50
@@ -184,7 +184,7 @@ trait DatabaseDeadlockTest
 }
 
 class DatabaseDeadlockTestH2 extends DatabaseDeadlockTest with H2Test {
-  import rawStorage.api._
+  import rawStorage.api.*
 
   // H2 cannot deadlock at the moment, because we are enforcing a single connection.
   // Therefore disabling negative tests.
@@ -209,7 +209,7 @@ class DatabaseDeadlockTestH2 extends DatabaseDeadlockTest with H2Test {
 }
 
 class DatabaseDeadlockTestPostgres extends DatabaseDeadlockTest with PostgresTest {
-  import rawStorage.api._
+  import rawStorage.api.*
 
   override def mkDbConfig(basicConfig: DbBasicConfig): Postgres = {
     // Enforce 8 connections. If there is only one connection, the test will fail to produce deadlocks.

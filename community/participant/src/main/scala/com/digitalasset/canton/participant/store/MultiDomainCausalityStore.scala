@@ -94,7 +94,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
     if (causalityMessages.nonEmpty) {
       val transferIds = causalityMessages.map(m => m.transferId).toSet
 
-      //TODO(M40): Don't crash if there are causality messages for several transfers
+      // TODO(M40): Don't crash if there are causality messages for several transfers
       ErrorUtil.requireState(
         transferIds.sizeCompare(1) == 0,
         s"Received causality messages for several transfers at once." +

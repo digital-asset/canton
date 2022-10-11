@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferInViewTree, ViewType}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
@@ -86,11 +86,14 @@ case class TransferInMediatorMessage(tree: TransferInViewTree)
   override def toProtoEnvelopeContentV1: v1.EnvelopeContent =
     v1.EnvelopeContent(
       someEnvelopeContent =
-        v1.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV0)
+        v1.EnvelopeContent.SomeEnvelopeContent.TransferInMediatorMessage(toProtoV1)
     )
 
   def toProtoV0: v0.TransferInMediatorMessage =
     v0.TransferInMediatorMessage(tree = Some(tree.toProtoV0))
+
+  def toProtoV1: v1.TransferInMediatorMessage =
+    v1.TransferInMediatorMessage(tree = Some(tree.toProtoV1))
 
   override def rootHash: Option[RootHash] = Some(tree.rootHash)
 
@@ -107,7 +110,14 @@ object TransferInMediatorMessage
         fromProtoV0(hashOps)(proto)
       ),
       _.toProtoV0.toByteString,
-    )
+    ),
+    ProtobufVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.TransferInMediatorMessage)((hashOps, proto) =>
+        fromProtoV1(hashOps)(proto)
+      ),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def fromProtoV0(hashOps: HashOps)(
@@ -117,6 +127,23 @@ object TransferInMediatorMessage
       tree <- ProtoConverter
         .required("TransferInMediatorMessage.tree", transferInMediatorMessageP.tree)
         .flatMap(TransferInViewTree.fromProtoV0(hashOps, _))
+      _ <- EitherUtil.condUnitE(
+        tree.commonData.isFullyUnblinded,
+        OtherError(s"Transfer-in common data is blinded in request ${tree.rootHash}"),
+      )
+      _ <- EitherUtil.condUnitE(
+        tree.view.isBlinded,
+        OtherError(s"Transfer-in view data is not blinded in request ${tree.rootHash}"),
+      )
+    } yield TransferInMediatorMessage(tree)
+
+  def fromProtoV1(hashOps: HashOps)(
+      transferInMediatorMessageP: v1.TransferInMediatorMessage
+  ): ParsingResult[TransferInMediatorMessage] =
+    for {
+      tree <- ProtoConverter
+        .required("TransferInMediatorMessage.tree", transferInMediatorMessageP.tree)
+        .flatMap(TransferInViewTree.fromProtoV1(hashOps, _))
       _ <- EitherUtil.condUnitE(
         tree.commonData.isFullyUnblinded,
         OtherError(s"Transfer-in common data is blinded in request ${tree.rootHash}"),

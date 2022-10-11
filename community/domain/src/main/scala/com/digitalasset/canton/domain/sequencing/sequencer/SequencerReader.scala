@@ -3,34 +3,34 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Sink, Source, WireTap}
 import akka.{Done, NotUsed}
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.option._
+import cats.syntax.bifunctor.*
+import cats.syntax.option.*
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.AkkaUtil.CombinedKillSwitch
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{AkkaUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -132,7 +132,7 @@ class SequencerReader(
       override protected val loggerFactory: NamedLoggerFactory,
   ) extends NamedLogging {
 
-    import SequencerReader._
+    import SequencerReader.*
 
     private def unvalidatedEventsSourceFromCheckpoint(initialReadState: ReadState)(implicit
         traceContext: TraceContext
@@ -179,7 +179,7 @@ class SequencerReader(
       // Essentially the Source.wireTap implementation except that we return the completion future of the sink
       Flow.fromGraph(GraphDSL.createGraph(recordCheckpointSink) {
         implicit b: GraphDSL.Builder[(KillSwitch, Future[Done])] => recordCheckpointShape =>
-          import GraphDSL.Implicits._
+          import GraphDSL.Implicits.*
           val bcast = b.add(WireTap[UnsignedEventData]())
           bcast.out1 ~> recordCheckpointShape
           FlowShape(bcast.in, bcast.out0)
@@ -206,7 +206,7 @@ class SequencerReader(
           Future.successful(Some(signingTimestamp) -> signingSnaphot)
         case None =>
           val warnIfApproximate =
-            (event.counter > GenesisSequencerCounter) && member.isAuthenticated &&
+            (event.counter > SequencerCounter.Genesis) && member.isAuthenticated &&
               protocolVersion != ProtocolVersion.v2
           SyncCryptoClient
             .getSnapshotForTimestamp(
@@ -504,14 +504,14 @@ object SequencerReader {
       nextReadTimestamp: CantonTimestamp,
       latestTopologyClientRecipientTimestamp: Option[CantonTimestamp],
       lastBatchWasFull: Boolean = false,
-      nextCounterAccumulator: SequencerCounter = 0L,
+      nextCounterAccumulator: SequencerCounter = SequencerCounter.Genesis,
   ) extends PrettyPrinting {
 
     /** Update the state after reading a new page of results */
     def update(storedEvents: Seq[Sequenced[_]], batchSize: Int): ReadState = {
       copy(
         // increment the counter by the number of events we've now processed
-        nextCounterAccumulator = nextCounterAccumulator + storedEvents.size,
+        nextCounterAccumulator = nextCounterAccumulator + storedEvents.size.toLong,
         // set the timestamp to the last record of the batch, or our current timestamp if we got no results
         nextReadTimestamp = storedEvents.lastOption.map(_.timestamp).getOrElse(nextReadTimestamp),
         // did we receive a full batch of events on this update

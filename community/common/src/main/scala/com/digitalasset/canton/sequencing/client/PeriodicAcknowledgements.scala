@@ -18,7 +18,7 @@ import io.functionmeta.functionFullName
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 /** Periodically pull the latest clean timestamp and if it has changed acknowledge it with the sequencer.
   * This indicates that we have successfully processed all events up to and including this event.

@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, v0}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.domainId
 import com.digitalasset.canton.version.UntypedVersionedMessage
+import com.digitalasset.canton.{BaseTestWordSpec, SequencerCounter}
 
 class SequencedEventTest extends BaseTestWordSpec {
   "serialization" should {
@@ -38,7 +38,7 @@ class SequencedEventTest extends BaseTestWordSpec {
       )
       val deliver: Deliver[DefaultOpenEnvelope] =
         Deliver.create[DefaultOpenEnvelope](
-          42L,
+          SequencerCounter(42),
           CantonTimestamp.now(),
           domainId,
           Some(MessageId.tryCreate("some-message-id")),
@@ -56,7 +56,7 @@ class SequencedEventTest extends BaseTestWordSpec {
 
     "correctly serialize and deserialize a deliver error" in {
       val deliverError: DeliverError = DeliverError.create(
-        42L,
+        SequencerCounter(42),
         CantonTimestamp.now(),
         domainId,
         MessageId.tryCreate("some-message-id"),

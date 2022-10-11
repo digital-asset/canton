@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.console.commands
 
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.codahale.metrics.{Histogram, Meter, MetricRegistry}
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.admin.package_management_service.PackageDetails
@@ -17,7 +17,7 @@ import com.daml.ledger.api.v1.ledger_configuration_service.LedgerConfiguration
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
-import com.daml.ledger.client.binding.{Contract, Primitive => P, TemplateCompanion}
+import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
@@ -975,7 +975,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
     }
   }
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   private def awaitTransaction(
       transactionId: String,

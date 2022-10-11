@@ -32,10 +32,10 @@ import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 
-import java.time.{Duration => JDuration, Instant}
+import java.time.{Duration as JDuration, Instant}
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration.{Duration => SDuration}
-import scala.reflect.runtime.{universe => ru}
+import scala.concurrent.duration.{Duration as SDuration}
+import scala.reflect.runtime.{universe as ru}
 import scala.util.control.NonFatal
 
 case class NodeReferences[A, R <: A, L <: A](local: Seq[L], remote: Seq[R]) {

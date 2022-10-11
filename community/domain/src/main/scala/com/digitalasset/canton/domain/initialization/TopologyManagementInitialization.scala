@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.initialization
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.instances.future._
+import cats.instances.future.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{
@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.{
   PublicKey,
 }
 import com.digitalasset.canton.domain.config.{DomainBaseConfig, DomainConfig, DomainNodeParameters}
-import com.digitalasset.canton.domain.topology._
+import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
 import com.digitalasset.canton.domain.topology.store.RegisterTopologyTransactionResponseStore
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
@@ -42,7 +42,7 @@ import com.digitalasset.canton.store.{
   SequencerCounterTrackerStore,
 }
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -51,7 +51,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 
 final case class TopologyManagementComponents(
@@ -159,6 +159,7 @@ object TopologyManagementInitialization {
           managerId,
           sequencedEventStore,
           sendTrackerStore,
+          SequencerClient.signSubmissionRequest(syncCrypto),
         )
       }
       timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)

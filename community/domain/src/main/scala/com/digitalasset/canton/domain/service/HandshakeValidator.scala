@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.domain.service
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionCompatibility}
 

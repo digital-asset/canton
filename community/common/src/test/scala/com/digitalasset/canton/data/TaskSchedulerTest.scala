@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
+import com.daml.metrics.MetricHandle.{Gauge, VarGauge}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.metrics.MetricHandle.VarGaugeM
 import com.digitalasset.canton.metrics.{MetricHandle, RefGauge}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
@@ -20,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Random
 
 class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
-  import TaskSchedulerTest._
+  import TaskSchedulerTest.*
   import com.digitalasset.canton.data.CantonTimestamp.ofEpochMilli
 
   private lazy val metrics = new MockTaskSchedulerMetrics()
@@ -47,23 +47,23 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
 
       val tasksInExecutionOrder: Seq[TaskData] =
         Seq(
-          TaskData(ofEpochMilli(3), 0L, Finalization),
-          TaskData(ofEpochMilli(3), 1L, Finalization),
-          TaskData(ofEpochMilli(3), 1L, Timeout),
-          TaskData(ofEpochMilli(3), 1L, Activeness),
-          TaskData(ofEpochMilli(3), 3L, Activeness),
-          TaskData(ofEpochMilli(4), 0L, Finalization),
-          TaskData(ofEpochMilli(4), 0L, Timeout),
-          TaskData(ofEpochMilli(4), 0L, Activeness),
+          TaskData(ofEpochMilli(3), SequencerCounter(0), Finalization),
+          TaskData(ofEpochMilli(3), SequencerCounter(1), Finalization),
+          TaskData(ofEpochMilli(3), SequencerCounter(1), Timeout),
+          TaskData(ofEpochMilli(3), SequencerCounter(1), Activeness),
+          TaskData(ofEpochMilli(3), SequencerCounter(3), Activeness),
+          TaskData(ofEpochMilli(4), SequencerCounter(0), Finalization),
+          TaskData(ofEpochMilli(4), SequencerCounter(0), Timeout),
+          TaskData(ofEpochMilli(4), SequencerCounter(0), Activeness),
         )
       val ticksWithTasks: Map[SequencerCounter, CantonTimestamp] = Map(
-        0L -> ofEpochMilli(0),
-        1L -> ofEpochMilli(1),
-        3L -> ofEpochMilli(3),
+        SequencerCounter(0) -> ofEpochMilli(0),
+        SequencerCounter(1) -> ofEpochMilli(1),
+        SequencerCounter(3) -> ofEpochMilli(3),
       )
       val ticksWithoutTasks: Map[SequencerCounter, CantonTimestamp] = Map(
-        2L -> ofEpochMilli(2),
-        4L -> ofEpochMilli(5),
+        SequencerCounter(2) -> ofEpochMilli(2),
+        SequencerCounter(4) -> ofEpochMilli(5),
       )
 
       val allTicks = ticksWithTasks ++ ticksWithoutTasks
@@ -81,7 +81,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
           val shuffled = rand.shuffle(indexedChanges)
           val taskScheduler =
             new TaskScheduler(
-              0L,
+              SequencerCounter(0),
               CantonTimestamp.MinValue,
               TestTaskOrdering,
               metrics,
@@ -104,8 +104,8 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
             if (ticksAdded.contains(base)) firstGapFrom(base + 1) else base
 
           def checkBarriers(): Future[Unit] = {
-            val missingTick = firstGapFrom(0)
-            if (missingTick > 0) {
+            val missingTick = firstGapFrom(SequencerCounter(0))
+            if (missingTick > SequencerCounter(0)) {
               val timestamp = allTicks(missingTick - 1)
               barriersWithFutures.traverse_ { case (barrierTimestamp, barrierCompletion) =>
                 if (barrierTimestamp <= timestamp) {
@@ -155,7 +155,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
     "process tasks and complete barriers when they are ready" in {
       val taskScheduler =
         new TaskScheduler(
-          0L,
+          SequencerCounter(0),
           CantonTimestamp.MinValue,
           TestTaskOrdering,
           metrics,
@@ -164,16 +164,23 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
         )(executionContext)
       val executionOrder = mutable.Queue.empty[Int]
       val waitPromise = Promise[Unit]()
-      val task0 = new TestTask(executionOrder, 0, ofEpochMilli(1), 0L, Activeness)
+      val task0 = TestTask(executionOrder, 0, ofEpochMilli(1), SequencerCounter(0), Activeness)
       val task1 =
-        new TestTask(executionOrder, 1, ofEpochMilli(2), 0L, Activeness, waitPromise.future)
+        TestTask(
+          executionOrder,
+          1,
+          ofEpochMilli(2),
+          SequencerCounter(0),
+          Activeness,
+          waitPromise.future,
+        )
       taskScheduler.scheduleTask(task1)
       taskScheduler.scheduleTask(task0)
       val barrier1 = taskScheduler.scheduleBarrier(ofEpochMilli(1))
       val barrier2 = taskScheduler.scheduleBarrier(ofEpochMilli(2))
       val barrier3 = taskScheduler.scheduleBarrier(ofEpochMilli(3))
-      taskScheduler.addTick(1L, ofEpochMilli(2))
-      taskScheduler.addTick(0L, ofEpochMilli(1))
+      taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(2))
+      taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(1))
       val barrier0 = taskScheduler.scheduleBarrier(ofEpochMilli(1))
       assert(barrier0.isEmpty, s"Barrier is before observed time of the task scheduler")
       for {
@@ -190,110 +197,161 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
 
     "complain about timestamps before head" in {
       val taskScheduler =
-        new TaskScheduler(0L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(0),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(1L, EPOCH.minusMillis(1)),
+        taskScheduler.addTick(SequencerCounter(1), EPOCH.minusMillis(1)),
         _.getMessage shouldBe "Timestamp 1969-12-31T23:59:59.999Z for sequence counter 1 is not after current time 1970-01-01T00:00:00Z.",
       )
     }
 
     "complain about non-increasing timestamps on ticks" in {
       val taskScheduler =
-        new TaskScheduler(0L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(0),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
 
-      taskScheduler.addTick(1L, ofEpochMilli(2))
-      taskScheduler.addTick(7L, ofEpochMilli(4))
+      taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(2))
+      taskScheduler.addTick(SequencerCounter(7), ofEpochMilli(4))
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(3L, ofEpochMilli(1)),
+        taskScheduler.addTick(SequencerCounter(3), ofEpochMilli(1)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.001Z for sequencer counter 3 is not after timestamp 1970-01-01T00:00:00.002Z of an earlier sequencer counter.",
       ) // before previous counter
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(4L, ofEpochMilli(2)),
+        taskScheduler.addTick(SequencerCounter(4), ofEpochMilli(2)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.002Z for sequencer counter 4 is not after timestamp 1970-01-01T00:00:00.002Z of an earlier sequencer counter.",
       ) // same time as previous counter
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(5L, ofEpochMilli(4)),
+        taskScheduler.addTick(SequencerCounter(5), ofEpochMilli(4)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.004Z for sequencer counter 5 is not before timestamp 1970-01-01T00:00:00.004Z of a later sequencer counter.",
       ) // same as next counter
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(6L, ofEpochMilli(5)),
+        taskScheduler.addTick(SequencerCounter(6), ofEpochMilli(5)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.005Z for sequencer counter 6 is not before timestamp 1970-01-01T00:00:00.004Z of a later sequencer counter.",
       ) // after next counter
 
-      taskScheduler.addTick(0L, ofEpochMilli(1))
+      taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(1))
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(2L, ofEpochMilli(1).addMicros(1L)),
+        taskScheduler.addTick(SequencerCounter(2), ofEpochMilli(1).addMicros(1L)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.001001Z for sequence counter 2 is not after current time 1970-01-01T00:00:00.002Z.",
       )
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(0L, ofEpochMilli(3)),
+        taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(3)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.003Z for outdated sequencer counter 0 is after current time 1970-01-01T00:00:00.002Z.",
       ) // before head, but after latest observed time
     }
 
     "ignore signals before head" in {
       val taskScheduler =
-        new TaskScheduler(0L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(0),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
 
-      taskScheduler.addTick(0L, ofEpochMilli(2))
-      taskScheduler.addTick(1L, ofEpochMilli(3))
-      taskScheduler.addTick(0L, ofEpochMilli(2))
-      taskScheduler.addTick(0L, ofEpochMilli(1)) // don't throw even if we signal a different time
+      taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(2))
+      taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(3))
+      taskScheduler.addTick(SequencerCounter(0), ofEpochMilli(2))
+      taskScheduler.addTick(
+        SequencerCounter(0),
+        ofEpochMilli(1),
+      ) // don't throw even if we signal a different time
       succeed
     }
 
     "complain about adding a sequencer counter twice with different times" in {
       val taskScheduler =
-        new TaskScheduler(0L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(0),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
 
-      taskScheduler.addTick(1L, ofEpochMilli(10))
+      taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(10))
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(1L, ofEpochMilli(20)),
+        taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(20)),
         _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.020Z for sequencer counter 1 differs from timestamp 1970-01-01T00:00:00.010Z that was signalled before.",
       )
-      taskScheduler.addTick(1L, ofEpochMilli(10))
+      taskScheduler.addTick(SequencerCounter(1), ofEpochMilli(10))
       succeed
     }
 
     "complain about Long.MaxValue as a sequencer counter" in {
       val taskScheduler =
-        new TaskScheduler(0L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(0),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.addTick(Long.MaxValue, CantonTimestamp.MaxValue),
+        taskScheduler.addTick(SequencerCounter.MaxValue, CantonTimestamp.MaxValue),
         _.getMessage shouldBe "Sequencer counter Long.MaxValue signalled to task scheduler.",
       )
     }
 
     "scheduled tasks must be after current time" in {
       val taskScheduler =
-        new TaskScheduler(10L, EPOCH, TestTaskOrdering, metrics, timeouts, loggerFactory)(
+        new TaskScheduler(
+          SequencerCounter(10),
+          EPOCH,
+          TestTaskOrdering,
+          metrics,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
       val queue = mutable.Queue.empty[Int]
 
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.scheduleTask(new TestTask(queue, 1, ofEpochMilli(-1), 10L)),
+        taskScheduler.scheduleTask(new TestTask(queue, 1, ofEpochMilli(-1), SequencerCounter(10))),
         _.getMessage should fullyMatch regex "Timestamp .* of new task TestTask.* lies before current time .*\\.",
       )
 
       taskScheduler.scheduleTask(
-        new TestTask(queue, 2, ofEpochMilli(3), 10L, waitFor = Promise[Unit]().future)
+        new TestTask(
+          queue,
+          2,
+          ofEpochMilli(3),
+          SequencerCounter(10),
+          waitFor = Promise[Unit]().future,
+        )
       )
-      taskScheduler.addTick(11L, ofEpochMilli(5))
-      taskScheduler.addTick(10L, ofEpochMilli(1))
+      taskScheduler.addTick(SequencerCounter(11), ofEpochMilli(5))
+      taskScheduler.addTick(SequencerCounter(10), ofEpochMilli(1))
       // Time advances even if a task cannot be processed yet
       loggerFactory.assertInternalError[IllegalArgumentException](
-        taskScheduler.scheduleTask(new TestTask(queue, 3, ofEpochMilli(4), 10L)),
+        taskScheduler.scheduleTask(new TestTask(queue, 3, ofEpochMilli(4), SequencerCounter(10))),
         _.getMessage should fullyMatch regex "Timestamp .* of new task TestTask.* lies before current time .*\\.",
       )
     }
@@ -306,8 +364,8 @@ object TaskSchedulerTest {
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics with MetricHandle.Factory {
     override val registry: MetricRegistry = new MetricRegistry()
     override val prefix: MetricName = MetricName("test")
-    override val sequencerCounterQueue: VarGaugeM[Int] = varGauge(prefix :+ "counter", 0)
-    override val taskQueue: MetricHandle.GaugeM[RefGauge[Int], Int] = refGauge(prefix :+ "queue", 0)
+    override val sequencerCounterQueue: VarGauge[Int] = varGauge(prefix :+ "counter", 0)
+    override val taskQueue: Gauge[RefGauge[Int], Int] = refGauge(prefix :+ "queue", 0)
   }
 
   val Finalization: Int = 0

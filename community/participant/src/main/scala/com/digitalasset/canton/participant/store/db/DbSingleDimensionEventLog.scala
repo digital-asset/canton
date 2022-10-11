@@ -4,28 +4,28 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.OptionT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
+import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.CausalityUpdate
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{LocalOffset, RequestCounter}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
-import slick.jdbc._
+import slick.jdbc.*
 
 import scala.collection.{SortedMap, mutable}
 import scala.concurrent.{ExecutionContext, Future}
@@ -41,11 +41,11 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
     extends SingleDimensionEventLog[Id]
     with DbStore {
 
-  import ParticipantStorageImplicits._
-  import storage.api._
-  import storage.converters._
+  import ParticipantStorageImplicits.*
+  import storage.api.*
+  import storage.converters.*
 
-  protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("single-dimension-event-log")
 
   private def log_id: Int = id.index
@@ -274,7 +274,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
     processingTime.metric.optionTEvent {
       storage.querySingle(
         sql"""select local_offset from event_log where log_id = $log_id order by local_offset desc #${storage
-          .limit(1)}"""
+            .limit(1)}"""
           .as[LocalOffset]
           .headOption,
         functionFullName,
@@ -316,7 +316,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   }
 
   override def deleteSince(
-      inclusive: RequestCounter
+      inclusive: LocalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
     processingTime.metric.event {
       storage.update_(
@@ -341,11 +341,11 @@ object DbSingleDimensionEventLog {
       ec: ExecutionContext,
       closeContext: CloseContext,
   ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] = {
-    import DbStorage.Implicits.BuilderChain._
-    import ParticipantStorageImplicits._
+    import DbStorage.Implicits.BuilderChain.*
+    import ParticipantStorageImplicits.*
     import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
-    import storage.api._
-    import storage.converters._
+    import storage.api.*
+    import storage.converters.*
 
     val filters = List(
       fromInclusive.map(n => sql" and local_offset >= $n"),

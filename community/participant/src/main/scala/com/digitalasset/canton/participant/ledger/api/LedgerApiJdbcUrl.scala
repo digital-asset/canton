@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, PostgresDbConfig}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.FailedToConfigureLedgerApiStorage
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStorage.ledgerApiSchemaName

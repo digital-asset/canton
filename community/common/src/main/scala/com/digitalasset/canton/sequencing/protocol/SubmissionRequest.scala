@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.protocol
@@ -11,7 +12,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWrapperCompanion,
+  HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   HasProtocolVersionedWrapperCompanion,
   ProtobufVersion,
@@ -74,14 +75,25 @@ case class SubmissionRequest private (
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 }
+sealed trait MaxRequestSize {
+  val toOption: Option[NonNegativeInt] = this match {
+    case MaxRequestSize.Limit(value) => Some(value)
+    case MaxRequestSize.NoLimit => None
+  }
+}
+object MaxRequestSize {
+  case class Limit(value: NonNegativeInt) extends MaxRequestSize
+  case object NoLimit extends MaxRequestSize
+}
 
-object SubmissionRequest extends HasMemoizedProtocolVersionedWrapperCompanion[SubmissionRequest] {
+object SubmissionRequest
+    extends HasMemoizedProtocolVersionedWithContextCompanion[SubmissionRequest, MaxRequestSize] {
   val supportedProtoVersions = SupportedProtoVersions(
     ProtobufVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
-      supportedProtoVersionMemoized(v0.SubmissionRequest)(req =>
-        bytes => fromProtoV0(req, Some(bytes))
-      ),
+      supportedProtoVersionMemoized(v0.SubmissionRequest) { case (maxRequestSize, req) =>
+        bytes => fromProtoV0(maxRequestSize)(req, Some(bytes))
+      },
       _.toProtoV0.toByteString,
     )
   )
@@ -106,10 +118,13 @@ object SubmissionRequest extends HasMemoizedProtocolVersionedWrapperCompanion[Su
       timestampOfSigningKey,
     )(protocolVersionRepresentativeFor(protocolVersion))
 
-  def fromProtoV0(requestP: v0.SubmissionRequest): ParsingResult[SubmissionRequest] =
-    fromProtoV0(requestP, None)
+  def fromProtoV0(
+      requestP: v0.SubmissionRequest,
+      maxRequestSize: MaxRequestSize,
+  ): ParsingResult[SubmissionRequest] =
+    fromProtoV0(maxRequestSize)(requestP, None)
 
-  private def fromProtoV0(
+  private def fromProtoV0(maxRequestSize: MaxRequestSize)(
       requestP: v0.SubmissionRequest,
       bytes: Option[ByteString],
   ): ParsingResult[SubmissionRequest] = {
@@ -131,7 +146,7 @@ object SubmissionRequest extends HasMemoizedProtocolVersionedWrapperCompanion[Su
         .flatMap(CantonTimestamp.fromProtoPrimitive)
       batch <- ProtoConverter
         .required("SubmissionRequest.batch", batchP)
-        .flatMap(Batch.fromProtoV0(ClosedEnvelope.fromProtoV0))
+        .flatMap(Batch.fromProtoV0(ClosedEnvelope.fromProtoV0)(_, maxRequestSize))
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
     } yield new SubmissionRequest(
       sender,

@@ -64,7 +64,7 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
   ): Unit
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
     Seq(
       AsyncCloseable(

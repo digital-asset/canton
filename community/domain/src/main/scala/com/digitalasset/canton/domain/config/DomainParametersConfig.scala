@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.config
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.PositiveSeconds

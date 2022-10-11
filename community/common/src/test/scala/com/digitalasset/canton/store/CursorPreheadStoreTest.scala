@@ -4,17 +4,20 @@
 package com.digitalasset.canton.store
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 trait CursorPreheadStoreTest {
   this: AsyncWordSpecLike with BaseTest =>
 
-  def cursorPreheadStore(mk: () => CursorPreheadStore[Long]): Unit = {
-    val prehead5 = CursorPrehead(5L, CantonTimestamp.ofEpochSecond(5))
-    val prehead10 = CursorPrehead(10L, CantonTimestamp.ofEpochSecond(10))
-    val prehead20 = CursorPrehead(20L, CantonTimestamp.ofEpochSecond(20))
-    val prehead30 = CursorPrehead(20L, CantonTimestamp.ofEpochSecond(30))
+  def cursorPreheadStore[Discr](
+      mk: () => CursorPreheadStore[Discr],
+      counterBuilder: Long => Counter[Discr],
+  ): Unit = {
+    val prehead5 = CursorPrehead(counterBuilder(5), CantonTimestamp.ofEpochSecond(5))
+    val prehead10 = CursorPrehead(counterBuilder(10), CantonTimestamp.ofEpochSecond(10))
+    val prehead20 = CursorPrehead(counterBuilder(20), CantonTimestamp.ofEpochSecond(20))
+    val prehead30 = CursorPrehead(counterBuilder(20), CantonTimestamp.ofEpochSecond(30))
 
     "store and retrieve the prehead" in {
       val store = mk()

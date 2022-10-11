@@ -4,17 +4,17 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
@@ -22,21 +22,20 @@ import com.digitalasset.canton.domain.mediator.store.{
 }
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.protocol.{v0, _}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString
-import org.mockito.ArgumentMatchers.{eq => eqMatch}
+import org.mockito.ArgumentMatchers.{eq as eqMatch}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -52,7 +51,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
   private val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
   private val participant: ParticipantId = ExampleTransactionFactory.submitterParticipant
 
-  private val notSignificantCounter: SequencerCounter = 0L
+  private val notSignificantCounter: SequencerCounter = SequencerCounter(0)
 
   private val initialDomainParameters = TestDomainParameters.defaultDynamic
 
@@ -184,11 +183,20 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       )
     }
 
-    lazy val alarmViewThresholdBelowMinimumThreshold: MalformedMessage.Reject =
-      MediatorError.MalformedMessage.Reject(
-        "Rejected transaction as a view has threshold below the confirmation policy's minimum threshold.",
-        v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
-        testedProtocolVersion,
+    // TODO(i10210): We probably do not want this appearing in the context of the logged error
+    lazy val checkTestedProtocolVersion: Map[String, String] => Assertion =
+      _ should contain(
+        "representativeProtocolVersion" -> Verdict
+          .protocolVersionRepresentativeFor(
+            testedProtocolVersion
+          )
+          .toString
+      )
+    lazy val shouldBeViewThresholdBelowMinimumAlarm: LogEntry => Assertion =
+      _.shouldBeCantonError(
+        MediatorError.MalformedMessage,
+        _ should fullyMatch regex raw"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=ViewHash\(SHA-256:[0-9a-f]*...\), threshold=0",
+        checkTestedProtocolVersion,
       )
 
     "timestamp of mediator request is propagated" in {
@@ -207,13 +215,13 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         _ <- loggerFactory.assertLogs(
           sut.processor.processRequest(
             RequestId(requestTimestamp),
-            0L,
+            SequencerCounter(0),
             requestTimestamp.plusSeconds(60),
             requestTimestamp.plusSeconds(120),
             testMediatorRequest,
             List.empty,
           ),
-          _.shouldBeCantonError(alarmViewThresholdBelowMinimumThreshold),
+          shouldBeViewThresholdBelowMinimumAlarm,
         )
 
       } yield {
@@ -288,7 +296,7 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
               informeeMessage,
               List.empty,
             ),
-            _.shouldBeCantonError(alarmViewThresholdBelowMinimumThreshold),
+            shouldBeViewThresholdBelowMinimumAlarm,
           )
           _ <- sut.processResponse(
             CantonTimestamp.Epoch,
@@ -343,8 +351,8 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
         SerializedRootHashMessagePayload.empty,
       )
 
-      val sc = 100L
-      val ts = CantonTimestamp.ofEpochSecond(sc)
+      val sc = SequencerCounter(100)
+      val ts = CantonTimestamp.ofEpochSecond(sc.v)
       val requestId = RequestId(ts)
       for {
         _ <- sut.processor.processRequest(
@@ -379,10 +387,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             response,
           ), {
             _.shouldBeCantonError(
-              MediatorError.MalformedMessage.Reject(
-                show"Unknown request $requestId: received mediator response by $participant for view hash ${view.viewHash} for root hash ${view.rootHash}",
-                testedProtocolVersion,
-              )
+              MediatorError.MalformedMessage,
+              _ shouldBe show"Unknown request $requestId: received mediator response by $participant for view hash ${view.viewHash} for root hash ${mediatorRequest.rootHash.value}",
+              checkTestedProtocolVersion,
             )
           },
         )
@@ -590,12 +597,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
                 rootHashMessages,
               ),
               _.shouldBeCantonError(
-                MediatorError.InvalidMessage.Reject.create(
-                  s"Rejected transaction due to invalid root hash messages: $msg",
-                  v0.MediatorRejection.Code.InvalidRootHashMessage,
-                  testedProtocolVersion,
-                ),
-                strict = false,
+                MediatorError.InvalidMessage,
+                _ should startWith(s"Rejected transaction due to invalid root hash messages: $msg"),
+                checkTestedProtocolVersion,
               ),
             )
           }
@@ -665,12 +669,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
             ),
           ),
           _.shouldBeCantonError(
-            MediatorError.MalformedMessage.Reject(
-              show"The declared mediator in the MediatorRequest ($otherMediatorId) is not the mediator that received the request ($mediatorId).",
-              v0.MediatorRejection.Code.WrongDeclaredMediator,
-              testedProtocolVersion,
-            ),
-            strict = false,
+            MediatorError.MalformedMessage,
+            _ shouldBe show"The declared mediator in the MediatorRequest ($otherMediatorId) is not the mediator that received the request ($mediatorId).",
+            checkTestedProtocolVersion,
           ),
         )
       } yield succeed
@@ -826,8 +827,9 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val malformedMsg = "this is a test malformed response"
       def isMalformedWarn(participant: ParticipantId)(logEntry: LogEntry): Assertion = {
         logEntry.shouldBeCantonError(
-          LocalReject.MalformedRejects.Payloads.Reject(malformedMsg)(testedProtocolVersion),
-          Map("reportedBy" -> s"$participant"),
+          LocalReject.MalformedRejects.Payloads,
+          _ shouldBe s"Rejected transaction due to malformed payload within views $malformedMsg",
+          _ should contain("reportedBy" -> s"$participant"),
         )
       }
 

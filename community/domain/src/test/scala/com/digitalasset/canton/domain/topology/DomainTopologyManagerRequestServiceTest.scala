@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits._
+import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{
   Attack,
@@ -19,7 +19,7 @@ import com.digitalasset.canton.domain.topology.DomainTopologyManagerError.Invali
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
-import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State._
+import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   ParticipantId,
@@ -190,7 +190,7 @@ class DomainTopologyManagerRequestServiceTest
 
     "onboard new participants" taggedAs securityAsset.setHappyCase("onboard new participants") in {
       implicit f =>
-        import factory._
+        import factory.*
         val service = f.service(config)
         for {
           // store allow list certificate if domain is permissioned
@@ -214,7 +214,7 @@ class DomainTopologyManagerRequestServiceTest
         mitigation = "reject onboarding request",
       )
     ) in { implicit f =>
-      import factory._
+      import factory.*
       val service = f.service(config)
       for {
         // store allow list certificate if domain is permissioned
@@ -319,7 +319,7 @@ class DomainTopologyManagerRequestServiceTest
     }
 
     "accept updates from existing participants" in { implicit f =>
-      import factory._
+      import factory.*
       val service = f.service(config)
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3, ps1d1F_k1)
@@ -338,7 +338,7 @@ class DomainTopologyManagerRequestServiceTest
         mitigation = "reject request",
       )
     ) in { implicit f =>
-      import factory._
+      import factory.*
       val service = f.service(config)
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3, okm1ak1E_k3, ps1d1T_k3)
@@ -354,7 +354,7 @@ class DomainTopologyManagerRequestServiceTest
     }
 
     "ignore duplicates" in { implicit f =>
-      import factory._
+      import factory.*
       val service = f.service(config)
       for {
         _ <- f.append(ns1k1_k1, ns1k2_k1, ns1k3_k2, ps1d1F_k1)
@@ -394,7 +394,7 @@ class DomainTopologyManagerRequestServiceTest
         mitigation = "reject request",
       )
     ) in { implicit f =>
-      import factory._
+      import factory.*
       val service = f.service(TopologyConfig(open = false))
       for {
         request <- service.newRequest(

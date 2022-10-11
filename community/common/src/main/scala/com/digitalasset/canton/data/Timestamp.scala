@@ -6,7 +6,7 @@ package com.digitalasset.canton.data
 import com.digitalasset.canton.LfTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 
 import java.time.Instant
 

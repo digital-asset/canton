@@ -3,21 +3,21 @@
 
 package com.digitalasset.canton.crypto.provider.tink
 
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.tink.TinkKeyFormat.serializeHandle
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.google.crypto.tink.proto.KeyData.KeyMaterialType
-import com.google.crypto.tink.proto._
+import com.google.crypto.tink.proto.*
 import com.google.crypto.tink.subtle.EllipticCurves
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
-import com.google.crypto.tink.{KeysetHandle, proto => tinkproto}
+import com.google.crypto.tink.{KeysetHandle, proto as tinkproto}
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 
 import java.security.interfaces.ECPublicKey
-import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
+import java.security.{PrivateKey as JPrivateKey, PublicKey as JPublicKey}
 
 /** Converter methods from Tink to Java security keys and vice versa. */
 class TinkJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {

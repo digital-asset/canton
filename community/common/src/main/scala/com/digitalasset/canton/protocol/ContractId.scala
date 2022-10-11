@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.client.binding.Primitive
 import com.daml.lf.data.Bytes
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.google.protobuf.ByteString
 

@@ -5,7 +5,7 @@ package com.digitalasset.canton.demo
 
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.TransactionTree
-import com.daml.ledger.client.binding.{Contract, Primitive => P, TemplateCompanion}
+import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
@@ -17,7 +17,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
 }
 import com.digitalasset.canton.demo.Step.{Action, Noop}
-import com.digitalasset.canton.demo.model.{ai => ME, doctor => M}
+import com.digitalasset.canton.demo.model.{ai as ME, doctor as M}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -30,7 +30,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import java.time.{Duration, Instant}
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future, blocking}
 
 class ReferenceDemoScript(
@@ -61,7 +61,7 @@ class ReferenceDemoScript(
   private val participant5 = sorted(4)
   private val participant6 = sorted(5)
 
-  import com.digitalasset.canton.console.ConsoleEnvironment.Implicits._
+  import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 
   val maxImage: Int = 28
 
@@ -135,7 +135,7 @@ class ReferenceDemoScript(
     participant5.ledger_api.acs.await(registry, companion, timeout = lookupTimeout)
 
   private def execute[T](futs: Seq[Future[T]]): Seq[T] = {
-    import scala.concurrent.duration._
+    import scala.concurrent.duration.*
     val seq = Future.sequence(futs)
     Await.result(seq, 120.seconds)
   }
@@ -323,7 +323,7 @@ class ReferenceDemoScript(
         "ledger-api",
         "Alice: exercise <offerId> AcceptAppointment with registerId = <registerId>, policyId = <policyId>",
         () => {
-          import M.Doctor.OfferAppointment._
+          import M.Doctor.OfferAppointment.*
           val appointmentEv = aliceLookup(M.Doctor.OfferAppointment)
           val policyId = aliceLookup(M.HealthInsurance.Policy).contractId
           val registerId = aliceLookup(M.MedicalRecord.Register).contractId
@@ -340,7 +340,7 @@ class ReferenceDemoScript(
         "ledger-api",
         "Doctor: exercise <appointmentId> TickOff with description=...",
         () => {
-          import M.Doctor.Appointment._
+          import M.Doctor.Appointment.*
           val tickOff = doctorLookup(M.Doctor.Appointment).contractId
             .exerciseTickOff(
               description = "Did a hip replacement",
@@ -358,7 +358,7 @@ class ReferenceDemoScript(
         "Insurance: exercise <claimId> AcceptAndSettleClaim with cashId = <cashId>",
         () => {
           val withdraw = {
-            import M.Bank.Cash._
+            import M.Bank.Cash.*
             insuranceLookup(M.Bank.Cash).contractId.exerciseSplit(quantity = 15).command
           }
           participant3.ledger_api.commands
@@ -371,7 +371,7 @@ class ReferenceDemoScript(
 
           // settle claim (will invoke auto-transfer to the banking domain)
           val settleClaim = {
-            import M.HealthInsurance.Claim._
+            import M.HealthInsurance.Claim.*
             insuranceLookup(M.HealthInsurance.Claim).contractId
               .exerciseAcceptAndSettleClaim(cashId = findCashCid.contractId)
               .command
@@ -510,7 +510,7 @@ class ReferenceDemoScript(
         "ledger-api",
         "exercise offer AcceptAnalysis with registerId",
         () => {
-          import ME.AIAnalysis.OfferAnalysis._
+          import ME.AIAnalysis.OfferAnalysis.*
           val registerId = aliceLookup(ME.MedicalRecord.Register)
           val accept = aliceLookup(ME.AIAnalysis.OfferAnalysis).contractId
             .exerciseAcceptAnalysis(registerId = registerId.contractId)

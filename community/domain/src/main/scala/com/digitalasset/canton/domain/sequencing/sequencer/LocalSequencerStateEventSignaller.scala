@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{BroadcastHub, Keep, Sink, Source, SourceQueueWithComplete}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
@@ -88,22 +88,20 @@ class LocalSequencerStateEventSignaller(
   }
 
   protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     Seq(
       SyncCloseable("queue.complete", queue.complete()),
       AsyncCloseable(
         "queue.watchCompletion",
         queue.watchCompletion(),
-        // TODO(#9883) revert to timeout.shutdownShort once https://github.com/akka/akka/issues/31530 is solved
-        timeouts.closing.unwrap,
+        timeouts.shutdownShort.unwrap,
       ),
       // TODO(#9883): double check if this step is necessary
       AsyncCloseable(
         "queue.completion",
         notificationsHubSource.runWith(Sink.ignore),
-        // TODO(#9883) revert to timeout.shutdownShort once https://github.com/akka/akka/issues/31530 is solved
-        timeouts.closing.unwrap,
+        timeouts.shutdownShort.unwrap,
       ),
       // Other readers of the broadcast hub should be shut down separately
     )

@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.topology.store
 
-import cats.syntax.contravariantSemigroupal._
+import cats.syntax.contravariantSemigroupal.*
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Replace}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -38,7 +38,7 @@ trait TopologyStoreTest
   lazy val submissionId2 = String255.tryCreate("submissionId2")
 
   def partyMetadataStore(mk: () => PartyMetadataStore): Unit = {
-    import DefaultTestIdentities._
+    import DefaultTestIdentities.*
     "inserting new succeeds" in {
       val store = mk()
       for {
@@ -141,10 +141,10 @@ trait TopologyStoreTest
 
   def topologyStore(mk: () => TopologyStore[TopologyStoreId]): Unit = {
 
-    import DefaultTestIdentities._
+    import DefaultTestIdentities.*
     val factory: TestingOwnerWithKeys =
       new TestingOwnerWithKeys(domainManager, loggerFactory, executorService)
-    import factory.TestingTransactions._
+    import factory.TestingTransactions.*
 
     implicit val toValidated
         : SignedTopologyTransaction[TopologyChangeOp] => ValidatedTopologyTransaction =
@@ -628,7 +628,7 @@ trait TopologyStoreTest
 
         "namespace filter behaves correctly" in {
           val store = mk()
-          import factory.SigningKeys._
+          import factory.SigningKeys.*
           val ns2k3 =
             factory.mkAdd(
               NamespaceDelegation(Namespace(key2.fingerprint), key2, isRootDelegation = true),
@@ -758,7 +758,7 @@ trait TopologyStoreTest
 
         "state query combines uid and ns queries correctly" in {
           val store = mk()
-          import factory.SigningKeys._
+          import factory.SigningKeys.*
           val ns1 = Namespace(key1.fingerprint)
           val ns2 = Namespace(key2.fingerprint)
           val ns3 = Namespace(key3.fingerprint)
@@ -1134,7 +1134,7 @@ trait TopologyStoreTest
         "secondary uid/ns fetch works" in {
           val store = mk()
           val tmp = new SecondaryQueryTestDataSet
-          import tmp._
+          import tmp.*
 
           def fetch(
               uids: Option[Seq[UniqueIdentifier]],

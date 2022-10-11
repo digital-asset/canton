@@ -4,17 +4,17 @@
 package com.digitalasset.canton.participant.store.db
 
 import akka.NotUsed
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.OptionT
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
-import cats.syntax.traverseFilter._
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
+import cats.syntax.traverseFilter.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
-import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -27,7 +27,6 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
   PendingEventPublish,
@@ -41,20 +40,15 @@ import com.digitalasset.canton.participant.store.MultiDomainEventLog.{
   OnPublish,
   PublicationData,
 }
-import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog._
+import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog.*
 import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog}
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{
-  GlobalOffset,
-  LedgerSyncEvent,
-  LocalOffset,
-  RequestCounter,
-}
+import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Implicits.{
-  getResultLfPartyId => _,
-  getResultPackageId => _,
+  getResultLfPartyId as _,
+  getResultPackageId as _,
 }
 import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -62,14 +56,15 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.*
+import com.digitalasset.canton.{LedgerTransactionId, RequestCounter}
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.control.NonFatal
 
@@ -113,11 +108,11 @@ class DbMultiDomainEventLog private[db] (
     with HasFlushFuture {
 
   import TimestampedEvent.getResultTimestampedEvent
-  import storage.api._
-  import storage.converters._
-  import ParticipantStorageImplicits._
+  import storage.api.*
+  import storage.converters.*
+  import ParticipantStorageImplicits.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("multi-domain-event-log")
 
   private val dispatcher: Dispatcher[GlobalOffset] =
@@ -474,7 +469,7 @@ class DbMultiDomainEventLog private[db] (
         PositiveNumeric.tryCreate(maxBatchSize),
       )
       val queries = inClauses.map { inClause =>
-        import DbStorage.Implicits.BuilderChain._
+        import DbStorage.Implicits.BuilderChain.*
         (sql"""
             select global_offset,
               el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update,
@@ -630,7 +625,7 @@ class DbMultiDomainEventLog private[db] (
       storage
         .query(
           sql"""select local_offset from linearized_event_log where log_id = ${id.index} order by local_offset desc #${storage
-            .limit(1)}"""
+              .limit(1)}"""
             .as[LocalOffset]
             .headOption,
           functionFullName,
@@ -652,7 +647,7 @@ class DbMultiDomainEventLog private[db] (
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
       case _ =>
         sql"select global_offset, log_id, local_offset, publication_time from linearized_event_log order by global_offset desc #${storage
-          .limit(count)}"
+            .limit(count)}"
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
     }
     storage.query(query, functionFullName).flatMap { vec =>
@@ -672,7 +667,7 @@ class DbMultiDomainEventLog private[db] (
   override def flush(): Future[Unit] = doFlush()
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     List[AsyncOrSyncCloseable](
       SyncCloseable("eventsQueue.complete", eventsQueue.complete()),
       // The kill switch ensures that we stop processing the remaining entries in the queue.
@@ -734,7 +729,7 @@ object DbMultiDomainEventLog {
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Future[Option[(GlobalOffset, CantonTimestamp)]] = {
-    import storage.api._
+    import storage.api.*
 
     val query =
       sql"""select global_offset, publication_time from linearized_event_log where global_offset <= $upToInclusive
@@ -749,7 +744,7 @@ object DbMultiDomainEventLog {
       executionContext: ExecutionContext,
       closeContext: CloseContext,
   ): Future[TrieMap[Int, LocalOffset]] = {
-    import storage.api._
+    import storage.api.*
 
     storage.query(
       {

@@ -20,7 +20,7 @@ object RequireBlocking extends WartTraverser {
   val messageThreadSleep: String = "Use Threading.sleep instead of Thread.sleep"
 
   def apply(u: WartUniverse): u.Traverser = {
-    import u.universe._
+    import u.universe.*
 
     val synchronizedName = TermName("synchronized")
     val blockingFullName = "scala.concurrent.blocking"

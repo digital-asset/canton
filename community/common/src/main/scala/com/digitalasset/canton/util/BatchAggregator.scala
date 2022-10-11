@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.util
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
@@ -49,7 +49,7 @@ object BatchAggregator {
   def apply[A, B](
       processor: Processor[A, B],
       config: BatchAggregatorConfig,
-      processingTime: Option[GaugeM[TimedLoadGauge, Double]] = None,
+      processingTime: Option[Gauge[TimedLoadGauge, Double]] = None,
   ): BatchAggregator[A, B] = config match {
     case BatchAggregatorConfig.Batching(maximumInFlight, maximumBatchSize) =>
       new BatchAggregatorImpl[A, B](
@@ -119,7 +119,7 @@ class BatchAggregatorImpl[A, B](
     processor: BatchAggregator.Processor[A, B],
     private val maximumInFlight: Int,
     private val maximumBatchSize: Int,
-    processingTime: Option[GaugeM[TimedLoadGauge, Double]],
+    processingTime: Option[Gauge[TimedLoadGauge, Double]],
 ) extends BatchAggregator[A, B] {
 
   private val inFlight = new AtomicInteger(0)

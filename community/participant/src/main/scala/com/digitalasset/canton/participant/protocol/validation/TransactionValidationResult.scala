@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.SubmitterMetadata
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.protocol.validation.ContractConsisten
 import com.digitalasset.canton.participant.protocol.validation.TimeValidator.TimeCheckFailure
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, WorkflowId}
 
 // TODO(Andreas, M40): Push model conformance down to individual views, not just for the transaction as a whole

@@ -8,7 +8,6 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.LocalOffset
-import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.admin.RepairService
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -33,18 +32,12 @@ import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  BaseTest,
-  DefaultDamlValues,
-  GenesisSequencerCounter,
-  SequencerCounter,
-}
+import com.digitalasset.canton.{BaseTest, DefaultDamlValues, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
 class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
-
   private lazy val indexedStringStore = InMemoryIndexedStringStore()
   private lazy val domainIdF =
     IndexedDomain.indexed(indexedStringStore)(DomainId.tryFromString("domain::da"))
@@ -54,7 +47,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
   )(sc: SequencerCounter, timestamp: CantonTimestamp): OrdinarySerializedEvent =
     OrdinarySequencedEvent(
       SignedContent(
-        SequencerTestUtils.mockDeliver(sc, timestamp, domainId),
+        SequencerTestUtils.mockDeliver(sc.v, timestamp, domainId),
         SymbolicCrypto.emptySignature,
         None,
       )
@@ -101,7 +94,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         } yield {
           startingPoints.cleanReplay shouldBe MessageProcessingStartingPoint.default
           startingPoints.processing shouldBe MessageProcessingStartingPoint.default
-          startingPoints.eventPublishingNextLocalOffset shouldBe GenesisRequestCounter
+          startingPoints.eventPublishingNextLocalOffset shouldBe RequestCounter.Genesis.asLocalOffset
           startingPoints.rewoundSequencerCounterPrehead shouldBe None
         }
       }
@@ -113,8 +106,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = 0L
-        val sc = 10L
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(10)
         val ts = CantonTimestamp.Epoch
         for {
           domainId <- domainIdF
@@ -139,7 +132,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         } yield {
           val cleanReplay = MessageProcessingStartingPoint(rc, sc, ts.immediatePredecessor)
           val processing = MessageProcessingStartingPoint(rc + 1L, sc + 1L, ts)
-          val localOffset = GenesisRequestCounter
+          val localOffset = RequestCounter.Genesis.asLocalOffset
 
           withDirtySc.cleanReplay shouldBe cleanReplay
           withDirtySc.processing shouldBe processing
@@ -160,8 +153,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = 0L
-        val sc = 10L
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(10)
         val ts0 = CantonTimestamp.ofEpochSecond(0)
         val ts1 = CantonTimestamp.ofEpochSecond(1)
         val ts2 = CantonTimestamp.ofEpochSecond(2)
@@ -251,8 +244,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = 0L
-        val sc = 10L
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(10)
         val ts0 = CantonTimestamp.ofEpochSecond(0)
         val ts1 = CantonTimestamp.ofEpochSecond(1)
         val ts2 = CantonTimestamp.ofEpochSecond(2)
@@ -286,8 +279,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = 0L
-        val sc = 10L
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(10)
         val ts0 = CantonTimestamp.ofEpochSecond(0)
         val ts1 = CantonTimestamp.ofEpochSecond(1)
         val ts2 = CantonTimestamp.ofEpochSecond(2)
@@ -325,13 +318,13 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = 0L
-        val sc = 10L
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(10)
         val ts0 = CantonTimestamp.ofEpochSecond(0)
         val ts1 = CantonTimestamp.ofEpochSecond(1)
         val ts2 = CantonTimestamp.ofEpochSecond(2)
 
-        val firstOffset = rc
+        val firstOffset = rc.asLocalOffset
         val secondOffset = firstOffset + 2L
 
         for {
@@ -385,8 +378,8 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
         val scts = new InMemorySequencerCounterTrackerStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory)
         val mdel = mockMultiDomainEventLog()
-        val rc = GenesisRequestCounter
-        val sc = 10L
+        val rc = RequestCounter.Genesis
+        val sc = SequencerCounter(10)
         val ts0 = CantonTimestamp.ofEpochSecond(0)
         val ts1 = CantonTimestamp.ofEpochSecond(1)
 
@@ -426,12 +419,12 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           )
         } yield {
           noCleanRepair.cleanReplay shouldBe MessageProcessingStartingPoint(
-            GenesisRequestCounter,
+            RequestCounter.Genesis,
             sc + 1L,
             ts0,
           )
           noCleanRepair.processing shouldBe MessageProcessingStartingPoint(
-            GenesisRequestCounter,
+            RequestCounter.Genesis,
             sc + 1L,
             ts0,
           )
@@ -460,13 +453,13 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           domainId <- domainIdF
           _ <- rjs.insert(
             RequestData.clean(
-              GenesisRequestCounter,
+              RequestCounter.Genesis,
               repairTs,
               repairTs,
               Some(RepairContext.tryCreate("repair0")),
             )
           )
-          _ <- rjs.advancePreheadCleanTo(CursorPrehead(GenesisRequestCounter, repairTs))
+          _ <- rjs.advancePreheadCleanTo(CursorPrehead(RequestCounter.Genesis, repairTs))
           oneRepair <- SyncDomainEphemeralStateFactory.startingPoints(
             domainId,
             rjs,
@@ -476,13 +469,13 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           )
           _ <- rjs.insert(
             RequestData.clean(
-              GenesisRequestCounter + 1L,
+              RequestCounter.Genesis + 1L,
               repairTs,
               repairTs,
               Some(RepairContext.tryCreate("repair1")),
             )
           )
-          _ <- rjs.advancePreheadCleanTo(CursorPrehead(GenesisRequestCounter + 1L, repairTs))
+          _ <- rjs.advancePreheadCleanTo(CursorPrehead(RequestCounter.Genesis + 1L, repairTs))
           twoRepairs <- SyncDomainEphemeralStateFactory.startingPoints(
             domainId,
             rjs,
@@ -493,7 +486,7 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           _ <- rjs.insert(
             RequestData
               .clean(
-                GenesisRequestCounter + 2L,
+                RequestCounter.Genesis + 2L,
                 repairTs,
                 repairTs,
                 Some(RepairContext.tryCreate("crashed repair")),
@@ -509,23 +502,23 @@ class SyncDomainEphemeralStateFactoryTest extends AsyncWordSpec with BaseTest {
           )
         } yield {
           val startOne = MessageProcessingStartingPoint(
-            GenesisRequestCounter + 1L,
-            GenesisSequencerCounter,
+            RequestCounter.Genesis + 1L,
+            SequencerCounter.Genesis,
             CantonTimestamp.MinValue,
           )
           oneRepair.cleanReplay shouldBe startOne
           oneRepair.processing shouldBe startOne
-          oneRepair.eventPublishingNextLocalOffset shouldBe GenesisRequestCounter
+          oneRepair.eventPublishingNextLocalOffset shouldBe RequestCounter.Genesis.asLocalOffset
           oneRepair.rewoundSequencerCounterPrehead shouldBe None
 
           val startTwo = MessageProcessingStartingPoint(
-            GenesisRequestCounter + 2L,
-            GenesisSequencerCounter,
+            RequestCounter.Genesis + 2L,
+            SequencerCounter.Genesis,
             CantonTimestamp.MinValue,
           )
           twoRepairs.cleanReplay shouldBe startTwo
           twoRepairs.processing shouldBe startTwo
-          twoRepairs.eventPublishingNextLocalOffset shouldBe GenesisRequestCounter
+          twoRepairs.eventPublishingNextLocalOffset shouldBe RequestCounter.Genesis.asLocalOffset
           twoRepairs.rewoundSequencerCounterPrehead shouldBe None
 
           crashedRepair shouldBe twoRepairs

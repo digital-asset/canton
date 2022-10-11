@@ -19,7 +19,7 @@ trait DbDomainConnectionConfigStoreTest
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[_] = {
-    import storage.api._
+    import storage.api.*
     storage.update_(sqlu"truncate table participant_domain_connection_configs", functionFullName)
   }
 

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.sync
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -42,7 +42,7 @@ class SyncDomainMigration(
     extends NamedLogging
     with FlagCloseable {
 
-  import com.digitalasset.canton.participant.sync.SyncDomainMigrationError._
+  import com.digitalasset.canton.participant.sync.SyncDomainMigrationError.*
 
   private def getDomainId(
       sourceAlias: DomainAlias

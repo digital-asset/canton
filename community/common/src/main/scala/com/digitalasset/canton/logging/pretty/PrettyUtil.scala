@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.logging.pretty
 
-import cats.syntax.functorFilter._
+import cats.syntax.functorFilter.*
 import com.digitalasset.canton.logging.pretty.Pretty
 import pprint.{Tree, Walker}
 

@@ -4,10 +4,10 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.memory.{
   InMemoryCryptoPrivateStore,
   InMemoryCryptoPublicStore,
@@ -18,7 +18,7 @@ import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
 import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 
-import java.security.{PrivateKey => JPrivateKey, PublicKey => JPublicKey}
+import java.security.{PrivateKey as JPrivateKey, PublicKey as JPublicKey}
 import scala.concurrent.{ExecutionContext, Future}
 
 object SymbolicCrypto extends LazyLogging {
@@ -130,7 +130,7 @@ object SymbolicCrypto extends LazyLogging {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   ): Crypto = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
     implicit val loggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(loggerFactory.getTracedLogger(this.getClass))
 

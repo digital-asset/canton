@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.OptionT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,7 +28,7 @@ class InMemoryCommandDeduplicationStore(override protected val loggerFactory: Na
     extends CommandDeduplicationStore
     with NamedLogging {
 
-  import CommandDeduplicationStore._
+  import CommandDeduplicationStore.*
 
   /** The command deduplication data for each change ID unless pruned. */
   private val byChangeId: TrieMap[ChangeIdHash, CommandDeduplicationData] =

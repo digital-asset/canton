@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.{RequestId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -62,7 +62,7 @@ case class TransactionResultMessage private (
     v1.TransactionResultMessage(
       requestId = Some(requestId.toProtoPrimitive),
       verdict = Some(verdict.toProtoV1),
-      notificationTree = Some(notificationTree.toProtoV0),
+      notificationTree = Some(notificationTree.toProtoV1),
     )
 
   override protected[messages] def toProtoSomeSignedProtocolMessage
@@ -144,7 +144,7 @@ object TransactionResultMessage
         .flatMap(Verdict.fromProtoV1)
       notificationTree <- ProtoConverter
         .required("notification_tree", notificationTreePO)
-        .flatMap(InformeeTree.fromProtoV0(hashOps, _))
+        .flatMap(InformeeTree.fromProtoV1(hashOps, _))
     } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
       protocolVersionRepresentativeFor(ProtobufVersion(1)),
       Some(bytes),

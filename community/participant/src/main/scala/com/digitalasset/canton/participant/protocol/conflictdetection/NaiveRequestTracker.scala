@@ -4,8 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{EitherT, NonEmptyChain}
-import cats.syntax.either._
-import com.digitalasset.canton.SequencerCounter
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler, TaskSchedulerMetrics}
 import com.digitalasset.canton.lifecycle.{
@@ -16,19 +15,19 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SingleUseCell}
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
 import scala.annotation.nowarn
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent._
+import scala.concurrent.*
 import scala.util.{Failure, Success, Try}
 
 /** The naive request tracker performs all its tasks (activeness check/timeout/finalization) sequentially.
@@ -40,7 +39,7 @@ import scala.util.{Failure, Success, Try}
   * @param initSc The first sequencer counter to be processed
   * @param initTimestamp Only timestamps after this timestamp are allowed
   */
-class NaiveRequestTracker(
+private[participant] class NaiveRequestTracker(
     initSc: SequencerCounter,
     initTimestamp: CantonTimestamp,
     conflictDetector: ConflictDetector,
@@ -51,8 +50,8 @@ class NaiveRequestTracker(
     extends RequestTracker
     with NamedLogging
     with FlagCloseableAsync {
-  import NaiveRequestTracker._
-  import RequestTracker._
+  import NaiveRequestTracker.*
+  import RequestTracker.*
 
   override private[protocol] val taskScheduler =
     new TaskScheduler(
@@ -87,8 +86,8 @@ class NaiveRequestTracker(
       decisionTime: CantonTimestamp,
       activenessSet: ActivenessSet,
   )(implicit traceContext: TraceContext): Either[RequestAlreadyExists, Future[RequestFutures]] = {
-    ErrorUtil.requireArgument(rc != RequestCounter.MaxValue, "Request counter MaxValue used")
-    ErrorUtil.requireArgument(sc != Long.MaxValue, "Sequencer counter Long.MaxValue used")
+    ErrorUtil.requireArgument(rc.isNotMaxValue, "Request counter MaxValue used")
+    ErrorUtil.requireArgument(sc.isNotMaxValue, "Sequencer counter Long.MaxValue used")
     ErrorUtil.requireArgument(
       requestTimestamp <= activenessTimestamp,
       withRC(
@@ -440,8 +439,8 @@ class NaiveRequestTracker(
   }
 }
 
-object NaiveRequestTracker {
-  import RequestTracker._
+private[conflictdetection] object NaiveRequestTracker {
+  import RequestTracker.*
 
   /** Abstract class for tasks that the [[data.TaskScheduler]] accumulates in its `taskQueue`
     *

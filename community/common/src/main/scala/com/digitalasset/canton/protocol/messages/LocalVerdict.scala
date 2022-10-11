@@ -3,20 +3,20 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import com.daml.error._
+import com.daml.error.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   OtherError,
   ValueDeserializationError,
 }
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.LocalRejectionGroup
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.LocalReject.MalformedRejects.CreatesExistingContracts
 import com.digitalasset.canton.protocol.messages.LocalVerdict.protocolVersionRepresentativeFor
 import com.digitalasset.canton.protocol.{messages, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.empty
 import org.slf4j.event.Level
 
@@ -63,7 +63,7 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
   private[messages] def fromProtoV0(
       localVerdictP: v0.LocalVerdict
   ): ParsingResult[LocalVerdict] = {
-    import v0.LocalVerdict.{SomeLocalVerdict => Lv}
+    import v0.LocalVerdict.{SomeLocalVerdict as Lv}
     val protocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
     localVerdictP match {
       case v0.LocalVerdict(Lv.LocalApprove(empty.Empty(_))) =>
@@ -75,7 +75,7 @@ object LocalVerdict extends HasProtocolVersionedCompanion[LocalVerdict] {
   }
 
   private[messages] def fromProtoV1(localVerdictP: v1.LocalVerdict): ParsingResult[LocalVerdict] = {
-    import v1.LocalVerdict.{SomeLocalVerdict => Lv}
+    import v1.LocalVerdict.{SomeLocalVerdict as Lv}
     val protocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(1)).representative
     val v1.LocalVerdict(someLocalVerdictP) = localVerdictP
     someLocalVerdictP match {
@@ -215,7 +215,7 @@ object LocalReject extends LocalRejectionGroup {
   // if you add a new error below, you must add it to this list here as well
 
   private[messages] def fromProtoV0(v: v0.LocalReject): ParsingResult[LocalReject] = {
-    import ConsistencyRejections._
+    import ConsistencyRejections.*
     import v0.LocalReject.Code
     val protocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
     v.code match {
@@ -260,7 +260,7 @@ object LocalReject extends LocalRejectionGroup {
   }
 
   private[messages] def fromProtoV1(localRejectP: v1.LocalReject): ParsingResult[LocalReject] = {
-    import ConsistencyRejections._
+    import ConsistencyRejections.*
     val v1.LocalReject(causePrefix, details, resource, errorCodeP, errorCategoryP) = localRejectP
     val protocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
     errorCodeP match {

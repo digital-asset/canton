@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc._
+import io.grpc.*
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Stand up a gRPC service stub which will direct to an instance set dynamically at runtime if available,
   * or return a UNAVAILBLE status if not set.

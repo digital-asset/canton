@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.Monoid
 import cats.data.OptionT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.LfPackageId
@@ -23,13 +23,13 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
 import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContext
 ) extends DamlPackageStore
     with NamedLogging {
-  import DamlPackageStore._
+  import DamlPackageStore.*
 
   private val pkgData: concurrent.Map[LfPackageId, (DamlLf.Archive, String256M)] =
     new ConcurrentHashMap[LfPackageId, (DamlLf.Archive, String256M)].asScala

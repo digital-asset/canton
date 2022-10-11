@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import cats.Order
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
@@ -17,6 +17,12 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.SafeSimpleString
+import com.digitalasset.canton.version.{
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 import io.circe.Encoder
 import slick.jdbc.{GetResult, SetParameter}
@@ -81,7 +87,8 @@ trait CryptoKeyPairKey extends CryptoKey {
   def isPublicKey: Boolean
 }
 
-trait CryptoKeyPair[PK <: PublicKey, SK <: PrivateKey] {
+trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
+    extends HasVersionedWrapper[VersionedMessage[CryptoKeyPair[PK, SK]]] {
 
   require(
     publicKey.id == privateKey.id,
@@ -94,12 +101,25 @@ trait CryptoKeyPair[PK <: PublicKey, SK <: PrivateKey] {
   // The keypair is identified by the public key's id
   def id: Fingerprint = publicKey.id
 
+  override def toProtoVersioned(
+      version: ProtocolVersion
+  ): VersionedMessage[CryptoKeyPair[PK, SK]] = {
+    VersionedMessage(toProtoCryptoKeyPairV0.toByteString, 0)
+  }
+
   protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair
 
-  def toProtoCryptoKeyPair: v0.CryptoKeyPair = v0.CryptoKeyPair(toProtoCryptoKeyPairPairV0)
+  def toProtoCryptoKeyPairV0: v0.CryptoKeyPair = v0.CryptoKeyPair(toProtoCryptoKeyPairPairV0)
 }
 
-object CryptoKeyPair {
+object CryptoKeyPair
+    extends HasVersionedMessageCompanion[CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey]] {
+
+  override protected def name: String = "crypto key pair"
+
+  val supportedProtoVersions: Map[Int, Parser] = Map(
+    0 -> supportedProtoVersion(v0.CryptoKeyPair)(fromProtoCryptoKeyPairV0)
+  )
 
   def fromProtoCryptoKeyPairV0(
       keyPair: v0.CryptoKeyPair
@@ -124,7 +144,7 @@ object CryptoKeyPair {
     } yield pair
 }
 
-trait PublicKey extends CryptoKeyPairKey {
+trait PublicKey extends CryptoKeyPairKey with HasVersionedWrapper[VersionedMessage[PublicKey]] {
 
   def fingerprint: Fingerprint = id
 
@@ -133,6 +153,9 @@ trait PublicKey extends CryptoKeyPairKey {
   def isSigning: Boolean = purpose == KeyPurpose.Signing
 
   override def isPublicKey: Boolean = true
+
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[PublicKey] =
+    VersionedMessage(toProtoPublicKeyV0.toByteString, 0)
 
   protected def toProtoPublicKeyKeyV0: v0.PublicKey.Key
 
@@ -166,10 +189,16 @@ object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
 
 }
 
-trait PublicKeyWithName extends Product with Serializable {
+trait PublicKeyWithName
+    extends Product
+    with Serializable
+    with HasVersionedWrapper[VersionedMessage[PublicKeyWithName]] {
   type K <: PublicKey
   def publicKey: K
   def name: Option[KeyName]
+
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[PublicKeyWithName] =
+    VersionedMessage(toProtoV0.toByteString, 0)
 
   def toProtoV0: v0.PublicKeyWithName =
     v0.PublicKeyWithName(

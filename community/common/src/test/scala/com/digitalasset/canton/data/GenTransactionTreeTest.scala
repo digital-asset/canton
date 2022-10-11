@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
@@ -93,13 +93,6 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       }
 
       "be serialized and deserialized" in {
-        val transactionTree = example.transactionTree
-        GenTransactionTree
-          .fromByteString(
-            factory.cryptoOps,
-            transactionTree.toProtoV0.toByteString,
-          ) shouldEqual Right(transactionTree)
-
         val fullInformeeTree = example.fullInformeeTree
         FullInformeeTree
           .fromByteString(factory.cryptoOps)(
@@ -183,7 +176,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       factory.submitterMetadata,
       factory.commonMetadata,
       factory.participantMetadata,
-      MerkleSeq.fromSeq(factory.cryptoOps)(Seq(singleCreateView)),
+      MerkleSeq.fromSeq(factory.cryptoOps)(Seq(singleCreateView), testedProtocolVersion),
     )
 
     "several root views have the same hash" must {
@@ -192,7 +185,10 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           factory.submitterMetadata,
           factory.commonMetadata,
           factory.participantMetadata,
-          MerkleSeq.fromSeq(factory.cryptoOps)(Seq(singleCreateView, singleCreateView)),
+          MerkleSeq.fromSeq(factory.cryptoOps)(
+            Seq(singleCreateView, singleCreateView),
+            testedProtocolVersion,
+          ),
         ) should matchPattern {
           case Left(message: String)
               if message.matches(
@@ -214,7 +210,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           factory.submitterMetadata,
           factory.commonMetadata,
           factory.participantMetadata,
-          MerkleSeq.fromSeq(factory.cryptoOps)(Seq(parentView)),
+          MerkleSeq.fromSeq(factory.cryptoOps)(Seq(parentView), testedProtocolVersion),
         ) should matchPattern {
           case Left(message: String)
               if message.matches(
@@ -379,7 +375,10 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 
         val view1WithParticipantDataUnblinded =
           view1.copy(viewParticipantData = view1Unblinded.viewParticipantData)
-        val rootViews = MerkleSeq.fromSeq(factory.cryptoOps)(Seq(view1WithParticipantDataUnblinded))
+        val rootViews = MerkleSeq.fromSeq(factory.cryptoOps)(
+          Seq(view1WithParticipantDataUnblinded),
+          testedProtocolVersion,
+        )
 
         val treeWithViewMetadataUnblinded =
           informeeTree.copy(rootViews = rootViews)(factory.cryptoOps)
@@ -427,7 +426,10 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 
         val viewCommonDataBlinded =
           fullInformeeTree.copy(rootViews =
-            MerkleSeq.fromSeq(factory.cryptoOps)(rootViewsWithCommonDataBlinded)
+            MerkleSeq.fromSeq(factory.cryptoOps)(
+              rootViewsWithCommonDataBlinded,
+              testedProtocolVersion,
+            )
           )(factory.cryptoOps)
 
         FullInformeeTree
@@ -440,7 +442,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
   }
 
   "Witnesses" must {
-    import GenTransactionTreeTest._
+    import GenTransactionTreeTest.*
 
     "correctly compute recipients from witnesses" in {
       def mkWitnesses(setup: Seq[Set[Int]]): Witnesses = Witnesses(setup.map(_.map(informee)))

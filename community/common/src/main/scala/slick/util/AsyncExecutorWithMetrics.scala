@@ -12,11 +12,11 @@ import slick.util.AsyncExecutor.{PrioritizedRunnable, Priority, WithConnection}
 
 import java.lang.management.ManagementFactory
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import java.util.concurrent.{TimeUnit, _}
+import java.util.concurrent.{TimeUnit, *}
 import javax.management.{InstanceNotFoundException, ObjectName}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.util.control.NonFatal
 
 @SuppressWarnings(

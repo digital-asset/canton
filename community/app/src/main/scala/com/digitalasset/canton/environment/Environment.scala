@@ -214,6 +214,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       HealthServer(_, metricsFactory.health, timeouts, loggerFactory)(this)
     )
 
+  metricsFactory.forJvm.registerExecutionContextQueueSize(() => executionContext.queueSize)
+
   lazy val domains =
     new DomainNodes(
       createDomain,
@@ -264,7 +266,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           .await("auto-connect to local domain")(connectET.value)
       }
     logger.info(s"Auto-connecting local participants ${connectParticipants
-      .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
+        .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
     activeDomains
       .traverse(toDomainConfig)
       .traverse_(config =>
@@ -311,7 +313,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           ParticipantApis(node.config.ledgerApi.port.unwrap, node.config.adminApi.port.unwrap),
         )
       }.toMap
-      import io.circe.syntax._
+      import io.circe.syntax.*
       implicit val encoder: Encoder[ParticipantApis] =
         Encoder.forProduct2("ledgerApi", "adminApi") { apis =>
           (apis.ledgerApi, apis.adminApi)

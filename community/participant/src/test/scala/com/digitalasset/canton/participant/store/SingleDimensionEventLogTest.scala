@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Time}
-import com.digitalasset.canton._
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.LedgerSyncEvent.PublicPackageUploadRejected
 import com.digitalasset.canton.participant.protocol.TransactionUpdate
@@ -18,15 +17,18 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEvent,
   TimestampedEventAndCausalChange,
 }
-import com.digitalasset.canton.participant.{
-  LedgerSyncEvent,
-  LedgerSyncRecordTime,
-  LocalOffset,
-  RequestCounter,
-}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{
+  BaseTest,
+  LedgerSubmissionId,
+  LedgerTransactionId,
+  LfTimestamp,
+  RequestCounter,
+  SequencerCounter,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 
@@ -36,7 +38,7 @@ import scala.concurrent.Future
 
 trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
   this: AsyncWordSpec =>
-  import SingleDimensionEventLogTest._
+  import SingleDimensionEventLogTest.*
 
   lazy val id: EventLogId = DbEventLogTestResources.dbSingleDimensionEventLogEventLogId
 
@@ -82,7 +84,13 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
 
   lazy val domain1: DomainId = DomainId.tryFromString("domain::one")
   lazy val update: TransactionUpdate =
-    TransactionUpdate(Set.empty, CantonTimestamp.MinValue, domain1, 0L, testedProtocolVersion)
+    TransactionUpdate(
+      Set.empty,
+      CantonTimestamp.MinValue,
+      domain1,
+      RequestCounter(0),
+      testedProtocolVersion,
+    )
 
   def singleDimensionEventLog(mk: () => SingleDimensionEventLog[EventLogId]): Unit = {
 
@@ -248,9 +256,17 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
       "publish events with extreme counters and timestamps" in withEventLog { eventLog =>
         logger.debug("Starting 9")
         val event1 =
-          generateEvent(LedgerSyncRecordTime.MinValue, Long.MinValue, Some(Long.MinValue))
+          generateEvent(
+            LedgerSyncRecordTime.MinValue,
+            Long.MinValue,
+            Some(SequencerCounter(Long.MinValue)),
+          )
         val event2 =
-          generateEvent(LedgerSyncRecordTime.MaxValue, Long.MaxValue, Some(Long.MaxValue))
+          generateEvent(
+            LedgerSyncRecordTime.MaxValue,
+            Long.MaxValue,
+            Some(SequencerCounter.MaxValue),
+          )
 
         for {
           inserts <- eventLog.insertsUnlessEventIdClash(
@@ -393,7 +409,10 @@ trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
           q1 <- eventLog.existsBetween(CantonTimestamp(ts1), 2L)
           q2 <- eventLog.existsBetween(CantonTimestamp(ts1).immediateSuccessor, 2L)
           q3 <- eventLog.existsBetween(CantonTimestamp(ts2), 0L)
-          q4 <- eventLog.existsBetween(CantonTimestamp.MaxValue, RequestCounter.MaxValue)
+          q4 <- eventLog.existsBetween(
+            CantonTimestamp.MaxValue,
+            RequestCounter.MaxValue.asLocalOffset,
+          )
           q5 <- eventLog.existsBetween(CantonTimestamp(ts3), 3L)
         } yield {
           logger.debug("Finished 15")
@@ -440,7 +459,7 @@ object SingleDimensionEventLogTest {
   def generateEvent(
       recordTime: LedgerSyncRecordTime,
       localOffset: LocalOffset,
-      requestSequencerCounter: Option[SequencerCounter] = Some(42L),
+      requestSequencerCounter: Option[SequencerCounter] = Some(SequencerCounter(42)),
   )(implicit traceContext: TraceContext): TimestampedEvent =
     TimestampedEvent(
       PublicPackageUploadRejected(

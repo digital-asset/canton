@@ -7,7 +7,7 @@ import com.google.protobuf.ByteString
 
 import java.nio.{ByteBuffer, ByteOrder, ShortBuffer}
 import scala.concurrent.blocking
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** A running digest of a set of bytes, where elements can be added and removed.
   *
@@ -18,7 +18,7 @@ import scala.jdk.CollectionConverters._
   *    add an element 2^16 times; i.e., taking a digest d, then adding the same element 2^16 times results in d again.
   */
 class LtHash16 private (private val buffer: Array[Byte]) {
-  import LtHash16._
+  import LtHash16.*
 
   require(
     buffer.length == BYTE_LENGTH,

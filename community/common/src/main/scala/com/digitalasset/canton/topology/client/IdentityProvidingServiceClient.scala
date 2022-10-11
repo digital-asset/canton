@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
@@ -13,21 +13,21 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
   TopologyTransactionProcessingSubscriber,
 }
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, checked}
 
 import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 // architecture-handbook-entry-begin: IdentityProvidingServiceClient

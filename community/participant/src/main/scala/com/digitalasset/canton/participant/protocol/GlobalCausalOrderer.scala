@@ -10,7 +10,7 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
 import com.digitalasset.canton.participant.store.MultiDomainCausalityStore
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -137,14 +137,14 @@ class GlobalCausalOrderer(
       val seen = domainCausalityStore.highestSeenOn(id)
       val finished = seen.exists(t => !t.isBefore(timestamp))
       val connected = connectedDomains(id)
-      //TODO(i6180): Revisit this code with respect to changing domain topologies
+      // TODO(i6180): Revisit this code with respect to changing domain topologies
       !finished && connected
     }
     clk.isEmpty
   }
 
   override def close(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Lifecycle.close(
       exQueue.asCloseable("global-causal-orderer-sequential-queue", timeouts.shutdownShort.unwrap)
     )(logger)

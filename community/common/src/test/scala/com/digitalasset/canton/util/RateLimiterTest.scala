@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
@@ -12,7 +12,7 @@ import org.scalatest.prop.TableFor3
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.concurrent.Future
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 @SuppressWarnings(Array("org.wartremover.warts.While"))
 class RateLimiterTest extends BaseTestWordSpec with HasExecutionContext {

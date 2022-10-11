@@ -1,6 +1,6 @@
-import sbt.Keys._
-import sbt._
-import wartremover.WartRemover.autoImport._
+import sbt.Keys.*
+import sbt.*
+import wartremover.WartRemover.autoImport.*
 import wartremover.contrib.ContribWart
 
 /** Settings for all JVM projects in this build. Contains compiler flags,
@@ -18,8 +18,8 @@ object JvmRulesPlugin extends AutoPlugin {
   }
   import de.heikoseeberger.sbtheader.{
     LineCommentCreator,
-    CommentStyle => HeaderCommentStyle,
-    FileType => HeaderFileType,
+    CommentStyle as HeaderCommentStyle,
+    FileType as HeaderFileType,
   }
 
   lazy val cantonRepoHeaderSettings = Seq(
@@ -83,7 +83,7 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Xlint:_,-unused",
             "-Xmacro-settings:materialize-derivations",
             "-Xfatal-warnings",
-            "-Wconf:cat=unused-imports:info", //reports unused-imports without counting them as warnings, and without causing -Werror to fail.
+            "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
             "-Ywarn-dead-code",
             "-Ywarn-numeric-widen",
             "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
@@ -137,7 +137,7 @@ object JvmRulesPlugin extends AutoPlugin {
       },
       // Disable wart checks on generated code
       wartremoverExcluded += (Compile / sourceManaged).value,
-      //licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),
+      // licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),
       //
       // allow sbt to pull scaladoc from managed dependencies if referenced in our ScalaDoc links
       autoAPIMappings := true,

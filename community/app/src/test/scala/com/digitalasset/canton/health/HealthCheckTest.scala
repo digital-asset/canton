@@ -20,7 +20,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 /** Stub health check that returns the configured response to all isHealthy calls.

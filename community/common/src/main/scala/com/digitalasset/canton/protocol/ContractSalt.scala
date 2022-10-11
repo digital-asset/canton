@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.topology.{DomainId, MediatorId}

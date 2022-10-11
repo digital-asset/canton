@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.common.domain
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,

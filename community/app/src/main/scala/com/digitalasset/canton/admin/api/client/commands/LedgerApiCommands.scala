@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.active_contracts_service.ActiveContractsServiceGrpc.ActiveContractsServiceStub
 import com.daml.ledger.api.v1.active_contracts_service.{
@@ -18,11 +18,11 @@ import com.daml.ledger.api.v1.admin.metering_report_service.{
   MeteringReportServiceGrpc,
 }
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
-import com.daml.ledger.api.v1.admin.package_management_service._
+import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.ledger.api.v1.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
-import com.daml.ledger.api.v1.admin.participant_pruning_service._
+import com.daml.ledger.api.v1.admin.participant_pruning_service.*
 import com.daml.ledger.api.v1.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
-import com.daml.ledger.api.v1.admin.party_management_service._
+import com.daml.ledger.api.v1.admin.party_management_service.*
 import com.daml.ledger.api.v1.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
 import com.daml.ledger.api.v1.admin.user_management_service.{
   CreateUserRequest,
@@ -39,12 +39,12 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   ListUsersResponse,
   RevokeUserRightsRequest,
   RevokeUserRightsResponse,
-  Right => UserRight,
+  Right as UserRight,
   User,
   UserManagementServiceGrpc,
 }
 import com.daml.ledger.api.v1.command_completion_service.CommandCompletionServiceGrpc.CommandCompletionServiceStub
-import com.daml.ledger.api.v1.command_completion_service._
+import com.daml.ledger.api.v1.command_completion_service.*
 import com.daml.ledger.api.v1.command_service.CommandServiceGrpc.CommandServiceStub
 import com.daml.ledger.api.v1.command_service.{
   CommandServiceGrpc,
@@ -57,7 +57,7 @@ import com.daml.ledger.api.v1.command_submission_service.{
   CommandSubmissionServiceGrpc,
   SubmitRequest,
 }
-import com.daml.ledger.api.v1.commands.{Command, Commands => CommandsV1}
+import com.daml.ledger.api.v1.commands.{Command, Commands as CommandsV1}
 import com.daml.ledger.api.v1.completion.Completion
 import com.daml.ledger.api.v1.ledger_configuration_service.LedgerConfigurationServiceGrpc.LedgerConfigurationServiceStub
 import com.daml.ledger.api.v1.ledger_configuration_service.{
@@ -77,8 +77,8 @@ import com.daml.ledger.api.v1.testing.time_service.{
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.transaction_service.TransactionServiceGrpc.TransactionServiceStub
-import com.daml.ledger.api.v1.transaction_service._
-import com.daml.ledger.client.binding.{Primitive => P}
+import com.daml.ledger.api.v1.transaction_service.*
+import com.daml.ledger.client.binding.{Primitive as P}
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -103,7 +103,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import com.google.protobuf.empty.Empty
-import io.grpc._
+import io.grpc.*
 import io.grpc.stub.StreamObserver
 
 import java.time.Instant
@@ -401,7 +401,7 @@ object LedgerApiCommands {
           service: CommandCompletionServiceStub,
           request: CompletionStreamRequest,
       ): Future[Seq[Completion]] = {
-        import scala.jdk.DurationConverters._
+        import scala.jdk.DurationConverters.*
         streamedResponse[CompletionStreamRequest, CompletionStreamResponse, Completion](
           service.completionStream,
           _.completions.filter(filter),
@@ -728,7 +728,7 @@ object LedgerApiCommands {
         ]] {
 
       override def createRequest(): Either[String, GetActiveContractsRequest] = {
-        import scalaz.syntax.tag._
+        import scalaz.syntax.tag.*
         val filter =
           if (templateFilter.nonEmpty) {
             Filters(

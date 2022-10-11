@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.error.ErrorCategory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -13,14 +13,14 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   NotImplementedYet,
   ValueDeserializationError,
 }
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v0.RejectionReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.empty
 import pprint.Tree
 
@@ -232,7 +232,7 @@ object Verdict
 
   def fromProtoV0(verdictP: v0.Verdict): ParsingResult[Verdict] = {
     val v0.Verdict(someVerdictP) = verdictP
-    import v0.Verdict.{SomeVerdict => V}
+    import v0.Verdict.{SomeVerdict as V}
 
     val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0))
 
@@ -248,7 +248,7 @@ object Verdict
 
   def fromProtoV1(verdictP: v1.Verdict): ParsingResult[Verdict] = {
     val v1.Verdict(someVerdictP) = verdictP
-    import v1.Verdict.{SomeVerdict => V}
+    import v1.Verdict.{SomeVerdict as V}
 
     val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(1))
 

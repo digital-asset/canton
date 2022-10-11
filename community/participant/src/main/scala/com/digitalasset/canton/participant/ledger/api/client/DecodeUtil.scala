@@ -7,8 +7,8 @@ import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.api.v1.event.{ArchivedEvent, CreatedEvent}
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.api.v1.{value => V}
-import com.daml.ledger.client.binding.{Contract, Primitive => P, Template, TemplateCompanion}
+import com.daml.ledger.api.v1.{value as V}
+import com.daml.ledger.client.binding.{Contract, Primitive as P, Template, TemplateCompanion}
 
 object DecodeUtil {
   def decodeAllCreated[T](

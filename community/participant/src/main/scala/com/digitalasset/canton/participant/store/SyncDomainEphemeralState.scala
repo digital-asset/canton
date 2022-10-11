@@ -75,6 +75,7 @@ class SyncDomainEphemeralState(
   val requestJournal =
     new RequestJournal(
       persistentState.requestJournalStore,
+      metrics,
       loggerFactory,
       startingPoints.processing.nextRequestCounter,
     )
@@ -146,7 +147,7 @@ class SyncDomainEphemeralState(
   }
 
   override def close(): Unit = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
     Lifecycle.close(
       requestTracker,
       recordOrderPublisher,

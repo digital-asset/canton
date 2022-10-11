@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.examples.Iou.Iou
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -26,7 +26,7 @@ class ContractIdTest extends AnyWordSpec with BaseTest {
   }
 
   "Conversion between API and LF types" should {
-    import ContractIdSyntax._
+    import ContractIdSyntax.*
     "work both ways" in {
       val discriminator = ExampleTransactionFactory.lfHash(1)
       val hash = Hash.build(HashPurposeTest.testHashPurpose, HashAlgorithm.Sha256).add(0).finish()

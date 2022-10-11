@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.Applicative
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
@@ -104,18 +104,22 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
       sequencedEventP: v0.SequencedEvent,
       bytes: ByteString,
   ): ParsingResult[SequencedEvent[Env]] = {
-    import cats.syntax.traverse._
+    import cats.syntax.traverse.*
     val v0.SequencedEvent(counter, tsP, domainIdP, mbMsgIdP, mbBatchP, mbDeliverErrorReasonP) =
       sequencedEventP
 
     val protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+    val sequencerCounter = SequencerCounter(counter)
 
     for {
       timestamp <- ProtoConverter
         .required("SequencedEvent.timestamp", tsP)
         .flatMap(CantonTimestamp.fromProtoPrimitive)
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "SequencedEvent.domainId")
-      mbBatch <- mbBatchP.traverse(Batch.fromProtoV0(envelopeDeserializer))
+      // TODO(i10428) Prevent zip bombing when decompressing the request
+      mbBatch <- mbBatchP.traverse(
+        Batch.fromProtoV0(envelopeDeserializer)(_, maxRequestSize = MaxRequestSize.NoLimit)
+      )
       mbDeliverErrorReason <- mbDeliverErrorReasonP.traverse(DeliverErrorReason.fromProtoV0)
       // errors have an error reason, delivers have a batch
       event <- ((mbDeliverErrorReason, mbBatch) match {
@@ -128,7 +132,13 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
             msgId <- ProtoConverter
               .required("DeliverError", mbMsgIdP)
               .flatMap(MessageId.fromProtoPrimitive)
-          } yield new DeliverError(counter, timestamp, domainId, msgId, deliverErrorReason)(
+          } yield new DeliverError(
+            sequencerCounter,
+            timestamp,
+            domainId,
+            msgId,
+            deliverErrorReason,
+          )(
             protocolVersionRepresentative,
             Some(bytes),
           ) {}
@@ -136,7 +146,7 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
           mbMsgIdP match {
             case None =>
               Right(
-                Deliver(counter, timestamp, domainId, None, batch)(
+                Deliver(sequencerCounter, timestamp, domainId, None, batch)(
                   protocolVersionRepresentative,
                   Some(bytes),
                 )
@@ -145,7 +155,7 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
               MessageId
                 .fromProtoPrimitive(msgId)
                 .map(msgId =>
-                  Deliver(counter, timestamp, domainId, Some(msgId), batch)(
+                  Deliver(sequencerCounter, timestamp, domainId, Some(msgId), batch)(
                     protocolVersionRepresentative,
                     Some(bytes),
                   )
@@ -168,7 +178,7 @@ sealed abstract case class DeliverError private[sequencing] (
 ) extends SequencedEvent[Nothing]
     with NoCopy {
   def toProtoV0: v0.SequencedEvent = v0.SequencedEvent(
-    counter = counter,
+    counter = counter.toProtoPrimitive,
     timestamp = Some(timestamp.toProtoPrimitive),
     domainId = domainId.toProtoPrimitive,
     messageId = Some(messageId.toProtoPrimitive),
@@ -231,7 +241,7 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
   lazy val isReceipt: Boolean = messageId.isDefined
 
   private[sequencing] def toProtoV0: v0.SequencedEvent = v0.SequencedEvent(
-    counter = counter,
+    counter = counter.toProtoPrimitive,
     timestamp = Some(timestamp.toProtoPrimitive),
     domainId = domainId.toProtoPrimitive,
     messageId = messageId.map(_.toProtoPrimitive),

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -10,7 +11,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore.DeduplicationData
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.topology.{MediatorId, Member}
@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ConcurrentNavigableMap, ConcurrentSkipListMap}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 private[mediator] trait MediatorDeduplicationStore extends NamedLogging {
 
@@ -189,7 +189,7 @@ private[mediator] object MediatorDeduplicationStore {
       )
   }
 
-  import DbStorage.Implicits._
+  import DbStorage.Implicits.*
 
   implicit val setParameterDeduplicationData: SetParameter[DeduplicationData] = {
     case (DeduplicationData(uuid, requestTime, expireAfter), pp) =>
@@ -234,10 +234,10 @@ private[mediator] class DbMediatorDeduplicationStore(
     extends MediatorDeduplicationStore
     with DbStore {
 
-  import Member.DbStorageImplicits._
-  import storage.api._
+  import Member.DbStorageImplicits.*
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("mediator-deduplication-store")
 
   override protected def doInitialize(

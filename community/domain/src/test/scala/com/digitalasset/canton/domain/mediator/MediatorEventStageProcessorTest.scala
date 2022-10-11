@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,15 +14,16 @@ import com.digitalasset.canton.domain.mediator.store.{
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -97,11 +97,11 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
     )
 
     def deliver(timestamp: CantonTimestamp): Deliver[Nothing] =
-      SequencerTestUtils.mockDeliver(0L, timestamp, domainId)
+      SequencerTestUtils.mockDeliver(0, timestamp, domainId)
 
     def request(timestamp: CantonTimestamp): Deliver[DefaultOpenEnvelope] =
       Deliver.create[DefaultOpenEnvelope](
-        0L,
+        SequencerCounter(0),
         timestamp,
         domainId,
         None,
@@ -182,7 +182,14 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       loggerFactory.assertLogs(
         env.processor.handle(
           toTracedSignedEvents(
-            Deliver.create(1L, CantonTimestamp.Epoch, domainId, None, batch, testedProtocolVersion)
+            Deliver.create(
+              SequencerCounter(1),
+              CantonTimestamp.Epoch,
+              domainId,
+              None,
+              batch,
+              testedProtocolVersion,
+            )
           )
         ),
         expectedMessages map { error => logEntry: LogEntry =>
@@ -265,12 +272,15 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
       }
 
       for {
-        assertion1 <- test(deliver1Ts, Set(MediatorEvent.Timeout(0, deliver1Ts, pendingRequest1Id)))
+        assertion1 <- test(
+          deliver1Ts,
+          Set(MediatorEvent.Timeout(SequencerCounter(0), deliver1Ts, pendingRequest1Id)),
+        )
         assertion2 <- test(
           deliver2Ts,
           Set(
-            MediatorEvent.Timeout(0, deliver2Ts, pendingRequest1Id),
-            MediatorEvent.Timeout(0, deliver2Ts, pendingRequest2Id),
+            MediatorEvent.Timeout(SequencerCounter(0), deliver2Ts, pendingRequest1Id),
+            MediatorEvent.Timeout(SequencerCounter(0), deliver2Ts, pendingRequest2Id),
           ),
         )
       } yield (assertion1, assertion2) shouldBe (succeed, succeed)

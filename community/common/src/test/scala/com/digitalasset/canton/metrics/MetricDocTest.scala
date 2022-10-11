@@ -4,6 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
+import com.daml.metrics.MetricHandle.Timer
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -12,21 +13,21 @@ class MetricDocTest extends AnyWordSpec with BaseTest {
   lazy val tm = new metrics.Timer()
   class DocVar {
     @MetricDoc.Tag("varred summary", "varred desc")
-    val varred = MetricHandle.TimerM("varred", tm)
+    val varred = Timer("varred", tm)
   }
 
   class DocItem {
     @MetricDoc.Tag("top summary", "top desc")
-    val top = MetricHandle.TimerM("top", tm)
-    val utop = MetricHandle.TimerM("utop", tm)
+    val top = Timer("top", tm)
+    val utop = Timer("utop", tm)
     object nested {
       @MetricDoc.Tag("nested.n1 summary", "n1 desc")
-      val n1 = MetricHandle.TimerM("nested.n1", tm)
-      val u1 = MetricHandle.TimerM("nested.u1", tm)
+      val n1 = Timer("nested.n1", tm)
+      val u1 = Timer("nested.u1", tm)
       object nested2 {
         @MetricDoc.Tag("nested.n2 summary", "n2 desc")
-        val n2 = MetricHandle.TimerM("nested.n2", tm)
-        val u2 = MetricHandle.TimerM("nested.u2", tm)
+        val n2 = Timer("nested.n2", tm)
+        val u2 = Timer("nested.u2", tm)
       }
     }
     val other = new DocVar()

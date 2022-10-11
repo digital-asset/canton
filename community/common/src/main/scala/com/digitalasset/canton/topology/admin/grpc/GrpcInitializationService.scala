@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.topology.admin.grpc
 
-import cats.instances.future._
-import cats.syntax.either._
+import cats.instances.future.*
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.store.CryptoPublicStore
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.admin.v0._
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.v0.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.either._
+import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{Hash, HashOps, TestHash}
 import com.digitalasset.canton.data.MerkleSeq.{Branch, MerkleSeqElement, Singleton}
 import com.digitalasset.canton.data.MerkleTree.{
@@ -12,50 +12,61 @@ import com.digitalasset.canton.data.MerkleTree.{
   RevealIfNeedBe,
   RevealSubtree,
 }
-import com.digitalasset.canton.data.MerkleTreeTest.Leaf1
+import com.digitalasset.canton.data.MerkleTreeTest.{AbstractLeaf, Leaf1}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.protocol.RootHash
-import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
 import org.scalatest.prop.TableFor4
 import org.scalatest.wordspec.AnyWordSpec
 
 class MerkleSeqTest extends AnyWordSpec with BaseTest {
 
-  import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+  import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 
   val hashOps: HashOps = MerkleTreeTest.hashOps
 
   val DummyHash: Hash = TestHash.digest("dummy")
 
-  def leaf(index: Int): Leaf1 = Leaf1(index)
+  def leaf(index: Int): Leaf1 =
+    Leaf1(index)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
 
-  def singleton(index: Int): Singleton[Leaf1] = Singleton(leaf(index))(hashOps)
+  def singleton(index: Int): Singleton[Leaf1] =
+    Singleton(leaf(index), testedProtocolVersion)(hashOps)
 
   def branch(
       first: MerkleTree[MerkleSeqElement[Leaf1]],
       second: MerkleTree[MerkleSeqElement[Leaf1]],
   ): Branch[Leaf1] =
-    Branch(first, second)(hashOps)
+    Branch(first, second, testedProtocolVersion)(hashOps)
 
-  val Empty: MerkleSeq[Nothing] = MerkleSeq(None)(hashOps)
+  val Empty: MerkleSeq[Nothing] = MerkleSeq(None, testedProtocolVersion)(hashOps)
 
-  val OneUnblindedElement: MerkleSeq[Leaf1] = MerkleSeq(Some(singleton(0)))(hashOps)
+  val OneUnblindedElement: MerkleSeq[Leaf1] =
+    MerkleSeq(Some(singleton(0)), testedProtocolVersion)(hashOps)
 
   val OneBlindedElement: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(Singleton(blinded(leaf(0)))(hashOps)))(hashOps)
+    MerkleSeq(
+      Some(
+        Singleton(blinded(leaf(0)), testedProtocolVersion)(hashOps)
+      ),
+      testedProtocolVersion,
+    )(hashOps)
 
-  val OneElementFullyBlinded: MerkleSeq[Leaf1] = MerkleSeq(Some(blinded(singleton(0))))(hashOps)
+  val OneElementFullyBlinded: MerkleSeq[Leaf1] =
+    MerkleSeq(Some(blinded(singleton(0))), testedProtocolVersion)(hashOps)
 
-  val FullyBlinded: MerkleSeq[Leaf1] = MerkleSeq(Some(BlindedNode(RootHash(DummyHash))))(hashOps)
+  val FullyBlinded: MerkleSeq[Leaf1] =
+    MerkleSeq(Some(BlindedNode(RootHash(DummyHash))), testedProtocolVersion)(hashOps)
 
   val TwoUnblindedElements: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(branch(singleton(0), singleton(1))))(hashOps)
+    MerkleSeq(Some(branch(singleton(0), singleton(1))), testedProtocolVersion)(hashOps)
 
   val TwoBlindedElements: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(branch(blinded(singleton(0)), blinded(singleton(1)))))(hashOps)
+    MerkleSeq(Some(branch(blinded(singleton(0)), blinded(singleton(1)))), testedProtocolVersion)(
+      hashOps
+    )
 
   val OneBlindedOneUnblinded: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(branch(blinded(singleton(0)), singleton(1))))(hashOps)
+    MerkleSeq(Some(branch(blinded(singleton(0)), singleton(1))), testedProtocolVersion)(hashOps)
 
   val TwoElementsRootHash: RootHash =
     TwoUnblindedElements.rootOrEmpty
@@ -63,15 +74,18 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       .rootHash
 
   val TwoElementsFullyBlinded: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(BlindedNode(TwoElementsRootHash)))(hashOps)
+    MerkleSeq(Some(BlindedNode(TwoElementsRootHash)), testedProtocolVersion)(hashOps)
 
   val SevenElementsLeft: Branch[Leaf1] =
     branch(branch(singleton(0), singleton(1)), branch(singleton(2), singleton(3)))
   val SevenElementsRight: Branch[Leaf1] = branch(branch(singleton(4), singleton(5)), singleton(6))
   val SevenElements: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(branch(SevenElementsLeft, SevenElementsRight)))(hashOps)
+    MerkleSeq(Some(branch(SevenElementsLeft, SevenElementsRight)), testedProtocolVersion)(hashOps)
   val SevenElementsRootUnblinded: MerkleSeq[Leaf1] =
-    MerkleSeq(Some(branch(blinded(SevenElementsLeft), blinded(SevenElementsRight))))(hashOps)
+    MerkleSeq(
+      Some(branch(blinded(SevenElementsLeft), blinded(SevenElementsRight))),
+      testedProtocolVersion,
+    )(hashOps)
 
   val testCases: TableFor4[String, Seq[MerkleTree[Leaf1]], MerkleSeq[Leaf1], MerkleSeq[Leaf1]] =
     Table[String, Seq[MerkleTree[Leaf1]], MerkleSeq[Leaf1], MerkleSeq[Leaf1]](
@@ -103,18 +117,18 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>
     s"A MerkleSeq with $name" can {
       "be constructed" in {
-        MerkleSeq.fromSeq(hashOps)(elements) shouldEqual merkleSeq
+        MerkleSeq.fromSeq(hashOps)(elements, testedProtocolVersion) shouldEqual merkleSeq
       }
 
       "be serialized" in {
-        val merkleSeqP = merkleSeq.toProtoV0
+        val merkleSeqP = merkleSeq.toByteString
         val merkleSeqDeserialized =
           MerkleSeq
-            .fromProtoV0(
-              hashOps,
-              MerkleTreeTest
-                .leafFromByteString(Leaf1)(_)
-                .leftMap(ProtoDeserializationError.CryptoDeserializationError(_)),
+            .fromByteString(
+              (
+                hashOps,
+                AbstractLeaf.fromByteString(testedProtocolVersion)(_),
+              )
             )(merkleSeqP)
             .value
 
@@ -125,7 +139,8 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
 
       "blind the root" in {
         val policy = rootHash.toList.map(_ -> BlindSubtree).toMap
-        val expectedBlindedSeq = MerkleSeq(rootHash.map(BlindedNode(_)))(hashOps)
+        val expectedBlindedSeq =
+          MerkleSeq(rootHash.map(BlindedNode(_)), testedProtocolVersion)(hashOps)
 
         merkleSeq.doBlind(policy) shouldEqual expectedBlindedSeq
       }
@@ -146,7 +161,7 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       }
 
       "compute the right indices" in {
-        val merkleSeq = MerkleSeq.fromSeq(hashOps)(elements)
+        val merkleSeq = MerkleSeq.fromSeq(hashOps)(elements, testedProtocolVersion)
         val indices: Seq[MerklePathElement] = MerkleSeq.indicesFromSeq(elements.size)
 
         assert(indices.size == elements.size)
@@ -169,12 +184,19 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
   }
 
   "Mapping changes the tree as expected" in {
-    val inc: Leaf1 => Leaf1 = { case Leaf1(i) => Leaf1(i + 1) }
+    val inc: Leaf1 => Leaf1 = { case Leaf1(i) =>
+      Leaf1(i + 1)(AbstractLeaf.protocolVersionRepresentativeFor(testedProtocolVersion))
+    }
     OneBlindedElement.mapM(inc) shouldBe OneBlindedElement
     OneElementFullyBlinded.mapM(inc) shouldBe OneElementFullyBlinded
-    OneUnblindedElement.mapM(inc) shouldBe MerkleSeq(Some(singleton(1)))(hashOps)
+    OneUnblindedElement.mapM(inc) shouldBe MerkleSeq(Some(singleton(1)), testedProtocolVersion)(
+      hashOps
+    )
     TwoUnblindedElements
-      .mapM(inc) shouldBe MerkleSeq(Some(branch(singleton(1), singleton(2))))(hashOps)
+      .mapM(inc) shouldBe MerkleSeq(
+      Some(branch(singleton(1), singleton(2))),
+      testedProtocolVersion,
+    )(hashOps)
     SevenElements.mapM(inc.compose(inc)) shouldBe SevenElements.mapM(inc).mapM(inc)
   }
 }

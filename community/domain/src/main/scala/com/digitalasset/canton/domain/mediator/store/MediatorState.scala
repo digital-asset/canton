@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
-import cats.instances.future._
+import cats.instances.future.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ConcurrentLinkedQueue, ConcurrentSkipListMap}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Provides state management for messages received by the mediator.
   * Non-finalized response aggregations are kept in memory, such that in case of the node shutting down,

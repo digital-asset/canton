@@ -9,10 +9,10 @@ import org.scalatest.funspec.AnyFunSpec
 import java.util.Random
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class JitterSpec extends AnyFunSpec {
-  //val rng = new SecureRandom()
+  // val rng = new SecureRandom()
   val rng = new java.util.Random()
   val rand = Jitter.randomSource(rng)
   val cap = 2000 milliseconds

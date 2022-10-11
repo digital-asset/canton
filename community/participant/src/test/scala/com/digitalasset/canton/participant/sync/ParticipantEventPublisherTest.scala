@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.participant.domain.DomainAliasResolution
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics

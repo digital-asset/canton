@@ -4,14 +4,14 @@
 package com.digitalasset.canton.resource
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.{DbConfig, LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{CloseContext, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.RetryConfig
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
 import io.functionmeta.functionFullName
@@ -196,7 +196,7 @@ trait DbMigrations { this: NamedLogging =>
           val elapsed = System.nanoTime() - started
           logger.debug(
             s"Finished setting up database schemas after ${LoggerUtil
-              .roundDurationForHumans(Duration.fromNanos(elapsed))}"
+                .roundDurationForHumans(Duration.fromNanos(elapsed))}"
           )
         }
       }

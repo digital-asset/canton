@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.health.admin.grpc
 
-import better.files._
+import better.files.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.health.admin.grpc.GrpcStatusService.DefaultHealthDumpChunkSize
 import com.digitalasset.canton.health.admin.v0.{HealthDumpChunk, HealthDumpRequest}

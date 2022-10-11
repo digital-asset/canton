@@ -8,7 +8,7 @@ import com.digitalasset.canton.resource.DatabaseStorageError.DatabaseStorageDegr
 import com.digitalasset.canton.tracing.TraceContext
 import org.postgresql.util.PSQLException
 
-import java.sql._
+import java.sql.*
 import scala.annotation.tailrec
 import scala.util.{Failure, Try}
 

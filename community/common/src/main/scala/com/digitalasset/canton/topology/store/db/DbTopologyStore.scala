@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.topology.store.db
 
-import cats.instances.future._
-import cats.instances.list._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.instances.future.*
+import cats.instances.list.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{
@@ -19,17 +20,16 @@ import com.digitalasset.canton.crypto.{Fingerprint, PublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.DynamicDomainParameters
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
-import com.digitalasset.canton.topology.store._
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.store.*
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
@@ -60,9 +60,9 @@ class DbTopologyStoreFactory(
       )
       .asInstanceOf[TopologyStore[StoreId]]
 
-  import storage.api._
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("domain-identity-store-factory")
 
   override def allNonDiscriminated(implicit
@@ -106,10 +106,10 @@ class DbPartyMetadataStore(
 ) extends PartyMetadataStore
     with DbStore {
 
-  import DbStorage.Implicits.BuilderChain._
-  import storage.api._
+  import DbStorage.Implicits.BuilderChain.*
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("party-metadata-store")
 
   override def metadataForParty(
@@ -231,9 +231,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     extends TopologyStore[StoreId]
     with DbStore {
 
-  import DbStorage.Implicits.BuilderChain._
-  import storage.api._
-  import storage.converters._
+  import DbStorage.Implicits.BuilderChain.*
+  import storage.api.*
+  import storage.converters.*
 
   private implicit val getResultSignedTopologyTransaction
       : GetResult[SignedTopologyTransaction[TopologyChangeOp]] =
@@ -245,9 +245,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     case _ => false
   }
 
-  private val updatingTime: GaugeM[TimedLoadGauge, Double] =
+  private val updatingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("topology-store-update")
-  private val readTime: GaugeM[TimedLoadGauge, Double] =
+  private val readTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("topology-store-read")
 
   private def buildTransactionStoreNames(
@@ -483,8 +483,8 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   private def asOfQuery(asOf: CantonTimestamp, asOfInclusive: Boolean): SQLActionBuilder = {
 
     sql" AND valid_from #${if (asOfInclusive) "<="
-    else "<"} $asOf AND (valid_until is NULL OR $asOf #${if (asOfInclusive) "<"
-    else "<="} valid_until)"
+      else "<"} $asOf AND (valid_until is NULL OR $asOf #${if (asOfInclusive) "<"
+      else "<="} valid_until)"
   }
 
   override def timestamp(

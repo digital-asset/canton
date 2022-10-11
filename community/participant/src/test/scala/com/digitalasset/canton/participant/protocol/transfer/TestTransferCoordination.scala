@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferCoordinatio
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.TransferProcessorError
 import com.digitalasset.canton.participant.store.memory.InMemoryTransferStore
-import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.time.TimeProofTestUtil
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,

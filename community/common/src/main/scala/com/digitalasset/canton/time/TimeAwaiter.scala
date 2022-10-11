@@ -8,11 +8,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 
-import java.util.PriorityQueue
+import java.util.{ConcurrentModificationException, PriorityQueue}
 import scala.annotation.tailrec
 import scala.concurrent.{Future, Promise, blocking}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Utility to implement a time awaiter
   *
@@ -40,7 +41,9 @@ trait TimeAwaiter {
   }
 
   protected def expireTimeAwaiter(): Unit =
-    awaitTimestampFutures.iterator().asScala.foreach(_._2.shutdown())
+    blocking(awaitTimestampFuturesLock.synchronized {
+      awaitTimestampFutures.iterator().asScala.foreach(_._2.shutdown())
+    })
 
   protected def currentKnownTime: CantonTimestamp
 
@@ -86,10 +89,18 @@ trait TimeAwaiter {
 
   protected def notifyAwaitedFutures(upToInclusive: CantonTimestamp): Unit = {
     @tailrec def go(): Unit = Option(awaitTimestampFutures.peek()) match {
-      case Some((timestamp, awaiter)) if timestamp <= upToInclusive =>
+      case Some(peeked @ (timestamp, awaiter)) if timestamp <= upToInclusive =>
+        val polled = awaitTimestampFutures.poll()
         // Thanks to the synchronization, the priority queue cannot be modified concurrently,
-        // so we get discard the head here.
-        awaitTimestampFutures.poll().discard
+        // but let's be paranoid and check.
+        if (peeked ne polled) {
+          import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
+          ErrorUtil.internalError(
+            new ConcurrentModificationException(
+              s"Insufficient synchronization in time awaiter. Peek returned $peeked, polled returned $polled"
+            )
+          )
+        }
         awaiter.success()
         go()
       case _ =>

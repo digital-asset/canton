@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import akka.stream.Materializer
-import cats.syntax.foldable._
-import cats.syntax.traverseFilter._
+import cats.syntax.foldable.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{
@@ -21,13 +21,13 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.util.{ErrorUtil, retry}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Some of the state of a participant that is not tied to a domain and must survive restarts.

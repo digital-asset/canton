@@ -31,7 +31,7 @@ object ViewPosition {
   val root: ViewPosition = new ViewPosition(List.empty[MerklePathElement])
 
   implicit def prettyViewPosition: Pretty[ViewPosition] = {
-    import com.digitalasset.canton.logging.pretty.Pretty._
+    import com.digitalasset.canton.logging.pretty.Pretty.*
     prettyOfClass(unnamedParam(_.position))
   }
 

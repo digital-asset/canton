@@ -3,26 +3,26 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.admin.api.client.data.crypto._
+import com.digitalasset.canton.admin.api.client.data.crypto.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
 import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters => DynamicDomainParametersInternal,
-  StaticDomainParameters => StaticDomainParametersInternal,
-  v0 => protocolV0,
-  v1 => protocolV1,
+  DynamicDomainParameters as DynamicDomainParametersInternal,
+  StaticDomainParameters as StaticDomainParametersInternal,
+  v0 as protocolV0,
+  v1 as protocolV1,
 }
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{ProtoDeserializationError, crypto => DomainCrypto}
-import io.scalaland.chimney.dsl._
+import com.digitalasset.canton.{ProtoDeserializationError, crypto as DomainCrypto}
+import io.scalaland.chimney.dsl.*
 
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 
 /** Companion object [[com.digitalasset.canton.protocol.StaticDomainParameters]] indicates
   * when the different version were introduces.

@@ -4,11 +4,11 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.alternative.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.domain.mediator.store.MediatorState
@@ -16,15 +16,15 @@ import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, RootHash, v0}
 import com.digitalasset.canton.sequencing.HandlerResult
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.DomainTimeTracker
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -384,7 +384,7 @@ private[mediator] class ConfirmationResponseProcessor(
           }
 
         responseAggregation <- mediatorState.fetch(response.requestId).orElse {
-          //we assume that informee message has already been persisted in mediatorStorage before any participant responds
+          // we assume that informee message has already been persisted in mediatorStorage before any participant responds
           ResponseAggregation
             .alarmMediatorRequestNotFound(
               response.requestId,

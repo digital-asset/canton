@@ -5,7 +5,7 @@ package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 case class MetricsSnapshot(
     timers: Map[String, metrics.Timer],

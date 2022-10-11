@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -126,7 +126,7 @@ object SignedProtocolMessage
       hashOps: HashOps,
       signedMessageP: v0.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
-    import v0.SignedProtocolMessage.{SomeSignedProtocolMessage => Sm}
+    import v0.SignedProtocolMessage.{SomeSignedProtocolMessage as Sm}
     val v0.SignedProtocolMessage(maybeSignatureP, messageBytes) = signedMessageP
     for {
       message <- (messageBytes match {

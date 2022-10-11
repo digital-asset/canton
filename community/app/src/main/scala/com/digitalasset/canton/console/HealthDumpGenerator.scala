@@ -15,7 +15,7 @@ import com.digitalasset.canton.metrics.MetricsSnapshot
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ReleaseVersion
 import io.circe.Encoder
-import io.circe.syntax._
+import io.circe.syntax.*
 
 import scala.annotation.nowarn
 
@@ -60,8 +60,8 @@ trait HealthDumpGenerator[Status <: CantonStatus] {
       outputFile: File,
       extraFilesToZip: Seq[File] = Seq.empty,
   ): File = {
-    import io.circe.generic.auto._
-    import CantonHealthAdministrationEncoders._
+    import io.circe.generic.auto.*
+    import CantonHealthAdministrationEncoders.*
 
     case class EnvironmentInfo(os: String, javaVersion: String)
 
@@ -82,7 +82,7 @@ trait HealthDumpGenerator[Status <: CantonStatus] {
     val config = environment.config.dumpString
 
     val traces = {
-      import scala.jdk.CollectionConverters._
+      import scala.jdk.CollectionConverters.*
       Thread.getAllStackTraces.asScala.toMap
     }
 

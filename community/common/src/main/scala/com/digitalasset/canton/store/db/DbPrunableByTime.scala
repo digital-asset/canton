@@ -4,8 +4,8 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -43,9 +43,9 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
 
   protected[this] implicit val ec: ExecutionContext
 
-  import storage.api._
+  import storage.api.*
 
-  protected val processingTime: GaugeM[TimedLoadGauge, Double]
+  protected val processingTime: Gauge[TimedLoadGauge, Double]
 
   override def pruningStatus(implicit
       traceContext: TraceContext
@@ -83,18 +83,18 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
         sqlu"""
           merge into #$pruning_status_table pruning_status
           using (
-            select 
-              $partitionKey partitionKey, 
-              $phase phase, 
+            select
+              $partitionKey partitionKey,
+              $phase phase,
               $timestamp timestamp
               from
                 dual
-          ) val 
+          ) val
           on (pruning_status.#$partitionColumn = val.partitionKey)
             when matched then
                 update set pruning_status.phase = val.phase, pruning_status.ts = val.timestamp
                 where (pruning_status.ts < val.timestamp or (pruning_status.ts = val.timestamp and val.phase = ${PruningPhase.Completed}))
-            when not matched then 
+            when not matched then
               insert (#$partitionColumn, phase, ts) values (val.partitionKey, val.phase, val.timestamp)
           """
     }

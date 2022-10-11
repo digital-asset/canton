@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client.transports
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,7 +31,7 @@ import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 class HttpSequencerSubscriptionTest
@@ -55,7 +55,7 @@ class HttpSequencerSubscriptionTest
 
   "HttpSequencerSubscription" should {
     "continuously poll readNextEvent until an event is found" in { env =>
-      import env._
+      import env.*
 
       val finished = Promise[Unit]()
       val pollingResults = PollingResultsBuilder()
@@ -71,7 +71,7 @@ class HttpSequencerSubscriptionTest
 
       // this should start the subscription
       val subscription = mkSubscription(pollingResults) { event =>
-        if (event.content.counter == 2) finished.success(())
+        if (event.content.counter == SequencerCounter(2)) finished.success(())
         Future.successful(Right(()))
       }
 
@@ -87,7 +87,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription with subscription error if readEvents returns error" in { env =>
-    import env._
+    import env.*
     val called = new AtomicBoolean(false)
 
     val error =
@@ -104,7 +104,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription if handler returns a failed future" in { env =>
-    import env._
+    import env.*
 
     val exception = new RuntimeException("handler exception")
     val pollingResults = PollingResultsBuilder().event(0).build
@@ -118,7 +118,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription if the handler throws" in { env =>
-    import env._
+    import env.*
 
     val exception = new RuntimeException("handler exception")
     val pollingResults = PollingResultsBuilder().event(0).build
@@ -132,7 +132,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "subscription doesn't set closeReason until handler is complete" in { env =>
-    import env._
+    import env.*
 
     val handlerInvoked = Promise[Unit]()
     val handlerCompleted = Promise[Either[String, Unit]]()
@@ -164,7 +164,7 @@ class HttpSequencerSubscriptionTest
       handler: RawSignedContentSerializedEvent => Future[Either[String, Unit]]
   )(implicit materializer: Materializer): HttpSequencerSubscription[String] =
     new HttpSequencerSubscription(
-      0L,
+      SequencerCounter(0),
       event => handler(event.signedEvent),
       pollingResults.readEvent,
       DefaultProcessingTimeouts.testing,
@@ -172,11 +172,10 @@ class HttpSequencerSubscriptionTest
       pollingInterval,
     )
 
-  def mkEvent(counter: SequencerCounter): OrdinarySerializedEvent =
+  def mkEvent(sc: Long): OrdinarySerializedEvent =
     OrdinarySequencedEvent(
       SignedContent(
-        SequencerTestUtils
-          .mockDeliver(counter, CantonTimestamp.Epoch, DefaultTestIdentities.domainId),
+        SequencerTestUtils.mockDeliver(sc, CantonTimestamp.Epoch, DefaultTestIdentities.domainId),
         SymbolicCrypto.emptySignature,
         None,
       )
@@ -193,7 +192,7 @@ class HttpSequencerSubscriptionTest
     def readEvent(
         counter: Traced[SequencerCounter]
     ): EitherT[Future, HttpSequencerClientError, Option[OrdinarySerializedEvent]] = {
-      polls += counter.value
+      polls += counter.value.v
       val resultIndex = nextResultIndex.getAndIncrement()
 
       // bit shady but just don't complete the future once we've run out of expected events
@@ -210,7 +209,7 @@ class HttpSequencerSubscriptionTest
   case class PollingResultsBuilder(
       results: Seq[Either[HttpSequencerClientError, Option[OrdinarySerializedEvent]]] = Seq.empty
   ) {
-    def event(counter: SequencerCounter) = copy(results :+ Right(Some(mkEvent(counter))))
+    def event(sc: Long) = copy(results :+ Right(Some(mkEvent(sc))))
     def empty(): PollingResultsBuilder = copy(results :+ Right(None))
     def error(error: HttpSequencerClientError) = copy(results :+ Left(error))
 

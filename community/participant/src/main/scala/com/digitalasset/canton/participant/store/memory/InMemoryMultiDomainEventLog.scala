@@ -6,9 +6,9 @@ package com.digitalasset.canton.participant.store.memory
 import akka.NotUsed
 import akka.stream.scaladsl.Source
 import cats.data.OptionT
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.LedgerTransactionId
@@ -31,7 +31,7 @@ import com.digitalasset.canton.participant.store.EventLogId.{
   DomainEventLogId,
   ParticipantEventLogId,
 }
-import com.digitalasset.canton.participant.store.MultiDomainEventLog._
+import com.digitalasset.canton.participant.store.MultiDomainEventLog.*
 import com.digitalasset.canton.participant.store.{
   EventLogId,
   MultiDomainEventLog,
@@ -49,7 +49,7 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 
 import java.util.concurrent.atomic.AtomicReference
@@ -388,7 +388,7 @@ class InMemoryMultiDomainEventLog(
     }
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Lifecycle.close(
       executionQueue
         .asCloseable("InMemoryMultiDomainEventLog.executionQueue", timeouts.shutdownShort.duration),

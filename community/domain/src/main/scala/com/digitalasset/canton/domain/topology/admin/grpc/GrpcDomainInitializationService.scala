@@ -9,7 +9,7 @@ import com.digitalasset.canton.domain.admin.v0.DomainInitializationServiceGrpc.D
 import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil

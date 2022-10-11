@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.util
 
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.RequestCounter
 import slick.jdbc.GetResult
 
 /** A status and when it became effective.

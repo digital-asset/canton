@@ -7,13 +7,13 @@ import cats.data.{EitherT, NonEmptyChain}
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.error.{ContextualizedErrorLogger, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.ledger.participant.state.v2.{ChangeId, SubmitterInfo, TransactionMeta}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.SubmissionErrorGroup
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -34,13 +34,13 @@ import com.digitalasset.canton.participant.protocol.validation.{
 import com.digitalasset.canton.participant.store.{DuplicateContract, SyncDomainEphemeralState}
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.DeliverErrorReason
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import org.slf4j.event.Level
 
 import java.time.Duration

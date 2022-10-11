@@ -253,6 +253,7 @@ object SigningKeyScheme {
 final case class SigningKeyPair(publicKey: SigningPublicKey, privateKey: SigningPrivateKey)
     extends CryptoKeyPair[SigningPublicKey, SigningPrivateKey]
     with NoCopy {
+
   protected def toProtoV0: v0.SigningKeyPair =
     v0.SigningKeyPair(Some(publicKey.toProtoV0), Some(privateKey.toProtoV0))
 

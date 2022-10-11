@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

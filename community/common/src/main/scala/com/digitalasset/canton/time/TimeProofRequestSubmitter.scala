@@ -4,7 +4,7 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -100,7 +100,7 @@ private[time] class TimeProofRequestSubmitterImpl(
     with NamedLogging
     with FlagCloseable
     with HasFlushFuture {
-  import com.digitalasset.canton.time.TimeProofRequestSubmitterImpl._
+  import com.digitalasset.canton.time.TimeProofRequestSubmitterImpl.*
 
   private val currentRequestToken: AtomicReference[Token] =
     new AtomicReference[Token](NoCurrentRequest)

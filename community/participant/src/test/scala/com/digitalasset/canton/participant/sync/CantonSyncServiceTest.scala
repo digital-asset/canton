@@ -4,10 +4,16 @@
 package com.digitalasset.canton.participant.sync
 
 import akka.stream.Materializer
+import cats.Id
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.ledger.participant.state.v2.ChangeId
+import com.daml.ledger.participant.state.v2.Update.TransactionAccepted
 import com.daml.lf.CantonOnly
+import com.daml.lf.data.{ImmArray, Ref}
+import com.daml.lf.transaction.CommittedTransaction
+import com.daml.lf.transaction.test.TransactionBuilder
+import com.daml.lf.value.Value.ValueRecord
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric, String255}
 import com.digitalasset.canton.config.{
@@ -18,12 +24,14 @@ import com.digitalasset.canton.config.{
   LoggingConfig,
 }
 import com.digitalasset.canton.crypto.{Fingerprint, SyncCryptoApiProvider}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.{
   AdminWorkflowConfig,
   PackageService,
   ResourceManagementService,
+  workflows,
 }
 import com.digitalasset.canton.participant.config.{
   LedgerApiServerParametersConfig,
@@ -37,7 +45,7 @@ import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.pruning.NoOpPruningProcessor
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightReference
 import com.digitalasset.canton.participant.store.ParticipantEventLog.ProductionParticipantEventLogId
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryParticipantEventLog,
   InMemoryParticipantSettingsStore,
@@ -51,7 +59,7 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
@@ -66,13 +74,19 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LedgerSubmissionId, LfPartyId}
+import com.digitalasset.canton.{
+  BaseTest,
+  DefaultDamlValues,
+  HasExecutionContext,
+  LedgerSubmissionId,
+  LfPartyId,
+}
 import org.mockito.ArgumentMatchers
 import org.scalatest.Outcome
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import scala.concurrent.Future
-import scala.jdk.FutureConverters._
+import scala.jdk.FutureConverters.*
 
 class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -111,6 +125,8 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
     enableCausalityTracking = true,
     unsafeEnableDamlLfDevVersion = false,
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
+    maxDbConnections = 10,
+    excludeInfrastructureTransactions = true,
   )
 
   case class Fixture() {
@@ -284,5 +300,52 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
       result.futureValue
     }
+
+    def stats(sync: CantonSyncService, packageId: String): Option[Int] = {
+
+      import TransactionBuilder.Implicits.*
+
+      val builder = TransactionBuilder()
+      val createNode = builder.create(
+        id = builder.newCid,
+        templateId = Ref.Identifier(packageId, Ref.QualifiedName("M", "D")),
+        argument = ValueRecord(None, ImmArray.Empty),
+        signatories = Seq("Alice"),
+        observers = Seq.empty,
+        key = None,
+      )
+      builder.add(createNode)
+
+      lazy val event = TransactionAccepted(
+        optCompletionInfo = DefaultDamlValues.completionInfo(List.empty).some,
+        transactionMeta = DefaultDamlValues.transactionMeta(),
+        transaction = CommittedTransaction.subst[Id](builder.build()),
+        transactionId = DefaultDamlValues.lfTransactionId(1),
+        recordTime = CantonTimestamp.Epoch.toLf,
+        divulgedContracts = List.empty,
+        blindingInfo = None,
+        contractMetadata = Map(),
+      )
+
+      Option(sync.augmentTransactionStatistics(event))
+        .collect({ case ta: TransactionAccepted => ta })
+        .flatMap(_.optCompletionInfo)
+        .flatMap(_.statistics)
+        .map(_.committed.actions)
+
+    }
+
+    "populate metering" in { f =>
+      stats(f.sync, "packageX") shouldBe Some(1)
+    }
+
+    "not include ping-pong packages in metering" in { f =>
+      stats(f.sync, workflows.PackageID.PingPong) shouldBe Some(0)
+    }
+
+    "not include dar-distribution packages in metering" in { f =>
+      stats(f.sync, workflows.PackageID.DarDistribution) shouldBe Some(0)
+    }
+
   }
 }

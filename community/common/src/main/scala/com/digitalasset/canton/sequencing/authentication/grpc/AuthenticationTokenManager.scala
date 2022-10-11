@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import io.grpc.Status
 
 import java.util.concurrent.atomic.AtomicReference
@@ -76,7 +76,7 @@ class AuthenticationTokenManager(
   }
 
   private def createRefreshTokenFuture(): EitherT[Future, Status, AuthenticationToken] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
     val syncP = Promise[Unit]()
     val refresh = EitherT.right(syncP.future).flatMap(_ => obtainToken())

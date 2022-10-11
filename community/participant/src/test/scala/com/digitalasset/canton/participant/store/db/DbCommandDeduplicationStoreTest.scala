@@ -18,7 +18,7 @@ trait DbCommandDeduplicationStoreTest
     with CommandDeduplicationStoreTest {
   this: DbTest =>
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table command_deduplication",

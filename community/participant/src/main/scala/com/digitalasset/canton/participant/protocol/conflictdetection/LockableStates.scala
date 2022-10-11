@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.{ConflictDetectionStore, HasPrunable}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.tracing.TraceContext
@@ -31,7 +31,11 @@ import scala.reflect.ClassTag
   * @tparam Key Identifier for states
   * @tparam Status The status type for states.
   */
-class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private (
+private[conflictdetection] class LockableStates[
+    Key,
+    Status <: PrettyPrinting with HasPrunable,
+    E,
+] private (
     private val store: ConflictDetectionStore[Key, Status, E],
     protected override val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
@@ -42,8 +46,8 @@ class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private 
     implicit val classTagKey: ClassTag[Key],
 ) extends NamedLogging {
 
-  import LockableStates._
-  import Pretty._
+  import LockableStates.*
+  import Pretty.*
 
   /** The in-memory map for storing the states.
     * This map is also accessed by the [[DomainRouter]]
@@ -574,7 +578,7 @@ class LockableStates[Key, Status <: PrettyPrinting with HasPrunable, E] private 
   }
 }
 
-object LockableStates {
+private[conflictdetection] object LockableStates {
   def empty[K: Pretty: ClassTag, A <: PrettyPrinting with HasPrunable, E](
       store: ConflictDetectionStore[K, A, E],
       loggerFactory: NamedLoggerFactory,

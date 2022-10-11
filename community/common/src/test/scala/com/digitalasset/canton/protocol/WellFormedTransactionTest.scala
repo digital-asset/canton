@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol
 
 import com.daml.lf.data.ImmArray
 import com.daml.lf.value.Value
-import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{State, WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}

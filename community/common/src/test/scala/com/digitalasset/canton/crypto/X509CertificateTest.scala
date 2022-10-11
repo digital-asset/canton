@@ -11,7 +11,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
-import java.security.cert.{CertificateFactory, X509Certificate => JX509Certificate}
+import java.security.cert.{CertificateFactory, X509Certificate as JX509Certificate}
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))

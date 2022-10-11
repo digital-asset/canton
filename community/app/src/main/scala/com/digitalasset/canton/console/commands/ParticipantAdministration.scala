@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.console.commands
 
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DomainAlias
@@ -65,8 +65,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.NoTracing
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.*
 
 import java.time.Instant
 import scala.concurrent.TimeoutException
@@ -177,7 +177,7 @@ class ParticipantTestingGroup(
     val loggerFactory: NamedLoggerFactory,
 ) extends FeatureFlagFilter
     with Helpful {
-  import participantRef._
+  import participantRef.*
 
   @Help.Summary(
     "Send a bong to a set of target parties over the ledger. Levels > 0 leads to an exploding ping with exponential number of contracts. " +
@@ -314,7 +314,7 @@ class LocalParticipantTestingGroup(
   protected def defaultLimit: PositiveInt =
     consoleEnvironment.environment.config.parameters.console.defaultLimit
 
-  import participantRef._
+  import participantRef.*
   @Help.Summary("Lookup contracts in the Private Contract Store", FeatureFlag.Testing)
   @Help.Description("""Get raw access to the PCS of the given domain sync controller.
   The filter commands will check if the target value ``contains`` the given string.
@@ -481,7 +481,7 @@ class ParticipantPruningAdministrationGroup(
 ) extends FeatureFlagFilter
     with Helpful {
 
-  import runner._
+  import runner.*
 
   @Help.Summary("Prune the ledger up to the specified offset inclusively.")
   @Help.Description(
@@ -566,7 +566,7 @@ class LocalParticipantPruningAdministrationGroup(
 ) extends ParticipantPruningAdministrationGroup(runner, consoleEnvironment, loggerFactory)
     with NoTracing {
 
-  import runner._
+  import runner.*
 
   @Help.Summary(
     "Return the highest participant ledger offset whose record time is before or at the given one (if any) at which pruning is safely possible",
@@ -589,7 +589,7 @@ class LocalCommitmentsAdministrationGroup(
     with Helpful
     with NoTracing {
 
-  import runner._
+  import runner.*
 
   @Help.Summary(
     "Lookup ACS commitments received from other participants as part of the reconciliation protocol"
@@ -671,7 +671,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     with LedgerApiAdministration
     with NamedLogging =>
 
-  import ConsoleEnvironment.Implicits._
+  import ConsoleEnvironment.Implicits.*
   implicit protected val consoleEnvironment: ConsoleEnvironment
 
   private val runner = this
@@ -1523,13 +1523,6 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |As the rate of commands is checked and updated immediately after receiving a new command submission,
         |an application cannot exceed the maximum rate, even when it sends a "burst" of commands.
         |
-        |To determine a suitable value for `max_dirty_requests`, you should test the system under high load.
-        |If you choose a higher value, throughput may increase, as more commands are validated in parallel.
-        |If you observe a high latency (time between submission and observing a command completion) 
-        |or even command timeouts, you should choose a lower value.
-        |Once a suitable value for `max_dirty_requests` has been found, you should include "bursts" into the tests
-        |to also find a suitable value for `max_rate`.
-        |
         |Resource limits can only be changed, if the server runs Canton enterprise.
         |In the community edition, the server uses fixed limits that cannot be changed."""
     )
@@ -1554,7 +1547,7 @@ class ParticipantHealthAdministration(
     )
     with FeatureFlagFilter {
 
-  import runner._
+  import runner.*
 
   @Help.Summary(
     "Sends a ping to the target participant over the ledger. " +

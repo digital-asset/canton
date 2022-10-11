@@ -62,6 +62,9 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
     override val message =
       s"Invalid version $invalidVersion in versioned message `$versionedMessage`"
   }
+  final case class MaxBytesToDecompressExceeded(error: String) extends ProtoDeserializationError {
+    override def message = error
+  }
   final case class OtherError(error: String) extends ProtoDeserializationError {
     override def message = error
   }

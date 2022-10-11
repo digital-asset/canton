@@ -30,6 +30,7 @@ class DbSyncDomainPersistentState(
     override val pureCryptoApi: CryptoPureApi,
     parameters: ParticipantStoreConfig,
     caching: CachingConfigs,
+    numDbConnections: Int,
     processingTimeouts: ProcessingTimeout,
     override val enableAdditionalConsistencyChecks: Boolean,
     indexedStringStore: IndexedStringStore,
@@ -54,6 +55,7 @@ class DbSyncDomainPersistentState(
       domainId,
       protocolVersion,
       parameters.maxItemsInSqlClause,
+      numDbConnections,
       caching.contractStore,
       parameters.dbBatchAggregationConfig,
       processingTimeouts,
@@ -115,7 +117,7 @@ class DbSyncDomainPersistentState(
     new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)
   val sequencerCounterTrackerStore =
     new DbSequencerCounterTrackerStore(client, storage, processingTimeouts, loggerFactory)
-  //TODO(i5660): Use the db-based send tracker store
+  // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
   val causalDependencyStore =
     new DbSingleDomainCausalDependencyStore(

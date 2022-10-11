@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import com.digitalasset.canton.ProtoDeserializationError._
+import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 

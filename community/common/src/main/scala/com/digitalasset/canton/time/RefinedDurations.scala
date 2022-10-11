@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.time
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveNumeric}
 import com.digitalasset.canton.config.{
-  NonNegativeFiniteDuration => NonNegativeFiniteDurationConfig,
-  PositiveDurationSeconds => ConfigPositiveSeconds,
+  NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
+  PositiveDurationSeconds as ConfigPositiveSeconds,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.logging.TracedLogger
@@ -18,14 +18,14 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
-import com.google.protobuf.duration.{Duration => PbDuration}
+import com.google.protobuf.duration.{Duration as PbDuration}
 import io.circe.Encoder
 import io.scalaland.chimney.Transformer
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.Duration
 import scala.concurrent.duration.FiniteDuration
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 sealed trait RefinedDuration {
   def duration: Duration

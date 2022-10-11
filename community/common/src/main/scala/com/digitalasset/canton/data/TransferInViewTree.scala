@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.bifunctor._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
   DeliveredTransferOutResult,
@@ -75,7 +75,8 @@ object TransferInViewTree
   override val name: String = "TransferInViewTree"
 
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.TransferViewTree)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.TransferViewTree)(fromProtoV0),
+    1 -> supportedProtoVersion(v1.TransferViewTree)(fromProtoV1),
   )
 
   def fromProtoV0(
@@ -83,6 +84,15 @@ object TransferInViewTree
       transferInViewTreeP: v0.TransferViewTree,
   ): ParsingResult[TransferInViewTree] =
     GenTransferViewTree.fromProtoV0(
+      TransferInCommonData.fromByteString(hashOps),
+      TransferInView.fromByteString(hashOps),
+    )((commonData, view) => new TransferInViewTree(commonData, view)(hashOps))(transferInViewTreeP)
+
+  def fromProtoV1(
+      hashOps: HashOps,
+      transferInViewTreeP: v1.TransferViewTree,
+  ): ParsingResult[TransferInViewTree] =
+    GenTransferViewTree.fromProtoV1(
       TransferInCommonData.fromByteString(hashOps),
       TransferInView.fromByteString(hashOps),
     )((commonData, view) => new TransferInViewTree(commonData, view)(hashOps))(transferInViewTreeP)

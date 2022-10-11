@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol
-import com.digitalasset.canton.SequencerCounter
+
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.blocking
 
-/** Allocates [[com.digitalasset.canton.participant.RequestCounter]]s for the transaction processor. */
+/** Allocates [[com.digitalasset.canton.RequestCounter]]s for the transaction processor. */
 trait RequestCounterAllocator {
 
   /** Allocates the next request counter to the confirmation request with the given
@@ -32,7 +32,7 @@ trait RequestCounterAllocator {
     * @throws java.lang.IllegalArgumentException if the values `Long.MaxValue` is used as a sequence counter
     * @throws java.lang.IllegalStateException if no request counter can be assigned
     *                                         because an earlier call assigned already a
-    *                                         [[com.digitalasset.canton.participant.RequestCounter]]
+    *                                         [[com.digitalasset.canton.RequestCounter]]
     *                                         to a higher [[com.digitalasset.canton.SequencerCounter]],
     *                                         or because all request counters have been exhausted.
     *                                         The request counter `Long.MaxValue` cannot be used.
@@ -47,7 +47,7 @@ trait RequestCounterAllocator {
     * All calls must be sequential, and the only request counter that can be skipped is the "next" request counter that
     * would have been allocated by [[allocateFor]].
     *
-    * @throws java.lang.IllegalArgumentException if the specified [[com.digitalasset.canton.participant.RequestCounter]] is not the
+    * @throws java.lang.IllegalArgumentException if the specified [[com.digitalasset.canton.RequestCounter]] is not the
     *                                            one that would otherwise be allocated next.
     * @throws java.lang.IllegalStateException if all request counters have been exhausted.
     *                                         The request counter `Long.MaxValue` cannot be used.
@@ -59,7 +59,7 @@ trait RequestCounterAllocator {
   def peek: RequestCounter
 }
 
-/** Allocator for [[com.digitalasset.canton.participant.RequestCounter]]s.
+/** Allocator for [[com.digitalasset.canton.RequestCounter]]s.
   *
   * This class is not thread safe.
   *
@@ -74,7 +74,7 @@ class RequestCounterAllocatorImpl(
 ) extends RequestCounterAllocator
     with NamedLogging {
   require(
-    initRc < RequestCounter.MaxValue,
+    initRc.isNotMaxValue,
     s"Request counter ${RequestCounter.MaxValue} cannot be used.",
   )
 
@@ -95,11 +95,11 @@ class RequestCounterAllocatorImpl(
     } else {
       val allocatedRc = withLock {
         ErrorUtil.requireArgument(
-          sc < Long.MaxValue,
-          s"Sequencer counter ${Long.MaxValue} cannot be used.",
+          sc.isNotMaxValue,
+          s"Sequencer counter ${SequencerCounter.MaxValue} cannot be used.",
         )
         ErrorUtil.requireState(
-          nextRc != RequestCounter.MaxValue,
+          nextRc.isNotMaxValue,
           s"No more request counters can be allocated because the request counters have reached ${RequestCounter.MaxValue - 1}.",
         )
 
@@ -129,7 +129,7 @@ class RequestCounterAllocatorImpl(
     withLock {
       val nextRequestCounter = nextRc
       ErrorUtil.requireState(
-        nextRequestCounter != RequestCounter.MaxValue,
+        nextRequestCounter.isNotMaxValue,
         s"No more request counters can be allocated because the request counters have reached ${RequestCounter.MaxValue - 1}.",
       )
       ErrorUtil.requireArgument(

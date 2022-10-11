@@ -2,7 +2,7 @@ import sbt.Keys.streams
 import sbt.internal.util.ManagedLogger
 import sbt.{IO, Setting, complete, inputKey}
 
-import cats.syntax.either._
+import cats.syntax.either.*
 
 object Release {
   private val SemVerDigitsRegex = """(0|[1-9]\d*)"""
@@ -15,6 +15,8 @@ object Release {
       suffix: Option[String],
   )(val fileToCheck: java.io.File)
       extends Ordered[ParsedVersion] {
+    def majorMinor: (String, String) = (major, minor)
+
     override def compare(that: ParsedVersion): Int = {
       if (this.major != that.major) this.major compare that.major
       else if (this.minor != that.minor) this.minor compare that.minor
@@ -62,7 +64,8 @@ object Release {
     // Split the version lines according to their order from the current release
     val (lower, matching, higher) =
       releaseLines.foldLeft((Vector.empty[String], Option.empty[String], Vector.empty[String])) {
-        case ((lower, _, higher), line) if parseLine(line) == releaseVersion =>
+        case ((lower, _, higher), line)
+            if parseLine(line).majorMinor == releaseVersion.majorMinor =>
           (lower, Some(line), higher)
         case ((lower, matching, higher), line) if parseLine(line) < releaseVersion =>
           (lower :+ line, matching, higher)
@@ -195,7 +198,7 @@ object Release {
       inputKey[Unit]("Ensure release version and protocol version mappings are defined")
     Seq(
       fixReleaseVersions := {
-        import complete.DefaultParsers._
+        import complete.DefaultParsers.*
         implicit val log: ManagedLogger = streams.value.log
 
         val args: Seq[String] = spaceDelimited("<arg>").parsed

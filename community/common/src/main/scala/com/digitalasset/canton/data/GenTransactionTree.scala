@@ -4,20 +4,20 @@
 package com.digitalasset.canton.data
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.GenTransactionTree.InvalidGenTransactionTree
 import com.digitalasset.canton.data.InformeeTree.InvalidInformeeTree
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
-import com.digitalasset.canton.data.MerkleTree._
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -28,6 +28,7 @@ import com.digitalasset.canton.protocol.{
   TransactionId,
   ViewHash,
   v0,
+  v1,
 }
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -208,10 +209,18 @@ case class GenTransactionTree(
 
   def toProtoV0: v0.GenTransactionTree =
     v0.GenTransactionTree(
-      submitterMetadata = Some(MerkleTree.toBlindableNode(submitterMetadata)),
-      commonMetadata = Some(MerkleTree.toBlindableNode(commonMetadata)),
-      participantMetadata = Some(MerkleTree.toBlindableNode(participantMetadata)),
+      submitterMetadata = Some(MerkleTree.toBlindableNodeV0(submitterMetadata)),
+      commonMetadata = Some(MerkleTree.toBlindableNodeV0(commonMetadata)),
+      participantMetadata = Some(MerkleTree.toBlindableNodeV0(participantMetadata)),
       rootViews = Some(rootViews.toProtoV0),
+    )
+
+  def toProtoV1: v1.GenTransactionTree =
+    v1.GenTransactionTree(
+      submitterMetadata = Some(MerkleTree.toBlindableNodeV1(submitterMetadata)),
+      commonMetadata = Some(MerkleTree.toBlindableNodeV1(commonMetadata)),
+      participantMetadata = Some(MerkleTree.toBlindableNodeV1(participantMetadata)),
+      rootViews = Some(rootViews.toProtoV1),
     )
 
   def topLevelViewMap(f: TransactionView => TransactionView): GenTransactionTree = {
@@ -266,43 +275,88 @@ object GenTransactionTree {
   ): ParsingResult[GenTransactionTree] =
     for {
       submitterMetadata <- MerkleTree
-        .fromProtoOption(
+        .fromProtoOptionV0(
           protoTransactionTree.submitterMetadata,
           SubmitterMetadata.fromByteString(hashOps),
         )
       commonMetadata <- MerkleTree
-        .fromProtoOption(
+        .fromProtoOptionV0(
           protoTransactionTree.commonMetadata,
           CommonMetadata.fromByteString(hashOps),
         )
       participantMetadata <- MerkleTree
-        .fromProtoOption(
+        .fromProtoOptionV0(
           protoTransactionTree.participantMetadata,
           ParticipantMetadata.fromByteString(hashOps),
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
-      rootViews <- MerkleSeq.fromProtoV0(hashOps, TransactionView.fromByteString(hashOps))(
-        rootViewsP
+      rootViews <- MerkleSeq.fromProtoV0(
+        (hashOps, TransactionView.fromByteString(ProtobufVersion(0))(hashOps)),
+        rootViewsP,
       )
-      genTransactionTree <- GenTransactionTree
-        .create(hashOps)(
-          submitterMetadata,
-          commonMetadata,
-          participantMetadata,
-          rootViews,
-        )
-        .leftMap(e =>
-          ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
-        )
+      genTransactionTree <- createGenTransactionTreeV0V1(
+        hashOps,
+        submitterMetadata,
+        commonMetadata,
+        participantMetadata,
+        rootViews,
+      )
     } yield genTransactionTree
 
-  def fromByteString(hashOps: HashOps, bytes: ByteString): ParsingResult[GenTransactionTree] =
+  def fromProtoV1(
+      hashOps: HashOps,
+      protoTransactionTree: v1.GenTransactionTree,
+  ): ParsingResult[GenTransactionTree] =
     for {
-      protoTransactionTree <- ProtoConverter
-        .protoParser(v0.GenTransactionTree.parseFrom)(bytes)
-      transactionTree <- fromProtoV0(hashOps, protoTransactionTree)
-    } yield transactionTree
+      submitterMetadata <- MerkleTree
+        .fromProtoOptionV1(
+          protoTransactionTree.submitterMetadata,
+          SubmitterMetadata.fromByteString(hashOps),
+        )
+      commonMetadata <- MerkleTree
+        .fromProtoOptionV1(
+          protoTransactionTree.commonMetadata,
+          CommonMetadata.fromByteString(hashOps),
+        )
+      participantMetadata <- MerkleTree
+        .fromProtoOptionV1(
+          protoTransactionTree.participantMetadata,
+          ParticipantMetadata.fromByteString(hashOps),
+        )
+      rootViewsP <- ProtoConverter
+        .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
+      rootViews <- MerkleSeq.fromProtoV1(
+        (
+          hashOps,
+          TransactionView.fromByteString(ProtobufVersion(1))(hashOps),
+        ),
+        rootViewsP,
+      )
+      genTransactionTree <- createGenTransactionTreeV0V1(
+        hashOps,
+        submitterMetadata,
+        commonMetadata,
+        participantMetadata,
+        rootViews,
+      )
+    } yield genTransactionTree
+
+  def createGenTransactionTreeV0V1(
+      hashOps: HashOps,
+      submitterMetadata: MerkleTree[SubmitterMetadata],
+      commonMetadata: MerkleTree[CommonMetadata],
+      participantMetadata: MerkleTree[ParticipantMetadata],
+      rootViews: MerkleSeq[TransactionView],
+  ): ParsingResult[GenTransactionTree] =
+    GenTransactionTree
+      .create(hashOps)(
+        submitterMetadata,
+        commonMetadata,
+        participantMetadata,
+        rootViews,
+      )
+      .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e"))
 }
 
 /** Wraps a `GenTransactionTree` where exactly one view (including subviews) is unblinded.
@@ -382,7 +436,7 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
       throw InvalidTransactionViewTree(
         "The submitter metadata must be unblinded if and only if the represented view is top-level. " +
           s"Submitter metadata: ${tree.submitterMetadata.unwrap
-            .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
+              .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
       )
     }
 
@@ -465,18 +519,27 @@ case class InformeeTree(tree: GenTransactionTree)
     */
   lazy val tryToFullInformeeTree: FullInformeeTree = FullInformeeTree(tree)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[InformeeTree] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[InformeeTree] = {
+    if (version >= ProtocolVersion.v4) {
+      VersionedMessage(toProtoV1.toByteString, 1)
+    } else {
+      VersionedMessage(toProtoV0.toByteString, 0)
+    }
+  }
 
   def toProtoV0: v0.InformeeTree =
     v0.InformeeTree(tree = Some(tree.toProtoV0))
+
+  def toProtoV1: v1.InformeeTree =
+    v1.InformeeTree(tree = Some(tree.toProtoV1))
 }
 
 object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree, HashOps] {
   override val name: String = "InformeeTree"
 
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.InformeeTree)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.InformeeTree)(fromProtoV0),
+    1 -> supportedProtoVersion(v1.InformeeTree)(fromProtoV1),
   )
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
@@ -554,6 +617,18 @@ object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree
         .create(tree)
         .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
     } yield informeeTree
+
+  def fromProtoV1(
+      hashOps: HashOps,
+      protoInformeeTree: v1.InformeeTree,
+  ): ParsingResult[InformeeTree] =
+    for {
+      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
+      tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
+      informeeTree <- InformeeTree
+        .create(tree)
+        .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
+    } yield informeeTree
 }
 
 /** Wraps a [[GenTransactionTree]] that is also a full informee tree.
@@ -615,11 +690,19 @@ case class FullInformeeTree(tree: GenTransactionTree)
     tree.commonMetadata.tryUnwrap
   ).confirmationPolicy
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[FullInformeeTree] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[FullInformeeTree] = {
+    if (version >= ProtocolVersion.v4) {
+      VersionedMessage(toProtoV1.toByteString, 1)
+    } else {
+      VersionedMessage(toProtoV0.toByteString, 0)
+    }
+  }
 
   def toProtoV0: v0.FullInformeeTree =
     v0.FullInformeeTree(tree = Some(tree.toProtoV0))
+
+  def toProtoV1: v1.FullInformeeTree =
+    v1.FullInformeeTree(tree = Some(tree.toProtoV1))
 
   override def pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 }
@@ -628,7 +711,8 @@ object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInfo
   override val name: String = "FullInformeeTree"
 
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.FullInformeeTree)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.FullInformeeTree)(fromProtoV0),
+    1 -> supportedProtoVersion(v1.FullInformeeTree)(fromProtoV1),
   )
 
   def create(tree: GenTransactionTree): Either[String, FullInformeeTree] =
@@ -641,6 +725,20 @@ object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInfo
     for {
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
+      fullInformeeTree <- FullInformeeTree
+        .create(tree)
+        .leftMap(e =>
+          ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
+        )
+    } yield fullInformeeTree
+
+  def fromProtoV1(
+      hashOps: HashOps,
+      protoInformeeTree: v1.FullInformeeTree,
+  ): ParsingResult[FullInformeeTree] =
+    for {
+      protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
+      tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
       fullInformeeTree <- FullInformeeTree
         .create(tree)
         .leftMap(e =>
@@ -1080,10 +1178,19 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
 
   override def toProtoVersioned(
       version: ProtocolVersion
-  ): VersionedMessage[LightTransactionViewTree] = VersionedMessage(toProtoV0.toByteString, 0)
+  ): VersionedMessage[LightTransactionViewTree] = {
+    if (version >= ProtocolVersion.v4) {
+      VersionedMessage(toProtoV1.toByteString, 1)
+    } else {
+      VersionedMessage(toProtoV0.toByteString, 0)
+    }
+  }
 
   def toProtoV0: v0.LightTransactionViewTree =
     v0.LightTransactionViewTree(tree = Some(tree.toProtoV0))
+
+  def toProtoV1: v1.LightTransactionViewTree =
+    v1.LightTransactionViewTree(tree = Some(tree.toProtoV1))
 
   override lazy val toBeSigned: Option[RootHash] =
     tree.rootViews.unblindedElements
@@ -1100,7 +1207,8 @@ object LightTransactionViewTree
   override val name: String = "LightTransactionViewTree"
 
   val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.LightTransactionViewTree)(fromProtoV0)
+    0 -> supportedProtoVersion(v0.LightTransactionViewTree)(fromProtoV0),
+    1 -> supportedProtoVersion(v1.LightTransactionViewTree)(fromProtoV1),
   )
 
   case class InvalidLightTransactionViewTree(message: String) extends RuntimeException(message)
@@ -1125,6 +1233,20 @@ object LightTransactionViewTree
     for {
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
+      result <- LightTransactionViewTree
+        .create(tree)
+        .leftMap(e =>
+          ProtoDeserializationError.OtherError(s"Unable to create transaction tree: $e")
+        )
+    } yield result
+
+  def fromProtoV1(
+      hashOps: HashOps,
+      protoT: v1.LightTransactionViewTree,
+  ): ParsingResult[LightTransactionViewTree] =
+    for {
+      protoTree <- ProtoConverter.required("tree", protoT.tree)
+      tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
       result <- LightTransactionViewTree
         .create(tree)
         .leftMap(e =>
@@ -1251,7 +1373,7 @@ object LightTransactionViewTree
   * then the grandparent's, etc.
   */
 case class Witnesses(unwrap: Seq[Set[Informee]]) {
-  import Witnesses._
+  import Witnesses.*
 
   def prepend(informees: Set[Informee]) = Witnesses(informees +: unwrap)
 

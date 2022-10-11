@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.error.ErrorCategory.MaliciousOrFaultyBehaviour
 import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
@@ -14,7 +14,6 @@ import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.version.ProtocolVersion.InvalidProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersionCompatibility.UnsupportedVersion
-import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.releaseVersionToProtocolVersions
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -31,10 +30,10 @@ object ProtocolVersionCompatibility {
         ProtocolVersion.unstable.forgetNE
       else List.empty
 
-    releaseVersionToProtocolVersions.getOrElse(
+    ReleaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of a participant of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+        s"Please add the supported protocol versions of a participant of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ unstable
   }
@@ -50,10 +49,10 @@ object ProtocolVersionCompatibility {
         ProtocolVersion.unstable.forgetNE
       else List.empty
 
-    releaseVersionToProtocolVersions.getOrElse(
+    ReleaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of domain nodes of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+        s"Please add the supported protocol versions of domain nodes of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ unstable
   }
@@ -125,8 +124,8 @@ final case class MinProtocolError(
 ) extends HandshakeError {
   override def description: String =
     s"The version required by the domain (${server.toString}) is lower than the minimum version configured by the participant (${clientMinimumProtocolVersion
-      .map(_.toString)
-      .getOrElse("")}). " +
+        .map(_.toString)
+        .getOrElse("")}). " +
       s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the domain and would be able to connect to the domain if the minimum required version is configured to be lower."} "
 }
 

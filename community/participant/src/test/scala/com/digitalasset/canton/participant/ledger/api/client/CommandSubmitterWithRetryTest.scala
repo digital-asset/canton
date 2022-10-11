@@ -16,11 +16,11 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.CommandsCtx
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
-import org.scalatest._
+import org.scalatest.*
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
 import scala.concurrent.Await
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))
 class CommandSubmitterWithRetryTest extends FixtureAsyncWordSpec with BaseTest {

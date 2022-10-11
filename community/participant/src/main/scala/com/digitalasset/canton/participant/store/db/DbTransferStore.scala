@@ -4,22 +4,20 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import cats.syntax.either._
-import com.digitalasset.canton.LfPartyId
+import cats.syntax.either.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferOutTree}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore
-import com.digitalasset.canton.participant.store.TransferStore._
+import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.db.DbTransferStore.RawDeliveredTransferOutResult
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{SerializableContract, TransactionId, TransferId}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -32,6 +30,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil}
 import com.digitalasset.canton.version.Transfer.SourceProtocolVersion
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
+import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.TransactionIsolation.Serializable
@@ -50,10 +49,10 @@ class DbTransferStore(
 )(implicit ec: ExecutionContext)
     extends TransferStore
     with DbStore {
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("transfer-store")
 
   implicit val getResultFullTransferOutTree: GetResult[FullTransferOutTree] = GetResult(r =>
@@ -104,7 +103,7 @@ class DbTransferStore(
     TransferData(
       sourceProtocolVersion = sourceProtocolVersion,
       transferOutTimestamp = GetResult[CantonTimestamp].apply(r),
-      transferOutRequestCounter = r.nextLong(),
+      transferOutRequestCounter = GetResult[RequestCounter].apply(r),
       transferOutRequest = getResultFullTransferOutTree(r),
       transferOutDecisionTime = GetResult[CantonTimestamp].apply(r),
       contract = GetResult[SerializableContract].apply(r),
@@ -132,7 +131,7 @@ class DbTransferStore(
       val transferId: TransferId = transferData.transferId
       val newEntry = TransferEntry(transferData, None)
 
-      import DbStorage.Implicits._
+      import DbStorage.Implicits.*
       val insert: DBIO[Int] = sqlu"""
         insert into transfers(target_domain, origin_domain, request_timestamp, transfer_out_timestamp, transfer_out_request_counter,
         transfer_out_request, transfer_out_decision_time, contract, creating_transaction_id, transfer_out_result, submitter_lf, source_protocol_version)
@@ -247,7 +246,7 @@ class DbTransferStore(
                 set time_of_completion_request_counter=${timeOfCompletion.rc}, time_of_completion_timestamp=${timeOfCompletion.timestamp}
               where
                 target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp=${transferId.requestTimestamp}
-                and (time_of_completion_request_counter is NULL 
+                and (time_of_completion_request_counter is NULL
                   or (time_of_completion_request_counter = ${timeOfCompletion.rc} and time_of_completion_timestamp = ${timeOfCompletion.timestamp}))
             """
 
@@ -309,8 +308,8 @@ class DbTransferStore(
     processingTime.metric.event {
       storage.query(
         {
-          import DbStorage.Implicits.BuilderChain._
-          import DbStorage.Implicits._
+          import DbStorage.Implicits.BuilderChain.*
+          import DbStorage.Implicits.*
 
           val sourceFilter = filterSource.fold(sql"")(domain => sql" and origin_domain=${domain}")
           val timestampFilter = filterTimestamp.fold(sql"")(ts => sql" and request_timestamp=${ts}")
@@ -331,7 +330,7 @@ class DbTransferStore(
     processingTime.metric.event {
       storage.query(
         {
-          import DbStorage.Implicits.BuilderChain._
+          import DbStorage.Implicits.BuilderChain.*
 
           val timestampFilter =
             requestAfter.fold(sql"")({ case (requestTimestamp, sourceDomain) =>
@@ -373,8 +372,8 @@ class DbTransferStore(
       errorHandler: Throwable => E,
       operationName: String = "updateDependentDeprecated",
   )(implicit traceContext: TraceContext): CheckedT[Future, E, W, Option[R]] = {
-    import DbStorage.Implicits._
-    import storage.api.{DBIO => _, _}
+    import DbStorage.Implicits.*
+    import storage.api.{DBIO as _, *}
 
     val readAndInsert =
       exists

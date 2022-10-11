@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Sink}
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
@@ -16,12 +16,12 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{SequencerSubscription, SubscriptionCloseReason}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{AkkaUtil, FutureUtil, SingleUseCell}
 
 import scala.concurrent.{ExecutionContext, Future}

@@ -11,7 +11,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -69,10 +69,10 @@ class TopologyTransactionProcessorTest
   private def process(
       proc: TopologyTransactionProcessor,
       ts: CantonTimestamp,
-      sc: SequencerCounter,
+      sc: Long,
       txs: List[SignedTopologyTransaction[TopologyChangeOp]],
   ): Future[Unit] =
-    proc.process(SequencedTime(ts), EffectiveTime(ts), sc, txs).onShutdown(fail())
+    proc.process(SequencedTime(ts), EffectiveTime(ts), SequencerCounter(sc), txs).onShutdown(fail())
 
   private def validate(
       observed: List[TopologyStateElement[TopologyMapping]],
@@ -85,7 +85,7 @@ class TopologyTransactionProcessorTest
   }
 
   object Factory extends TopologyTransactionTestFactory(loggerFactory, parallelExecutionContext)
-  import Factory._
+  import Factory.*
 
   "topology transaction processor" should {
     "deal with additions" in {

@@ -10,25 +10,26 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SequencerClient.ReplayStatistics
-import com.digitalasset.canton.sequencing.client._
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.client.transports.replay.ReplayingEventsSequencerClientTransport.ReplayingSequencerSubscription
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
   HandshakeRequest,
   HandshakeResponse,
+  SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
 }
 import com.digitalasset.canton.sequencing.{SequencerClientRecorder, SerializedEventHandler}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.nio.file.Path
-import java.time.{Duration => JDuration, Instant}
+import java.time.{Duration as JDuration, Instant}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -63,6 +64,14 @@ class ReplayingEventsSequencerClientTransport(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] = EitherT.rightT(())
+
+  /** Does nothing */
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+    EitherT.rightT(())
 
   /** Does nothing */
   override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit

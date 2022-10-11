@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.config
 
-import better.files.{File, _}
+import better.files.{File, *}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
@@ -21,7 +21,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
 
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
   val simpleConf = "examples/01-simple-topology/simple-topology.conf"
   "the example simple topology configuration" should {
     lazy val config =
@@ -53,7 +53,7 @@ class CantonCommunityConfigTest extends AnyWordSpec with BaseTest {
     ) _
 
     def deprecatedConfigChecks(config: CantonCommunityConfig) = {
-      import scala.concurrent.duration._
+      import scala.concurrent.duration.*
 
       val participant = config.participants.head._2
       participant.init.ledgerApi.maxDeduplicationDuration.duration.toSeconds shouldBe 10.minutes.toSeconds

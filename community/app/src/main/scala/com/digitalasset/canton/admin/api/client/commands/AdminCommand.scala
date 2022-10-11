@@ -4,7 +4,7 @@
 package com.digitalasset.canton.admin.api.client.commands
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultBoundedTimeout,
   TimeoutType,

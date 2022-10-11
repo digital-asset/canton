@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.errors
 
-import com.daml.error.Explanation
+import com.daml.error.{Explanation, Resolution}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
@@ -29,5 +30,37 @@ object SequencerError extends SequencerErrorGroup {
           s"Member $member has acknowledged the timestamp $acked_timestamp when only events with timestamps at most $latest_valid_timestamp have been delivered."
         )
         with CantonError
+  }
+
+  @Explanation("""
+                 |This error indicates that some sequencer node has distributed an invalid sequencer pruning request via the blockchain.
+                 |Either the sequencer nodes got out of sync or one of the sequencer nodes is buggy.
+                 |The sequencer node will stop processing to prevent the danger of severe data corruption.
+                 |""")
+  @Resolution(
+    """Stop using the domain involving the sequencer nodes. Contact support."""
+  )
+  object InvalidPruningRequestOnChain
+      extends AlarmErrorCode("INVALID_SEQUENCER_PRUNING_REQUEST_ON_CHAIN") {
+    case class Error(
+        blockHeight: Long,
+        blockLatestTimestamp: CantonTimestamp,
+        safePruningTimestamp: CantonTimestamp,
+        invalidPruningRequests: Seq[CantonTimestamp],
+    )(implicit override val loggingContext: ErrorLoggingContext)
+        extends Alarm(
+          s"Pruning requests in block $blockHeight are unsafe: previous block's latest timestamp $blockLatestTimestamp, safe pruning timestamp $safePruningTimestamp, unsafe pruning timestamps: $invalidPruningRequests"
+        )
+        with CantonError
+  }
+
+  @Explanation(
+    """This error means that the request size has exceeded the configured value maxInboundMessageSize."""
+  )
+  @Resolution(
+    """Send smaller requests or increase the maxInboundMessageSize in the domain parameters"""
+  )
+  object MaxRequestSizeExceeded extends AlarmErrorCode("MAX_REQUEST_SIZE_EXCEEDED") {
+    case class Error(message: String, maxRequestSize: NonNegativeInt) extends Alarm(message)
   }
 }

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.logging
 
-import cats.syntax.functor._
-import cats.syntax.option._
+import cats.syntax.functor.*
+import cats.syntax.option.*
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.spi.AppenderAttachable

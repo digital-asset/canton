@@ -4,7 +4,7 @@
 package com.digitalasset.canton
 
 import better.files.File
-import cats.syntax.either._
+import cats.syntax.either.*
 import ch.qos.logback.classic.{Logger, LoggerContext}
 import ch.qos.logback.core.status.{ErrorStatus, Status, StatusListener, WarnStatus}
 import com.daml.nonempty.NonEmpty
@@ -95,7 +95,7 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
       }
 
     val configFromMap = {
-      import scala.jdk.CollectionConverters._
+      import scala.jdk.CollectionConverters.*
       ConfigFactory.parseMap(cliOptions.configMap.asJava)
     }
     val finalConfig = CantonConfig.mergeConfigs(mergedUserConfigs, Seq(configFromMap))

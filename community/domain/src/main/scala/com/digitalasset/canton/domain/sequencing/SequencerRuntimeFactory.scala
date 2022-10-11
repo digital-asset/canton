@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing
 
 import akka.actor.ActorSystem
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
   LocalNodeParameters,

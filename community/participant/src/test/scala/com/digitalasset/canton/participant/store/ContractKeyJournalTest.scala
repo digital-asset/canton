@@ -3,10 +3,9 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.daml.lf.value.Value.ValueInt64
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
   Assigned,
@@ -17,8 +16,9 @@ import com.digitalasset.canton.participant.store.ContractKeyJournal.{
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.store.PrunableByTimeTest
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
+import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -28,7 +28,7 @@ import scala.util.Random
 
 @nowarn("msg=match may not be exhaustive")
 trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLike with BaseTest =>
-  import ContractKeyJournalTest._
+  import ContractKeyJournalTest.*
 
   def contractKeyJournal(mkCkj: ExecutionContext => ContractKeyJournal): Unit = {
     def mk(): ContractKeyJournal = mkCkj(executionContext)
@@ -39,7 +39,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLik
     val otherKey = globalKey(-1L)
     val keys012 = List(key0, key1, key2)
 
-    val rc = 0L
+    val rc = RequestCounter(0)
     val ts = CantonTimestamp.assertFromInstant(Instant.parse("2002-02-20T10:00:00.00Z"))
     val toc = TimeOfChange(rc, ts)
     val toc1 = TimeOfChange(rc + 1L, ts)
@@ -70,7 +70,10 @@ trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLik
         )
         val rand = new Random(1234567890L)
         def moveToc(toc: TimeOfChange, offset: Int): TimeOfChange =
-          TimeOfChange(toc.rc + offset * 100, toc.timestamp.plusSeconds(offset.toLong))
+          TimeOfChange(
+            toc.rc + offset * 100,
+            toc.timestamp.plusSeconds(offset.toLong),
+          )
 
         MonadUtil
           .sequentialTraverse_(0 to 20) { iteration =>

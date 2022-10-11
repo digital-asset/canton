@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.admin.api.client
+
 import cats.data.EitherT
 import com.daml.ledger.api.auth.client.LedgerCallCredentials
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand

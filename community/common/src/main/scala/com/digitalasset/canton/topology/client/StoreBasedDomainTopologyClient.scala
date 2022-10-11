@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.functor._
-import cats.syntax.functorFilter._
+import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, U
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
@@ -25,12 +25,12 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import io.functionmeta.functionFullName
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.collection.compat.immutable.ArraySeq
 import scala.concurrent.duration.Duration
@@ -611,7 +611,7 @@ class StoreBasedTopologySnapshot(
   override def findParticipantCertificate(
       participantId: ParticipantId
   )(implicit traceContext: TraceContext): Future[Option[LegalIdentityClaimEvidence.X509Cert]] = {
-    import cats.implicits._
+    import cats.implicits.*
     findTransactions(
       asOfInclusive = false,
       includeSecondary = false,

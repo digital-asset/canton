@@ -20,9 +20,10 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientFactory,
   SequencerClientTransportFactory,
 }
+import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
 import com.digitalasset.canton.store.{SendTrackerStore, SequencedEventStore}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersionCompatibility
@@ -52,13 +53,16 @@ class DomainNodeSequencerClientFactory(
       member: Member,
       sequencedEventStore: SequencedEventStore,
       sendTrackerStore: SendTrackerStore,
+      signSubmission: TraceContext => SubmissionRequest => EitherT[Future, String, SignedContent[
+        SubmissionRequest
+      ]],
   )(implicit
       executionContext: ExecutionContextExecutor,
       materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[Future, String, SequencerClient] =
-    factory(member).create(member, sequencedEventStore, sendTrackerStore)
+    factory(member).create(member, sequencedEventStore, sendTrackerStore, signSubmission)
 
   override def makeTransport(connection: SequencerConnection, member: Member)(implicit
       executionContext: ExecutionContextExecutor,

@@ -5,12 +5,13 @@ package com.digitalasset.canton.participant.ledger.api
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
 import com.daml.metrics.Metrics
-import com.daml.platform.apiserver._
+import com.daml.platform.apiserver.*
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey
 import com.daml.platform.indexer.{IndexerServiceOwner, IndexerStartupMode}
 import com.daml.platform.store.DbSupport
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -34,8 +35,8 @@ import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 
-import java.time.{Duration => JDuration}
-import scala.concurrent.duration._
+import java.time.{Duration as JDuration}
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -86,6 +87,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       override val loggerFactory: NamedLoggerFactory,
       tracerProvider: TracerProvider,
       metrics: Metrics,
+      meteringReportKey: MeteringReportKey,
   ) extends NamedLogging {
     override def logger: TracedLogger = super.logger
 

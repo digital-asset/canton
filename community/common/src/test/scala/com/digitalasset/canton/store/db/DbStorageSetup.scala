@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store.db
 
 import com.digitalasset.canton.config.CommunityDbConfig.{H2, Postgres}
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -25,7 +25,7 @@ import org.scalatest.Assertions.fail
 import org.testcontainers.containers.PostgreSQLContainer
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Provide a storage backend for tests.
   */
@@ -159,7 +159,7 @@ class PostgresCISetup(
       CommunityDbConfig.Postgres(basicConfig.copy(dbName = envDb).toPostgresConfig)
     val envDbStorage = mkStorage(envDbConfig)
     try {
-      import envDbStorage.api._
+      import envDbStorage.api.*
       val genF = envDbStorage
         .query(sql"SELECT 1 FROM pg_database WHERE datname = $useDb".as[Int], functionFullName)
         .flatMap { res =>

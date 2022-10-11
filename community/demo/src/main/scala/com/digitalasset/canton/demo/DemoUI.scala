@@ -33,12 +33,12 @@ import scalafx.concurrent.{ScheduledService, Task}
 import scalafx.geometry.{Insets, Pos}
 import scalafx.scene.Scene
 import scalafx.scene.control.Alert.AlertType
-import scalafx.scene.control._
+import scalafx.scene.control.*
 import scalafx.scene.image.{Image, ImageView}
 import scalafx.scene.layout.Priority.Always
-import scalafx.scene.layout._
+import scalafx.scene.layout.*
 import scalafx.scene.text.Font
-import scalafx.util.{Duration => FXDuration}
+import scalafx.util.{Duration as FXDuration}
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{Executor, TimeUnit}
@@ -58,7 +58,7 @@ object Step {
   ) extends Step
   object Noop extends Step
 }
-import com.digitalasset.canton.demo.Step._
+import com.digitalasset.canton.demo.Step.*
 
 trait BaseScript extends NamedLogging {
 
@@ -69,7 +69,7 @@ trait BaseScript extends NamedLogging {
   def imagePath: String
 
   def run(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     logger.debug("Running script")
     steps.foreach {
       case Noop => ()
@@ -869,7 +869,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   }
 
   def close(): Unit = {
-    import scala.concurrent.duration._
+    import scala.concurrent.duration.*
     participantTabs.values.foreach(_.shutdown())
     sequencerPool.close()
     val _ = Await.result(actorSystem.terminate(), 2.seconds)

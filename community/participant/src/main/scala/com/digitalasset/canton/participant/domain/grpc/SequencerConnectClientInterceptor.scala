@@ -8,7 +8,7 @@ import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.topology.ParticipantId
 import io.grpc.ClientCall.Listener
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
-import io.grpc._
+import io.grpc.*
 
 class SequencerConnectClientInterceptor(
     participantId: ParticipantId,

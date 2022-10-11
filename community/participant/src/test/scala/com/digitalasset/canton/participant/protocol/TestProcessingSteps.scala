@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
@@ -12,7 +12,6 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOp
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
   WrapsProcessorError,
@@ -40,9 +39,9 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   DomainId,
@@ -52,7 +51,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent
@@ -214,7 +213,9 @@ class TestProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TestProcessingError, StorePendingDataAndSendResponseAndCreateTimeout] = {
     val res = StorePendingDataAndSendResponseAndCreateTimeout(
-      pendingRequestData.getOrElse(TestPendingRequestData(0L, 0L, Set.empty)),
+      pendingRequestData.getOrElse(
+        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty)
+      ),
       Seq.empty,
       List.empty,
       (),

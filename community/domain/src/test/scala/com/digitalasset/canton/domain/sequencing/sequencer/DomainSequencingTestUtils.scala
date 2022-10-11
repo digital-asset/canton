@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.syntax.functorFilter._
+import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 

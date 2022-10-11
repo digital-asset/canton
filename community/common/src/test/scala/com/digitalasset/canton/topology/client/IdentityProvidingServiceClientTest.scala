@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
   ParticipantPermission,
@@ -18,7 +18,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class PartyTopologySnapshotClientTest extends AsyncWordSpec with BaseTest {
 
-  import DefaultTestIdentities._
+  import DefaultTestIdentities.*
 
   "party topology snapshot client" should {
     lazy val topology = Map(

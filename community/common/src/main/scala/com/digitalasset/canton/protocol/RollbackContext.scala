@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.ViewParticipantData
@@ -91,7 +91,7 @@ object RollbackContext {
     maybeRbContext.fold(Either.right[ProtoDeserializationError, RollbackContext](empty)) {
       case com.digitalasset.canton.protocol.v0.ViewParticipantData
             .RollbackContext(rbScope, nextChild) =>
-        import cats.syntax.traverse._
+        import cats.syntax.traverse.*
 
         val rbScopeVector = rbScope.toVector
 

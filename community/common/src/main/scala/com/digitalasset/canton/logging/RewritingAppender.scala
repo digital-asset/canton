@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.logging
 
-import cats.syntax.functorFilter._
+import cats.syntax.functorFilter.*
 import ch.qos.logback.classic
 import ch.qos.logback.classic.spi.{ILoggingEvent, IThrowableProxy, LoggerContextVO}
 import ch.qos.logback.core.spi.AppenderAttachable

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store
 
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 trait SequencerCounterTrackerStoreTest extends CursorPreheadStoreTest {
@@ -11,7 +11,7 @@ trait SequencerCounterTrackerStoreTest extends CursorPreheadStoreTest {
 
   def sequencerCounterTrackerStore(mk: () => SequencerCounterTrackerStore): Unit = {
     "sequencer counter tracker store" should {
-      behave like cursorPreheadStore(() => mk().cursorStore)
+      behave like cursorPreheadStore(() => mk().cursorStore, SequencerCounter.apply)
     }
   }
 }

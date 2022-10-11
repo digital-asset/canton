@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.RegisterTopologyTransactionResponse.Result.{
-  State => ProtoStateV0
+  State as ProtoStateV0
 }
 import com.digitalasset.canton.protocol.v1.RegisterTopologyTransactionResponse.Result.{
-  State => ProtoStateV1
+  State as ProtoStateV1
 }
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -73,7 +73,7 @@ object RegisterTopologyTransactionResponse
     extends HasProtocolVersionedCompanion[
       RegisterTopologyTransactionResponse[RegisterTopologyTransactionResponseResult]
     ] {
-  import RegisterTopologyTransactionResponseResult._
+  import RegisterTopologyTransactionResponseResult.*
 
   type Result = RegisterTopologyTransactionResponse[RegisterTopologyTransactionResponseResult]
 

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.store

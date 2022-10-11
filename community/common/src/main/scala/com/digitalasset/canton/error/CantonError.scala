@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.error._
+import com.daml.error.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.error_details.ErrorInfo
@@ -14,7 +14,7 @@ import scala.util.matching.Regex
 
 object ErrorCodeUtils {
 
-  import cats.syntax.either._
+  import cats.syntax.either.*
 
   /** regex suitable to parse an error code string and extract the error recoverability code */
   lazy val errorCodeCategoryRegexp: Regex = "^[0-9A-Z_]+\\(([0-9]+),[A-Za-z0-9]+\\).*".r
@@ -76,7 +76,7 @@ trait BaseCantonError extends BaseError {
   def rpcStatus(
       overrideCode: Option[Status.Code] = None
   )(implicit loggingContext: ErrorLoggingContext): com.google.rpc.status.Status = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     val status0: com.google.rpc.Status = code.asGrpcStatus(this)
     val details: Seq[com.google.protobuf.Any] = status0.getDetailsList.asScala.toSeq
     val detailsScalapb = details.map(com.google.protobuf.any.Any.fromJavaProto)

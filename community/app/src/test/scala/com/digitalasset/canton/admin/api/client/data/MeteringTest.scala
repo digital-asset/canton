@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import io.circe.parser._
+import io.circe.parser.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 

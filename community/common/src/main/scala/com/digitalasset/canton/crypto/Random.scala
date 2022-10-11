@@ -3,7 +3,12 @@
 
 package com.digitalasset.canton.crypto
 
-import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  HasCryptographicEvidence,
+}
+import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 
 import scala.util.Random
@@ -24,15 +29,16 @@ trait RandomOps {
   *
   * Not an AnyVal as we also want it to be a serializable value such that we can encrypt it.
   */
-sealed abstract case class SecureRandomness(unwrap: ByteString) extends HasCryptographicEvidence {
+case class SecureRandomness private[crypto] (unwrap: ByteString)
+    extends HasCryptographicEvidence
+    with HasVersionedToByteString {
+  override def toByteString(version: ProtocolVersion): ByteString = getCryptographicEvidence
+
   override def getCryptographicEvidence: ByteString = unwrap
 }
 
 /** Cryptographically-secure randomness */
 object SecureRandomness {
-
-  private[crypto] def apply(unwrap: ByteString): SecureRandomness =
-    new SecureRandomness(unwrap) {}
 
   /** Recover secure randomness from a byte string. Use for deserialization only. Fails if the provided byte string
     * is not of the expected length.
@@ -42,9 +48,8 @@ object SecureRandomness {
   )(bytes: ByteString): Either[DeserializationError, SecureRandomness] = {
     if (bytes.size != expectedLength)
       Left(
-        DeserializationError(
-          s"Expected $expectedLength bytes of serialized randomness, got ${bytes.size}",
-          bytes,
+        DefaultDeserializationError(
+          s"Expected $expectedLength bytes of serialized randomness, got ${bytes.size}"
         )
       )
     else Right(SecureRandomness(bytes))

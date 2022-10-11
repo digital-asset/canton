@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.config.{CacheConfig, ProcessingTimeout}

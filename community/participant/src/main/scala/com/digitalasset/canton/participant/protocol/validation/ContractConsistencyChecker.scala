@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.Validated
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionView}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.LfContractId

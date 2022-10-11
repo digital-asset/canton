@@ -51,16 +51,16 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise, blocking}
 import scala.util.{Failure, Success}
 
@@ -70,7 +70,7 @@ class DomainTopologyDispatcherTest
     with HasExecutionContext
     with MockClock {
 
-  import com.digitalasset.canton.topology.DefaultTestIdentities._
+  import com.digitalasset.canton.topology.DefaultTestIdentities.*
 
   case class Awaiter(
       atLeast: Int,
@@ -263,7 +263,7 @@ class DomainTopologyDispatcherTest
 
     "dispatch" when {
       "transactions in sequence" in { f =>
-        import f._
+        import f.*
         val grabF = expect(3)
         for {
           _ <- submit(ts0, txs.ns1k1, txs.id1k1)
@@ -274,7 +274,7 @@ class DomainTopologyDispatcherTest
         }
       }
       "end batch if we have a domain parameters change or a participant state change" in { f =>
-        import f._
+        import f.*
         val grabF = expect(2)
         for {
           _ <- submit(ts0, txs.ns1k1, txs.ps1, txs.id1k1)
@@ -290,7 +290,7 @@ class DomainTopologyDispatcherTest
         }
       }
       "delay second dispatch on effective time update" in { f =>
-        import f._
+        import f.*
         val tdp = TestDomainParameters.defaultDynamic
         def dpc(factor: Int) =
           mkDmGov(
@@ -326,7 +326,7 @@ class DomainTopologyDispatcherTest
     "abort" when {
 
       def shouldHalt(f: Fixture): Future[Assertion] = {
-        import f._
+        import f.*
         loggerFactory.assertLogs(
           for {
             _ <- submit(ts0, txs.ns1k1)
@@ -347,7 +347,7 @@ class DomainTopologyDispatcherTest
 
     "resume" when {
       "restarting idle" in { f =>
-        import f._
+        import f.*
         logger.debug("restarting when idle")
         for {
           _ <- submit(ts0, txs.ns1k1, txs.id1k1)
@@ -361,7 +361,7 @@ class DomainTopologyDispatcherTest
         }
       }
       "restarting with somewhat pending txs" in { f =>
-        import f._
+        import f.*
         trait TestFlusher {
           def foo: Future[Unit]
         }
@@ -387,7 +387,7 @@ class DomainTopologyDispatcherTest
 
     "bootstrapping participants" when {
       "send snapshot to new participant" in { f =>
-        import f._
+        import f.*
         val grabF = expect(1)
         for {
           _ <- submit(ts0, txs.dpc1)
@@ -408,7 +408,7 @@ class DomainTopologyDispatcherTest
       }
 
       "keep distributing on non-deactivation changes" in { f =>
-        import f._
+        import f.*
         for {
           _ <- submit(ts0, txs.ns1k1, mpsO)
           _ <- expect(2)
@@ -440,7 +440,7 @@ class DomainTopologyDispatcherTest
       }
 
       "resume distribution to re-activated participants" in { f =>
-        import f._
+        import f.*
         val mpsS2 = genPs(ParticipantPermission.Observation)
         val rmpsS = revert(mpsS)
         val rmpsD = revert(mpsD)
@@ -495,7 +495,7 @@ class DomainTopologySenderTest
     with HasExecutionContext
     with MockClock {
 
-  import com.digitalasset.canton.topology.DefaultTestIdentities._
+  import com.digitalasset.canton.topology.DefaultTestIdentities.*
 
   case class Response(
       sync: Either[SendAsyncClientError, Unit],
@@ -579,7 +579,7 @@ class DomainTopologySenderTest
   "domain topology sender" should {
     "split batch" when {
       "getting multiple transactions" in { f =>
-        import f._
+        import f.*
         val resp1F = respond(Response(sync = Right(())))
         val resp2F = respond(Response(sync = Right(())))
         val subF = submit(Set(participant1), txs.id1k1, txs.okm1)
@@ -598,7 +598,7 @@ class DomainTopologySenderTest
 
     "abort" when {
       "on fatal submission failures" in { f =>
-        import f._
+        import f.*
         val respondF = respond(
           Response(sync = Left(RequestRefused(SendAsyncError.RequestInvalid("booh"))), async = None)
         )
@@ -616,14 +616,14 @@ class DomainTopologySenderTest
         )
       }
       "on fatal send tracker failures" in { f =>
-        import f._
+        import f.*
         val respondF = respond(
           Response(
             sync = Right(()),
             async = Some(
               SendResult.Error(
                 DeliverError.create(
-                  counter = 1,
+                  counter = SequencerCounter(1),
                   timestamp = CantonTimestamp.Epoch,
                   domainId,
                   messageId = MessageId.tryCreate("booh"),
@@ -648,7 +648,7 @@ class DomainTopologySenderTest
     "retry" when {
 
       def checkDegradation(f: Fixture, failure: Response): Future[Assertion] = {
-        import f._
+        import f.*
         val resp1F = respond(failure)
         val resp2F = respond(Response(sync = Right(())))
         val stage1F = loggerFactory.assertLogs(

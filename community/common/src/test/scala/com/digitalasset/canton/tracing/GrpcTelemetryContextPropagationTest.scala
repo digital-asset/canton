@@ -75,7 +75,7 @@ class GrpcTelemetryContextPropagationTest
 
   "The telemetry context" should {
     "be propagated from GRPC client to server" in { env =>
-      import env._
+      import env.*
       implicit val tracer: Tracer = telemetry.tracer
 
       val sut = new Outer()

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.api.v0
@@ -154,7 +154,7 @@ class GrpcSequencerConnectClient(
   def isActive(participantId: ParticipantId, waitForActive: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, Boolean] = {
-    import Thereafter.syntax._
+    import Thereafter.syntax.*
     val interceptor = new SequencerConnectClientInterceptor(participantId, loggerFactory)
 
     val channel = builder.build()

@@ -4,14 +4,14 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
-import com.digitalasset.canton.protocol.{v0 => protoV0, v1 => protoV1}
+import com.digitalasset.canton.protocol.{v0 as protoV0, v1 as protoV1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{
@@ -21,10 +21,10 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 
 object DomainParameters {
 

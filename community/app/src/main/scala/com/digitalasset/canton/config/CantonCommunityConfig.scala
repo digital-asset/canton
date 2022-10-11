@@ -4,7 +4,7 @@
 package com.digitalasset.canton.config
 
 import cats.data.Validated
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ConfigErrors.CantonConfigError
 import com.digitalasset.canton.config.RequireTypes.InstanceName
@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.typesafe.config.Config
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 import org.slf4j.{Logger, LoggerFactory}
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -77,17 +77,17 @@ object CantonCommunityConfig {
     NamedLoggerFactory.root.properties,
     TraceContext.empty,
   )
-  import pureconfig.generic.semiauto._
-  import CantonConfig._
+  import pureconfig.generic.semiauto.*
+  import CantonConfig.*
 
   // Implemented as a def so we can pass the ErrorLoggingContext to be used during parsing
   @nowarn("cat=unused")
   private implicit def cantonCommunityConfigReader(implicit
       elc: ErrorLoggingContext
   ): ConfigReader[CantonCommunityConfig] = { // memoize it so we get the same instance every time
-    import CantonConfig.ConfigReaders._
-    import DeprecatedConfigUtils._
-    import CantonDeprecationImplicits._
+    import CantonConfig.ConfigReaders.*
+    import DeprecatedConfigUtils.*
+    import CantonDeprecationImplicits.*
 
     implicit val communityDomainConfigReader: ConfigReader[CommunityDomainConfig] =
       deriveReader[CommunityDomainConfig].applyDeprecations
@@ -100,7 +100,7 @@ object CantonCommunityConfig {
   @nowarn("cat=unused")
   private lazy implicit val cantonCommunityConfigWriter: ConfigWriter[CantonCommunityConfig] = {
     val writers = new CantonConfig.ConfigWriters(confidential = true)
-    import writers._
+    import writers.*
     implicit val communityDomainConfigWriter: ConfigWriter[CommunityDomainConfig] =
       deriveWriter[CommunityDomainConfig]
     implicit val communityParticipantConfigWriter: ConfigWriter[CommunityParticipantConfig] =

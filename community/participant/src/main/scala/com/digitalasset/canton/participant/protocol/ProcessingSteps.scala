@@ -4,15 +4,14 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative._
+import cats.syntax.alternative.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.WrapsProcessorError
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor._
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessResult,
   ActivenessSet,
@@ -32,12 +31,12 @@ import com.digitalasset.canton.participant.store.{
   TransferLookup,
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, _}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.{EncryptedViewMessageDecryptionError, *}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
+import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
 
 import scala.collection.concurrent
 import scala.concurrent.Future
@@ -326,7 +325,7 @@ trait ProcessingSteps[
   /** Phase 3, step 2 (some good views):
     *
     * @param ts         The timestamp of the request
-    * @param rc         The [[com.digitalasset.canton.participant.RequestCounter]] of the request
+    * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
     * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
     * @param decryptedViews The decrypted views from step 1 with the right root hash
     * @param malformedPayloads The decryption errors and decrypted views with a wrong root hash
@@ -363,7 +362,7 @@ trait ProcessingSteps[
   /** Phase 3, step 2 (some good views, but the chosen mediator is inactive)
     *
     * @param ts         The timestamp of the request
-    * @param rc         The [[com.digitalasset.canton.participant.RequestCounter]] of the request
+    * @param rc         The [[com.digitalasset.canton.RequestCounter]] of the request
     * @param sc         The [[com.digitalasset.canton.SequencerCounter]] of the request
     * @param decryptedViews The decrypted views from step 1 with the right root hash
     * @return The optional rejection event to be published in the event log,

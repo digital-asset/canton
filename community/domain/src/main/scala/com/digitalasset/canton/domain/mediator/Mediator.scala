@@ -4,9 +4,8 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.{EitherT, NonEmptySeq}
-import cats.instances.future._
-import cats.syntax.bifunctor._
-import com.digitalasset.canton.SequencerCounter
+import cats.instances.future.*
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.config.{LocalNodeParameters, ProcessingTimeout}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -22,22 +21,19 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.handlers.{DiscardIgnoredEvents, EnvelopeOpener}
 import com.digitalasset.canton.sequencing.protocol.Envelope
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.store.{
-  CursorPrehead,
-  SequencedEventStore,
-  SequencerCounterTrackerStore,
-}
+import com.digitalasset.canton.store.{SequencedEventStore, SequencerCounterTrackerStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, DomainTimeTrackerConfig}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
@@ -131,7 +127,7 @@ private[mediator] class Mediator(
   } yield ()
 
   private def onCleanSequencerCounterHandler(
-      newTracedPrehead: Traced[CursorPrehead[SequencerCounter]]
+      newTracedPrehead: Traced[SequencerCounterCursorPrehead]
   ): Future[Unit] = newTracedPrehead.withTraceContext { implicit traceContext => newPrehead =>
     performUnlessClosingF("prune mediator deduplication store")(
       state.deduplicationStore.prune(newPrehead.timestamp)

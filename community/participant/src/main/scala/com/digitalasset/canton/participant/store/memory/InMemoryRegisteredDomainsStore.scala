@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -55,7 +55,7 @@ class InMemoryRegisteredDomainsStore(override protected val loggerFactory: Named
       traceContext: TraceContext
   ): Future[Map[DomainAlias, DomainId]] = blocking {
     lock.synchronized {
-      import scala.jdk.CollectionConverters._
+      import scala.jdk.CollectionConverters.*
       Future.successful(Map(domainAliasMap.asScala.toSeq: _*))
     }
   }

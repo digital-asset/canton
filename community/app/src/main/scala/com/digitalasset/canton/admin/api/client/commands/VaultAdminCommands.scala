@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
@@ -12,7 +12,7 @@ import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
 import com.digitalasset.canton.admin.api.client.data.CertificateResult
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc.VaultServiceStub
-import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 => cryptoproto, _}
+import com.digitalasset.canton.crypto.{PublicKeyWithName, v0 as cryptoproto, *}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.google.protobuf.ByteString
 import io.grpc.ManagedChannel

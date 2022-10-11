@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.config
 
-import better.files.{File => BFile}
+import better.files.{File as BFile}
 import com.digitalasset.canton.cli.Command
 import com.digitalasset.canton.environment.Environment
 import pureconfig.ConfigWriter
@@ -26,7 +26,7 @@ object Generate {
     command match {
       case Command.Generate.RemoteConfig =>
         val writers = new CantonConfig.ConfigWriters(confidential = false)
-        import writers._
+        import writers.*
         config.participantsByString.map(x => (x._1, x._2.toRemoteConfig)).foreach {
           case (name, config) =>
             write(name, "participants", config)

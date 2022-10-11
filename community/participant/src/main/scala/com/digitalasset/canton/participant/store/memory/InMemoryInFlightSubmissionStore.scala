@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative._
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.alternative.*
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission._
+import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
@@ -20,7 +20,7 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MapsUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap

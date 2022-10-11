@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.daml.lf.transaction.TransactionVersion
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker._
+import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker.*
 import com.digitalasset.canton.protocol.PackageInfoService
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}

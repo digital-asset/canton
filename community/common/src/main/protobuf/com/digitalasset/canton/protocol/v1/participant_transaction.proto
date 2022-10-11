@@ -7,6 +7,7 @@ package com.digitalasset.canton.protocol.v1;
 import "com/digitalasset/canton/crypto/v0/crypto.proto";
 import "com/digitalasset/canton/protocol/v0/common.proto";
 import "com/digitalasset/canton/protocol/v0/participant_transaction.proto";
+import "com/digitalasset/canton/protocol/v1/merkle.proto";
 
 // Messages sent by a participant as part of the transaction protocol
 
@@ -32,6 +33,12 @@ message ActionDescription {
     bool failed = 8;
     optional string interface_id = 9;
   }
+}
+
+message ViewNode {
+  BlindableNode view_common_data = 1;
+  BlindableNode view_participant_data = 2;
+  repeated BlindableNode subviews = 3;
 }
 
 // EncryptedViewMessage
@@ -67,6 +74,14 @@ message ViewParticipantMessage {
 // InformeeMessage
 
 message InformeeMessage {
-    v0.FullInformeeTree full_informee_tree = 1;
+    FullInformeeTree full_informee_tree = 1;
     int32 protocol_version = 2; // added in v1
+}
+
+message LightTransactionViewTree {
+  GenTransactionTree tree = 1;
+}
+
+message FullInformeeTree {
+  GenTransactionTree tree = 1;
 }

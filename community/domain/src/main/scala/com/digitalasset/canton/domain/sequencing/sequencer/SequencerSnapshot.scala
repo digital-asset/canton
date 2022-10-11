@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
@@ -32,7 +32,7 @@ case class SequencerSnapshot(
   def toProtoV0: v0.SequencerSnapshot = v0.SequencerSnapshot(
     Some(lastTs.toProtoPrimitive),
     heads.map { case (member, counter) =>
-      member.toProtoPrimitive -> counter
+      member.toProtoPrimitive -> counter.toProtoPrimitive
     },
     Some(status.toProtoV0),
     additional.map(a => v0.ImplementationSpecificInfo(a.implementationName, a.info)),
@@ -79,7 +79,9 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       )
       heads <- request.headMemberCounters.toList
         .traverse { case (member, counter) =>
-          Member.fromProtoPrimitive(member, "registeredMembers").map(m => m -> counter)
+          Member
+            .fromProtoPrimitive(member, "registeredMembers")
+            .map(m => m -> SequencerCounter(counter))
         }
         .map(_.toMap)
       status <- ProtoConverter.parseRequired(

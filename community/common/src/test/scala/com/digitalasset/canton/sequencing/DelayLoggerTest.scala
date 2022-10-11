@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.daml.metrics.VarGauge
+import com.daml.metrics.Gauges.VarGauge
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.LogEntry

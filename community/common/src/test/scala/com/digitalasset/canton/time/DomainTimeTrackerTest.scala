@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.time
 
-import cats.syntax.option._
-import com.digitalasset.canton.BaseTest
+import cats.syntax.option.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -13,6 +12,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, S
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -40,7 +40,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     OrdinarySequencedEvent(
       SignedContent(
         Deliver.create(
-          0L,
+          SequencerCounter(0),
           ts,
           DefaultTestIdentities.domainId,
           TimeProof.mkTimeProofRequestMessageId.some,
@@ -57,7 +57,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     val event = OrdinarySequencedEvent(
       SignedContent(
         Deliver.create(
-          0L,
+          SequencerCounter(0),
           ts,
           DefaultTestIdentities.domainId,
           MessageId.tryCreate("not a time proof").some,
@@ -121,7 +121,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     // keep waiting if we're seeing regular events from the domain
 
     "do nothing if a event is witnessed with an appropriate tick" in { env =>
-      import env._
+      import env.*
 
       timeTracker.requestTick(ts(2))
 
@@ -141,7 +141,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "request time proof if we surpass the time we're expecting" in { env =>
-      import env._
+      import env.*
 
       timeTracker.requestTick(ts(2))
 
@@ -153,7 +153,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "hold off requesting time proof if were getting regular updates" in { env =>
-      import env._
+      import env.*
 
       timeTracker.requestTick(ts(20))
 
@@ -175,7 +175,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "ignore requested tick if too large to track" in { env =>
-      import env._
+      import env.*
 
       // as we wait for the observation latency after the requested domain time using max value
       // would cause the timestamp we're looking for to overflow
@@ -220,7 +220,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
   "fetch" should {
     "timestamp should resolve on any received event" in { env =>
-      import env._
+      import env.*
 
       // make two distinct requests for the next timestamp to ensure they will all be resolved by the same event
       val fetchP1 = timeTracker.fetchTime()
@@ -241,7 +241,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "immediately return if we have a suitably fresh timestamp" in { env =>
-      import env._
+      import env.*
 
       clock.advanceTo(ts(1))
 
@@ -268,7 +268,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
     "fetching time proof when there isn't a fresh one available should immediately force request" in {
       env =>
-        import env._
+        import env.*
 
         clock.advanceTo(ts(1))
 
@@ -285,7 +285,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "stop waiting on shutdown" in { env =>
-      import env._
+      import env.*
 
       clock.advanceTo(ts(1))
 
@@ -302,7 +302,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
   "awaitTick" should {
     "only resolve future when we've reached the given time" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- observeTimeProof(1)
@@ -318,7 +318,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
     "return None if we've already witnessed an equal or greater timestamp from the domain" in {
       env =>
-        import env._
+        import env.*
 
         for {
           _ <- observeTimeProof(42)
@@ -332,7 +332,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
   "ensure minimum time interval" should {
     "should ask for time if a sufficient amount of local time progresses" in { env =>
-      import env._
+      import env.*
 
       // advance to our min observation duration without witnessing a time
       clock.advance(config.minObservationDuration.duration.plusMillis(1))

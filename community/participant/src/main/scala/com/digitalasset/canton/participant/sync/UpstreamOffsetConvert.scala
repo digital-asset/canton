@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
-import com.daml.lf.data.{Bytes => LfBytes, Ref}
+import com.daml.lf.data.{Bytes as LfBytes, Ref}
 import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncOffset}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString
 
 import java.nio.{ByteBuffer, ByteOrder}

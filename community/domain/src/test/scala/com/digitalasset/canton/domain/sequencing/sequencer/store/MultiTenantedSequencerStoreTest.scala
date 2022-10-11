@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp

@@ -7,17 +7,17 @@ import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.time.{
-  NonNegativeFiniteDuration => NonNegativeFiniteDurationInternal,
-  PositiveSeconds => DomainPositiveSeconds,
+  NonNegativeFiniteDuration as NonNegativeFiniteDurationInternal,
+  PositiveSeconds as DomainPositiveSeconds,
 }
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.FutureUtil.defaultStackTraceFilter
 import io.circe.Encoder
 import org.slf4j.event.Level
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.concurrent.TimeUnit
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, TimeoutException}
 
 trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends PrettyPrinting {

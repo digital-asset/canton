@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.archive.{DarDecoder, DarReader}
 import com.daml.lf.data.Ref
 import com.daml.lf.language.Ast

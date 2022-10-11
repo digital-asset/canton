@@ -6,13 +6,13 @@ package com.digitalasset.canton.logging
 import com.digitalasset.canton.util.ErrorUtil
 import org.scalactic.source
 import org.scalatest.Assertion
-import org.scalatest.matchers.should.Matchers._
+import org.scalatest.matchers.should.Matchers.*
 import org.slf4j.event.{Level, SubstituteLoggingEvent}
 import org.slf4j.{Logger, helpers}
 
 import java.util.concurrent.TimeUnit
 import scala.collection.immutable.ListMap
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Test logger that just writes the events into a queue for inspection
   */

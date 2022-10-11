@@ -3,19 +3,19 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   TimeoutType,
 }
-import com.digitalasset.canton.admin.api.client.data._
+import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters => DynamicDomainParametersInternal,
-  v0 => idProto,
+  DynamicDomainParameters as DynamicDomainParametersInternal,
+  v0 as idProto,
 }
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.admin.v0
@@ -25,8 +25,8 @@ import com.digitalasset.canton.topology.admin.v0.TopologyAggregationServiceGrpc.
 import com.digitalasset.canton.topology.admin.v0.TopologyManagerReadServiceGrpc.TopologyManagerReadServiceStub
 import com.digitalasset.canton.topology.admin.v0.TopologyManagerWriteServiceGrpc.TopologyManagerWriteServiceStub
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.topology.{DomainId, _}
+import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.{DomainId, *}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty

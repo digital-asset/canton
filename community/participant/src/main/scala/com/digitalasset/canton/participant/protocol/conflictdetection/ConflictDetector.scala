@@ -5,16 +5,16 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.Monad
 import cats.data.NonEmptyChain
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableStates.LockableStatesCheckHandle
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.{
   ContractKeyJournalError,
@@ -22,7 +22,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTra
   RequestTrackerStoreError,
   TransferStoreError,
 }
-import com.digitalasset.canton.participant.store.ActiveContractStore._
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyState
 import com.digitalasset.canton.participant.store.TransferStore.{
   TransferCompleted,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractK
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{CheckedT, ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 
@@ -56,7 +56,7 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 // We do not make the execution context implicit
 // so that we are always aware of when a context switch may happen.
-class ConflictDetector(
+private[participant] class ConflictDetector(
     private val acs: ActiveContractStore,
     private val contractKeyJournal: ContractKeyJournal,
     private val transferCache: TransferCache,
@@ -66,7 +66,7 @@ class ConflictDetector(
     override protected val timeouts: ProcessingTimeout,
 ) extends NamedLogging
     with FlagCloseable {
-  import ConflictDetector._
+  import ConflictDetector.*
   import LockableStates.withRC
 
   /** Execution queue to ensure that there are no concurrent accesses to the states */
@@ -98,7 +98,7 @@ class ConflictDetector(
         executionContext = executionContext,
       )
 
-  /** Contains the [[com.digitalasset.canton.participant.RequestCounter]]s of all requests
+  /** Contains the [[com.digitalasset.canton.RequestCounter]]s of all requests
     * that have registered their activeness check using [[registerActivenessSet]]
     * and not yet completed it using [[checkActivenessAndLock]].
     * The [[ConflictDetector.PendingActivenessCheck]] stores what needs to be done
@@ -107,7 +107,7 @@ class ConflictDetector(
   private[this] val pendingActivenessChecks: mutable.Map[RequestCounter, PendingActivenessCheck] =
     new mutable.HashMap()
 
-  /** Contains the [[com.digitalasset.canton.participant.RequestCounter]]s of all requests
+  /** Contains the [[com.digitalasset.canton.RequestCounter]]s of all requests
     * that have completed their activeness check using [[checkActivenessAndLock]]
     * and have not yet been finalized using [[finalizeRequest]].
     * The [[LockedStates]] contains the locked contracts, keys, and the checked transfers.
@@ -488,9 +488,15 @@ class ConflictDetector(
         // at EVERY flatMap in on anything that runs through guardedExecution. This includes all operations up to here.
         // The execution queue merely ensures that each Future by itself runs atomically.
         storeFuture.flatMap { results =>
+          logger.debug(
+            withRC(
+              rc,
+              "Conflict detection store updates have finished. Waiting for evicting states.",
+            )
+          )
           runSequentially(s"evict states for request $rc") {
             val result = results.sequence_.toEither
-            logger.debug(withRC(rc, "Conflict detection store updates have finished"))
+            logger.debug(withRC(rc, "Evicting states"))
             // Schedule evictions only if no shutdown is happening. (ecForCd is shut down before ecForAcs.)
             pendingContractWrites.foreach(contractStates.signalWriteAndTryEvict(rc, _))
             pendingKeyWrites.foreach(keyStates.signalWriteAndTryEvict(rc, _))
@@ -608,15 +614,13 @@ class ConflictDetector(
   }
 }
 
-object ConflictDetector {
+private[conflictdetection] object ConflictDetector {
   private[ConflictDetector] case class PendingEvictions(
       lockedStates: LockedStates,
       commitSet: CommitSet,
       pendingContracts: Seq[LfContractId],
       pendingKeys: Seq[LfGlobalKey],
   )
-
-  type LockableContractState = MutableLockableState[ActiveContractStore.Status]
 
   type ImmutableContractState = ImmutableLockableState[ActiveContractStore.Status]
   val ImmutableContractState: ImmutableLockableState.type = ImmutableLockableState

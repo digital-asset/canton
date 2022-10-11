@@ -5,7 +5,7 @@ package com.digitalasset.canton.logging.pretty
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ApiLoggingConfig
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import org.mockito.exceptions.verification.SmartNullPointerException
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -25,7 +25,7 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   /** Enable pretty printing for [[ExampleAlienClass]].
     */
   implicit val prettyAlien: Pretty[ExampleAlienClass] = {
-    import Pretty._
+    import Pretty.*
     prettyOfClass(
       param("p1", _.p1.doubleQuoted),
       unnamedParam(_.p2.doubleQuoted),

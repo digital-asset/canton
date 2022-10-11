@@ -38,7 +38,7 @@ class WellFormedTransactionMergeTest
   // Top-level lf transaction builder for "state-less" lf node creations.
   private implicit val tb = TransactionBuilder()
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
 
   private val subTxTree0 = TxTree(tb.fetch(create(newLfContractId(), Iou.Iou.id, alice, bob)))
   private val subTxTree1 = TxTree(create(newLfContractId(), Iou.Iou.id, alice, bob))

@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{Keep, Sink}
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.functor._
-import cats.syntax.option._
+import cats.syntax.bifunctor.*
+import cats.syntax.functor.*
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -27,7 +27,7 @@ import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRe
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.retry.{Pause, Success}
 import com.digitalasset.canton.util.{AkkaUtil, EitherTUtil, FutureUtil, retry}
@@ -36,7 +36,7 @@ import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Failure
 import scala.util.control.NonFatal

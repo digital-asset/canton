@@ -7,29 +7,29 @@ import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
-import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
+import com.daml.platform.apiserver.{ApiServerConfig as DamlApiServerConfig}
 import com.daml.platform.configuration.{
   CommandConfiguration,
-  IndexServiceConfig => DamlIndexServiceConfig,
+  IndexServiceConfig as DamlIndexServiceConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
-  IndexerConfig => DamlIndexerConfig,
+  IndexerConfig as DamlIndexerConfig,
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.daml.platform.store.DbSupport.{DataSourceProperties => DamlDataSourceProperties}
+import com.daml.platform.store.DbSupport.{DataSourceProperties as DamlDataSourceProperties}
 import com.daml.platform.store.backend.postgresql.{
-  PostgresDataSourceConfig => DamlPostgresDataSourceConfig
+  PostgresDataSourceConfig as DamlPostgresDataSourceConfig
 }
 import com.daml.platform.usermanagement.UserManagementConfig
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt._
-import com.digitalasset.canton.config.RequireTypes._
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.*
+import com.digitalasset.canton.config.RequireTypes.*
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -42,15 +42,15 @@ import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.time.NonNegativeFiniteDuration._
+import com.digitalasset.canton.time.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import io.netty.handler.ssl.{ClientAuth, SslContext}
-import io.scalaland.chimney.dsl._
-import monocle.macros.syntax.lens._
+import io.scalaland.chimney.dsl.*
+import monocle.macros.syntax.lens.*
 
 import java.security.InvalidParameterException
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig {
@@ -162,6 +162,8 @@ case class ParticipantNodeParameters(
     enableCausalityTracking: Boolean,
     unsafeEnableDamlLfDevVersion: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
+    maxDbConnections: Int,
+    excludeInfrastructureTransactions: Boolean,
 ) extends LocalNodeParameters {
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -373,7 +375,7 @@ object LedgerApiServerConfig {
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
-      import ServerAuthRequirementConfig._
+      import ServerAuthRequirementConfig.*
       clientAuth match {
         case ClientAuth.REQUIRE =>
           None // not passing "require" as we need adminClientCerts in this case which are not available here
@@ -755,6 +757,7 @@ object TestingTimeServiceConfig {
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
   * @param dontWarnOnDeprecatedPV If true, then this participant will not emit a warning when connecting to a sequencer using a deprecated protocol version (such as 2.0.0).
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
+  * @param excludeInfrastructureTransactions If set, infrastructure transactions (i.e. ping, bong and dar distribution) will be excluded from participant metering.
   */
 case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -777,6 +780,7 @@ case class ParticipantNodeParameterConfig(
       NonNegativeFiniteDuration.ofSeconds(20)
     ),
     ledgerApiServerParameters: LedgerApiServerParametersConfig = LedgerApiServerParametersConfig(),
+    excludeInfrastructureTransactions: Boolean = true,
 )
 
 /** Parameters for the participant node's stores

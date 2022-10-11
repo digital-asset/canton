@@ -5,10 +5,10 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
@@ -16,7 +16,7 @@ import com.digitalasset.canton.protocol.{ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, ParticipantId, UniqueIdentifier}
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasRepresentativeProtocolVersion,
@@ -128,8 +128,11 @@ object EncryptedView {
     private[EncryptedView] def fromByteString[V <: HasVersionedToByteString](
         deserialize: ByteString => Either[DeserializationError, V]
     )(bytes: ByteString): Either[DeserializationError, CompressedView[V]] =
-      // TODO(M40) Make sure that this view does not explode into an arbitrarily large object
-      ByteStringUtil.decompressGzip(bytes).flatMap(deserialize).map(CompressedView(_))
+      // TODO(i10428) Make sure that this view does not explode into an arbitrarily large object
+      ByteStringUtil
+        .decompressGzip(bytes, maxBytesLimit = None)
+        .flatMap(deserialize)
+        .map(CompressedView(_))
   }
 
 }

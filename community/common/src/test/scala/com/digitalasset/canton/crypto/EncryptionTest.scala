@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
-import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -19,7 +19,7 @@ trait EncryptionTest extends BaseTest { this: AsyncWordSpec =>
   }
 
   private object Message {
-    def fromByteString(bytes: ByteString): Either[DeserializationError, Message] = Right(
+    def fromByteString(bytes: ByteString): Either[DefaultDeserializationError, Message] = Right(
       Message(bytes)
     )
   }

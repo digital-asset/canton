@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.util
 
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.util.OptionUtil
 import slick.jdbc.GetResult
 
@@ -32,8 +32,9 @@ object TimeOfChange {
   }
 
   implicit val getResultOptionTimeOfChange: GetResult[Option[TimeOfChange]] = GetResult(r =>
-    OptionUtil.zipWith(r.nextLongOption(), GetResult[Option[CantonTimestamp]].apply(r))(
-      TimeOfChange.apply
-    )
+    OptionUtil.zipWith(
+      GetResult[Option[RequestCounter]].apply(r),
+      GetResult[Option[CantonTimestamp]].apply(r),
+    )(TimeOfChange.apply)
   )
 }

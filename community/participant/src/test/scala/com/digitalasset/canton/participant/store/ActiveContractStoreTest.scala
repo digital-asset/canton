@@ -5,15 +5,15 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.Chain
 import cats.implicits.toFoldableOps
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.ActiveContractStore._
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
   contractInstance,
@@ -24,7 +24,7 @@ import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{BaseTest, LfPackageId}
+import com.digitalasset.canton.{BaseTest, LfPackageId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import java.time.Instant
@@ -53,7 +53,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
 
     val thousandOneContracts = (1 to 1001).map(ExampleTransactionFactory.suffixedId(0, _)).toSeq
 
-    val rc = 0L
+    val rc = RequestCounter(0)
     val ts = CantonTimestamp.assertFromInstant(Instant.parse("2019-04-04T10:00:00.00Z"))
 
     behave like prunableByTime(mkAcs)
@@ -96,7 +96,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
       }
     }
 
-    val rc2 = 1L
+    val rc2 = RequestCounter(1)
     val ts2 = ts.addMicros(1)
 
     "creating and archiving a contract" in {
@@ -290,7 +290,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
       }
     }
 
-    val rc3 = 2L
+    val rc3 = RequestCounter(2L)
     val ts3 = ts2.plusMillis(1)
 
     "several contracts can be inserted" in {
@@ -914,7 +914,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
 
     "prune exactly the old archived contracts" in {
       val acs = mk()
-      val rc3 = 2L
+      val rc3 = RequestCounter(2)
       val ts3 = ts2.addMicros(1)
       val coid11 = ExampleTransactionFactory.suffixedId(1, 1)
       val coid20 = ExampleTransactionFactory.suffixedId(2, 0)
@@ -972,7 +972,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
     "only prune contracts with deactivations" in {
       val acs = mk()
       val Seq(toc1, toc2, toc3, toc4) =
-        (0 to 3).map(i => TimeOfChange(rc + i, ts.addMicros(i.toLong)))
+        (0L to 3L).map(i => TimeOfChange(rc + i, ts.addMicros(i)))
       val activations = List(toc1, toc2, toc3)
       for {
         transferIns <- activations.traverse(acs.transferInContract(coid00, _, domain1).value)
@@ -1212,7 +1212,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
       ): Future[Unit] = {
         contracts.traverse_ { case (contractId, pkg) =>
           contractStore.storeCreatedContract(
-            0,
+            RequestCounter(0),
             transactionId(1),
             asSerializable(
               contractId,

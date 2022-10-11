@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.initialization
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.InitConfigBase
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.crypto.{SigningPublicKey, X509Certificate}
@@ -12,7 +12,7 @@ import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.domain.topology.DomainTopologyManager
 import com.digitalasset.canton.environment.CantonNodeBootstrapBase
 import com.digitalasset.canton.protocol.DynamicDomainParameters
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{
   DomainParametersChange,
   NamespaceDelegation,

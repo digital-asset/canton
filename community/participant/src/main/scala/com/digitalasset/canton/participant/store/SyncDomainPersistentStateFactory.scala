@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -133,6 +133,7 @@ class SyncDomainPersistentStateFactory(
           pureCryptoApi,
           parameters.stores,
           parameters.cachingConfigs,
+          parameters.maxDbConnections,
           parameters.processingTimeouts,
           parameters.enableAdditionalConsistencyChecks,
           indexedStringStore,
@@ -181,7 +182,7 @@ class SyncDomainPersistentStateFactory(
         uckMode == connectToUniqueContractKeys,
         DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
           s"Cannot connect to domain ${domainAlias.unwrap} with${if (!connectToUniqueContractKeys) "out"
-          else ""} unique contract keys semantics as the participant has set unique-contract-keys=$uckMode"
+            else ""} unique contract keys semantics as the participant has set unique-contract-keys=$uckMode"
         ),
       )
       _ <- EitherT.cond[Future](!uckMode, (), ()).leftFlatMap { _ =>
@@ -193,7 +194,7 @@ class SyncDomainPersistentStateFactory(
           allActiveDomains.forall(_ == domainId),
           DomainRegistryError.ConfigurationErrors.IncompatibleUniqueContractKeysMode.Error(
             s"Cannot connect to domain ${domainAlias.unwrap} as the participant has UCK semantics enabled and has already been connected to other domains: ${allActiveDomains
-              .mkString(", ")}"
+                .mkString(", ")}"
           ): DomainRegistryError,
         )
       }

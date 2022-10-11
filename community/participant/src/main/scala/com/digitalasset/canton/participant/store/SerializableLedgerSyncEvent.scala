@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf.Archive
-import com.daml.ledger.configuration._
+import com.daml.ledger.configuration.*
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
   FinalReason,
   RejectionReasonTemplate,
 }
-import com.daml.ledger.participant.state.v2._
-import com.daml.lf.crypto.{Hash => LfHash}
+import com.daml.ledger.participant.state.v2.*
+import com.daml.lf.crypto.{Hash as LfHash}
 import com.daml.lf.data.Time.Timestamp
-import com.daml.lf.data.{Bytes => LfBytes, ImmArray, Ref, StringModule}
+import com.daml.lf.data.{Bytes as LfBytes, ImmArray, Ref, StringModule}
 import com.daml.lf.transaction.BlindingInfo
 import com.digitalasset.canton
 import com.digitalasset.canton.ProtoDeserializationError.{
@@ -25,8 +25,8 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.v0
-import com.digitalasset.canton.participant.store.DamlLfSerializers._
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.participant.store.DamlLfSerializers.*
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{
   LfCommittedTransaction,
   LfContractId,
@@ -61,7 +61,7 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.google.protobuf.ByteString
-import com.google.rpc.status.{Status => RpcStatus}
+import com.google.rpc.status.{Status as RpcStatus}
 import slick.jdbc.{GetResult, SetParameter}
 
 /** Wrapper for converting a [[LedgerSyncEvent]] to its protobuf companion.
@@ -392,7 +392,7 @@ case class SerializablePublicPackageUpload(
 }
 
 object SerializablePublicPackageUpload {
-  import cats.syntax.traverse._
+  import cats.syntax.traverse.*
 
   def fromProtoV0(
       publicPackageUploadP: v0.PublicPackageUpload

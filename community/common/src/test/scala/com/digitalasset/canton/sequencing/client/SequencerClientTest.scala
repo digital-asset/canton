@@ -4,10 +4,10 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
@@ -15,13 +15,14 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Hash, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.GapInSequencerCounter
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
   ClientShutdown,
@@ -37,7 +38,8 @@ import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.{
 }
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.{
   InMemorySendTrackerStore,
@@ -72,18 +74,22 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
   lazy val metrics =
     new SequencerClientMetrics(MetricName("SequencerClientTest"), new MetricRegistry())
   lazy val deliver: Deliver[Nothing] =
-    SequencerTestUtils.mockDeliver(42L, CantonTimestamp.Epoch, DefaultTestIdentities.domainId)
+    SequencerTestUtils.mockDeliver(
+      42,
+      CantonTimestamp.Epoch,
+      DefaultTestIdentities.domainId,
+    )
   lazy val signedDeliver: OrdinarySerializedEvent = {
     OrdinarySequencedEvent(SequencerTestUtils.sign(deliver))(traceContext)
   }
 
   lazy val nextDeliver: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
-    43L,
+    43,
     CantonTimestamp.ofEpochSecond(1),
     DefaultTestIdentities.domainId,
   )
   lazy val deliver44: Deliver[Nothing] = SequencerTestUtils.mockDeliver(
-    44L,
+    44,
     CantonTimestamp.ofEpochSecond(2),
     DefaultTestIdentities.domainId,
   )
@@ -121,7 +127,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         env <- Env.create()
         _ <- env.subscribeAfter()
       } yield {
-        env.transport.subscriber.value.request.counter shouldBe GenesisSequencerCounter
+        env.transport.subscriber.value.request.counter shouldBe SequencerCounter.Genesis
       }
     }
 
@@ -175,7 +181,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       val processed = new AtomicBoolean()
 
       for {
-        env @ Env(client, transport, _, _, _) <- Env.create(
+        env @ Env(_client, transport, _, _, _) <- Env.create(
           eventValidator = new SequencedEventValidator {
             override def validate(
                 event: OrdinarySerializedEvent
@@ -227,7 +233,8 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     }
 
     "completes the sequencer client if the subscription closes due to an error" in {
-      val error = EventValidationError(GapInSequencerCounter(666, 0))
+      val error =
+        EventValidationError(GapInSequencerCounter(SequencerCounter(666), SequencerCounter(0)))
       for {
         env @ Env(client, transport, _, _, _) <- Env.create(useParallelExecutionContext = true)
 
@@ -393,7 +400,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
         )
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           nextDeliver.counter,
           deliver44.counter,
@@ -461,7 +468,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- client.flush()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           deliver44.counter,
           deliver45.counter,
@@ -489,7 +496,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- client.flush()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           deliver44.counter,
           deliver45.counter,
@@ -577,12 +584,12 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- env.changeTransport(secondTransport)
       } yield {
         val originalSubscriber = env.transport.subscriber.value
-        originalSubscriber.request.counter shouldBe GenesisSequencerCounter
+        originalSubscriber.request.counter shouldBe SequencerCounter.Genesis
         originalSubscriber.subscription.isClosing shouldBe true // old subscription gets closed
         env.transport.isClosing shouldBe true
 
         val newSubscriber = secondTransport.subscriber.value
-        newSubscriber.request.counter shouldBe GenesisSequencerCounter
+        newSubscriber.request.counter shouldBe SequencerCounter.Genesis
         newSubscriber.subscription.isClosing shouldBe false
         secondTransport.isClosing shouldBe false
 
@@ -602,7 +609,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- env.changeTransport(secondTransport)
       } yield {
         val originalSubscriber = env.transport.subscriber.value
-        originalSubscriber.request.counter shouldBe GenesisSequencerCounter
+        originalSubscriber.request.counter shouldBe SequencerCounter.Genesis
 
         val newSubscriber = secondTransport.subscriber.value
         newSubscriber.request.counter shouldBe deliver.counter
@@ -731,6 +738,13 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       EitherT.rightT(())
     }
 
+    override def sendAsyncSigned(
+        request: SignedContent[SubmissionRequest],
+        timeout: Duration,
+        protocolVersion: ProtocolVersion,
+    )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+      sendAsync(request.content, timeout, protocolVersion)
+
     override def sendAsyncUnauthenticated(
         request: SubmissionRequest,
         timeout: Duration,
@@ -780,7 +794,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
       */
     def create(
         storedEvents: Seq[SequencedEvent[ClosedEnvelope]] = Seq.empty,
-        cleanPrehead: Option[CursorPrehead[SequencerCounter]] = None,
+        cleanPrehead: Option[SequencerCounterCursorPrehead] = None,
         eventValidator: SequencedEventValidator = eventAlwaysValid,
         options: SequencerClientConfig = SequencerClientConfig(),
         useParallelExecutionContext: Boolean = false,
@@ -825,6 +839,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         timeouts,
         eventValidatorFactory,
         clock,
+        _ => req => EitherT.rightT(SignedContent(req, SymbolicCrypto.emptySignature, None)),
         sequencedEventStore,
         sendTracker,
         CommonMockMetrics.sequencerClient,

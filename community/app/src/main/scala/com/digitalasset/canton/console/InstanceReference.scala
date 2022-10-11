@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.console
 
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, HttpAdminCommand}
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
-import com.digitalasset.canton.console.commands._
+import com.digitalasset.canton.console.commands.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.domain.config.RemoteDomainConfig
 import com.digitalasset.canton.domain.{Domain, DomainNodeBootstrap}
-import com.digitalasset.canton.environment._
+import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.admin.data.{DomainStatus, NodeStatus, ParticipantStatus}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -130,7 +130,8 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
   @Help.Group("Keys")
   override def keys = _keys
 
-  private val _keys = new LocalKeyAdministrationGroup(this, consoleEnvironment, crypto)
+  private val _keys =
+    new LocalKeyAdministrationGroup(this, consoleEnvironment, crypto)
 
   private[console] def migrateDbCommand(): ConsoleCommandResult[Unit] =
     migrateInstanceDb().toResult(_.message, _ => ())
@@ -186,7 +187,8 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 trait RemoteInstanceReference extends InstanceReference {
   @Help.Summary("Manage public and secret keys")
   @Help.Group("Keys")
-  override val keys: KeyAdministrationGroup = new KeyAdministrationGroup(this, consoleEnvironment)
+  override val keys: KeyAdministrationGroup =
+    new KeyAdministrationGroup(this, consoleEnvironment)
 }
 
 trait GrpcRemoteInstanceReference extends RemoteInstanceReference {

@@ -4,9 +4,9 @@
 package com.digitalasset.canton.crypto.provider.jce
 
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.instances.future.*
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
@@ -18,7 +18,7 @@ import org.bouncycastle.jce.spec.ECNamedCurveParameterSpec
 import java.security.{
   GeneralSecurityException,
   InvalidAlgorithmParameterException,
-  KeyPair => JKeyPair,
+  KeyPair as JKeyPair,
   KeyPairGenerator,
   NoSuchAlgorithmException,
 }

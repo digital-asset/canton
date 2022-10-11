@@ -3,17 +3,16 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore, TransactionalStoreUpdate}
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
-import slick.jdbc.GetResult
 
 import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
@@ -29,28 +28,27 @@ import scala.concurrent.{ExecutionContext, Future}
   *                    </ul>
   * @param processingTime The metric to be used for DB queries
   */
-// TODO(#459) Switch to a different superclass or tagging for `Counter`
-class DbCursorPreheadStore[Counter <: Long: GetResult](
+class DbCursorPreheadStore[Discr](
     client: SequencerClientDiscriminator,
     override protected val storage: DbStorage,
     cursorTable: String,
-    processingTime: GaugeM[TimedLoadGauge, Double],
+    processingTime: Gauge[TimedLoadGauge, Double],
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
-    extends CursorPreheadStore[Counter]
+    extends CursorPreheadStore[Discr]
     with DbStore {
-  import storage.api._
+  import storage.api.*
 
   @nowarn("msg=match may not be exhaustive")
   override def prehead(implicit
       traceContext: TraceContext
-  ): Future[Option[CursorPrehead[Counter]]] =
+  ): Future[Option[CursorPrehead[Discr]]] =
     processingTime.metric.event {
       val preheadQuery =
         sql"""select prehead_counter, ts from #$cursorTable where client = $client order by prehead_counter desc #${storage
-          .limit(2)}"""
-          .as[(Counter, CantonTimestamp)]
+            .limit(2)}"""
+          .as[(Counter[Discr], CantonTimestamp)]
       storage.query(preheadQuery, functionFullName).map {
         case Seq() => None
         case (preheadCounter, preheadTimestamp) +: rest =>
@@ -64,7 +62,7 @@ class DbCursorPreheadStore[Counter <: Long: GetResult](
 
   @VisibleForTesting
   override private[canton] def overridePreheadUnsafe(
-      newPrehead: Option[CursorPrehead[Counter]]
+      newPrehead: Option[CursorPrehead[Discr]]
   )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
     logger.info(s"Override prehead counter in $cursorTable to $newPrehead")
     newPrehead match {
@@ -96,7 +94,7 @@ class DbCursorPreheadStore[Counter <: Long: GetResult](
   }
 
   override def advancePreheadToTransactionalStoreUpdate(
-      newPrehead: CursorPrehead[Counter]
+      newPrehead: CursorPrehead[Discr]
   )(implicit traceContext: TraceContext): TransactionalStoreUpdate = {
     logger.debug(s"Advancing prehead in $cursorTable to $newPrehead")
     val CursorPrehead(counter, timestamp) = newPrehead
@@ -143,7 +141,7 @@ class DbCursorPreheadStore[Counter <: Long: GetResult](
   }
 
   override def rewindPreheadTo(
-      newPreheadO: Option[CursorPrehead[Counter]]
+      newPreheadO: Option[CursorPrehead[Discr]]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.info(s"Rewinding prehead to $newPreheadO")
     newPreheadO match {

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.crypto.{Nonce, Signature}
 import com.digitalasset.canton.domain.Domain.GrpcSequencerAuthenticationErrorGroup

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.environment
 
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.{Applicative, Id}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.{
@@ -215,7 +215,7 @@ class ManagedNodes[
   ): Either[StartupError, Unit] =
     runIfUsingDatabase[Id](storageConfig) { dbConfig: DbConfig =>
       val migrations = migrationsFactory.create(dbConfig, name, params.devVersionSupport)
-      import TraceContext.Implicits.Empty._
+      import TraceContext.Implicits.Empty.*
       logger.info(s"Setting up database schemas for $name")
 
       def errorMapping(err: DbMigrations.Error): StartupError = {
@@ -292,7 +292,7 @@ class ParticipantNodes[PC <: LocalParticipantConfig](
       loggerFactory,
     ) {
   private def migrateIndexerDatabase(name: String): Either[StartupError, Unit] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     for {
       config <- configs.get(name).toRight(ConfigurationNotFound(name))

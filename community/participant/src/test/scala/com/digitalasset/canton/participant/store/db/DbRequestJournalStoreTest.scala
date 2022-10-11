@@ -22,7 +22,7 @@ trait DbRequestJournalStoreTest extends AsyncWordSpec with BaseTest with Request
   val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(sqlu"truncate table journal_requests", sqlu"truncate table head_clean_counters"),
       functionFullName,

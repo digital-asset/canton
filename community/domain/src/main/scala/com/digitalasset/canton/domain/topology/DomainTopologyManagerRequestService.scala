@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -14,7 +14,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, StoreBasedTopologySnapshot}
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -29,9 +29,9 @@ import com.digitalasset.canton.topology.store.{
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -51,7 +51,7 @@ private[domain] trait RequestProcessingStrategy {
 
 private[domain] object RequestProcessingStrategy {
 
-  import RegisterTopologyTransactionResponseResult.State._
+  import RegisterTopologyTransactionResponseResult.State.*
 
   trait ManagerHooks {
     def addFromRequest(
@@ -424,7 +424,7 @@ private[domain] class DomainTopologyManagerRequestService(
     extends NamedLogging
     with DomainTopologyManagerRequestService.Handler {
 
-  import RegisterTopologyTransactionResponseResult.State._
+  import RegisterTopologyTransactionResponseResult.State.*
 
   override def newRequest(
       requestedBy: Member,

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.sync
 
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.Update.TransactionAccepted
 import com.daml.lf.data.ImmArray
 import com.digitalasset.canton.config.RequireTypes.String300
@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerTransactionId, SequencerCounter, checked}
 import slick.jdbc.{GetResult, SetParameter}
 
@@ -77,12 +77,12 @@ object TimestampedEvent {
     GetResult { r =>
       import TraceContext.hasVersionedWrapperGetResult
 
-      val requestCounter = r.nextLong()
-      val requestSequencerCounter = r.nextLongOption()
+      val localOffset = r.nextLong()
+      val requestSequencerCounter = GetResult[Option[SequencerCounter]].apply(r)
       val eventId = GetResult[Option[EventId]].apply(r)
       val event = implicitly[GetResult[LedgerSyncEvent]].apply(r)
       val traceContext = implicitly[GetResult[TraceContext]].apply(r)
-      TimestampedEvent(event, requestCounter, requestSequencerCounter, eventId)(traceContext)
+      TimestampedEvent(event, localOffset, requestSequencerCounter, eventId)(traceContext)
     }
 
   /** The size of the event for the metric in the [[com.digitalasset.canton.participant.store.MultiDomainEventLog]]. */

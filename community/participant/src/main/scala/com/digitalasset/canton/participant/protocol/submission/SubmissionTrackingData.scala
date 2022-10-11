@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
 import com.daml.ledger.participant.state.v2.Update.CommandRejected
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate

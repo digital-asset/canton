@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String68
@@ -12,7 +13,6 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashAlgorithm, HashP
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning.{
@@ -47,7 +47,7 @@ import slick.jdbc.{GetResult, PositionedParameters, SetParameter, TransactionIso
 
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 class DbAcsCommitmentStore(
     override protected val storage: DbStorage,
@@ -60,9 +60,9 @@ class DbAcsCommitmentStore(
     extends AcsCommitmentStore
     with DbPrunableByTimeDomain[AcsCommitmentStoreError]
     with DbStore {
-  import DbStorage.Implicits._
-  import storage.api._
-  import storage.converters._
+  import DbStorage.Implicits.*
+  import storage.api.*
+  import storage.converters.*
 
   override protected[this] val pruning_status_table = "commitment_pruning"
 
@@ -87,7 +87,7 @@ class DbAcsCommitmentStore(
       )
   )
 
-  override protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("acs-commitment-store")
 
   override def getComputed(period: CommitmentPeriod, counterParticipant: ParticipantId)(implicit
@@ -169,7 +169,7 @@ class DbAcsCommitmentStore(
     )
     if (counterParticipants.isEmpty) Future.unit
     else {
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
 
       // Slick doesn't support bulk insertions by default, so we have to stitch our own
       val insertOutstanding =
@@ -239,7 +239,7 @@ class DbAcsCommitmentStore(
     processingTime.metric.event {
       val participantFilter =
         counterParticipant.fold(sql"")(p => sql" and counter_participant = $p")
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
       val query =
         sql"""select from_exclusive, to_inclusive, counter_participant
                     from outstanding_acs_commitments where domain_id = $domainId and to_inclusive >= $start and from_exclusive < $end
@@ -554,7 +554,7 @@ class DbAcsCommitmentStore(
     new DbCommitmentQueue(storage, domainId, protocolVersion, timeouts, loggerFactory)
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     Lifecycle.close(
       runningCommitments,
@@ -574,11 +574,11 @@ class DbIncrementalCommitmentStore(
     extends IncrementalCommitmentStore
     with DbStore {
 
-  import DbStorage.Implicits._
-  import storage.api._
-  import storage.converters._
+  import DbStorage.Implicits.*
+  import storage.api.*
+  import storage.converters.*
 
-  protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("acs-snapshot-store")
 
   private implicit val setParameterStoredParties: SetParameter[StoredParties] =
@@ -735,13 +735,13 @@ class DbCommitmentQueue(
     extends CommitmentQueue
     with DbStore {
 
-  import DbStorage.Implicits._
-  import storage.api._
+  import DbStorage.Implicits.*
+  import storage.api.*
 
   private implicit val acsCommitmentReader =
     AcsCommitment.getAcsCommitmentResultReader(domainId.item, protocolVersion)
 
-  protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("acs-commitment-queue")
 
   override def enqueue(

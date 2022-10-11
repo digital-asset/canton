@@ -1,4 +1,4 @@
-import sbt._
+import sbt.*
 
 object Dependencies {
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
@@ -13,6 +13,8 @@ object Dependencies {
   lazy val scala_version = "2.13.8"
   lazy val scala_version_short = "2.13"
 
+  // TODO(#9883) We have cloned akka's BroadcastHub implementation in community/lib/akka/src/main/scala/akka/stream/scaladsl/BroadcastHub.scala
+  //  When updating akka, make sure to update the clone as well, including the tests in community/lib/akka/src/main/scala/akka
   lazy val akka_version = "2.6.18"
   lazy val akka_http_version = "10.2.8"
   lazy val grpc_version = "1.44.0"

@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.concurrent
-import cats.syntax.either._
+
+import cats.syntax.either.*
 import com.digitalasset.canton.lifecycle.ClosingException
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.util.concurrent.ThreadFactoryBuilder
 
-import java.util.concurrent._
+import java.util.concurrent.*
 import java.util.function.Predicate
 import scala.concurrent.{ExecutionContext, blocking}
 

@@ -27,7 +27,7 @@ class CantonPrettyPrinter(maxStringLength: Int, maxMessageLines: Int) {
           case err: IllegalArgumentException => ErrorUtil.messageWithStacktrace(err)
         }
       case _: Any =>
-        import com.digitalasset.canton.logging.pretty.Pretty._
+        import com.digitalasset.canton.logging.pretty.Pretty.*
         message.toString.limit(maxStringLength).toString
     }
 
@@ -40,7 +40,7 @@ class CantonPrettyPrinter(maxStringLength: Int, maxMessageLines: Int) {
     additionalHandlers = {
       case _: ByteString => Tree.Literal("ByteString")
       case s: String =>
-        import com.digitalasset.canton.logging.pretty.Pretty._
+        import com.digitalasset.canton.logging.pretty.Pretty.*
         s.limit(maxStringLength).toTree
       case Some(p) =>
         pprinter.treeify(

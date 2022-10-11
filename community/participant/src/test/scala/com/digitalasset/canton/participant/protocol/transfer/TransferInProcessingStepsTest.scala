@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree}
@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SeedGenerator,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps._
+import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   NoSubmissionPermission,
   ReceivedMultipleRequests,
@@ -43,7 +43,7 @@ import com.digitalasset.canton.participant.store.TransferStoreTest.{
   contract,
   transactionId1,
 }
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
   MultiDomainEventLog,
   SyncDomainEphemeralState,
@@ -53,12 +53,12 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.submitterParticipant
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -67,7 +67,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.collection.immutable.Set
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
@@ -206,7 +206,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail when a receiving party has no participant on the domain" in {
       val transferOutRequest = TransferOutRequest(
         party1,
-        Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+        Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
         Set.empty,
         coidAbs1,
         transferId.sourceDomain,
@@ -229,7 +229,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         TransferData(
           SourceProtocolVersion(testedProtocolVersion),
           transferId.requestTimestamp,
-          0L,
+          RequestCounter(0),
           fullTransferOutTree,
           CantonTimestamp.ofEpochSecond(10),
           contract,
@@ -415,8 +415,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- valueOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
@@ -442,8 +442,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmpty(Seq, WithRecipients(inTree2, RecipientsTest.testInstance)),
             Seq.empty,
             cryptoSnapshot,
@@ -465,8 +465,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmpty(
               Seq,
               WithRecipients(inTree, RecipientsTest.testInstance),
@@ -485,8 +485,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail if there are not transfer-in view trees with the right root hash" in {
       transferInProcessingSteps.pendingDataAndResponseArgsForMalformedPayloads(
         CantonTimestamp.Epoch,
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         Seq.empty,
         cryptoSnapshot,
       ) shouldBe Left(ReceivedNoRequests)
@@ -528,8 +528,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pendingDataAndResponseArgs2 = TransferInProcessingSteps.PendingDataAndResponseArgs(
           fullTransferInTree2,
           CantonTimestamp.Epoch,
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           cryptoSnapshot,
           transferringParticipant = true,
         )
@@ -576,8 +576,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pendingDataAndResponseArgs = TransferInProcessingSteps.PendingDataAndResponseArgs(
           fullTransferInTree,
           CantonTimestamp.Epoch,
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           cryptoSnapshot,
           transferringParticipant = true,
         )
@@ -652,7 +652,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferOutRequest = TransferOutRequest(
       party1,
-      Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+      Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
       contractId,
       transferId.sourceDomain,
@@ -675,7 +675,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferData(
         SourceProtocolVersion(testedProtocolVersion),
         CantonTimestamp.Epoch,
-        1L,
+        RequestCounter(1),
         fullTransferOutTree,
         CantonTimestamp.Epoch,
         contract,
@@ -751,8 +751,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
       val pendingRequestData = TransferInProcessingSteps.PendingTransferIn(
         RequestId(CantonTimestamp.Epoch),
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         mock[RootHash],
         contract,
         transactionId1,
@@ -941,7 +941,7 @@ object TransferInProcessingStepsTest {
       Batch.of(protocolVersion, (signedResult, Recipients.cc(participantId)))
     val deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
       Deliver.create(
-        0L,
+        SequencerCounter(0),
         CantonTimestamp.Epoch,
         sourceDomain,
         Some(MessageId.tryCreate("msg-0")),

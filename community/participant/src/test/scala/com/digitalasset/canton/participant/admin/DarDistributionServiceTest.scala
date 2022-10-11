@@ -13,14 +13,14 @@ import com.daml.ledger.api.v1.event.Event.Event.{Archived, Created}
 import com.daml.ledger.api.v1.event.{ArchivedEvent, CreatedEvent, Event}
 import com.daml.ledger.api.v1.transaction.Transaction
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.client.binding.{Primitive => P}
+import com.daml.ledger.client.binding.{Primitive as P}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String255
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
 import com.digitalasset.canton.participant.ledger.api.client.{
   CommandSubmitterWithRetry,
   LedgerSubmit,
@@ -47,7 +47,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
   "DarDistributionService" can {
     "successfully share a dar to another participant" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         _ <- alices.service.share(SuccessfulSetup.hash, Bob)
@@ -63,7 +63,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "rejecting removes the request from both sides" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         _ <- alices.service.share(SuccessfulSetup.hash, Bob)
@@ -83,7 +83,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "error if the dar to share isn't registered with the participant" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         result <- alices.service.share(TestHash.digest("this dar doesn't exist"), Bob)
@@ -92,7 +92,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "not register the dar sharing request as pending if we fail to submit to the ledger" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       setupFailingSubmitBehavior()
 
@@ -109,7 +109,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "leave share request and offer pending if appending shared dar the ledger fails" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         _ <- alices.service.share(FailToAppendSetup.hash, Bob)
@@ -129,7 +129,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "dar with incorrect hash is automatically rejected" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         _ <- bobs.logger.assertLogs(
@@ -152,7 +152,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
     "invalid dar is automatically rejected" in {
       val errorMsg = "Error message"
       val f = new Fixture(bobDarValidation = _ => Left(errorMsg))
-      import f._
+      import f.*
 
       for {
         _ <- bobs.logger.assertLogs(
@@ -174,7 +174,7 @@ class DarDistributionServiceTest extends AsyncWordSpec with BaseTest {
 
     "automatically install dar if owner is whitelisted" in {
       val f = new Fixture
-      import f._
+      import f.*
 
       for {
         _ <- bobs.whitelistStore.whitelist(Alice)

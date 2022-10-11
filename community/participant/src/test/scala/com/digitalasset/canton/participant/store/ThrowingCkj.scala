@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
   ContractKeyJournalError,
@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.{ExecutionContext, Future}
 

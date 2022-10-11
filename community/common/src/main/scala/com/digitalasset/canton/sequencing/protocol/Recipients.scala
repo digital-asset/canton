@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.reducible._
-import cats.syntax.traverse._
+import cats.syntax.reducible.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0

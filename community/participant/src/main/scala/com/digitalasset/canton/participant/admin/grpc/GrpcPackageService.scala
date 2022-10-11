@@ -5,14 +5,14 @@ package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
 import com.daml.ledger.api.refinements.ApiTypes
-import com.daml.ledger.client.binding.{Contract, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService.DarDescriptor
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
-import com.digitalasset.canton.participant.admin._
-import com.digitalasset.canton.participant.admin.v0.{DarDescription => ProtoDarDescription, _}
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.participant.admin.*
+import com.digitalasset.canton.participant.admin.v0.{DarDescription as ProtoDarDescription, *}
+import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
@@ -214,7 +214,7 @@ class GrpcPackageService(
   private def acceptRejectResultToResponse(
       name: String
   )(result: Either[AcceptRejectError, Unit]): Try[Empty] = {
-    import cats.implicits._
+    import cats.implicits.*
 
     def errorToStatus: AcceptRejectError => Status = {
       case AcceptRejectError.OfferNotFound =>

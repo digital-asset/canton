@@ -4,10 +4,10 @@
 package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.db.{DbCryptoPrivateStore, StoredPrivateKey}
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPrivateStore
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

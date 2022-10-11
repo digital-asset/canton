@@ -9,7 +9,7 @@ import com.digitalasset.canton.ProtoDeserializationError.TimestampConversionErro
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 import slick.jdbc.{GetResult, SetParameter}
 
 import java.time.{Duration, Instant}

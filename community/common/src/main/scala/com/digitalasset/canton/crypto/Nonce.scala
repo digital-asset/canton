@@ -6,7 +6,7 @@ package com.digitalasset.canton.crypto
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
+import com.digitalasset.canton.serialization.{DefaultDeserializationError, HasCryptographicEvidence}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.util.HexString
 import com.google.protobuf.ByteString
@@ -50,7 +50,7 @@ object Nonce {
       bytes.size() == length,
       new Nonce(bytes),
       CryptoDeserializationError(
-        DeserializationError(s"Nonce of invalid length: ${bytes.size()}", bytes)
+        DefaultDeserializationError(s"Nonce of invalid length: ${bytes.size()}")
       ),
     )
 

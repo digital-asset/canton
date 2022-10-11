@@ -7,15 +7,15 @@ import com.daml.lf.data.Ref.QualifiedName
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.test.TransactionBuilder
-import com.daml.lf.transaction.test.TransactionBuilder.Implicits._
+import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.daml.lf.value.Value
 import com.daml.lf.value.Value.ValueRecord
 import com.daml.lf.{language, transaction}
 import com.digitalasset.canton.protocol.{LfContractId, LfVersionedTransaction}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.{LfPackageId, LfPartyId, LfValue}
 
 private[submission] object DomainSelectionFixture {
@@ -96,7 +96,7 @@ private[submission] object DomainSelectionFixture {
       def tx(
           version: language.LanguageVersion = LanguageVersion.StableVersions.max
       ): LfVersionedTransaction = {
-        import SimpleTopology._
+        import SimpleTopology.*
 
         val builder = TransactionBuilder(_ => version)
         val createNode = builder.create(
@@ -118,7 +118,7 @@ private[submission] object DomainSelectionFixture {
 
     object ThreeExercises {
 
-      import SimpleTopology._
+      import SimpleTopology.*
 
       private val builder = TransactionBuilder()
 
@@ -145,8 +145,8 @@ private[submission] object DomainSelectionFixture {
     case class ExerciseByInterface(
         version: language.LanguageVersion = LanguageVersion.StableVersions.max
     ) {
-      import SimpleTopology._
-      import ExerciseByInterface._
+      import SimpleTopology.*
+      import ExerciseByInterface.*
 
       private val builder = TransactionBuilder(_ => version)
 

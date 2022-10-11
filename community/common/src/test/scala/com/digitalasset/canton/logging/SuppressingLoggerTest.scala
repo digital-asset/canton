@@ -10,7 +10,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j
 
 import scala.collection.immutable.ListMap
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 class SuppressingLoggerTest extends AnyWordSpec with BaseTest {
@@ -276,7 +276,7 @@ class SuppressingLoggerTest extends AnyWordSpec with BaseTest {
     }
 
     "ignore missing optional unordered errors" in new LoggingTester {
-      import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality._
+      import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.*
       loggerFactory.assertLogsUnorderedOptional(
         {
           logger.error("First")

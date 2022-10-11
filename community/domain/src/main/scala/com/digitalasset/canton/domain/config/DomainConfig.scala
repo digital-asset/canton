@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.config
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.domain.sequencing.sequencer.CommunitySequencerConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
@@ -14,7 +14,7 @@ import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteD
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.ProtocolVersion
 import io.netty.handler.ssl.SslContext
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 
 import java.io.File
 

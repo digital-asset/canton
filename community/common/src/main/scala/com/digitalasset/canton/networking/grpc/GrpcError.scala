@@ -12,7 +12,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
 }
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc.Status.Code._
+import io.grpc.Status.Code.*
 import io.grpc.{Metadata, Status, StatusRuntimeException}
 
 import scala.annotation.nowarn

@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.time
 
-import cats.syntax.option._
-import com.digitalasset.canton.BaseTest
+import cats.syntax.option.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedContent}
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 
 object TimeProofTestUtil {
   def mkTimeProof(
@@ -19,7 +19,7 @@ object TimeProofTestUtil {
       domainId: DomainId = DefaultTestIdentities.domainId,
   ): TimeProof = {
     val deliver = Deliver.create(
-      counter,
+      SequencerCounter(counter),
       timestamp,
       domainId,
       TimeProof.mkTimeProofRequestMessageId.some,

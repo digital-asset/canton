@@ -4,16 +4,16 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.daml.lf.transaction.ContractStateMachine.KeyInactive
 import com.daml.lf.transaction.Transaction.{KeyActive, KeyCreate, KeyInput, NegativeKeyLookup}
 import com.daml.lf.transaction.{ContractKeyUniquenessMode, ContractStateMachine}
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractKeyResolutionError,
@@ -22,10 +22,10 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   TransactionTreeConversionError,
 }
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
@@ -323,7 +323,12 @@ class TransactionTreeFactoryImplV3(
     } yield {
       // Compute the result
       val transactionView =
-        TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, childViews)
+        TransactionView.tryCreate(cryptoOps)(
+          viewCommonData,
+          viewParticipantData,
+          childViews,
+          protocolVersion,
+        )
 
       checkCsmStateMatchesView(state.csmState, transactionView, viewPosition)
 
@@ -411,7 +416,7 @@ class TransactionTreeFactoryImplV3(
     ErrorUtil.requireArgument(
       subviewKeyResolutions.keySet.subsetOf(viewKeyInputs.keySet),
       s"Global key inputs of subview not part of the global key inputs of the parent view. Missing keys: ${subviewKeyResolutions.keySet
-        .diff(viewKeyInputs.keySet)}",
+          .diff(viewKeyInputs.keySet)}",
     )
 
     def resolutionFor(

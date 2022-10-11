@@ -33,9 +33,9 @@ class DbServiceAgreementAcceptanceStore(
     with FlagCloseable
     with HasCloseContext {
 
-  import com.digitalasset.canton.util.ShowUtil._
-  import storage.api._
-  import storage.converters._
+  import com.digitalasset.canton.util.ShowUtil.*
+  import storage.api.*
+  import storage.converters.*
 
   private implicit val setParameterSignature: SetParameter[Signature] =
     Signature.getVersionedSetParameter(protocolVersion)

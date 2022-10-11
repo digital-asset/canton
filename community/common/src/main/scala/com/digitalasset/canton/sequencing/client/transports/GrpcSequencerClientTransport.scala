@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
@@ -27,7 +27,7 @@ import com.digitalasset.canton.sequencing.client.{
   SubscriptionErrorRetryPolicy,
 }
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil
@@ -97,6 +97,29 @@ class GrpcSequencerClientTransport(
         .toEitherT[Future]
     } yield response
 
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
+
+    val response = CantonGrpcUtil
+      .sendGrpcRequest(sequencerServiceClient, "sequencer")(
+        stub => stub.sendAsyncSigned(request.toProtoV0),
+        requestDescription = s"send-async-signed/${request.content.messageId}",
+        timeout = timeout,
+        logger = logger,
+        logPolicy = noLoggingShutdownErrorsLogPolicy,
+        // sends are at-most-once so we cannot retry when unavailable as we don't know if the request has been accepted
+        retryPolicy = retryPolicy(retryOnUnavailable = false),
+      )
+
+    response.biflatMap(
+      fromGrpcError(_, request.content.messageId).toEitherT,
+      fromResponse(_).toEitherT,
+    )
+  }
+
   override def sendAsync(
       request: SubmissionRequest,
       timeout: Duration,
@@ -115,36 +138,39 @@ class GrpcSequencerClientTransport(
   ): EitherT[Future, SendAsyncClientError, Unit] =
     sendAsyncInternal(request, timeout, requiresAuthentication = false)
 
+  private def fromResponse(responseP: v0.SendAsyncResponse): Either[SendAsyncClientError, Unit] =
+    for {
+      response <- SendAsyncResponse
+        .fromProtoV0(responseP)
+        .leftMap[SendAsyncClientError](err =>
+          SendAsyncClientError.RequestFailed(s"Failed to deserialize response: $err")
+        )
+      _ <- response.error.toLeft(()).leftMap(SendAsyncClientError.RequestRefused)
+    } yield ()
+
+  private def fromGrpcError(error: GrpcError, messageId: MessageId)(implicit
+      traceContext: TraceContext
+  ): Either[SendAsyncClientError, Unit] = {
+    val result = EitherUtil.condUnitE(
+      !bubbleSendErrorPolicy(error),
+      SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error"),
+    )
+
+    // log that we're swallowing the error
+    result.foreach { _ =>
+      logger.info(
+        s"Send [$messageId] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
+      )
+    }
+
+    result
+  }
+
   private def sendAsyncInternal(
       request: SubmissionRequest,
       timeout: Duration,
       requiresAuthentication: Boolean,
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
-    def fromGrpcError(error: GrpcError): Either[SendAsyncClientError, Unit] = {
-      val result = EitherUtil.condUnitE(
-        !bubbleSendErrorPolicy(error),
-        SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error"),
-      )
-
-      // log that we're swallowing the error
-      result.foreach { _ =>
-        logger.info(
-          s"Send [${request.messageId}] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
-        )
-      }
-
-      result
-    }
-
-    def fromResponse(responseP: v0.SendAsyncResponse): Either[SendAsyncClientError, Unit] =
-      for {
-        response <- SendAsyncResponse
-          .fromProtoV0(responseP)
-          .leftMap[SendAsyncClientError](err =>
-            SendAsyncClientError.RequestFailed(s"Failed to deserialize response: $err")
-          )
-        _ <- response.error.toLeft(()).leftMap(SendAsyncClientError.RequestRefused)
-      } yield ()
 
     val response = CantonGrpcUtil
       .sendGrpcRequest(sequencerServiceClient, "sequencer")(
@@ -161,7 +187,7 @@ class GrpcSequencerClientTransport(
         retryPolicy = retryPolicy(retryOnUnavailable = false),
       )
 
-    response.biflatMap(fromGrpcError(_).toEitherT, fromResponse(_).toEitherT)
+    response.biflatMap(fromGrpcError(_, request.messageId).toEitherT, fromResponse(_).toEitherT)
   }
 
   override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =

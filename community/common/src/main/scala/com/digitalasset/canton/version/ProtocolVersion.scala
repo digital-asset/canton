@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.buildinfo.BuildInfo
@@ -167,9 +167,6 @@ object ProtocolVersion {
   lazy val v2: ProtocolVersion = ProtocolVersion(2)
   lazy val v3: ProtocolVersion = ProtocolVersion(3)
   lazy val v4: ProtocolVersion = ProtocolVersion(4)
-
-  // TODO(i10354): remove hardcoded protocol version in MerkleTree
-  lazy val v2Todo_i10354: ProtocolVersion = v2
 
   /** @return Parsed protocol version if found in environment variable `CANTON_PROTOCOL_VERSION`
     * @throws java.lang.RuntimeException if the given parameter cannot be parsed to a protocol version

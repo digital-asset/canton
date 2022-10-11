@@ -4,9 +4,9 @@
 package com.digitalasset.canton.domain.mediator
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
@@ -14,14 +14,14 @@ import com.digitalasset.canton.domain.mediator.store.{
 }
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.InformeeMessage
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 class MediatorStateTest extends AsyncWordSpec with BaseTest {
@@ -44,7 +44,12 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           s(999),
           testedProtocolVersion,
         )
-      val view = TransactionView.tryCreate(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
+      val view = TransactionView.tryCreate(hashOps)(
+        viewCommonData,
+        BlindedNode(rh(0)),
+        Nil,
+        testedProtocolVersion,
+      )
       val commonMetadata = CommonMetadata(hashOps)(
         ConfirmationPolicy.Signatory,
         domainId,
@@ -58,7 +63,7 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           BlindedNode(rh(11)),
           commonMetadata,
           BlindedNode(rh(12)),
-          MerkleSeq.fromSeq(hashOps)(view :: Nil),
+          MerkleSeq.fromSeq(hashOps)(view :: Nil, testedProtocolVersion),
         )
       )
     }
@@ -121,9 +126,8 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
           result <- loggerFactory.assertLogs(
             sut.replace(newVersion, newVersion).value,
             _.shouldBeCantonError(
-              MediatorError.InternalError.Reject(
-                s"Request ${currentVersion.requestId} has an unexpected version ${currentVersion.requestId.unwrap} (expected version: $newVersion, new version: $newVersion)."
-              )
+              MediatorError.InternalError,
+              _ shouldBe s"Request ${currentVersion.requestId} has an unexpected version ${currentVersion.requestId.unwrap} (expected version: ${newVersion.version}, new version: ${newVersion.version}).",
             ),
           )
         } yield result shouldBe None

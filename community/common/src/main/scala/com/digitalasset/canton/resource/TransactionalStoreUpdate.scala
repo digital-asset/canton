@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.resource
 
-import cats.syntax.alternative._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
+import cats.syntax.alternative.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -64,7 +64,7 @@ object TransactionalStoreUpdate {
 
       lazy val updatesF = storages.headOption
         .traverse_ { storage =>
-          import storage.api._
+          import storage.api.*
           val dbUpdatesTransaction = DBIO.seq(dbUpdates.map(_.sql): _*).transactionally
           storage.update_(dbUpdatesTransaction, functionFullName)
         }

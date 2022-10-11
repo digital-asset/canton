@@ -18,11 +18,11 @@ import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.time.Clock.SystemClockRunningBackwards
 import com.digitalasset.canton.topology.admin.v0.InitializationServiceGrpc
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, PriorityBlockingQueueUtil}
 import com.google.protobuf.empty.Empty
 
-import java.time.{Clock => JClock, Duration, Instant}
+import java.time.{Clock as JClock, Duration, Instant}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.{Callable, PriorityBlockingQueue, TimeUnit}
 import scala.annotation.tailrec
@@ -83,7 +83,7 @@ abstract class Clock() extends AutoCloseable with NamedLogging {
             .get()
             .isBefore(nowSnapshot.minusSeconds(30))
         ) {
-          import TraceContext.Implicits.Empty._
+          import TraceContext.Implicits.Empty.*
           backwardsClockAlerted.set(nowSnapshot)
           SystemClockRunningBackwards.Error(nowSnapshot, oldTs)
         }
@@ -252,7 +252,7 @@ class WallClock(
   private val running = new AtomicBoolean(true)
 
   override def close(): Unit = {
-    import com.digitalasset.canton.concurrent._
+    import com.digitalasset.canton.concurrent.*
     if (running.getAndSet(false)) {
       Lifecycle.close(
         () => failTasks(),
@@ -428,7 +428,7 @@ class RemoteClock(
       pbTimestamp <- EitherT.right[ProtoDeserializationError](service.currentTime(Empty()))
       timestamp <- EitherT.fromEither[Future](CantonTimestamp.fromProtoPrimitive(pbTimestamp))
     } yield timestamp
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     timeouts.network.await("fetching remote time")(req.value) match {
       case Right(tm) => tm
       case Left(err) =>

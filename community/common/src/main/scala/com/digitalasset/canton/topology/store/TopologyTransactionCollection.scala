@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.topology.store
 
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
@@ -22,8 +22,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Remove,
   Replace,
 }
-import com.digitalasset.canton.topology.transaction._
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.version.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -275,7 +275,7 @@ final case class PositiveSignedTopologyTransactions(
 }
 
 object TopologyTransactionSplitter {
-  import TopologyChangeOp._
+  import TopologyChangeOp.*
 
   def apply[Op <: TopologyChangeOp, F[_ <: TopologyChangeOp]](
       collection: Seq[F[TopologyChangeOp]],

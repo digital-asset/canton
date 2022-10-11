@@ -4,20 +4,20 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.ledger.api.v1.value.{Identifier, Record}
-import com.daml.ledger.api.validation.{ValueValidator => LedgerApiValueValidator}
+import com.daml.ledger.api.validation.{ValueValidator as LedgerApiValueValidator}
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.daml.platform.participant.util.LfEngineToApi
-import com.daml.platform.server.api.validation.{FieldValidations => LedgerApiFieldValidations}
-import com.digitalasset.canton._
+import com.daml.platform.server.api.validation.{FieldValidations as LedgerApiFieldValidations}
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
@@ -35,12 +35,13 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.{
@@ -51,8 +52,7 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
 import com.digitalasset.canton.store.{
   CursorPrehead,
@@ -69,8 +69,8 @@ import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.*
 
 import java.time.Instant
 import scala.Ordered.orderingToOrdered
@@ -109,7 +109,7 @@ class RepairService(
     extends NamedLogging
     with FlagCloseableAsync
     with HasCloseContext {
-  import RepairService._
+  import RepairService.*
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -681,16 +681,15 @@ class RepairService(
       skipInactive: Boolean,
       batchSize: PositiveInt,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
-    // TODO(i9270) extract magic numbers
     MonadUtil
-      .batchedSequentialTraverse(20, batchSize.value)(cids)(
+      .batchedSequentialTraverse(parameters.maxDbConnections * 2, batchSize.value)(cids)(
         moveContracts(_, repairSource, repairTarget, skipInactive).map(_ => Seq[Unit]())
       )
       .map(_ => ())
 
   /** Move contract from `repairSource` to `repairTarget`. */
   private def moveContracts(
-      cids: Seq[LfContractId],
+      cids: Iterable[LfContractId],
       repairSource: RepairRequest,
       repairTarget: RepairRequest,
       skipInactive: Boolean,
@@ -994,7 +993,7 @@ class RepairService(
             blindingInfo = None,
             contractMetadata = Map(), // TODO(#9795) wire proper value
           ),
-          repair.rc,
+          repair.rc.asLocalOffset,
           None,
         )
         val eventLog = repair.domainPersistence.eventLog
@@ -1239,7 +1238,7 @@ class RepairService(
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Seq(
       executionQueue.asCloseable(
         "repair-service-queue",

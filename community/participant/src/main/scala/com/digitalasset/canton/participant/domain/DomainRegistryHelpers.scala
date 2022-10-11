@@ -5,14 +5,14 @@ package com.digitalasset.canton.participant.domain
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiProvider}
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.config.{
   ParticipantNodeParameters,
@@ -31,7 +31,7 @@ import com.digitalasset.canton.sequencing.SequencerConnection
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   DomainTopologyClientWithInit,
@@ -275,6 +275,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
+          SequencerClient.signSubmissionRequest(domainCryptoApi),
         )
         .leftMap[DomainRegistryError](
           DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)

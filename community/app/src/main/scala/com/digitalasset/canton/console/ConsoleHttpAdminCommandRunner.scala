@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.console
 
-import cats.instances.future._
-import cats.syntax.either._
+import cats.instances.future.*
+import cats.syntax.either.*
 import com.digitalasset.canton.admin.api.client.HttpCtlRunner
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   CustomClientTimeout,

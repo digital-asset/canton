@@ -10,7 +10,7 @@ import com.digitalasset.canton.sequencing.protocol.ClosedEnvelope
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.ExecutionContext
 

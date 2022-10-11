@@ -24,10 +24,10 @@ import com.digitalasset.canton.domain.sequencing.sequencer.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.duration.FiniteDuration
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 class SequencerAdministrationGroup(
     runner: AdminCommandRunner,

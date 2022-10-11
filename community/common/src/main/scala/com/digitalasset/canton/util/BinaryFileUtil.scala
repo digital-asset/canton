@@ -5,7 +5,7 @@ package com.digitalasset.canton.util
 
 import com.google.protobuf.ByteString
 
-import java.io._
+import java.io.*
 import scala.concurrent.blocking
 
 /** Write and read byte strings to files.

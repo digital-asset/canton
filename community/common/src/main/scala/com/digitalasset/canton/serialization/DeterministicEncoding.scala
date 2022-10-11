@@ -3,22 +3,32 @@
 
 package com.digitalasset.canton.serialization
 
-import cats.syntax.either._
-import com.digitalasset.canton.LfPartyId
+import cats.syntax.either.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 import java.nio.{ByteBuffer, ByteOrder}
 import java.time.Instant
 import scala.annotation.tailrec
 
-case class DeserializationError(message: String, bytes: ByteString) extends PrettyPrinting {
+sealed trait DeserializationError extends PrettyPrinting {
+  val message: String
+
   override def pretty: Pretty[DeserializationError] =
     prettyOfClass(
-      param("message", _.message.unquoted),
-      param("bytes", _.bytes),
+      param("message", _.message.unquoted)
     )
+  def toProtoDeserializationError: ProtoDeserializationError =
+    this match {
+      case DefaultDeserializationError(message) =>
+        ProtoDeserializationError.OtherError(message)
+      case MaxByteToDecompressExceeded(message) =>
+        ProtoDeserializationError.MaxBytesToDecompressExceeded(message)
+    }
 }
+case class DefaultDeserializationError(message: String) extends DeserializationError
+case class MaxByteToDecompressExceeded(message: String) extends DeserializationError
 
 /** The methods in this object should be used when a <strong>deterministic</strong> encoding is
   * needed. They are not meant for computing serializations for a wire format. Protobuf is a better choice there.
@@ -31,13 +41,16 @@ object DeterministicEncoding {
   ): ByteString => Either[DeserializationError, T] =
     bytes =>
       deserialize(bytes).flatMap { case (key, rest) =>
-        Either.cond(rest.isEmpty, key, DeserializationError("Too many bytes", rest))
+        Either.cond(rest.isEmpty, key, DefaultDeserializationError("Too many bytes"))
       }
 
   /** Tests that the given [[com.google.protobuf.ByteString]] has at least `len` bytes and splits the [[com.google.protobuf.ByteString]] at `len`. */
-  def splitAt(len: Int, bytes: ByteString): Either[DeserializationError, (ByteString, ByteString)] =
+  def splitAt(
+      len: Int,
+      bytes: ByteString,
+  ): Either[DeserializationError, (ByteString, ByteString)] =
     if (bytes.size < len)
-      Left(DeserializationError(s"Expected $len bytes", bytes))
+      Left(DefaultDeserializationError(s"Expected $len bytes"))
     else
       Right((bytes.substring(0, len), bytes.substring(len)))
 
@@ -46,7 +59,7 @@ object DeterministicEncoding {
     for {
       byteAndRest <- splitAt(1, bytes)
       (byte, rest) = byteAndRest
-      _ <- Either.cond(byte.byteAt(0) == b, (), DeserializationError(s"Expected byte $b", bytes))
+      _ <- Either.cond(byte.byteAt(0) == b, (), DefaultDeserializationError(s"Expected byte $b"))
     } yield rest
 
   /** Encode a [[scala.Byte]] into a [[com.google.protobuf.ByteString]]. */
@@ -57,7 +70,9 @@ object DeterministicEncoding {
     encodeInt(b.size).concat(b)
 
   /** Extract a byte-string (length stored) from another ByteString */
-  def decodeBytes(bytes: ByteString): Either[DeserializationError, (ByteString, ByteString)] =
+  def decodeBytes(
+      bytes: ByteString
+  ): Either[DeserializationError, (ByteString, ByteString)] =
     for {
       lenAndContent <- decodeLength(bytes)
       (len, content) = lenAndContent
@@ -116,7 +131,7 @@ object DeterministicEncoding {
     }
 
     decodeUVarIntBytes(0, 0, 0).bimap(
-      err => DeserializationError(s"Failed to decode unsigned var-int: $err", bytes),
+      err => DefaultDeserializationError(s"Failed to decode unsigned var-int: $err"),
       { case (output, index) =>
         (output, bytes.substring(index + 1))
       },
@@ -125,19 +140,21 @@ object DeterministicEncoding {
   }
 
   /** Decode a length parameter and do some sanity checks */
-  private def decodeLength(bytes: ByteString): Either[DeserializationError, (Int, ByteString)] =
+  private def decodeLength(
+      bytes: ByteString
+  ): Either[DeserializationError, (Int, ByteString)] =
     for {
       intAndB <- decodeInt(bytes)
       (len, rest) = intAndB
       _ <- Either.cond(
         len >= 0,
         (),
-        DeserializationError(s"Negative length of $len in encoded data", bytes),
+        DefaultDeserializationError(s"Negative length of $len in encoded data"),
       )
       _ <- Either.cond(
         len <= rest.size,
         (),
-        DeserializationError(s"Length $len is larger than received bytes", bytes),
+        DefaultDeserializationError(s"Length $len is larger than received bytes"),
       )
     } yield intAndB
 
@@ -204,7 +221,9 @@ object DeterministicEncoding {
     *
     * Inverse to [[DeterministicEncoding.encodeInstant]]
     */
-  def decodeInstant(bytes: ByteString): Either[DeserializationError, (Instant, ByteString)] = {
+  def decodeInstant(
+      bytes: ByteString
+  ): Either[DeserializationError, (Instant, ByteString)] = {
     for {
       longAndBytes <- decodeLong(bytes)
       (long, bytes) = longAndBytes
@@ -229,7 +248,7 @@ object DeterministicEncoding {
     *  prefixing it with the length of the [[scala.Seq]]
     */
   def encodeSeqWith[A](seq: Seq[A])(encode: A => ByteString): ByteString = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     DeterministicEncoding
       .encodeInt(seq.length)
       .concat(ByteString.copyFrom(seq.map(encode).asJava))

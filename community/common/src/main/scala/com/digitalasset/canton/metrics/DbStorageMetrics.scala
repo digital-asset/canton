@@ -4,16 +4,16 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
+import com.daml.metrics.MetricHandle.{Counter, Gauge, Timer}
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.metrics.MetricHandle.{CounterM, GaugeM, TimerM}
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
     extends MetricHandle.Factory {
   override val prefix: MetricName = basePrefix :+ "db-storage"
 
-  def loadGaugeM(name: String): GaugeM[TimedLoadGauge, Double] = {
+  def loadGaugeM(name: String): Gauge[TimedLoadGauge, Double] = {
     val timerM = timer(prefix :+ name)
     loadGauge(prefix :+ name :+ "load", 1.second, timerM.metric)
   }
@@ -23,7 +23,7 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
     description = """Covers both read from and writes to the storage.""",
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  val timerExampleForDocs: TimerM = TimerM(prefix :+ "<storage>", null)
+  val timerExampleForDocs: Timer = Timer(prefix :+ "<storage>", null)
 
   @MetricDoc.Tag(
     summary = "The load on the given storage",
@@ -32,8 +32,8 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
           |has been spent reading from or writing to the storage.""",
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  val loadExampleForDocs: GaugeM[TimedLoadGauge, Double] =
-    GaugeM(prefix :+ "<storage>" :+ "load", null)
+  val loadExampleForDocs: Gauge[TimedLoadGauge, Double] =
+    Gauge(prefix :+ "<storage>" :+ "load", null)
 
   object alerts extends DbAlertMetrics(prefix, registry)
 
@@ -52,8 +52,8 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
   @MetricDoc.Tag(
     summary = "Number of database access tasks waiting in queue",
     description =
-      """Database access tasks get scheduled in this queue and get executed using one of the 
-        |existing asynchronous sessions. A large queue indicates that the database connection is 
+      """Database access tasks get scheduled in this queue and get executed using one of the
+        |existing asynchronous sessions. A large queue indicates that the database connection is
         |not able to deal with the large number of requests.
         |Note that the queue has a maximum size. Tasks that do not fit into the queue
         |will be retried, but won't show up in this metric.""",
@@ -69,7 +69,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
 
   @MetricDoc.Tag(
     summary = "Scheduling time metric for database tasks",
-    description = """Every database query is scheduled using an asynchronous executor with a queue. 
+    description = """Every database query is scheduled using an asynchronous executor with a queue.
         |The time a task is waiting in this queue is monitored using this metric.""",
   )
   val waitTimer = timer(prefix :+ "waittime")
@@ -90,7 +90,7 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |canton log for errors for details.
         |""",
   )
-  val failedEventLogWrites: CounterM = counter(prefix :+ "single-dimension-event-log")
+  val failedEventLogWrites: Counter = counter(prefix :+ "single-dimension-event-log")
 
   @MetricDoc.Tag(
     summary = "Number of failed writes to the multi-domain event log",
@@ -102,6 +102,6 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |canton log for errors for details.
         |""",
   )
-  val failedMultiDomainEventLogWrites: CounterM = counter(prefix :+ "multi-domain-event-log")
+  val failedMultiDomainEventLogWrites: Counter = counter(prefix :+ "multi-domain-event-log")
 
 }

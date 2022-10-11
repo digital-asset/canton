@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   CustomClientTimeout,
   TimeoutType,

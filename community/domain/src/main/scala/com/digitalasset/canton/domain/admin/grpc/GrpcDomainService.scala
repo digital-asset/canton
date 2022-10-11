@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.domain.admin.grpc
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.admin.v0.GetDomainParameters.Response.Parameters
-import com.digitalasset.canton.domain.admin.{v0 => adminproto}
+import com.digitalasset.canton.domain.admin.{v0 as adminproto}
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{StaticDomainParameters, v0}

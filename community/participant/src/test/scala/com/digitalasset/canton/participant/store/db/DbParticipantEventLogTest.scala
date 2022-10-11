@@ -13,7 +13,7 @@ import scala.concurrent.Future
 trait DbParticipantEventLogTest extends ParticipantEventLogTest { this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update_(
       sqlu"delete from event_log where log_id = $id", // table shared with other tests
       operationName = s"${this.getClass}: clean db",

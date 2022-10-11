@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
 import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -98,6 +98,19 @@ object TransferOutViewTree
     )((commonData, view) =>
       TransferOutViewTree(commonData, view)(
         protocolVersionRepresentativeFor(ProtobufVersion(0)),
+        hashOps,
+      )
+    )(transferOutViewTreeP)
+
+  def fromProtoV1(hashOps: HashOps)(
+      transferOutViewTreeP: v1.TransferViewTree
+  ): ParsingResult[TransferOutViewTree] =
+    GenTransferViewTree.fromProtoV1(
+      TransferOutCommonData.fromByteString(hashOps),
+      TransferOutView.fromByteString(hashOps),
+    )((commonData, view) =>
+      TransferOutViewTree(commonData, view)(
+        protocolVersionRepresentativeFor(ProtobufVersion(1)),
         hashOps,
       )
     )(transferOutViewTreeP)

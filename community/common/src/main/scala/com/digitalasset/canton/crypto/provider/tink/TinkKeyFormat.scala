@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.crypto.provider.tink
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{Fingerprint, HashAlgorithm}
-import com.digitalasset.canton.serialization.DeserializationError
-import com.google.crypto.tink.{proto, _}
+import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeserializationError}
+import com.google.crypto.tink.{proto, *}
 import com.google.protobuf.ByteString
 
 class TinkKeyFingerprintException(message: String) extends RuntimeException(message)
@@ -67,6 +67,6 @@ object TinkKeyFormat {
       .catchNonFatal(
         CleartextKeysetHandle.read(BinaryKeysetReader.withInputStream(bytes.newInput()))
       )
-      .leftMap(err => DeserializationError(s"Failed to deserialize tink keyset: $err", bytes))
+      .leftMap(err => DefaultDeserializationError(s"Failed to deserialize tink keyset: $err"))
 
 }

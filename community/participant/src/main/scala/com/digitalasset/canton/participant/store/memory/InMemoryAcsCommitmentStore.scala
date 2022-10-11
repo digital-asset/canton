@@ -35,7 +35,7 @@ import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.math.Ordering
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory)(implicit
     val ec: ExecutionContext
@@ -43,7 +43,7 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
     with InMemoryPrunableByTime[AcsCommitmentStoreError]
     with NamedLogging {
 
-  import AcsCommitmentStore._
+  import AcsCommitmentStore.*
 
   private val computed
       : TrieMap[ParticipantId, Map[CommitmentPeriod, AcsCommitment.CommitmentType]] = TrieMap.empty
@@ -172,7 +172,7 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
 
     val newPeriods = currentOutstanding.diff(oldPeriods).union(periodsToAdd)
 
-    import com.digitalasset.canton.logging.pretty.Pretty._
+    import com.digitalasset.canton.logging.pretty.Pretty.*
     def prettyNewPeriods = newPeriods.map { case (period, participants) =>
       Tree.Infix(participants.toTree, "-", period.toTree)
     }
@@ -342,7 +342,7 @@ class InMemoryIncrementalCommitments(
 
 class InMemoryCommitmentQueue(implicit val ec: ExecutionContext) extends CommitmentQueue {
 
-  import InMemoryCommitmentQueue._
+  import InMemoryCommitmentQueue.*
 
   /* Access must be synchronized, since PriorityQueue doesn't support concurrent
     modifications. */

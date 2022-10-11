@@ -5,19 +5,16 @@ package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.GlobalCausalOrderer
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventPerPartyCausalState
-import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore.CausalityWriteFinished
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.VectorClock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.HashSet
-import scala.concurrent.Future
 
 class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   lazy val participant: ParticipantId = ParticipantId("p1-mydomain")
@@ -50,16 +47,15 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
       rc: RequestCounter,
       timestamp: CantonTimestamp =
         CantonTimestamp.Epoch.plusSeconds(uniqueTimestamps.getAndIncrement().toLong),
-  ) = {
-    val future = Future.unit
-    EventPerPartyCausalState((domain), timestamp, rc)(dependencies, CausalityWriteFinished(future))
-  }
+  ): EventPerPartyCausalState =
+    EventPerPartyCausalState((domain), timestamp, rc.asLocalOffset)(dependencies)
 
   "basic ordering of two events" in {
     val sut = createForTesting()
 
-    val clock2 = eventClock(domain2, Map(), 0)
-    val clock1 = eventClock(domain1, Map(alice -> Map(domain2 -> clock2.localTs)), 0)
+    val clock2 = eventClock(domain2, Map(), RequestCounter(0))
+    val clock1 =
+      eventClock(domain1, Map(alice -> Map(domain2 -> clock2.localTs)), RequestCounter(0))
 
     val canPublish1F = sut.waitPublishable(clock1.clock)
     val canPublish2F = sut.waitPublishable(clock2.clock)
@@ -77,8 +73,8 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
   "ordering where an event has multiple causal dependencies on different domains" in {
     val sut = createForTesting(connectedDomains = List(domain1, domain2, domain4))
 
-    val clock1 = eventClock(domain1, Map(), 0)
-    val clock2 = eventClock(domain2, Map(), 0)
+    val clock1 = eventClock(domain1, Map(), RequestCounter(0))
+    val clock2 = eventClock(domain2, Map(), RequestCounter(0))
     val clock4 = eventClock(
       domain4,
       Map(
@@ -88,7 +84,7 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
           domain1 -> clock1.localTs,
         )
       ),
-      0,
+      RequestCounter(0),
     )
 
     val canPublish1F = sut.waitPublishable(clock1.clock)
@@ -116,9 +112,10 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
 
     val sut = createForTesting()
 
-    val clock2 = eventClock(domain2, Map(), 0)
-    val clock3 = eventClock(domain1, Map(), 1)
-    val clock1 = eventClock(domain1, Map(alice -> Map(domain2 -> clock2.localTs)), 0)
+    val clock2 = eventClock(domain2, Map(), RequestCounter(0))
+    val clock3 = eventClock(domain1, Map(), RequestCounter(1))
+    val clock1 =
+      eventClock(domain1, Map(alice -> Map(domain2 -> clock2.localTs)), RequestCounter(0))
 
     val canPublish1F = sut.waitPublishable(clock1.clock)
     val canPublish2F = sut.waitPublishable(clock2.clock)
@@ -139,10 +136,15 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
   "an event has several causal children" in {
     val sut = createForTesting()
 
-    val clock1 = eventClock(domain2, Map(), 0)
-    val clock2 = eventClock(domain1, Map(alice -> Map(domain2 -> clock1.localTs)), 0)
+    val clock1 = eventClock(domain2, Map(), RequestCounter(0))
+    val clock2 =
+      eventClock(domain1, Map(alice -> Map(domain2 -> clock1.localTs)), RequestCounter(0))
     val clock3 =
-      eventClock(domain1, Map(alice -> Map(domain2 -> clock1.localTs.minusSeconds(1))), 0)
+      eventClock(
+        domain1,
+        Map(alice -> Map(domain2 -> clock1.localTs.minusSeconds(1))),
+        RequestCounter(0),
+      )
 
     val canPublish1F = sut.waitPublishable(clock1.clock)
     val canPublish2F = sut.waitPublishable(clock2.clock)
@@ -162,9 +164,10 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
   "an event is causally dependant on two events on a single domain" in {
     val sut = createForTesting()
 
-    val clock2 = eventClock(domain2, Map(), 1)
-    val clock3 = eventClock(domain2, Map(), 0)
-    val clock1 = eventClock(domain1, Map(alice -> Map(domain2 -> clock3.localTs)), 0)
+    val clock2 = eventClock(domain2, Map(), RequestCounter(1))
+    val clock3 = eventClock(domain2, Map(), RequestCounter(0))
+    val clock1 =
+      eventClock(domain1, Map(alice -> Map(domain2 -> clock3.localTs)), RequestCounter(0))
 
     val canPublish1F = sut.waitPublishable(clock1.clock)
     val canPublish2F = sut.waitPublishable(clock2.clock)
@@ -190,13 +193,13 @@ class GlobalCausalOrdererTest extends AnyWordSpec with BaseTest with HasExecutio
   "an event is causally dependant on different domains for different parties" in {
     val sut = createForTesting()
 
-    val clock2 = eventClock(domain2, Map(), 1)
-    val clock3 = eventClock(domain3, Map(), 0)
+    val clock2 = eventClock(domain2, Map(), RequestCounter(1))
+    val clock3 = eventClock(domain3, Map(), RequestCounter(0))
     val clock1 =
       eventClock(
         domain1,
         Map(alice -> Map(domain3 -> clock3.localTs), bob -> Map(domain2 -> clock2.localTs)),
-        0,
+        RequestCounter(0),
       )
 
     val canPublish1F = sut.waitPublishable(clock1.clock)

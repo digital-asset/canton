@@ -11,7 +11,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable
 import scala.concurrent.Future
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
 
 @SuppressWarnings(Array("org.wartremover.warts.While"))
@@ -244,7 +244,7 @@ class FutureUtilTest extends AnyWordSpec with BaseTest {
       }
     if (failure)
       infos :+ Level.WARN -> s"Task ${task} did not complete within ${cumulativeAwaits.lastOption
-        .getOrElse(0.seconds)}. Stack traces:\n"
+          .getOrElse(0.seconds)}. Stack traces:\n"
     else infos
   }
 

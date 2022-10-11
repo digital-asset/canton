@@ -5,13 +5,15 @@ package com.digitalasset.canton.participant
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey
+import com.daml.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -31,25 +33,25 @@ import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
-import com.digitalasset.canton.participant.admin.grpc._
-import com.digitalasset.canton.participant.admin.v0._
+import com.digitalasset.canton.participant.admin.grpc.*
+import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.admin.{
   DomainConnectivityService,
   PackageInspectionOpsImpl,
   PackageService,
   ResourceManagementService,
 }
-import com.digitalasset.canton.participant.config._
+import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.domain.{
   AgreementService,
   DomainAliasManager,
-  DomainConnectionConfig => CantonDomainConnectionConfig,
+  DomainConnectionConfig as CantonDomainConnectionConfig,
 }
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
-import com.digitalasset.canton.participant.ledger.api._
+import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.{DbDamlPackageStore, DbServiceAgreementStore}
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryDamlPackageStore,
@@ -67,10 +69,10 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   ParticipantTopologyManager,
 }
-import com.digitalasset.canton.resource._
+import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
-import com.digitalasset.canton.time._
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.time.*
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   IdentityProvidingServiceClient,
@@ -110,6 +112,7 @@ class ParticipantNodeBootstrap(
     futureSupervisor: FutureSupervisor,
     parentLogger: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
+    meteringReportKey: MeteringReportKey,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -210,6 +213,7 @@ class ParticipantNodeBootstrap(
             loggerFactory,
             tracerProvider,
             metrics.ledgerApiServer,
+            meteringReportKey,
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
@@ -722,6 +726,7 @@ object ParticipantNodeBootstrap {
             futureSupervisor,
             loggerFactory,
             writeHealthDumpToFile,
+            meteringReportKey = CommunityKey,
           )
         )
         .leftMap(_.toString)

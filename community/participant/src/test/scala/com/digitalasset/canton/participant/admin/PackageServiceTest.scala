@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import better.files._
+import better.files.*
 import cats.data.EitherT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.daml_lf_dev.DamlLf.Archive
@@ -82,7 +82,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
 
   "PackageService" should {
     "append DAR and packages from file" in withEnv { env =>
-      import env._
+      import env.*
 
       val expectedPackageIdsAndState = examplePackages
         .map(DamlPackageStore.readPackageId)
@@ -109,7 +109,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
     }
 
     "append DAR and packages from bytes" in withEnv { env =>
-      import env._
+      import env.*
 
       val expectedPackageIdsAndState = examplePackages
         .map(DamlPackageStore.readPackageId)
@@ -134,7 +134,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
     }
 
     "fetching dependencies" in withEnv { env =>
-      import env._
+      import env.*
 
       val dar = PackageServiceTest.loadExampleDar()
       val mainPackageId = DamlPackageStore.readPackageId(dar.main)
@@ -161,7 +161,7 @@ class PackageServiceTest extends AsyncWordSpec with BaseTest {
     }
 
     "appendDar validates the package" in withEnv { env =>
-      import env._
+      import env.*
 
       val badDarPath = PackageServiceTest.badDarPath
       val payload = BinaryFileUtil

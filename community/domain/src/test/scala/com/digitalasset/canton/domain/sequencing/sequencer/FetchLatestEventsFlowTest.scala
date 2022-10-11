@@ -14,7 +14,7 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.nowarn
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 @nowarn("msg=match may not be exhaustive")
@@ -112,7 +112,7 @@ class FetchLatestEventsFlowTest
   }
 
   "immediately fetches to latest regardless of being updated" in { env =>
-    import env._
+    import env.*
     val calls @ Seq(call1, call2, call3) = mockLookups(3)
     // find one event on the first call
     call1.returnsSingleEvent(ts(5))
@@ -130,7 +130,7 @@ class FetchLatestEventsFlowTest
   }
 
   "keeps fetching until we've reached the latest timestamp" in { env =>
-    import env._
+    import env.*
 
     val lookups @ Seq(lookup1, lookup2, lookup3) = mockLookups(3)
     lookup1.returnsSingleEvent(ts(5))
@@ -146,7 +146,7 @@ class FetchLatestEventsFlowTest
   }
 
   "drops read signals if read events take a long period" in { env =>
-    import env._
+    import env.*
 
     val lookups = mockLookups(100)
     val lookup1 = lookups.headOption.value

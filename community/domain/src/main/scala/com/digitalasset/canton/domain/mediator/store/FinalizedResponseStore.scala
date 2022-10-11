@@ -4,13 +4,13 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, MediatorRequest, Verdict}
@@ -73,7 +73,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
     with NamedLogging {
   private implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
   private val finalizedRequests =
     new ConcurrentHashMap[CantonTimestamp, ResponseAggregation].asScala
 
@@ -113,8 +113,8 @@ private[mediator] class DbFinalizedResponseStore(
 )(implicit val ec: ExecutionContext)
     extends FinalizedResponseStore
     with DbStore {
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
   implicit val getResultRequestId: GetResult[RequestId] =
     GetResult[CantonTimestamp].andThen(ts => RequestId(ts))
@@ -143,7 +143,7 @@ private[mediator] class DbFinalizedResponseStore(
     (r: MediatorRequest, pp: PositionedParameters) =>
       pp >> EnvelopeContent(r, protocolVersion).toByteArray
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("finalized-response-store")
 
   override def store(

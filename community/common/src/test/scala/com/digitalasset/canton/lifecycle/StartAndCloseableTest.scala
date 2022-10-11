@@ -10,7 +10,7 @@ import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration.{Duration, _}
+import scala.concurrent.duration.{Duration, *}
 import scala.concurrent.{Future, Promise, blocking}
 
 class StartAndCloseableTest extends AnyWordSpec with BaseTest with HasExecutionContext {

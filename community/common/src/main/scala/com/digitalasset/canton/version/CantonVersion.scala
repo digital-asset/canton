@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -123,7 +123,9 @@ final case class ReleaseVersion(
     minor: Int,
     patch: Int,
     optSuffix: Option[String] = None,
-) extends CantonVersion
+) extends CantonVersion {
+  def majorMinor: (Int, Int) = (major, minor)
+}
 
 object ReleaseVersion extends CompanionTrait {
 
@@ -160,8 +162,8 @@ object EthereumContractVersion extends CompanionTrait {
   def tryReleaseVersionToEthereumContractVersions(
       v: ReleaseVersion
   ): NonEmpty[List[EthereumContractVersion]] = {
-    assert(ReleaseVersionToProtocolVersions.releaseVersionToProtocolVersions.contains(v))
-    if (v < ReleaseVersions.v2_3_0_snapshot)
+    assert(ReleaseVersionToProtocolVersions.get(v).isDefined)
+    if (v < ReleaseVersions.v2_3_0)
       NonEmpty(List, v1_0_0)
     else
       NonEmpty(List, v1_0_0, v1_0_1)

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
-import cats.Order._
+import cats.Order.*
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
@@ -28,7 +28,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -183,7 +183,7 @@ case class DeliverErrorStoreEvent(
 
 case class Presequenced[+E <: StoreEvent[_]](event: E, maxSequencingTimeO: Option[CantonTimestamp])
     extends HasTraceContext {
-  import cats.implicits._
+  import cats.implicits.*
 
   def map[F <: StoreEvent[_]](fn: E => F): Presequenced[F] =
     Presequenced(fn(event), maxSequencingTimeO)

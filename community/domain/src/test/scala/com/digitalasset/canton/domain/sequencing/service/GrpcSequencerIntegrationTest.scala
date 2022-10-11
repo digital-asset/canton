@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.service
 import akka.NotUsed
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -35,12 +36,12 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   TestDomainParameters,
-  v0 => protocolV0,
-  v1 => protocolV1,
+  v0 as protocolV0,
+  v1 as protocolV1,
 }
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
-import com.digitalasset.canton.sequencing.client._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   ApplicationHandler,
   GrpcSequencerConnection,
@@ -49,7 +50,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.time.{DomainTimeTracker, SimClock}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
@@ -65,7 +66,7 @@ import org.scalatest.Outcome
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.FixtureAnyWordSpec
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContextExecutor, Future, Promise}
 
 case class Env(loggerFactory: NamedLoggerFactory)(implicit
@@ -209,6 +210,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         participant,
         sequencedEventStore,
         sendTrackerStore,
+        _ => request => EitherT.rightT(SignedContent(request, SymbolicCrypto.emptySignature, None)),
       ).value,
       10.seconds,
     )
@@ -303,11 +305,13 @@ class GrpcSequencerIntegrationTest
     }
 
     "send from the client gets a message to the sequencer" in { env =>
-      import cats.implicits._
+      import cats.implicits.*
 
       val anotherParticipant = ParticipantId("another")
 
       when(env.sequencer.sendAsync(any[SubmissionRequest])(anyTraceContext))
+        .thenReturn(EitherT.pure[Future, SendAsyncError](()))
+      when(env.sequencer.sendAsyncSigned(any[SignedContent[SubmissionRequest]])(anyTraceContext))
         .thenReturn(EitherT.pure[Future, SendAsyncError](()))
 
       val result = for {

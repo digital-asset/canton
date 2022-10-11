@@ -7,7 +7,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 class LoadGaugeTest extends AnyWordSpec with BaseTest with HasExecutionContext {

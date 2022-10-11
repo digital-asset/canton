@@ -4,8 +4,9 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.{
   HashPurpose,
   SignatureCheckError,
@@ -27,7 +28,6 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{GenesisSequencerCounter, SequencerCounter}
 
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
@@ -325,8 +325,8 @@ class SequencedEventValidatorImpl(
     extends SequencedEventValidator
     with NamedLogging {
 
-  import SequencedEventValidationError._
-  import SequencedEventValidatorImpl._
+  import SequencedEventValidationError.*
+  import SequencedEventValidatorImpl.*
 
   private val priorEventRef: AtomicReference[Option[PossiblyIgnoredSerializedEvent]] =
     new AtomicReference[Option[PossiblyIgnoredSerializedEvent]](initialPriorEvent)
@@ -343,7 +343,7 @@ class SequencedEventValidatorImpl(
       event: OrdinarySerializedEvent
   ): EitherT[Future, SequencedEventValidationError, Unit] = {
     val priorEventO = priorEventRef.get()
-    val oldCounter = priorEventO.fold(GenesisSequencerCounter - 1L)(_.counter)
+    val oldCounter = priorEventO.fold(SequencerCounter.Genesis - 1L)(_.counter)
     val newCounter = event.counter
 
     def checkCounterIncreases: ValidationResult =
@@ -467,7 +467,7 @@ class SequencedEventValidatorImpl(
         s"Skipping sequenced event validation for counter ${event.counter} and timestamp ${event.timestamp} in unauthenticated subscription"
       )
       EitherT.fromEither[Future](checkNoTimestampOfSigningKey(event))
-    } else if (event.counter == GenesisSequencerCounter) {
+    } else if (event.counter == SequencerCounter.Genesis) {
       // TODO(#4933) This is a fresh subscription. Either fetch the domain keys via a future sequencer API and validate the signature
       //  or wait until the topology processor has processed the topology information in the first message and then validate the signature.
       logger.info(

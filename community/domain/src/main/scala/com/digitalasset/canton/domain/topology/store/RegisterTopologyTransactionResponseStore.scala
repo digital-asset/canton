@@ -78,7 +78,7 @@ object RegisterTopologyTransactionResponseStore {
 class InMemoryRegisterTopologyTransactionResponseStore(implicit ec: ExecutionContext)
     extends RegisterTopologyTransactionResponseStore {
   import java.util.concurrent.ConcurrentHashMap
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
 
   private val responseMap =
     new ConcurrentHashMap[
@@ -135,8 +135,8 @@ class DbRegisterTopologyTransactionResponseStore(
     extends RegisterTopologyTransactionResponseStore
     with DbStore {
 
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
   implicit val getRegisterTopologyTransactionRequest
       : GetResult[RegisterTopologyTransactionRequest] = GetResult(r =>

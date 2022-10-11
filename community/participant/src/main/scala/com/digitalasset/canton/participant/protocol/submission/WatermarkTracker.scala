@@ -7,8 +7,8 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, Thereafter}
 import com.google.common.annotations.VisibleForTesting
 
@@ -45,7 +45,7 @@ class WatermarkTracker[Mark: Pretty](
 )(implicit private val ordering: Ordering[Mark])
     extends WatermarkLookup[Mark]
     with NamedLogging {
-  import WatermarkTracker._
+  import WatermarkTracker.*
 
   /** The high-watermark boundary, increases monotonically.
     *
@@ -161,7 +161,7 @@ class WatermarkTracker[Mark: Pretty](
     * The caller must have acquired [[lock]].
     */
   private def drainAndNotify(): Unit = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     val upto =
       // If there are no tasks or the first task's mark is higher than `highWatermark`,
       // we can complete all promises because all marks in `waitForTasksFinishing`

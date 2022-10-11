@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.networking.http
 
-import better.files._
+import better.files.*
 import cats.Show
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.either._
+import cats.instances.future.*
+import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.ExecutorServiceExtensions
 import com.digitalasset.canton.config.{KeyStoreConfig, Password, ProcessingTimeout}
 import com.digitalasset.canton.crypto.X509CertificatePem
@@ -22,22 +22,22 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.google.protobuf.ByteString
-import io.circe.syntax._
+import io.circe.syntax.*
 import io.circe.{Decoder, Encoder}
 import io.functionmeta.functionFullName
 import okhttp3.OkHttpClient
 import sttp.capabilities.WebSockets
 import sttp.client3
-import sttp.client3._
+import sttp.client3.*
 import sttp.client3.circe.asJson
 import sttp.client3.okhttp.OkHttpFutureBackend
 import sttp.model.{Header, StatusCode, Uri}
 
 import java.io.IOException
-import java.security._
+import java.security.*
 import java.security.cert.X509Certificate
 import java.util.Base64
-import javax.net.ssl._
+import javax.net.ssl.*
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A generic HTTP client with client certificate authentication and optional request signing.
@@ -57,7 +57,7 @@ class HttpClient private (
     extends NamedLogging
     with FlagCloseable {
 
-  import HttpClientError._
+  import HttpClientError.*
 
   // CCF doesn't use hostname verification but only relies a trusted root CA that signs all nodes' certs.
   private val hostnameVerifier = new HostnameVerifier {
@@ -213,7 +213,7 @@ class HttpClient private (
     sendRequest(basicRequest.get(uri).response(asJson[Res]))(jsonErrorHandler)
 
   override protected def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Lifecycle.close(
       AsyncCloseable(
         "http-client-sttp-backend",
@@ -228,7 +228,7 @@ class HttpClient private (
 
 object HttpClient extends HasLoggerName {
 
-  import HttpClientError._
+  import HttpClientError.*
 
   case class Response[Res](body: Res, headers: Seq[Header])
 

@@ -4,11 +4,11 @@
 package com.digitalasset.canton.networking.grpc
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.tracing.TracingConfig
-import io.grpc._
+import io.grpc.*
 import io.grpc.netty.{GrpcSslContexts, NettyServerBuilder}
 import io.grpc.util.MutableHandlerRegistry
 import io.netty.handler.ssl.{SslContext, SslContextBuilder}
@@ -154,7 +154,7 @@ object CantonServerBuilder {
   }
 
   private def baseSslBuilder(config: BaseTlsArguments): SslContextBuilder = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     val s1 =
       GrpcSslContexts.forServer(config.certChainFile.unwrap, config.privateKeyFile.unwrap)
     val s2 = config.protocols.fold(s1)(protocols => s1.protocols(protocols: _*))

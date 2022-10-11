@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.scaladsl.{Keep, Sink, SinkQueueWithCancel}
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
@@ -18,7 +18,7 @@ import org.scalatest.{Assertion, FutureOutcome}
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class LocalSequencerStateEventSignallerTest
     extends FixtureAsyncWordSpec
@@ -76,7 +76,7 @@ class LocalSequencerStateEventSignallerTest
   override type FixtureParam = Env
 
   "writer updates without subscribers don't block writer" in { env =>
-    import env._
+    import env.*
 
     for {
       // write a number that will certainly exceed any local buffers the akka stream operators may have

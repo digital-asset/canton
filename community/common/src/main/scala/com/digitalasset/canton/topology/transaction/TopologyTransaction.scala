@@ -4,21 +4,21 @@
 package com.digitalasset.canton.topology.transaction
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError._
+import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,
 }
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import slick.jdbc.SetParameter
 
@@ -375,7 +375,7 @@ final case class TopologyStateUpdate[+Op <: AddRemoveChangeOp] private (
     * If this transaction is a Remove, we return an Add with a new transaction id.
     */
   def reverse: TopologyTransaction[TopologyChangeOp] = {
-    import TopologyChangeOp._
+    import TopologyChangeOp.*
 
     (op: AddRemoveChangeOp) match {
       case Add => TopologyStateUpdate(Remove, element)(representativeProtocolVersion)

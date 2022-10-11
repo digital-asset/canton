@@ -10,11 +10,11 @@ import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainPar
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherUtil._
+import com.digitalasset.canton.util.EitherUtil.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.chaining._
+import scala.util.chaining.*
 
 class SortedReconciliationIntervalsProvider(
     reconciliationIntervalsProvider: DomainParametersLookup[PositiveSeconds],

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
@@ -11,9 +11,9 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 class PeriodicAcknowledgementsTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

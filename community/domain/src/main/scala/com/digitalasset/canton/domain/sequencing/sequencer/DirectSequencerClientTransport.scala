@@ -12,18 +12,19 @@ import com.digitalasset.canton.domain.sequencing.service.DirectSequencerSubscrip
 import com.digitalasset.canton.lifecycle.SyncCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.SerializedEventHandler
-import com.digitalasset.canton.sequencing.client._
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
   HandshakeRequest,
   HandshakeResponse,
+  SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
@@ -56,6 +57,15 @@ class DirectSequencerClientTransport(
   ): EitherT[Future, SendAsyncClientError, Unit] =
     sequencer
       .sendAsync(request)
+      .leftMap(SendAsyncClientError.RequestRefused)
+
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] =
+    sequencer
+      .sendAsyncSigned(request)
       .leftMap(SendAsyncClientError.RequestRefused)
 
   override def sendAsyncUnauthenticated(

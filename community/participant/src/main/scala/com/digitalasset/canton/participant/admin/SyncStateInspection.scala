@@ -4,22 +4,22 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.RequestJournal
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{
   SyncDomainPersistentStateManager,
   TimestampedEvent,
   UpstreamOffsetConvert,
 }
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -28,12 +28,12 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{LfCommittedTransaction, LfContractId, SerializableContract}
 import com.digitalasset.canton.sequencing.PossiblyIgnoredProtocolEvent
 import com.digitalasset.canton.sequencing.handlers.EnvelopeOpener
+import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.{
   ByTimestampRange,
   PossiblyIgnoredSequencedEvent,
 }
 import com.digitalasset.canton.store.{
-  CursorPrehead,
   SequencedEventNotFoundError,
   SequencedEventRangeOverlapsWithPruning,
   SequencedEventStore,
@@ -41,7 +41,7 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LedgerTransactionId}
+import com.digitalasset.canton.{DomainAlias, LedgerTransactionId, RequestCounter}
 
 import java.time.Instant
 import java.util.NoSuchElementException
@@ -339,8 +339,11 @@ class SyncStateInspection(
   }
 
   /** Update the prehead for clean requests to the given value, bypassing all checks. Only used for testing. */
-  def forceCleanPrehead(newHead: Option[CursorPrehead[RequestCounter]], domain: DomainAlias)(
-      implicit traceContext: TraceContext
+  def forceCleanPrehead(
+      newHead: Option[RequestCounterCursorPrehead],
+      domain: DomainAlias,
+  )(implicit
+      traceContext: TraceContext
   ): Either[String, Future[Unit]] = {
     getPersistentState(domain)
       .map(state => state.requestJournalStore.overridePreheadCleanForTesting(newHead))
@@ -349,7 +352,7 @@ class SyncStateInspection(
 
   def lookupCleanPrehead(domain: DomainAlias)(implicit
       traceContext: TraceContext
-  ): Either[String, Future[Option[CursorPrehead[RequestCounter]]]] =
+  ): Either[String, Future[Option[RequestCounterCursorPrehead]]] =
     getPersistentState(domain)
       .map(state => state.requestJournalStore.preheadClean)
       .toRight(s"Not connected to $domain")

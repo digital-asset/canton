@@ -89,7 +89,7 @@
           </appender>
         </then>
         <else>
-          <appender name="FILE" class="ch.qos.logback.core.NullAppender"/>
+          <appender name="FILE" class="ch.qos.logback.core.helpers.NOPAppender"/>
         </else>
       </if>
     </else>

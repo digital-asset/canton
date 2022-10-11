@@ -3,18 +3,18 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import cats.syntax.either._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPackageId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -93,7 +93,7 @@ object NamespaceDelegation {
     sit.transaction.element.mapping match {
       case nd: NamespaceDelegation =>
         nd.namespace.fingerprint == sit.key.fingerprint && nd.isRootDelegation && nd.target.fingerprint == nd.namespace.fingerprint &&
-          sit.operation == TopologyChangeOp.Add
+        sit.operation == TopologyChangeOp.Add
       case _ => false
     }
 

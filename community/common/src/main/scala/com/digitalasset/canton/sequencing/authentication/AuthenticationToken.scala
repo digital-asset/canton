@@ -3,11 +3,15 @@
 
 package com.digitalasset.canton.sequencing.authentication
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.RandomOps
-import com.digitalasset.canton.serialization.{DeserializationError, HasCryptographicEvidence}
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  HasCryptographicEvidence,
+}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.util.HexString
 import com.google.protobuf.ByteString
@@ -36,11 +40,13 @@ object AuthenticationToken {
     new AuthenticationToken(randomOps.generateRandomByteString(length))
   }
 
-  def fromProtoPrimitive(bytes: ByteString): Either[DeserializationError, AuthenticationToken] =
+  def fromProtoPrimitive(
+      bytes: ByteString
+  ): Either[DeserializationError, AuthenticationToken] =
     Either.cond(
       bytes.size() == length,
       new AuthenticationToken(bytes),
-      DeserializationError(s"Authentication token of wrong size: ${bytes.size()}", bytes),
+      DefaultDeserializationError(s"Authentication token of wrong size: ${bytes.size()}"),
     )
 
   def tryFromProtoPrimitive(bytes: ByteString): AuthenticationToken =

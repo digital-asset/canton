@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.either._
-import cats.syntax.foldable._
-import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
@@ -15,6 +13,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   transactionId,
 }
 import com.digitalasset.canton.protocol.WithTransactionId
+import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -46,17 +45,15 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
   private val contract2 =
     asSerializable(contractId2, contractInstance = contractInstance(agreementText = "instance2"))
 
-  private val rc0 = 0L
-  private val rc1 = 1L
-  private val rc2 = 2L
+  private val rc0 = RequestCounter(0)
+  private val rc1 = RequestCounter(1)
+  private val rc2 = RequestCounter(2)
 
   private val transactionId0 = transactionId(0)
   private val transactionId1 = transactionId(1)
 
   private val createdContract = StoredContract.fromCreatedContract(contract0, rc0, transactionId0)
   private val divulgedContract = StoredContract.fromDivulgedContract(contract1, rc0)
-
-  private val hashOps = new SymbolicPureCrypto
 
   "lookup" should {
     "find contracts in backing store" in {

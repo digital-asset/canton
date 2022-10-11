@@ -6,8 +6,8 @@ package com.digitalasset.canton.environment
 import akka.actor.ActorSystem
 import better.files.File
 import cats.data.{EitherT, OptionT}
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
 }
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService
 import com.digitalasset.canton.crypto.admin.v0.VaultServiceGrpc
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CryptoPrivateStoreFactory
@@ -34,7 +34,7 @@ import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.StorageFactory
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
   GrpcInitializationService,
   GrpcTopologyAggregationService,
@@ -52,7 +52,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreFactory,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.{TopologyTransaction, _}
+import com.digitalasset.canton.topology.transaction.{TopologyTransaction, *}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.retry
@@ -63,7 +63,7 @@ import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, blocking}
 
 object CantonNodeBootstrap {

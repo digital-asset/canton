@@ -4,9 +4,9 @@
 package com.digitalasset.canton.topology.transaction
 
 import cats.data.EitherT
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -88,7 +88,7 @@ object SignedTopologyTransaction
     )
   )
 
-  import com.digitalasset.canton.resource.DbStorage.Implicits._
+  import com.digitalasset.canton.resource.DbStorage.Implicits.*
 
   /** Sign the given topology transaction. */
   def create[Op <: TopologyChangeOp](
@@ -170,7 +170,7 @@ object SignedTopologyTransaction
   def createGetResultDomainTopologyTransaction
       : GetResult[SignedTopologyTransaction[TopologyChangeOp]] =
     GetResult { r =>
-      fromByteString(r.<<)
+      fromByteString(r.<<[ByteString])
         .valueOr(err =>
           throw new DbSerializationException(s"Failed to deserialize TopologyTransaction: $err")
         )

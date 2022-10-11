@@ -29,7 +29,7 @@ object TestTelemetry {
       CompletableResultCode.ofSuccess()
     }
     def allSpans(): List[SpanData] = {
-      import scala.jdk.CollectionConverters._
+      import scala.jdk.CollectionConverters.*
       queue.iterator().asScala.toList.reverse
     }
     override def flush(): CompletableResultCode = CompletableResultCode.ofSuccess()
@@ -37,7 +37,7 @@ object TestTelemetry {
   }
 
   def eventsOrderedByTime(spans: SpanData*): List[EventData] = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     spans.toList
       .flatMap(_.getEvents.asScala)
       .map(ev => (ev, ev.getEpochNanos))

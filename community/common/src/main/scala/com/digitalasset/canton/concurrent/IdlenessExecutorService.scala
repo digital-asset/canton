@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.concurrent
 
-import java.util.concurrent._
+import java.util.concurrent.*
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContextExecutorService
 import scala.concurrent.duration.FiniteDuration

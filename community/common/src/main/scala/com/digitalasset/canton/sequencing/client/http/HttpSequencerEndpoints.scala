@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.http
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 
 import java.net.{MalformedURLException, URL}

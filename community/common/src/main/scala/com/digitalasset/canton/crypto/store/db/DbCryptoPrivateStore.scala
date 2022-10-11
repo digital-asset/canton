@@ -4,16 +4,16 @@
 package com.digitalasset.canton.crypto.store.db
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String300
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.crypto.store._
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.store.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.DbStorage.DbAction
-import com.digitalasset.canton.resource.DbStorage.Implicits._
+import com.digitalasset.canton.resource.DbStorage.Implicits.*
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -65,11 +65,11 @@ class DbCryptoPrivateStore(
     extends CryptoPrivateStore
     with DbStore {
 
-  import storage.api._
+  import storage.api.*
 
-  private val insertTime: GaugeM[TimedLoadGauge, Double] =
+  private val insertTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-insert")
-  private val queryTime: GaugeM[TimedLoadGauge, Double] =
+  private val queryTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-private-store-query")
 
   private def queryKeys(purpose: KeyPurpose): DbAction.ReadOnly[Set[StoredPrivateKey]] =

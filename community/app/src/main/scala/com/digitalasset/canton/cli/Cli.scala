@@ -224,7 +224,7 @@ object Cli {
 
       opt[String]("log-file-appender")
         .text("Type of log file appender")
-        .valueName("rolling(default)|flat|off>")
+        .valueName("rolling(default)|flat|off")
         .action((typ, cli) =>
           typ.toLowerCase match {
             case "rolling" => cli.copy(logFileAppender = LogFileAppender.Rolling)
@@ -312,6 +312,8 @@ object Cli {
             .text("the script to run")
             .action((script, cli) => cli.copy(command = Some(Command.RunScript(script))))
         )
+
+      note("") // Enforce a newline in the help text
 
       implicit val readTarget: scopt.Read[Command.Generate.Target] = scopt.Read.reads {
         case "remote-config" => Command.Generate.RemoteConfig

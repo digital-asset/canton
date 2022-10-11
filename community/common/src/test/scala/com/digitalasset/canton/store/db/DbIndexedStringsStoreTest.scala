@@ -20,10 +20,10 @@ trait DbIndexedStringsStoreTest
     with HasExecutionContext {
   this: DbTest =>
 
-  import com.digitalasset.canton.topology.DefaultTestIdentities._
+  import com.digitalasset.canton.topology.DefaultTestIdentities.*
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     val query = storage.profile match {
       case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
         sqlu"truncate table static_strings restart identity"

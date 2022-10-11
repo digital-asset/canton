@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
+
 import ammonite.Main
 import ammonite.interp.Interpreter
 import ammonite.runtime.Frame
 import ammonite.util.Res.{Exception, Failing, Failure, Success}
-import ammonite.util._
-import cats.syntax.either._
+import ammonite.util.*
+import cats.syntax.either.*
 import com.digitalasset.canton.console.HeadlessConsole.{
   HeadlessConsoleError,
   convertAmmoniteResult,
@@ -18,7 +19,7 @@ import com.digitalasset.canton.console.HeadlessConsole.{
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
-import os.PathConvertible._
+import os.PathConvertible.*
 
 import java.io.File
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}

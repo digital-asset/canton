@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.sequencing.client.transports
+
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import cats.data.EitherT
@@ -22,7 +23,7 @@ import com.digitalasset.canton.sequencing.client.{
   SubscriptionErrorRetryPolicy,
 }
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -61,6 +62,15 @@ class HttpSequencerClientTransport(
       traceContext: TraceContext
   ): EitherT[Future, SendAsyncClientError, Unit] =
     client.sendAsync(request, requiresAuthentication = true)
+
+  override def sendAsyncSigned(
+      request: SignedContent[SubmissionRequest],
+      timeout: Duration,
+      protocolVersion: ProtocolVersion,
+  )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncClientError, Unit] = {
+    // http sequencers don't check signatures, so just use regular send
+    sendAsync(request.content, timeout, protocolVersion)
+  }
 
   override def sendAsyncUnauthenticated(
       request: SubmissionRequest,

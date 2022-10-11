@@ -3,24 +3,25 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v1.admin.user_management_service.Right.Kind
 import com.daml.ledger.api.v1.admin.user_management_service.{
-  ListUsersResponse => ProtoListUsersResponse,
-  Right => ProtoUserRight,
-  User => ProtoLedgerApiUser,
+  ListUsersResponse as ProtoListUsersResponse,
+  Right as ProtoUserRight,
+  User as ProtoLedgerApiUser,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
-case class LedgerApiUser(id: String, primaryParty: Option[LfPartyId])
+case class LedgerApiUser(id: String, primaryParty: Option[LfPartyId], isDeactivated: Boolean)
 
 object LedgerApiUser {
   def fromProtoV0(
       value: ProtoLedgerApiUser
   ): ParsingResult[LedgerApiUser] = {
-    val ProtoLedgerApiUser(id, primaryParty) = value
+    // TODO(#10448): Make user of metadata
+    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, _metadata) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
       .traverse(LfPartyId.fromString)
@@ -28,7 +29,7 @@ object LedgerApiUser {
         ProtoDeserializationError.ValueConversionError("primaryParty", err)
       }
       .map { primaryPartyO =>
-        LedgerApiUser(id, primaryPartyO)
+        LedgerApiUser(id, primaryPartyO, isDeactivated)
       }
   }
 }

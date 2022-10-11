@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.option._
-import cats.syntax.traverse._
-import com.digitalasset.canton._
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDuration}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
@@ -24,12 +24,13 @@ import com.digitalasset.canton.participant.protocol.submission.{
   TestSubmissionTrackingData,
   UnsequencedSubmission,
 }
+import com.digitalasset.canton.participant.pruning
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
   CommitmentSnapshot,
   CommitmentsPruningBound,
   RunningCommitments,
 }
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryAcsCommitmentStore,
   InMemoryActiveContractStore,
@@ -37,36 +38,35 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryRequestJournalStore,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.participant.{RequestCounter, pruning}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
   DefaultOpenEnvelope,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.sequencing.client._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.store.memory.InMemorySequencerCounterTrackerStore
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest
@@ -100,7 +100,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
   protected def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
-    TimeOfChange(requestCounter.toLong, ts(timestamp).forgetSecond)
+    TimeOfChange(RequestCounter(requestCounter), ts(timestamp).forgetSecond)
 
   protected def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
 
@@ -111,8 +111,8 @@ sealed trait AcsCommitmentProcessorBaseTest
     lifespan.toList
       .traverse_ { case (cid, (createdTs, archivedTs)) =>
         for {
-          _ <- acs.createContract(cid, TimeOfChange(0, createdTs)).value
-          _ <- acs.archiveContract(cid, TimeOfChange(0, archivedTs)).value
+          _ <- acs.createContract(cid, TimeOfChange(RequestCounter(0), createdTs)).value
+          _ <- acs.archiveContract(cid, TimeOfChange(RequestCounter(0), archivedTs)).value
         } yield ()
       }
       .map(_ => acs)
@@ -163,7 +163,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       AcsCommitmentProcessor,
       AcsCommitmentStore,
       SequencerClient,
-      List[(CantonTimestamp, Long, AcsChange)],
+      List[(CantonTimestamp, RequestCounter, AcsChange)],
   ) = {
     val domainCrypto = cryptoSetup(localId, topology)
 
@@ -181,10 +181,10 @@ sealed trait AcsCommitmentProcessorBaseTest
       .thenReturn(EitherT.rightT[Future, SendAsyncClientError](()))
 
     val changeTimes =
-      (timeProofs.map(ts => TimeOfChange(0, ts)) ++ contractSetup.values.toList.flatMap {
-        case (_, creationTs, archivalTs) =>
+      (timeProofs.map(ts => TimeOfChange(RequestCounter(0), ts)) ++ contractSetup.values.toList
+        .flatMap { case (_, creationTs, archivalTs) =>
           List(creationTs, archivalTs)
-      }).distinct.sorted
+        }).distinct.sorted
     val changes = changeTimes.map(changesAtToc(contractSetup))
     val store = optCommitmentStore.getOrElse(new InMemoryAcsCommitmentStore(loggerFactory))
 
@@ -236,7 +236,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       )
 
     changes.foreach { case (ts, rc, acsChange) =>
-      acsCommitmentProcessor.publish(RecordTime(ts, rc), acsChange)
+      acsCommitmentProcessor.publish(RecordTime(ts, rc.v), acsChange)
     }
     (acsCommitmentProcessor, store, sequencerClient)
   }
@@ -513,7 +513,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           .traverse_ { case (ts, batch) => processor.processBatchInternal(ts.forgetSecond, batch) }
           .onShutdown(fail())
         _ = changes.foreach { case (ts, tb, change) =>
-          processor.publish(RecordTime(ts, tb), change)
+          processor.publish(RecordTime(ts, tb.v), change)
         }
         _ <- processor.queue.flush()
         computed <- store.searchComputedBetween(CantonTimestamp.Epoch, timeProofs.lastOption.value)
@@ -652,12 +652,14 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
 
       for {
         _ <- requestJournalStore.insert(
-          RequestData.clean(0L, CantonTimestamp.Epoch, CantonTimestamp.Epoch, None)
+          RequestData.clean(RequestCounter(0), CantonTimestamp.Epoch, CantonTimestamp.Epoch, None)
         )
         _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
-          CursorPrehead(0L, CantonTimestamp.Epoch)
+          CursorPrehead(SequencerCounter(0), CantonTimestamp.Epoch)
         )
-        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(0L, CantonTimestamp.Epoch))
+        _ <- requestJournalStore.advancePreheadCleanTo(
+          CursorPrehead(RequestCounter(0), CantonTimestamp.Epoch)
+        )
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
@@ -732,17 +734,27 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val ts3 = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis * 3)
       val ts4 = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis * 5)
       for {
-        _ <- requestJournalStore.insert(RequestData.clean(0L, ts0, ts0))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(0L, ts0))
+        _ <- requestJournalStore.insert(RequestData.clean(RequestCounter(0), ts0, ts0))
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(0), ts0)
+        )
         _ <- requestJournalStore.insert(
-          RequestData.clean(1L, ts1, ts3.plusMillis(1))
+          RequestData.clean(RequestCounter(1), ts1, ts3.plusMillis(1))
         ) // RC1 commits after RC3
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(1L, ts1))
-        _ <- requestJournalStore.insert(RequestData.clean(2L, ts2, ts2))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(2L, ts2))
-        _ <- requestJournalStore.insert(RequestData(3L, RequestState.Pending, ts3, None))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(3L, ts3))
-        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(2L, ts2))
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(1), ts1)
+        )
+        _ <- requestJournalStore.insert(RequestData.clean(RequestCounter(2), ts2, ts2))
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(2), ts2)
+        )
+        _ <- requestJournalStore.insert(
+          RequestData(RequestCounter(3), RequestState.Pending, ts3, None)
+        )
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(3), ts3)
+        )
+        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(RequestCounter(2), ts2))
         res1 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
@@ -753,12 +765,14 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           checkForOutstandingCommitments = true,
         )
         _ <- requestJournalStore.insert(
-          RequestData(4L, RequestState.Pending, ts4, None)
+          RequestData(RequestCounter(4), RequestState.Pending, ts4, None)
         ) // Replay starts at ts4
         _ <- requestJournalStore
-          .replace(3L, ts3, RequestState.Pending, RequestState.Clean, Some(ts3))
+          .replace(RequestCounter(3), ts3, RequestState.Pending, RequestState.Clean, Some(ts3))
           .valueOrFail("advance RC 3 to clean")
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(4L, ts4))
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(4), ts4)
+        )
         res2 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
@@ -799,15 +813,23 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val tsCleanRequest = CantonTimestamp.Epoch.plusMillis(requestTsDelta.toMillis * 1)
       val ts3 = CantonTimestamp.Epoch.plusMillis(requestTsDelta.toMillis * 3)
       for {
-        _ <- requestJournalStore.insert(RequestData.clean(0L, ts0, ts0))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(0L, ts0))
-        _ <- requestJournalStore.insert(RequestData.clean(2L, tsCleanRequest, tsCleanRequest))
+        _ <- requestJournalStore.insert(RequestData.clean(RequestCounter(0), ts0, ts0))
         _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
-          CursorPrehead(2L, tsCleanRequest)
+          CursorPrehead(SequencerCounter(0), ts0)
         )
-        _ <- requestJournalStore.insert(RequestData(3L, RequestState.Pending, ts3))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(4L, ts3))
-        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(2L, tsCleanRequest))
+        _ <- requestJournalStore.insert(
+          RequestData.clean(RequestCounter(2), tsCleanRequest, tsCleanRequest)
+        )
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(2), tsCleanRequest)
+        )
+        _ <- requestJournalStore.insert(RequestData(RequestCounter(3), RequestState.Pending, ts3))
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(4), ts3)
+        )
+        _ <- requestJournalStore.advancePreheadCleanTo(
+          CursorPrehead(RequestCounter(2), tsCleanRequest)
+        )
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
@@ -842,9 +864,15 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       val ts1 = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis)
       val tsCleanRequest = CantonTimestamp.ofEpochMilli(requestTsDelta.toMillis * 2)
       for {
-        _ <- requestJournalStore.insert(RequestData.clean(2L, tsCleanRequest, tsCleanRequest))
-        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(2L, tsCleanRequest))
-        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(CursorPrehead(0L, ts1))
+        _ <- requestJournalStore.insert(
+          RequestData.clean(RequestCounter(2), tsCleanRequest, tsCleanRequest)
+        )
+        _ <- requestJournalStore.advancePreheadCleanTo(
+          CursorPrehead(RequestCounter(2), tsCleanRequest)
+        )
+        _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
+          CursorPrehead(SequencerCounter(0), ts1)
+        )
         res <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,
           sequencerCounterTrackerStore,
@@ -904,11 +932,17 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         traceContext,
       )
       for {
-        _ <- requestJournalStore.insert(RequestData.clean(2L, tsCleanRequest, tsCleanRequest))
-        _ <- requestJournalStore.insert(RequestData.clean(3L, tsCleanRequest2, tsCleanRequest2))
-        _ <- requestJournalStore.advancePreheadCleanTo(CursorPrehead(3L, tsCleanRequest2))
+        _ <- requestJournalStore.insert(
+          RequestData.clean(RequestCounter(2), tsCleanRequest, tsCleanRequest)
+        )
+        _ <- requestJournalStore.insert(
+          RequestData.clean(RequestCounter(3), tsCleanRequest2, tsCleanRequest2)
+        )
+        _ <- requestJournalStore.advancePreheadCleanTo(
+          CursorPrehead(RequestCounter(3), tsCleanRequest2)
+        )
         _ <- sequencerCounterTrackerStore.advancePreheadSequencerCounterTo(
-          CursorPrehead(1L, tsCleanRequest2)
+          CursorPrehead(SequencerCounter(1), tsCleanRequest2)
         )
         () <- inFlightSubmissionStore
           .register(submission1)
@@ -918,7 +952,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           .valueOrFailShutdown("register message ID 2")
         () <- inFlightSubmissionStore.observeSequencing(
           submission2.submissionDomain,
-          Map(submission2.messageId -> SequencedSubmission(2L, tsCleanRequest)),
+          Map(submission2.messageId -> SequencedSubmission(SequencerCounter(2), tsCleanRequest)),
         )
         res1 <- AcsCommitmentProcessor.safeToPrune(
           requestJournalStore,

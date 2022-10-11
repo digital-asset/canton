@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.store
 
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Keep, Sink}
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
-import com.digitalasset.canton._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
+import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
@@ -35,14 +35,14 @@ import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{AkkaUtil, MonadUtil}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.{Assertion, BeforeAndAfterAll}
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, blocking}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
@@ -84,7 +84,7 @@ trait MultiDomainEventLogTest
       timestampedEvent(0, 3),
       InFlightBySequencingInfo(
         domainIds(1),
-        SequencedSubmission(0L, CantonTimestamp.ofEpochSecond(1)),
+        SequencedSubmission(SequencerCounter(0), CantonTimestamp.ofEpochSecond(1)),
       ).some,
     ),
     (

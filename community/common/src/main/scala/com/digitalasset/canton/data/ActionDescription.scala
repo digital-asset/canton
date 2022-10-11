@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.value.{Value, ValueCoder}
 import com.digitalasset.canton.ProtoDeserializationError.{
@@ -13,9 +13,9 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueDeserializationError,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.InterfaceIdSyntax._
-import com.digitalasset.canton.protocol.LfHashSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
+import com.digitalasset.canton.protocol.InterfaceIdSyntax.*
+import com.digitalasset.canton.protocol.LfHashSyntax.*
 import com.digitalasset.canton.protocol.{
   GlobalKeySerialization,
   InterfaceIdSyntax,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionUtil, NoCopy}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
@@ -345,7 +345,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   private[data] def fromProtoV0(
       actionDescriptionP: v0.ActionDescription
   ): ParsingResult[ActionDescription] = {
-    import v0.ActionDescription.Description._
+    import v0.ActionDescription.Description.*
     val v0.ActionDescription(description) = actionDescriptionP
     description match {
       case Create(create) => fromCreateProtoV0(create)
@@ -359,7 +359,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
   private[data] def fromProtoV1(
       actionDescriptionP: v1.ActionDescription
   ): ParsingResult[ActionDescription] = {
-    import v1.ActionDescription.Description._
+    import v1.ActionDescription.Description.*
     val v1.ActionDescription(description) = actionDescriptionP
     description match {
       case Create(create) => fromCreateProtoV0(create)

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.sequencing.protocol.Recipients.cc
-import com.digitalasset.canton.sequencing.protocol.RecipientsTest._
+import com.digitalasset.canton.sequencing.protocol.RecipientsTest.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec

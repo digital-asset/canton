@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.syntax.alternative._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
+import cats.syntax.alternative.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.store.MediatorDeduplicationStore

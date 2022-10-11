@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
@@ -24,7 +24,7 @@ import com.digitalasset.canton.participant.store.{
   TransferStoreTest,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, ScalaFuturesWithPatience}
@@ -34,9 +34,10 @@ import org.scalatest.exceptions.TestFailedException
 
 import scala.concurrent.{ExecutionContext, Future}
 
-trait ConflictDetectionHelpers { this: AsyncTestSuite with BaseTest with HasExecutorService =>
+private[protocol] trait ConflictDetectionHelpers {
+  this: AsyncTestSuite with BaseTest with HasExecutorService =>
 
-  import ConflictDetectionHelpers._
+  import ConflictDetectionHelpers.*
 
   def parallelExecutionContext: ExecutionContext = executorService
 
@@ -86,7 +87,7 @@ trait ConflictDetectionHelpers { this: AsyncTestSuite with BaseTest with HasExec
   }
 }
 
-object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
+private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatience {
 
   def insertEntriesAcs(
       acs: ActiveContractStore,

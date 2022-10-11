@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
+
 import scala.collection.mutable
 
 /** The purpose of a hash serves to avoid hash collisions due to equal encodings for different objects.
@@ -79,4 +80,6 @@ object HashPurpose {
   val LegalIdentityClaim = HashPurpose(32, "LegalIdentityClaim")
   val DbLockId = HashPurpose(33, "DbLockId")
   val AcsCommitmentDb = HashPurpose(34, "AcsCommitmentDb")
+  val SubmissionRequestSignature = HashPurpose(35, "SubmissionRequestSignature")
+
 }

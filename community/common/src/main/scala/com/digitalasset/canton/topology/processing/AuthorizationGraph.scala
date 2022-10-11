@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.processing
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.Namespace
-import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
+import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction.*
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.transaction.{
   IdentifierDelegation,
@@ -18,11 +18,11 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 /** An authorized topology transaction */
 final case class AuthorizedTopologyTransaction[T <: TopologyMapping](

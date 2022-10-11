@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -37,16 +37,16 @@ import com.digitalasset.canton.participant.protocol.{
   ProcessingStartingPoints,
   SingleDomainCausalTracker,
 }
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{MultiDomainEventLog, SyncDomainEphemeralState}
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
@@ -56,7 +56,13 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasExecutorService,
+  LfPartyId,
+  RequestCounter,
+  SequencerCounter,
+}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -437,7 +443,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
       for {
         _ <- state.storedContractManager.addPendingContracts(
-          1L,
+          RequestCounter(1),
           Seq(WithTransactionId(contract, transactionId)),
         )
         _submissionResult <-
@@ -469,7 +475,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
 
       for {
         _ <- state.storedContractManager.addPendingContracts(
-          1L,
+          RequestCounter(1),
           Seq(WithTransactionId(contract, transactionId)),
         )
         submissionResult <- leftOrFailShutdown(
@@ -534,8 +540,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         result <- valueOrFail(
           outProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
@@ -550,8 +556,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
     "fail if there are not transfer-out requests with the right root hash" in {
       outProcessingSteps.pendingDataAndResponseArgsForMalformedPayloads(
         CantonTimestamp.Epoch,
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         Seq.empty,
         cryptoSnapshot,
       ) shouldBe Left(ReceivedNoRequests)
@@ -587,13 +593,13 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         fullTransferOutTree,
         Recipients.cc(submittingParticipant),
         CantonTimestamp.Epoch,
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         cryptoSnapshot,
       )
       for {
         _ <- state.storedContractManager.addPendingContracts(
-          1L,
+          RequestCounter(1),
           Seq(WithTransactionId(contract, transactionId)),
         )
         _result <- valueOrFail(
@@ -637,7 +643,7 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
           val batch: Batch[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
             Batch.of(testedProtocolVersion, (signedResult, Recipients.cc(submittingParticipant)))
           Deliver.create(
-            0L,
+            SequencerCounter(0),
             CantonTimestamp.Epoch,
             sourceDomain,
             Some(MessageId.tryCreate("msg-0")),
@@ -652,8 +658,8 @@ class TransferOutProcessingStepsTest extends AsyncWordSpec with BaseTest with Ha
         )
         pendingOut = PendingTransferOut(
           RequestId(CantonTimestamp.Epoch),
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           mock[RootHash],
           WithContractHash(contractId, contractHash),
           transferringParticipant = false,

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import cats.implicits.{toFoldableOps, _}
+import cats.implicits.{toFoldableOps, *}
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
@@ -76,9 +76,9 @@ class PackageInspectionOpsImpl(
   override def packageVetted(
       pkg: PackageId
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
-    //TODO(i9505): Consider unit testing this
+    // TODO(i9505): Consider unit testing this
 
-    import cats.implicits._
+    import cats.implicits.*
 
     val store = TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
 

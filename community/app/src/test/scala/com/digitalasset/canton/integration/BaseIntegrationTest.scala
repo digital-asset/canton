@@ -20,7 +20,7 @@ import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Assertion, ConfigMap, Outcome}
 
 import scala.collection.immutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 /** A highly opinionated base trait for writing integration tests interacting with a canton environment using console commands.
   * Tests must mixin a further [[EnvironmentSetup]] implementation to define when the canton environment is setup around the individual tests:
@@ -111,7 +111,7 @@ private[integration] trait BaseIntegrationTest[E <: Environment, TCE <: TestCons
     assertPingSucceeds(sender, receiver, timeoutMillis, workflowId, id)
     // wait for pong to be archived before proceeding to avoid race conditions
     eventually() {
-      import com.digitalasset.canton.participant.admin.{workflows => W}
+      import com.digitalasset.canton.participant.admin.{workflows as W}
       forEvery(Seq(sender, receiver)) { p =>
         p.ledger_api.acs
           .of_party(p.id.adminParty, filterTemplates = Seq(W.PingPong.Pong.id)) shouldBe empty
@@ -138,7 +138,7 @@ private[integration] trait BaseIntegrationTest[E <: Environment, TCE <: TestCons
       templateId: TemplateId,
       expectedNumber: Long,
   )(implicit env: TCE): Assertion = {
-    import env._
+    import env.*
     // Check all participants that are connected to domain
     for (p <- participants.local if p.domains.list_connected().exists(_.domainAlias == domain)) {
       assertNumberOfStoredContracts(p, domain, templateId, expectedNumber)

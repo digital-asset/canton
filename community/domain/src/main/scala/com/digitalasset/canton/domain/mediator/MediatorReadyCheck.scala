@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

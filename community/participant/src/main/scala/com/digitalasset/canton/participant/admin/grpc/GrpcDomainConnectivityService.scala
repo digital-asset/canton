@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import com.digitalasset.canton.participant.admin.DomainConnectivityService
-import com.digitalasset.canton.participant.admin.v0._
+import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 

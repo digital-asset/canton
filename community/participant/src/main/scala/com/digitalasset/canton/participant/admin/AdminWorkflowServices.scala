@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.admin
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.error.definitions.DamlError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.api.refinements.{ApiTypes => A}
+import com.daml.ledger.api.refinements.{ApiTypes as A}
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.configuration.CommandClientConfiguration
 import com.daml.lf.data.Ref.PackageId
@@ -18,7 +18,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AdminWorkflowServicesErrorGroup
 import com.digitalasset.canton.error.{CantonError, DecodedRpcStatus}
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.{
   LocalParticipantConfig,

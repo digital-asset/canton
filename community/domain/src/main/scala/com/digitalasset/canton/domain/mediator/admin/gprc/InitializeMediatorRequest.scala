@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator.admin.gprc
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.domain.sequencing.admin.protocol.InitRequest
 import com.digitalasset.canton.protocol.StaticDomainParameters

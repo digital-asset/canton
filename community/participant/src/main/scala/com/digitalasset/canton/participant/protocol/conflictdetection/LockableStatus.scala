@@ -9,7 +9,7 @@ import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractK
   *
   * Also defines the eviction strategy for items.
   */
-trait LockableStatus[-Status] {
+private[conflictdetection] trait LockableStatus[-Status] {
 
   /** The kind of item this `Status` can be used for. Used for logging and pretty printing. */
   def kind: String
@@ -26,12 +26,12 @@ trait LockableStatus[-Status] {
   def shouldEvict(status: Status): Boolean
 }
 
-object LockableStatus {
+private[conflictdetection] object LockableStatus {
   def apply[Status](implicit instance: LockableStatus[Status]): LockableStatus[Status] = instance
 
   implicit val activeContractStoreLockableStatus: LockableStatus[ActiveContractStore.Status] =
     new LockableStatus[ActiveContractStore.Status] {
-      import ActiveContractStore._
+      import ActiveContractStore.*
 
       override def kind: String = "contract"
 
@@ -50,7 +50,7 @@ object LockableStatus {
 
   implicit val contractKeyJournalStateLockableStatus: LockableStatus[ContractKeyJournal.Status] =
     new LockableStatus[ContractKeyJournal.Status] {
-      import ContractKeyJournal._
+      import ContractKeyJournal.*
 
       override def kind: String = "key"
 

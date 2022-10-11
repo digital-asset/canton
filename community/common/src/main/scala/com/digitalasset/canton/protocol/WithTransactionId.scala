@@ -15,7 +15,7 @@ case class WithTransactionId[+A](private val x: A, transactionId: TransactionId)
 
 object WithTransactionId {
   implicit def prettyWithTransactionId[A: Pretty]: Pretty[WithTransactionId[A]] = {
-    import Pretty._
+    import Pretty.*
     prettyOfClass(
       unnamedParam(_.x),
       param("transaction id", _.transactionId),

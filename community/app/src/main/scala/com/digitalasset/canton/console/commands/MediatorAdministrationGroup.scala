@@ -105,7 +105,7 @@ class MediatorAdministrationGroup(
     "Prune the mediator of unnecessary data while keeping data for the provided retention period"
   )
   def prune_with_retention_period(retentionPeriod: FiniteDuration): Unit = {
-    import scala.jdk.DurationConverters._
+    import scala.jdk.DurationConverters.*
     val pruneUpTo = consoleEnvironment.environment.clock.now.minus(retentionPeriod.toJava)
     prune_at(pruneUpTo)
   }

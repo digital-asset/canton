@@ -6,10 +6,11 @@ package com.digitalasset.canton.participant.store
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
-import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
+import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
+import com.digitalasset.canton.store.CursorPreheadStore
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import org.testcontainers.shaded.com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -20,11 +21,11 @@ class PreHookRequestJournalStore(
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends RequestJournalStore
     with NamedLogging {
-  import PreHookRequestJournalStore._
+  import PreHookRequestJournalStore.*
 
   override private[store] implicit val ec: ExecutionContext = backing.ec
 
-  override private[store] val cleanPreheadStore: CursorPreheadStore[RequestCounter] =
+  override private[store] val cleanPreheadStore: CursorPreheadStore[RequestCounterDiscriminator] =
     backing.cleanPreheadStore
 
   private val preInsertHook: AtomicReference[InsertHook] =
@@ -82,7 +83,7 @@ class PreHookRequestJournalStore(
   ): Future[Int] = backing.size(start, end)
 
   override def advancePreheadCleanTo(
-      newPrehead: CursorPrehead[RequestCounter]
+      newPrehead: RequestCounterCursorPrehead
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       _ <- preCleanCounterHook.getAndSet(emptyCleanCounterHook)(newPrehead)
@@ -111,7 +112,7 @@ object PreHookRequestJournalStore {
         Option[CantonTimestamp],
     ) => Future[Unit]
 
-  type CleanCounterHook = CursorPrehead[RequestCounter] => Future[Unit]
+  type CleanCounterHook = RequestCounterCursorPrehead => Future[Unit]
 
   val emptyInsertHook: InsertHook = _ => Future.unit
 

@@ -9,7 +9,7 @@ import com.digitalasset.canton.sequencing.client.CheckedSubscriptionErrorRetryPo
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 
-import GrpcSubscriptionErrorRetryPolicy._
+import GrpcSubscriptionErrorRetryPolicy.*
 
 class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerFactory)
     extends CheckedSubscriptionErrorRetryPolicy[GrpcSubscriptionError]
@@ -24,7 +24,7 @@ class GrpcSubscriptionErrorRetryPolicy(protected val loggerFactory: NamedLoggerF
         )
         logger.info(
           s"Trying to reconnect to give the sequencer the opportunity to become available again (after ${causes
-            .mkString(", ")})"
+              .mkString(", ")})"
         )
         true
 

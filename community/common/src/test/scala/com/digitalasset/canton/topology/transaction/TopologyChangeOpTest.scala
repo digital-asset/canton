@@ -10,7 +10,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 class TopologyChangeOpTest extends AnyWordSpec with BaseTest with HasExecutionContext {
-  import TopologyChangeOp._
+  import TopologyChangeOp.*
 
   private lazy val uid = UniqueIdentifier.tryFromProtoPrimitive("da::tluafed")
 

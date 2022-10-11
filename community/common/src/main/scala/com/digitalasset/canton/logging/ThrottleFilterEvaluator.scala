@@ -11,7 +11,7 @@ import ch.qos.logback.core.spi.FilterReply
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 import scala.collection.concurrent
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 /** Throttles logging events, so that no more than `maxLoggedOverPeriod` unique events are logged over `expiryPeriod`.
   * De-duplicates logging events over `expiryPeriod.`

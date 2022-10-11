@@ -7,32 +7,24 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 
 object ReleaseVersionToProtocolVersions {
 
-  import ProtocolVersion._
-  // At some point after Daml 3.0, this Map may diverge for domain and participant because we have
-  // different compatibility guarantees for participants and domains and we will need to add separate maps for each
-  // don't make `releaseVersionToProtocolVersions` private - it's used in `console-reference.canton`
-  val releaseVersionToProtocolVersions: Map[ReleaseVersion, NonEmpty[List[ProtocolVersion]]] = Map(
-    ReleaseVersions.v2_0_0_snapshot -> List(v2),
+  import ProtocolVersion.*
+  // For each (major, minor) the list of supported protocol versions
+  // Don't make this variable private because it's used in `console-reference.canton`
+  val majorMinorToProtocolVersions: Map[(Int, Int), NonEmpty[List[ProtocolVersion]]] = Map(
     ReleaseVersions.v2_0_0 -> List(v2),
-    ReleaseVersions.v2_0_1 -> List(v2),
-    ReleaseVersions.v2_1_0_snapshot -> List(v2),
     ReleaseVersions.v2_1_0 -> List(v2),
-    ReleaseVersions.v2_1_0_rc1 -> List(v2),
-    ReleaseVersions.v2_1_1_snapshot -> List(v2),
-    ReleaseVersions.v2_1_1 -> List(v2),
-    ReleaseVersions.v2_2_0_snapshot -> List(v2),
     ReleaseVersions.v2_2_0 -> List(v2),
-    ReleaseVersions.v2_2_0_rc1 -> List(v2),
-    ReleaseVersions.v2_2_1 -> List(v2),
-    ReleaseVersions.v2_2_0 -> List(v2),
-    ReleaseVersions.v2_3_0_snapshot -> List(v2, v3),
-    ReleaseVersions.v2_3_0_rc1 -> List(v2, v3),
     ReleaseVersions.v2_3_0 -> List(v2, v3),
-    ReleaseVersions.v2_3_1 -> List(v2, v3),
-    ReleaseVersions.v2_3_2 -> List(v2, v3),
-    ReleaseVersions.v2_3_3 -> List(v2, v3),
-    ReleaseVersions.v2_3_4 -> List(v2, v3),
-    ReleaseVersions.v2_4_0_rc1 -> List(v2, v3),
-    ReleaseVersions.v2_4_0_snapshot -> List(v2, v3),
-  ).map { case (release, pvs) => (release, NonEmptyUtil.fromUnsafe(pvs)) }
+    ReleaseVersions.v2_4_0 -> List(v2, v3),
+    ReleaseVersions.v2_5_0 -> List(v2, v3),
+  ).map { case (release, pvs) => (release.majorMinor, NonEmptyUtil.fromUnsafe(pvs)) }
+
+  def get(releaseVersion: ReleaseVersion): Option[NonEmpty[List[ProtocolVersion]]] =
+    majorMinorToProtocolVersions.get(releaseVersion.majorMinor)
+
+  def getOrElse(
+      releaseVersion: ReleaseVersion,
+      default: => NonEmpty[List[ProtocolVersion]],
+  ): NonEmpty[List[ProtocolVersion]] =
+    majorMinorToProtocolVersions.getOrElse(releaseVersion.majorMinor, default)
 }

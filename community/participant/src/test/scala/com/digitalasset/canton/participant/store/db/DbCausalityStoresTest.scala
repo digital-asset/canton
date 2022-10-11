@@ -38,7 +38,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
   }
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     storage
       .update(
@@ -57,8 +57,8 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
       events: Seq[(EventLogId, TimestampedEvent, Boolean)]
   ): Future[Unit] = {
     val theStorage = storage
-    import theStorage.api._
-    import theStorage.converters._
+    import theStorage.api.*
+    import theStorage.converters.*
 
     @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
       TraceContext.getVersionedSetParameter(testedProtocolVersion)
@@ -90,7 +90,7 @@ trait DbCausalityStoresTest extends CausalityStoresTest with DbTest {
             sql""" 
                             linearized_event_log (log_id, local_offset, publication_time)
                             values (${id.index}, $localOffset, ${CantonTimestamp
-              .now()})
+                .now()})
             """,
           )
 

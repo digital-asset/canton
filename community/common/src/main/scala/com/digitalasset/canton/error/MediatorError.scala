@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.error
 
-import com.daml.error._
+import com.daml.error.*
 import com.digitalasset.canton.error.CantonErrorGroups.MediatorErrorGroup
 import com.digitalasset.canton.protocol.messages.Verdict
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject

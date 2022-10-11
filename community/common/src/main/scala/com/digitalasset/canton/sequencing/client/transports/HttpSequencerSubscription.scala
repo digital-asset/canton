@@ -18,12 +18,12 @@ import com.digitalasset.canton.sequencing.client.{SequencerSubscription, Subscri
 import com.digitalasset.canton.sequencing.protocol.SubscriptionRequest
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SerializedEventHandler}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{AkkaUtil, FutureUtil, SingleUseCell}
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 

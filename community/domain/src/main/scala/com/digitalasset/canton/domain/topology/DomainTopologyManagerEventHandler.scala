@@ -14,18 +14,18 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionRequest,
   RegisterTopologyTransactionResponse,
 }
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{
   SendAsyncClientError,
   SendCallback,
   SequencerClient,
 }
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
 

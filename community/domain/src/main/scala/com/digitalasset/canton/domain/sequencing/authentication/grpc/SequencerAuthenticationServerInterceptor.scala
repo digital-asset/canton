@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.SequencerAuthenticationServerInterceptor.VerifyTokenError
 import com.digitalasset.canton.domain.sequencing.authentication.{
   MemberAuthenticationService,
@@ -25,7 +25,7 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc._
+import io.grpc.*
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -42,7 +42,7 @@ class SequencerAuthenticationServerInterceptor(
       headers: Metadata,
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
     (for {
       member <- Option(headers.get(Constant.MEMBER_ID_METADATA_KEY))
