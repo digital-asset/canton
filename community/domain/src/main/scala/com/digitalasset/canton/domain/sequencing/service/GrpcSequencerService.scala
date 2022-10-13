@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.service
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -13,13 +13,14 @@ import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
-import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerService._
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
+import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerService.*
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.protocol.{DomainParametersLookup, v0 => protocolV0}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.{DomainParametersLookup, v0 as protocolV0}
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, TimeProof}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.{EitherTUtil, RateLimiter}
@@ -175,10 +176,15 @@ class GrpcSequencerService(
     lazy val sendF = {
       val validatedRequestEither: Either[SendAsyncError, WrappedSubmissionRequest[Req]] = for {
         result <- deserealize
-          .leftMap { error =>
-            // Todo(i10271): add an alarm to report a deserialization error.
-            logger.warn(error.toString)
-            SendAsyncError.RequestInvalid(error.toString)
+          .leftMap {
+            case ProtoDeserializationError.MaxBytesToDecompressExceeded(message) =>
+              val alarm =
+                SequencerError.MaxRequestSizeExceeded.Error(message, maxInBoundMessageSize)
+              alarm.report()
+              SendAsyncError.RequestInvalid(message)
+            case error: ProtoDeserializationError =>
+              logger.warn(error.toString)
+              SendAsyncError.RequestInvalid(error.toString)
           }
         // validateSubmissionRequest is thread-local and therefore we need to validate the submission request
         // before we switch threads
@@ -453,7 +459,7 @@ class GrpcSequencerService(
         (),
         refuse(messageIdP, sender)(
           s"Unauthenticated member is trying to send message to members other than the domain manager: ${nonIdmRecipients
-            .mkString(" ,")}."
+              .mkString(" ,")}."
         ),
       )
     case _ => Right(())

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{CantonTimestamp, InformeeTree}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.{RequestId, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
@@ -88,12 +88,12 @@ object TransactionResultMessage
   override val name: String = "TransactionResultMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransactionResultMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransactionResultMessage)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -127,7 +127,7 @@ object TransactionResultMessage
         .leftWiden[ProtoDeserializationError]
       notificationTree <- InformeeTree.fromProtoV0(hashOps, protoNotificationTree)
     } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
 
@@ -146,7 +146,7 @@ object TransactionResultMessage
         .required("notification_tree", notificationTreePO)
         .flatMap(InformeeTree.fromProtoV1(hashOps, _))
     } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
-      protocolVersionRepresentativeFor(ProtobufVersion(1)),
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
       Some(bytes),
     )
   }

@@ -10,7 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.protocol.submission._
+import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightReference
 import com.digitalasset.canton.participant.store.db.DbInFlightSubmissionStore
 import com.digitalasset.canton.participant.store.memory.InMemoryInFlightSubmissionStore

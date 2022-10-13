@@ -8,7 +8,7 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.store.CursorPreheadStore
 import com.digitalasset.canton.store.memory.InMemoryCursorPreheadStore
 import com.digitalasset.canton.tracing.TraceContext
@@ -80,7 +80,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
             else if (oldResult.state != oldState)
               EitherT.leftT(InconsistentRequestState(rc, oldResult.state, oldState))
             else {
-              requestTable.put(rc, oldResult.tryAdvance(newState, commitTime))
+              requestTable.put(rc, oldResult.tryAdvance(newState, commitTime)).discard
               EitherT.rightT(())
             }
         }

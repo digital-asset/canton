@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.OptionT
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
@@ -15,7 +15,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent.EventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable.{SortedMap, TreeMap}

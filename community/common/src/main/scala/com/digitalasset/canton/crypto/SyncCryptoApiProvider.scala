@@ -4,8 +4,8 @@
 package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SignatureCheckError.{
@@ -17,7 +17,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   IdentityProvidingServiceClient,
@@ -31,7 +31,7 @@ import com.digitalasset.canton.{DomainAlias, checked}
 import com.google.protobuf.ByteString
 import org.slf4j.event.Level
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Crypto API Provider class
@@ -240,7 +240,7 @@ class DomainSyncCryptoClient(
   private def findSigningKey(
       referenceTime: CantonTimestamp
   ): EitherT[Future, SyncCryptoError, Fingerprint] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     for {
       snapshot <- EitherT.right(ipsSnapshot(referenceTime))
       signingKeys <- EitherT.right(snapshot.signingKeys(owner))
@@ -356,7 +356,7 @@ class DomainSnapshotSyncCryptoApi(
         else
           SignatureWithWrongKey(
             s"Key ${signature.signedBy} used to generate signature is not a valid key for ${signer}. Valid keys are ${validKeys
-              .map(_.fingerprint.unwrap)}"
+                .map(_.fingerprint.unwrap)}"
           )
       Left(error)
     }

@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.instances.list._
-import cats.syntax.foldable._
+import cats.instances.list.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContract, TransactionId}

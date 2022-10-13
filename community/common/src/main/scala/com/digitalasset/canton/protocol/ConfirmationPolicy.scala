@@ -4,13 +4,17 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{ConfirmingParty, Informee, PlainInformee}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  DeterministicEncoding,
+}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
 import com.digitalasset.canton.util.LfTransactionUtil
@@ -185,6 +189,6 @@ object ConfirmationPolicy {
       case (Vip.name, _) => Right(Vip)
       case (Signatory.name, _) => Right(Signatory)
       case (badName, badBytes) =>
-        Left(DeserializationError(s"Invalid confirmation policy $badName"))
+        Left(DefaultDeserializationError(s"Invalid confirmation policy $badName"))
     }
 }

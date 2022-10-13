@@ -8,7 +8,7 @@ import com.digitalasset.canton.admin.api.client.data.CantonStatus.splitSuccessfu
 import com.digitalasset.canton.console.{DomainReference, ParticipantReference}
 import com.digitalasset.canton.health.admin.data.{DomainStatus, NodeStatus, ParticipantStatus}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 trait CantonStatus extends PrettyPrinting {
   protected def descriptions[Status <: NodeStatus.Status](

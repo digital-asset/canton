@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.crypto.provider.jce
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.HkdfError.HkdfInternalError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.util.ShowUtil
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.crypto.tink.subtle.EllipticCurves.EcdsaEncoding
 import com.google.crypto.tink.subtle.Enums.HashType
-import com.google.crypto.tink.subtle._
+import com.google.crypto.tink.subtle.*
 import com.google.crypto.tink.{Aead, PublicKeySign, PublicKeyVerify}
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers
@@ -24,10 +24,10 @@ import java.security.{
   GeneralSecurityException,
   InvalidKeyException,
   NoSuchAlgorithmException,
-  PrivateKey => JPrivateKey,
-  PublicKey => JPublicKey,
+  PrivateKey as JPrivateKey,
+  PublicKey as JPublicKey,
   SecureRandom,
-  Signature => JSignature,
+  Signature as JSignature,
   SignatureException,
 }
 import scala.collection.concurrent.TrieMap

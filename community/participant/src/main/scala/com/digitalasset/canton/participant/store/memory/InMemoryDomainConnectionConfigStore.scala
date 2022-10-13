@@ -20,7 +20,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class InMemoryDomainConnectionConfigStore(protected override val loggerFactory: NamedLoggerFactory)
     extends DomainConnectionConfigStore

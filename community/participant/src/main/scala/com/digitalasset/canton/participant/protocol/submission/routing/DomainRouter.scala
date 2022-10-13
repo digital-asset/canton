@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -42,7 +42,7 @@ import com.digitalasset.canton.participant.sync.{
   TransactionRoutingErrorWithDomain,
 }
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -83,7 +83,7 @@ class DomainRouter(
     extends FlagCloseable
     with NamedLogging {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   def submitTransaction(
       submitterInfo: SubmitterInfo,

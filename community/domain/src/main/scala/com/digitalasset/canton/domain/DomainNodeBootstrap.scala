@@ -4,10 +4,10 @@
 package com.digitalasset.canton.domain
 
 import akka.actor.ActorSystem
-import better.files._
+import better.files.*
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.error.ErrorGroup
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -15,17 +15,17 @@ import com.digitalasset.canton.concurrent.{
 }
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.config.{InitConfigBase, TestingConfigInternal}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
   CommunityCryptoPrivateStoreFactory,
   CryptoPrivateStoreFactory,
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.{DomainServiceGrpc, SequencerVersionServiceGrpc}
-import com.digitalasset.canton.domain.admin.{grpc => admingrpc}
-import com.digitalasset.canton.domain.config._
+import com.digitalasset.canton.domain.admin.{grpc as admingrpc}
+import com.digitalasset.canton.domain.config.*
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
-import com.digitalasset.canton.domain.initialization._
+import com.digitalasset.canton.domain.initialization.*
 import com.digitalasset.canton.domain.mediator.{
   CommunityMediatorRuntimeFactory,
   MediatorRuntime,
@@ -35,7 +35,7 @@ import com.digitalasset.canton.domain.metrics.DomainMetrics
 import com.digitalasset.canton.domain.sequencing.service.GrpcSequencerVersionService
 import com.digitalasset.canton.domain.sequencing.{SequencerRuntime, SequencerRuntimeFactory}
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
-import com.digitalasset.canton.domain.topology._
+import com.digitalasset.canton.domain.topology.*
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrapBase}
 import com.digitalasset.canton.health.admin.data.{DomainStatus, TopologyQueueStatus}
@@ -45,16 +45,16 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.resource.{CommunityStorageFactory, Storage, StorageFactory}
-import com.digitalasset.canton.sequencing.client.{grpc => _, _}
+import com.digitalasset.canton.sequencing.client.{grpc as _, *}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.store.db.SequencerClientDiscriminator
 import com.digitalasset.canton.time.{Clock, HasUptime}
 import com.digitalasset.canton.topology.TopologyManagerError.DomainErrorGroup
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.client._
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
@@ -207,7 +207,7 @@ class DomainNodeBootstrap(
   /** If we're running a sequencer within the domain node itself, then locally start some core services */
   private def initializeSequencerServices: EitherT[Future, String, Unit] = {
     adminServerRegistry
-      .addService(
+      .addServiceU(
         SequencerVersionServiceGrpc.bindService(
           new GrpcSequencerVersionService(protocolVersion, loggerFactory),
           executionContext,
@@ -349,7 +349,7 @@ class DomainNodeBootstrap(
         }
 
         syncCrypto: DomainSyncCryptoClient = {
-          ips.add(topologyClient)
+          ips.add(topologyClient).discard
           new SyncCryptoApiProvider(
             manager.id,
             ips,
@@ -621,13 +621,13 @@ class Domain(
   def registerAdminServices(): Unit = {
     // The domain admin-API services
     sequencerRuntime.registerAdminGrpcServices { service =>
-      adminApiRegistry.addService(service).discard
+      adminApiRegistry.addServiceU(service)
     }
     mediatorRuntime.registerAdminGrpcServices { service =>
-      adminApiRegistry.addService(service).discard
+      adminApiRegistry.addServiceU(service)
     }
     adminApiRegistry
-      .addService(
+      .addServiceU(
         DomainServiceGrpc
           .bindService(
             new admingrpc.GrpcDomainService(
@@ -637,7 +637,6 @@ class Domain(
             executionContext,
           )
       )
-      .discard
   }
 }
 

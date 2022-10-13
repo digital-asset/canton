@@ -4,11 +4,11 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.traverse._
+import cats.instances.future.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, HashPurpose}
-import com.digitalasset.canton.domain.sequencing.sequencer.errors._
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.*
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -93,7 +93,7 @@ abstract class BaseSequencer(
         )
         EitherT.pure[Future, WriteRequestRefused](())
       case OperationError(RegisterMemberError.UnexpectedError(member, message)) =>
-        //TODO(danilo/arne) consider whether to propagate these errors further
+        // TODO(danilo/arne) consider whether to propagate these errors further
         logger.error(s"An unexpected error occurred whilst registering member $member: $message")
         EitherT.pure[Future, WriteRequestRefused](())
       case error: WriteRequestRefused => EitherT.leftT(error)
@@ -224,7 +224,7 @@ object BaseSequencer {
           .leftMap(error => {
             SendAsyncError.RequestRefused(
               s"Sequencer could not verify client's signature ${signedSubmission.timestampOfSigningKey
-                .fold("")(ts => s"at $ts ")}on submission request with sequencer's head snapshot at $timestamp. Error: $error"
+                  .fold("")(ts => s"at $ts ")}on submission request with sequencer's head snapshot at $timestamp. Error: $error"
             ): SendAsyncError
           })
           // set timestamp to the one used by the receiving sequencer's head snapshot timestamp

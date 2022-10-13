@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.syntax.flatMap._
-import cats.syntax.option._
+import cats.syntax.flatMap.*
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Encrypted, HashPurpose, HashPurposeTest, TestHash}
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.protocol.MessageDispatcher.{AcsCommitment => _, _}
+import com.digitalasset.canton.participant.protocol.MessageDispatcher.{AcsCommitment as _, *}
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
@@ -22,7 +22,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.EncryptedView.CompressedView
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   RequestAndRootHashMessage,
   RequestId,
@@ -30,31 +30,31 @@ import com.digitalasset.canton.protocol.{
   RootHash,
   TransferId,
   ViewHash,
-  v0 => protocolv0,
+  v0 as protocolv0,
 }
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   HandlerResult,
   PossiblyIgnoredProtocolEvent,
   RawProtocolEvent,
   SequencerTestUtils,
 }
-import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.Traced
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedSerializerCompanion,
-  ProtobufVersion,
+  HasVersionedToByteString,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
 import com.digitalasset.canton.{BaseTest, DiscardOps, LfPartyId, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
-import org.mockito.ArgumentMatchers.{eq => isEq}
+import org.mockito.ArgumentMatchers.eq as isEq
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AsyncWordSpec, AsyncWordSpecLike}
 
@@ -63,7 +63,7 @@ import scala.concurrent.Future
 
 trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 
-  import MessageDispatcherTest._
+  import MessageDispatcherTest.*
 
   val domainId = DomainId.tryFromString("messageDispatcher::domain")
   val sourceDomain = DomainId.tryFromString("sourceDomain::sourceDomain")
@@ -1186,7 +1186,7 @@ trait MessageDispatcherTest { this: AsyncWordSpecLike with BaseTest =>
 private[protocol] object MessageDispatcherTest {
 
   // The message dispatcher only sees encrypted view trees, so there's no point in implementing the methods.
-  sealed trait MockViewTree extends ViewTree with HasCryptographicEvidence
+  sealed trait MockViewTree extends ViewTree with HasVersionedToByteString
 
   trait AbstractTestViewType extends ViewType {
     override type View = MockViewTree
@@ -1232,7 +1232,7 @@ private[protocol] object MessageDispatcherTest {
     val name: String = "TestRegularMediatorResult"
 
     val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-      ProtobufVersion(0) -> VersionedProtoConverter(
+      ProtoVersion(0) -> VersionedProtoConverter(
         ProtocolVersion.v2,
         (),
         _ => throw new NotImplementedError("Serialization is not implemented"),

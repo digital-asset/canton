@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.sequencing.client.SendTrackerUpdateError.TimeoutHandlerError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinaryProtocolEvent,
   RawProtocolEvent,

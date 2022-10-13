@@ -5,9 +5,9 @@ package com.digitalasset.canton.networking.grpc
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
-import io.grpc._
+import io.grpc.*
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Stubbed GRPC services to provide simple responses rather than a typical full implementation. */
 object StaticGrpcServices {

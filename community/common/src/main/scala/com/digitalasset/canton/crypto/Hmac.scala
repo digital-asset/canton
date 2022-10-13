@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
-import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
 import com.google.protobuf.ByteString
@@ -70,7 +70,7 @@ final case class Hmac private (private val hmac: ByteString, private val algorit
 
 object Hmac {
 
-  import HmacError._
+  import HmacError.*
 
   private[crypto] def create(
       hmac: ByteString,
@@ -90,7 +90,7 @@ object Hmac {
         .create(hmacP.hmac, hmacAlgorithm)
         .leftMap(err =>
           ProtoDeserializationError.CryptoDeserializationError(
-            DeserializationError(s"Failed to deserialize HMAC: $err")
+            DefaultDeserializationError(s"Failed to deserialize HMAC: $err")
           )
         )
     } yield hmac

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0.CausalityUpdate.Tag
@@ -15,7 +15,7 @@ import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetPr
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   ProtocolVersionedCompanionDbHelpers,
   RepresentativeProtocolVersion,
@@ -168,7 +168,7 @@ object CausalityUpdate
     extends HasProtocolVersionedCompanion[CausalityUpdate]
     with ProtocolVersionedCompanionDbHelpers[CausalityUpdate] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.CausalityUpdate)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -178,7 +178,7 @@ object CausalityUpdate
   override protected def name: String = "causality update"
 
   def fromProtoV0(p: v0.CausalityUpdate): ParsingResult[CausalityUpdate] = {
-    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0))
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
 
     for {
       domainId <- DomainId.fromProtoPrimitive(p.domainId, "domain_id")

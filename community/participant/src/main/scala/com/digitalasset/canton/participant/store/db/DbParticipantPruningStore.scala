@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String36
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.store.ParticipantPruningStore
@@ -28,9 +28,9 @@ class DbParticipantPruningStore(
     extends ParticipantPruningStore
     with DbStore {
 
-  import storage.api._
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("participant-pruning-store")
 
   override def markPruningStarted(

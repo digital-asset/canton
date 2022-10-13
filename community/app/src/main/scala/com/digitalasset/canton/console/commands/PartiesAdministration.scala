@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.console.commands
 
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.admin.api.client.commands.{
   ParticipantAdminCommands,
@@ -30,14 +30,14 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNode
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   RequestSide,
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString
 
 import java.time.Instant
@@ -48,7 +48,7 @@ class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment:
   protected def defaultLimit: PositiveInt =
     consoleEnvironment.environment.config.parameters.console.defaultLimit
 
-  import runner._
+  import runner.*
 
   @Help.Summary(
     "List active parties, their active participants, and the participants' permissions on domains."
@@ -293,7 +293,7 @@ class LocalParticipantPartiesAdministrationGroup(
 ) extends ParticipantPartiesAdministrationGroup(reference.id, runner, consoleEnvironment)
     with FeatureFlagFilter {
 
-  import runner._
+  import runner.*
 
   @Help.Summary("Waits for any topology changes to be observed", FeatureFlag.Preview)
   @Help.Description(

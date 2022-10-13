@@ -34,7 +34,7 @@ class PeriodicActionTest extends AsyncWordSpec with BaseTest with HasExecutionCo
 
   "should call function periodically" in {
     val env = new Env()
-    import env._
+    import env.*
 
     numberOfCalls shouldBe 0
 
@@ -44,7 +44,7 @@ class PeriodicActionTest extends AsyncWordSpec with BaseTest with HasExecutionCo
 
   "should not call function after we are closed" in {
     val env = new Env()
-    import env._
+    import env.*
 
     numberOfCalls shouldBe 0
 

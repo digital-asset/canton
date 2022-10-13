@@ -4,6 +4,7 @@
 package com.digitalasset.canton.tracing
 
 import cats.data.{EitherT, OptionT}
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.tracing.Spanning.{SpanEndingExecutionContext, SpanWrapper}
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.{Span, StatusCode, Tracer}
@@ -44,7 +45,7 @@ trait Spanning {
         case Success(_) =>
           currentSpan.end()
         case Failure(exception) =>
-          recordException(exception)
+          recordException(exception).discard
           currentSpan.end()
       }(SpanEndingExecutionContext)
 
@@ -59,7 +60,7 @@ trait Spanning {
         f(childContext)(new SpanWrapper(currentSpan))
       } catch {
         case NonFatal(exception) =>
-          recordException(exception)
+          recordException(exception).discard
           currentSpan.end()
           throw exception
       }

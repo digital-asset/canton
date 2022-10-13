@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue, SynchronizedPeanoTreeQueue}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.Phase37Synchronizer._
+import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.*
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
+import com.digitalasset.canton.{DiscardOps, RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -108,7 +108,7 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
   private[this] def insert(requestCounter: RequestCounter, timestampO: Option[CantonTimestamp])(
       implicit traceContext: TraceContext
   ): Unit = blocking(synchronized {
-    queue.insert(requestCounter, timestampO)
+    queue.insert(requestCounter, timestampO).discard
     timestampO.foreach { timestamp =>
       byTimestamp.get(timestamp).foreach(_.trySuccess(()))
       if (timestamp > confirmedLowerBound.get()) {

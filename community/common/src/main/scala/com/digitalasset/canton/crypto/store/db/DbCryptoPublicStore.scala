@@ -4,12 +4,12 @@
 package com.digitalasset.canton.crypto.store.db
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.crypto.store._
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.crypto.store.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -30,12 +30,12 @@ class DbCryptoPublicStore(
     extends CryptoPublicStore
     with DbStore {
 
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
-  private val insertTime: GaugeM[TimedLoadGauge, Double] =
+  private val insertTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-public-store-insert")
-  private val queryTime: GaugeM[TimedLoadGauge, Double] =
+  private val queryTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("crypto-public-store-query")
 
   private implicit val setParameterEncryptionPublicKey: SetParameter[EncryptionPublicKey] =

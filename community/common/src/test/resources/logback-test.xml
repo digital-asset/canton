@@ -50,7 +50,7 @@
   <logger name="io.netty.handler.ssl" level="${LOG_LEVEL_CANTON:-DEBUG}"/>
 
   <!-- Set the logging level for Akka so that if someone configures akka to actually log something, this will end up in the log -->
-  <logger name="akka" level="DEBUG"/>
+  <logger name="akka" level="${LOG_LEVEL_CANTON:-DEBUG}"/>
 
   <!-- Enable for database-relevant debug logs -->
 <!--  <logger name="slick" level="DEBUG"/>-->

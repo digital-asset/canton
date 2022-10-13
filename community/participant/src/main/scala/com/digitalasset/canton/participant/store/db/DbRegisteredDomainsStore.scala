@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.Monad
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
   DomainAliasAlreadyAdded,
@@ -31,11 +31,11 @@ class DbRegisteredDomainsStore(
 )(implicit ec: ExecutionContext)
     extends RegisteredDomainsStore
     with DbStore {
-  import DomainAlias._
-  import DomainId._
-  import storage.api._
+  import DomainAlias.*
+  import DomainId.*
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("registered-domains-store")
 
   override def addMapping(alias: DomainAlias, domainId: DomainId)(implicit

@@ -4,20 +4,20 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.syntax.alternative._
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.alternative.*
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
-import com.daml.lf.engine.{Error => LfError}
-import com.daml.lf.interpretation.{Error => LfInterpretationError}
+import com.daml.lf.engine.{Error as LfError}
+import com.daml.lf.interpretation.{Error as LfInterpretationError}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton.crypto.{DecryptionError => _, EncryptionError => _, _}
+import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.ViewType.TransferInViewType
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
@@ -33,26 +33,26 @@ import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps._
-import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps._
+import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{
   ProtocolProcessor,
   SingleDomainCausalTracker,
   TransferInUpdate,
 }
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.{LedgerEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.serialization.DeserializationError
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.DefaultDeserializationError
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
@@ -176,7 +176,7 @@ private[transfer] class TransferInProcessingSteps(
       rootHash = fullTree.rootHash
       mediatorMessage = fullTree.mediatorMessage
       recipientsSet <- {
-        import cats.syntax.traverse._
+        import cats.syntax.traverse.*
         stakeholders.toSeq
           .traverse(activeParticipantsOfParty)
           .map(_.foldLeft(Set.empty[Member])(_ ++ _))
@@ -252,7 +252,7 @@ private[transfer] class TransferInProcessingSteps(
       ) { bytes =>
         FullTransferInTree
           .fromByteString(snapshot.pureCrypto)(bytes)
-          .leftMap(e => DeserializationError(e.toString))
+          .leftMap(e => DefaultDeserializationError(e.toString))
       }
       .map(WithRecipients(_, envelope.recipients))
 

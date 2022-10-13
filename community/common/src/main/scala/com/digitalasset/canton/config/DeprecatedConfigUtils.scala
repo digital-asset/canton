@@ -7,7 +7,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.typesafe.config.{ConfigFactory, ConfigUtil}
 import pureconfig.{ConfigCursor, ConfigReader, PathSegment}
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 object DeprecatedConfigUtils {
   case class MovedConfigPath(from: String, to: String)

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.syntax.traverseFilter._
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -52,9 +52,9 @@ class DbMultiDomainCausalityStore private (
       transferId: TransferId,
       parties: Set[LfPartyId],
   )(implicit tc: TraceContext): Future[Option[Map[LfPartyId, VectorClock]]] = {
-    import DbStorage.Implicits.BuilderChain._
-    import DbStorage.Implicits._
-    import storage.api._
+    import DbStorage.Implicits.BuilderChain.*
+    import DbStorage.Implicits.*
+    import storage.api.*
 
     val partiesSql: DbStorage.SQLActionBuilderChain = parties.toList
       .map { partyId: LfPartyId =>
@@ -110,7 +110,7 @@ class DbMultiDomainCausalityStore private (
       tc: TraceContext
   ): Future[Map[DomainId, CantonTimestamp]] = {
     import com.digitalasset.canton.data.CantonTimestamp.getResultTimestamp
-    import storage.api._
+    import storage.api.*
 
     val query = sql"""select lel.log_id, max(el.ts)
                 from linearized_event_log lel join event_log el on lel.log_id = el.log_id and lel.local_offset = el.local_offset

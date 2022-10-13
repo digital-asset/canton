@@ -11,7 +11,7 @@ import com.daml.ledger.participant.state.v2.Update.CommandRejected.{
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.google.rpc.code.Code
-import com.google.rpc.status.{Status => RpcStatus}
+import com.google.rpc.status.{Status as RpcStatus}
 import io.grpc.Status
 
 trait TransactionError extends BaseCantonError {

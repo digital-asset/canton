@@ -4,19 +4,19 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{Flow, GraphDSL, Keep, Merge, Source}
 import cats.data.{EitherT, Validated}
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String256M}
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.sequencing.protocol.{SendAsyncError, SubmissionRequest}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
@@ -204,7 +204,7 @@ object SequencerWriterSource {
       Source.fromGraph(
         GraphDSL.createGraph(deliverEventSource, keepAliveSource)(mkMaterialized) {
           implicit builder => (deliverEventSourceS, keepAliveSourceS) =>
-            import GraphDSL.Implicits._
+            import GraphDSL.Implicits.*
 
             val merge = builder.add(Merge[Write](inputPorts = 2))
 

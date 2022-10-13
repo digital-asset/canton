@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapRequest
 import com.digitalasset.canton.domain.admin.v0.TopologyBootstrapServiceGrpc.TopologyBootstrapService

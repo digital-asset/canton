@@ -4,17 +4,17 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.data.EitherT
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
-import com.digitalasset.canton.topology.{DomainId, _}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -65,7 +65,7 @@ object DomainTopologyTransactionMessage
   }
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.DomainTopologyTransactionMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -125,7 +125,7 @@ object DomainTopologyTransactionMessage
   def fromProtoV0(
       message: v0.DomainTopologyTransactionMessage
   ): ParsingResult[DomainTopologyTransactionMessage] = {
-    import cats.syntax.traverse._
+    import cats.syntax.traverse.*
 
     def decodeTransactions(
         payload: List[ByteString]
@@ -144,7 +144,7 @@ object DomainTopologyTransactionMessage
       signature,
       succeededContent,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
   override protected def name: String = "DomainTopologyTransactionMessage"

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.syntax.either._
+import cats.syntax.either.*
 
 object TestSalt {
 

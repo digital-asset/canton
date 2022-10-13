@@ -7,9 +7,9 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.data.OptionT
-import cats.syntax.option._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.option.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.daml.ledger.participant.state.v2.Update.{CommandRejected, TransactionAccepted}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -39,7 +39,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerSubmissionId, LedgerTransactionId}
 
 import java.util.concurrent.atomic.AtomicReference

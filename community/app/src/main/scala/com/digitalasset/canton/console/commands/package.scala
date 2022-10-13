@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.console
 
-import cats.syntax.either._
-import cats.syntax.functorFilter._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
@@ -28,7 +29,7 @@ package object commands {
     // It is ok to discard all except one exceptions, because:
     // - The exceptions do not have meaningful messages. Error messages are logged instead.
     // - The exception have all the same stack trace.
-    exceptions.collectFirst { case e: CantonInternalError => throw e }
+    exceptions.collectFirst { case e: CantonInternalError => throw e }.discard
     exceptions.headOption.foreach(throw _)
   }
 

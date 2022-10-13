@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import cats.instances.either._
-import cats.syntax.either._
+import cats.instances.either.*
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, EnvelopeContent}

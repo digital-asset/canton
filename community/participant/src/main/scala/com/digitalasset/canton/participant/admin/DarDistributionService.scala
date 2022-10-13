@@ -6,15 +6,15 @@ package com.digitalasset.canton.participant.admin
 import com.daml.error.definitions.DamlError
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
-import com.daml.ledger.client.binding.{Contract, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AcceptRejectError.OfferNotFound
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution => M}
+import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.{
   CommandResult,
-  Success => CommandSuccess,
+  Success as CommandSuccess,
 }
 import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil.{
   decodeAllArchived,
@@ -55,7 +55,7 @@ class InMemoryShareRequestStore
     with ShareRequestStore
 class InMemoryShareOfferStore extends InMemorySimpleTrackerStore[M.ShareDar] with ShareOfferStore
 class InMemoryWhitelistStore extends WhitelistStore {
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
   private val parties = new java.util.concurrent.ConcurrentHashMap[P.Party, Unit]
   override def whitelist(party: P.Party): Future[Unit] = Future.successful {
     parties.put(party, ())
@@ -151,8 +151,8 @@ class DarDistributionService(
     extends AdminWorkflowService
     with DarDistribution
     with NamedLogging {
-  import cats.data._
-  import cats.implicits._
+  import cats.data.*
+  import cats.implicits.*
 
   /** Async processing of the transaction.
     * TODO(danilo): promote async processing to [[AdminWorkflowService]] and our LedgerConnection
@@ -182,7 +182,7 @@ class DarDistributionService(
     if (share.value.owner == adminParty) {
       shareRequestStore.add(share)
     } else {
-      import M.ShareDar._
+      import M.ShareDar.*
       // make sure the DAR request is legit
       val content = decode(share.value.content)
       val hash = Hash.tryFromHexString(share.value.hash)
@@ -236,7 +236,7 @@ class DarDistributionService(
       acceptance: Contract[M.AcceptedDar]
   )(implicit traceContext: TraceContext): Future[Unit] =
     if (acceptance.value.darOwner == adminParty) {
-      import M.AcceptedDar._
+      import M.AcceptedDar.*
       logger.info(
         s"Dar [${acceptance.value.hash}] has been accepted by [${acceptance.value.recipient}]"
       )
@@ -248,7 +248,7 @@ class DarDistributionService(
       rejection: Contract[M.RejectedDar]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     if (rejection.value.darOwner == adminParty) {
-      import M.RejectedDar._
+      import M.RejectedDar.*
       logger.warn(
         s"Dar [${rejection.value.hash}] has been rejected by [${rejection.value.recipient}]: ${rejection.value.reason}"
       )
@@ -285,7 +285,7 @@ class DarDistributionService(
   override def reject(shareId: P.ContractId[M.ShareDar], reason: String)(implicit
       traceContext: TraceContext
   ): Future[Either[AcceptRejectError, Unit]] = {
-    import M.ShareDar._
+    import M.ShareDar.*
     (for {
       offer <- EitherT.fromOptionF(shareOfferStore.get(shareId), OfferNotFound: AcceptRejectError)
       rejectCommand = offer.contractId.exerciseReject(reason).command
@@ -304,7 +304,7 @@ class DarDistributionService(
   private def accept(
       offer: Contract[M.ShareDar]
   )(implicit traceContext: TraceContext): EitherT[Future, AcceptRejectError, Unit] = {
-    import M.ShareDar._
+    import M.ShareDar.*
     for {
       _hash <- Hash
         .fromHexString(offer.value.hash)

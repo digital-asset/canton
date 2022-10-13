@@ -105,7 +105,7 @@ trait DbDomainManagerNodeSequencerConfigStoreTest
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table domain_sequencer_config"

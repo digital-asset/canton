@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.DecryptionError.FailedToDecrypt
 import com.digitalasset.canton.crypto.SyncCryptoError.SyncCryptoDecryptionError
@@ -39,9 +39,9 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageDecryptionError.SyncCryptoDecryptError
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{LfContractId, RequestId, RootHash, ViewHash, v0}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   DomainId,

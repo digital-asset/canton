@@ -7,13 +7,13 @@ import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, ExecutionContextMonitor}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import org.scalactic.source
-import org.scalatest.AppendedClues._
+import org.scalatest.AppendedClues.*
 import org.scalatest.Assertion
-import org.scalatest.Inside._
-import org.scalatest.Inspectors._
-import org.scalatest.matchers.should.Matchers._
+import org.scalatest.Inside.*
+import org.scalatest.Inspectors.*
+import org.scalatest.matchers.should.Matchers.*
 import org.slf4j.Logger
 import org.slf4j.event.Level
 import org.slf4j.event.Level.{ERROR, WARN}
@@ -22,9 +22,9 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.immutable.ListMap
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.reflect.ClassTag
 import scala.util.matching.Regex
 import scala.util.{Failure, Success, Try}
@@ -352,13 +352,13 @@ class SuppressingLogger private[logging] (
           }
           if (requiredUnmatchedAssertions.nonEmpty) {
             errors += s"No log message has matched the assertions with index ${requiredUnmatchedAssertions.keys
-              .mkString(", ")}.\n"
+                .mkString(", ")}.\n"
           }
 
           if (errors.nonEmpty) {
             errors += s"Matched log messages:${matchedLogEntries
-              .map { case (index, entry) => s"$index:\t$entry" }
-              .mkString("\n", "\n", "\n")}"
+                .map { case (index, entry) => s"$index:\t$entry" }
+                .mkString("\n", "\n", "\n")}"
 
             fail(errors.mkString("\n"))
           }

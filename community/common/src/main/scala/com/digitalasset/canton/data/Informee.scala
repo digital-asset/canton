@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.Informee.InvalidInformee
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0

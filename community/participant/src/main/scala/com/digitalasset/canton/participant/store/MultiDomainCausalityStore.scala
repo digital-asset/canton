@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
+import com.digitalasset.canton.{DiscardOps, LfPartyId}
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -61,7 +61,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
     storedPromise.future.map { case () =>
       val mapO = transferStore.get(id)
       ErrorUtil.requireState(mapO.isDefined, s"No causal state for transfer $id")
-      transferOutPromises.remove(id)
+      transferOutPromises.remove(id).discard
       mapO.fold(Map.empty[LfPartyId, VectorClock])(m => m)
     }
   }
@@ -72,16 +72,18 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
   def registerTransferOut(id: TransferId, vectorClocks: Set[VectorClock])(implicit
       tc: TraceContext
   ): Unit = {
-    transferStore.updateWith(id) {
-      case Some(value) =>
-        val newMap = vectorClocks.map(v => v.partyId -> v).toMap
-        ErrorUtil.requireState(
-          value == newMap,
-          s"Processed multiple TransferOut causal updates for the transfer $id. This is not expected to happen and is likely a bug. The two values are $value and $newMap.",
-        )
-        Some(value)
-      case None => Some(vectorClocks.map(v => v.partyId -> v).toMap)
-    }
+    transferStore
+      .updateWith(id) {
+        case Some(value) =>
+          val newMap = vectorClocks.map(v => v.partyId -> v).toMap
+          ErrorUtil.requireState(
+            value == newMap,
+            s"Processed multiple TransferOut causal updates for the transfer $id. This is not expected to happen and is likely a bug. The two values are $value and $newMap.",
+          )
+          Some(value)
+        case None => Some(vectorClocks.map(v => v.partyId -> v).toMap)
+      }
+      .discard
     transferOutPromises.get(id).foreach { p =>
       p.trySuccess(())
     }
@@ -94,7 +96,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
     if (causalityMessages.nonEmpty) {
       val transferIds = causalityMessages.map(m => m.transferId).toSet
 
-      //TODO(M40): Don't crash if there are causality messages for several transfers
+      // TODO(M40): Don't crash if there are causality messages for several transfers
       ErrorUtil.requireState(
         transferIds.sizeCompare(1) == 0,
         s"Received causality messages for several transfers at once." +
@@ -128,14 +130,15 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
   def highestSeenOn(domain: DomainId): Option[CantonTimestamp] = highestSeen.get(domain)
 
   def registerSeen(domain: DomainId, timestamp: CantonTimestamp): Unit = {
-    highestSeen.updateWith(domain) {
-      case Some(value) =>
-        // The existing highest seen timestamp might be higher than the timestamp we are observing
-        // For example, this can happen during the replay of events after a shutdown
-        Some(CantonTimestamp.max(timestamp, value))
-      case None => Some(timestamp)
-    }
-    ()
+    highestSeen
+      .updateWith(domain) {
+        case Some(value) =>
+          // The existing highest seen timestamp might be higher than the timestamp we are observing
+          // For example, this can happen during the replay of events after a shutdown
+          Some(CantonTimestamp.max(timestamp, value))
+        case None => Some(timestamp)
+      }
+      .discard
   }
 
   /** Lookup the causal state at the transfer-out. Query it from the db if necessary.
@@ -149,7 +152,7 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
         for {
           clocks <- loadTransferOutStateFromPersistentStore(id, parties)
         } yield {
-          clocks.map { case (value) =>
+          clocks.foreach { case (value) =>
             // Store all the transfer-out state in memory for now
             transferStore.put(id, value)
           }

@@ -12,7 +12,7 @@ import com.digitalasset.canton.time.PositiveSeconds
 
 import java.time.temporal.ChronoUnit
 import scala.annotation.tailrec
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 /** Reconciliation intervals, with their validity intervals, sorted by
   * validFrom in decreasing order.

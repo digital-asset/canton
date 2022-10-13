@@ -7,7 +7,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.google.common.annotations.VisibleForTesting
@@ -74,7 +74,7 @@ class DbInitializationStore(
 )(implicit val ec: ExecutionContext)
     extends InitializationStore
     with DbStore {
-  import storage.api._
+  import storage.api.*
 
   override def id(implicit traceContext: TraceContext): Future[Option[NodeId]] =
     storage.query(

@@ -10,13 +10,13 @@ import cats.data.EitherT
 import com.codahale.metrics.{ConsoleReporter, MetricFilter}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
-import com.digitalasset.canton.sequencing.client._
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinarySerializedEvent,
   SequencerClientRecorder,
@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 /** Replays previously recorded sends against the configured sequencer and using a real sequencer client transport.
   * Records the latencies/rates to complete the send itself, and latencies/rates for an event that was caused by the send to be witnessed.
@@ -119,7 +119,7 @@ class ReplayingSendsSequencerClientTransport(
     val startedAt = CantonTimestamp.now()
     // we'll correlate received events by looking at their message-id and calculate the
     // latency of the send by comparing now to the time the event eventually arrives
-    pendingSends.put(submission.messageId, startedAt)
+    pendingSends.put(submission.messageId, startedAt).discard
 
     // Picking a correct max sequencing time could be technically difficult,
     // so instead we pick the biggest point in time that should ensure the sequencer always
@@ -143,7 +143,7 @@ class ReplayingSendsSequencerClientTransport(
 
         case Right(_) =>
           // we've successfully sent the send request
-          metrics.submissions.inFlight.metric.incrementAndGet()
+          metrics.submissions.inFlight.metric.increment()
           val sentAt = CantonTimestamp.now()
           metrics.submissions.sends.metric
             .update(java.time.Duration.between(startedAt.toInstant, sentAt.toInstant))
@@ -289,13 +289,15 @@ class ReplayingSendsSequencerClientTransport(
           val isIdle = elapsed.compareTo(idlenessDuration.toJava) >= 0
 
           if (isIdle) {
-            idleP.trySuccess(
-              EventsReceivedReport(
-                elapsed.toScala,
-                totalEventsReceived = eventCounter,
-                finishedAtCounter = lastCounter,
+            idleP
+              .trySuccess(
+                EventsReceivedReport(
+                  elapsed.toScala,
+                  totalEventsReceived = eventCounter,
+                  finishedAtCounter = lastCounter,
+                )
               )
-            )
+              .discard
           }
 
           isIdle
@@ -313,7 +315,7 @@ class ReplayingSendsSequencerClientTransport(
 
       messageIdO.flatMap(pendingSends.remove) foreach { sentAt =>
         val latency = java.time.Duration.between(sentAt.toInstant, Instant.now())
-        metrics.submissions.inFlight.metric.decrementAndGet()
+        metrics.submissions.inFlight.metric.decrement()
         metrics.submissions.sequencingTime.metric.update(latency)
         lastReceivedEvent.set(Some(CantonTimestamp.now()))
       }

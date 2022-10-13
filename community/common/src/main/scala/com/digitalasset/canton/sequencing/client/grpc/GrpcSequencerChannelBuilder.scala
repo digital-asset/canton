@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client.grpc
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.KeepAliveClientConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder

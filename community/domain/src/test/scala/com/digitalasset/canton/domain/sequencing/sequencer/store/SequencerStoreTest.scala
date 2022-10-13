@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.data.EitherT
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.data.CantonTimestamp
@@ -622,7 +622,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
     "pruning" should {
       "if data has been acknowledged and watermarked remove some now unnecessary data" in {
         val env = Env()
-        import env._
+        import env.*
 
         for {
           aliceId <- store.registerMember(alice, ts1)
@@ -693,7 +693,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       "when adjusting the safe pruning timestamp" should {
         "set it back to ensure we don't delete events that we'll still need to read to re-establish counters" in {
           val env = Env()
-          import env._
+          import env.*
 
           for {
             aliceId <- store.registerMember(alice, ts(1))
@@ -717,7 +717,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
         "correctly consider clients when there are many" in {
           val env = Env()
-          import env._
+          import env.*
 
           for {
             aliceId <- store.registerMember(alice, ts(1))
@@ -743,7 +743,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
         "not worry about ignored members" in {
           val env = Env()
-          import env._
+          import env.*
 
           for {
             aliceId <- store.registerMember(alice, ts(1))
@@ -774,7 +774,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
         "throw if we try to prune all data" in {
           val env = Env()
-          import env._
+          import env.*
 
           for {
             aliceId <- store.registerMember(alice, ts(1))
@@ -801,7 +801,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
     "disabling clients" in {
       val env = Env()
-      import env._
+      import env.*
 
       for {
         List(aliceId, bobId, caroleId) <- List(alice, bob, carole).traverse(
@@ -827,7 +827,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
 
     "unregister unauthenticated members" in {
       val env = Env()
-      import env._
+      import env.*
 
       val unauthenticatedAlice: UnauthenticatedMemberId =
         UnauthenticatedMemberId(UniqueIdentifier.tryCreate("alice_unauthenticated", "fingerprint"))

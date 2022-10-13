@@ -64,7 +64,7 @@ trait DbInitializationStoreTest extends InitializationStoreTest {
   override def myMigrationMode: MigrationMode = migrationMode
 
   def cleanDb(storage: DbStorage): Future[Int] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       sqlu"truncate table node_id",
       operationName = s"${this.getClass}: truncate table node_id",

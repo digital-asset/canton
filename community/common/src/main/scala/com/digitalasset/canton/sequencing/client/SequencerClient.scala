@@ -5,12 +5,11 @@ package com.digitalasset.canton.sequencing.client
 
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -28,7 +27,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle.toCloseableOption
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -41,13 +40,13 @@ import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
-import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError._
+import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.grpc.GrpcSequencerChannelBuilder
 import com.digitalasset.canton.sequencing.client.http.HttpSequencerClient
-import com.digitalasset.canton.sequencing.client.transports._
+import com.digitalasset.canton.sequencing.client.transports.*
 import com.digitalasset.canton.sequencing.client.transports.replay.{
   ReplayingEventsSequencerClientTransport,
   ReplayingSendsSequencerClientTransport,
@@ -57,32 +56,33 @@ import com.digitalasset.canton.sequencing.handlers.{
   StoreSequencedEvent,
 }
 import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.{
   OrdinarySequencedEvent,
   PossiblyIgnoredSequencedEvent,
 }
-import com.digitalasset.canton.store._
+import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced, TracingConfig}
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 import io.grpc.CallOptions
 import io.opentelemetry.api.trace.Tracer
 
 import java.nio.file.Path
-import java.time.{Duration => JDuration}
+import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ArrayBlockingQueue, BlockingQueue, LinkedBlockingQueue}
-import scala.concurrent._
-import scala.concurrent.duration._
+import scala.concurrent.*
+import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
 
 /** Client configured options for how to connect to a sequencer
@@ -314,8 +314,8 @@ class SequencerClient(
       span.setAttribute("message_id", messageId.unwrap)
 
       require(
-        Batch.supportedProtoVersions.protobufVersionsCount == 1,
-        "verifyBatchSize below assumes the batch is serialized with protocol version 0." +
+        Batch.supportedProtoVersions.protoVersionsCount == 1,
+        "verifyBatchSize below assumes the batch is serialized with Proto version 0." +
           " Update it if more versions are supported",
       )
 
@@ -815,7 +815,7 @@ class SequencerClient(
       val inboxSize = config.eventInboxSize.unwrap
       val javaEventList = new java.util.ArrayList[OrdinarySerializedEvent](inboxSize)
       if (receivedEvents.drainTo(javaEventList, inboxSize) > 0) {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         val handlerEvents = javaEventList.asScala
 
         def stopHandler(): Unit = blocking {
@@ -934,9 +934,13 @@ class SequencerClient(
                     // record errors and shutdown in `applicationHandlerFailure` and move on
                     result match {
                       case Success(outcome) =>
-                        outcome.onShutdown(putApplicationHandlerFailure(ApplicationHandlerShutdown))
+                        outcome
+                          .onShutdown(
+                            putApplicationHandlerFailure(ApplicationHandlerShutdown).discard
+                          )
+                          .discard
                       case Failure(error) =>
-                        handleException(error, syncProcessing = false)
+                        handleException(error, syncProcessing = false).discard
                     }
                     Success(UnlessShutdown.unit)
                   }.unwrap
@@ -947,7 +951,7 @@ class SequencerClient(
                   // we do not wait for the async results to finish, we are done here once the synchronous part is done
                   Right(())
                 case UnlessShutdown.AbortedDueToShutdown =>
-                  putApplicationHandlerFailure(ApplicationHandlerShutdown)
+                  putApplicationHandlerFailure(ApplicationHandlerShutdown).discard
                   Left(ApplicationHandlerShutdown)
               }
 
@@ -1028,7 +1032,7 @@ class SequencerClient(
 
   def closeSubscription(): Unit = {
     currentSubscription.getAndSet(None).foreach { subscription =>
-      import TraceContext.Implicits.Empty._
+      import TraceContext.Implicits.Empty.*
       logger.debug(s"Closing sequencer subscription...")
       subscription.close()
       logger.trace(s"Wait for the subscription to complete")

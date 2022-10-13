@@ -5,15 +5,15 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.Chain
 import cats.implicits.toFoldableOps
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
-import com.digitalasset.canton.participant.store.ActiveContractStore._
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
   contractInstance,

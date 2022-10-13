@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ServiceAgreementStore
 import com.digitalasset.canton.resource.DbStorage.DbAction
@@ -28,10 +28,10 @@ class DbServiceAgreementStore(
 ) extends ServiceAgreementStore
     with DbStore {
 
-  import ServiceAgreementStore._
-  import storage.api._
+  import ServiceAgreementStore.*
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("service-agreement-store")
 
   private def getAgreementText(

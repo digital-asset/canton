@@ -4,12 +4,12 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
-import cats.syntax.alternative._
-import cats.syntax.traverse._
+import cats.syntax.alternative.*
+import cats.syntax.traverse.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.NonEmptyColl._
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.NonEmptyColl.*
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.protocol.submission.{

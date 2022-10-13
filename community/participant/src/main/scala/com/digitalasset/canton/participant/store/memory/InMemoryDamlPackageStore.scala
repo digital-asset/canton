@@ -5,10 +5,9 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.Monoid
 import cats.data.OptionT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -18,18 +17,19 @@ import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.memory.InMemoryDamlPackageStore.defaultPackageDescription
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{DiscardOps, LfPackageId}
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
 import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLoggerFactory)(implicit
     ec: ExecutionContext
 ) extends DamlPackageStore
     with NamedLogging {
-  import DamlPackageStore._
+  import DamlPackageStore.*
 
   private val pkgData: concurrent.Map[LfPackageId, (DamlLf.Archive, String256M)] =
     new ConcurrentHashMap[LfPackageId, (DamlLf.Archive, String256M)].asScala
@@ -64,7 +64,7 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
     }
 
     dar.foreach { dar =>
-      darData.put(dar.descriptor.hash, (dar.bytes.clone(), dar.descriptor.name))
+      darData.put(dar.descriptor.hash, (dar.bytes.clone(), dar.descriptor.name)).discard
       val hash = dar.descriptor.hash
       val pkgS = pkgIds.toSet
       darPackages.updateWith(hash)(optSet => Some(optSet.fold(pkgS)(_.union(pkgS))))
@@ -103,8 +103,9 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
     darPackages
       .mapValuesInPlace({ case (_hash, packages) => packages - packageId })
       .filterInPlace({ case (_hash, packages) => packages.nonEmpty })
+      .discard
 
-    pkgData.remove(packageId)
+    pkgData.remove(packageId).discard
 
     Future.unit
   }
@@ -138,8 +139,8 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
   }
 
   override def removeDar(hash: Hash)(implicit traceContext: TraceContext): Future[Unit] = {
-    darPackages.remove(hash)
-    darData.remove(hash)
+    darPackages.remove(hash).discard
+    darData.remove(hash).discard
     Future.unit
   }
 

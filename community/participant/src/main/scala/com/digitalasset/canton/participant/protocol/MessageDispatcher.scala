@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.Chain
-import cats.syntax.alternative._
-import cats.syntax.functorFilter._
+import cats.syntax.alternative.*
+import cats.syntax.functorFilter.*
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.ViewType.{
@@ -30,14 +30,14 @@ import com.digitalasset.canton.participant.protocol.transfer.{
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.select
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestAndRootHashMessage, RequestProcessor, RootHash}
-import com.digitalasset.canton.sequencing._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.{DomainId, MediatorId, Member, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -50,7 +50,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * that are not processed by the [[TransactionProcessor]].
   */
 trait MessageDispatcher { this: NamedLogging =>
-  import MessageDispatcher._
+  import MessageDispatcher.*
 
   protected def domainId: DomainId
 

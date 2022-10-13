@@ -4,23 +4,23 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.{Chain, EitherT}
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.lf.data.Ref.PackageId
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String100}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil, IterableUtil}
 import io.functionmeta.functionFullName
-import slick.jdbc._
+import slick.jdbc.*
 import slick.jdbc.canton.SQLActionBuilder
 
 import scala.Ordered.orderingToOrdered
@@ -60,9 +60,9 @@ class DbActiveContractStore(
     with DbStore
     with DbPrunableByTimeDomain[AcsError] {
 
-  import ActiveContractStore._
-  import DbStorage.Implicits._
-  import storage.api._
+  import ActiveContractStore.*
+  import DbStorage.Implicits.*
+  import storage.api.*
 
   protected[this] override val pruning_status_table = "active_contract_pruning"
 
@@ -85,7 +85,7 @@ class DbActiveContractStore(
 
     private def remoteDomainIdF: Future[Option[DomainId]] = {
       remoteDomainIdIndex.fold(Future.successful(None: Option[DomainId])) { index =>
-        import TraceContext.Implicits.Empty._
+        import TraceContext.Implicits.Empty.*
         IndexedDomain
           .fromDbIndexOT("active_contracts remote domain index", indexedStringStore)(index)
           .map { x =>
@@ -112,7 +112,7 @@ class DbActiveContractStore(
 
   case class DbAcsError(reason: String) extends AcsError
 
-  override protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("active-contract-store")
 
   def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
@@ -225,7 +225,7 @@ class DbActiveContractStore(
         NonEmpty.from(contractIds.toSeq) match {
           case None => Future.successful(Map.empty)
           case Some(contractIdsNel) =>
-            import DbStorage.Implicits.BuilderChain._
+            import DbStorage.Implicits.BuilderChain.*
 
             val queries =
               DbStorage
@@ -266,8 +266,8 @@ class DbActiveContractStore(
     // The contractStore is unused
     // As we can directly query daml_contracts from the database
 
-    import DbStorage.Implicits.BuilderChain._
-    import DbStorage.Implicits._
+    import DbStorage.Implicits.BuilderChain.*
+    import DbStorage.Implicits.*
 
     // TODO(i9480): Integrate with performance tests to check that we can remove packages when there are many contracts.
 
@@ -330,7 +330,7 @@ class DbActiveContractStore(
       timestamp: CantonTimestamp,
       contractIds: Option[Set[LfContractId]],
   ): DbAction.ReadOnly[Seq[(LfContractId, CantonTimestamp)]] = {
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
 
     val idsO = contractIds.map { ids =>
       sql"(" ++ ids.toList.map(id => sql"$id").intercalate(sql", ") ++ sql")"
@@ -354,7 +354,7 @@ class DbActiveContractStore(
           join lateral
             (select ts, change from active_contracts AC2 where domain_id = $domainId
              and AC2.contract_id = AC1.contract_id and ts <= $timestamp order by ts desc, request_counter desc, change asc #${storage
-          .limit(1)}) as AC3 on true
+            .limit(1)}) as AC3 on true
           where AC1.domain_id = $domainId and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids))
           .as[(LfContractId, CantonTimestamp)]
@@ -684,7 +684,7 @@ class DbActiveContractStore(
     def checkIdempotence(
         idsToCheck: NonEmpty[Seq[LfContractId]]
     ): CheckedT[Future, AcsError, AcsWarning, Unit] = {
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
       val contractIdsNotInsertedInClauses =
         DbStorage.toInClauses_("contract_id", idsToCheck, maxContractIdSqlInListSize)
 
@@ -768,7 +768,7 @@ class DbActiveContractStore(
       descending: Boolean = true,
   ): DbAction.ReadOnly[Option[StoredActiveContract]] = {
 
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
 
     val baseQuery = sql"""select change, ts, request_counter, remote_domain_id from active_contracts
                           where domain_id = $domainId and contract_id = $contractId"""
@@ -783,10 +783,10 @@ class DbActiveContractStore(
     val orderQuery = storage.profile match {
       case _: DbStorage.Profile.Oracle =>
         sql" order by ts #$normal_order, request_counter #$normal_order, change #$normal_order #${storage
-          .limit(1)}"
+            .limit(1)}"
       case _ =>
         sql" order by ts #$normal_order, request_counter #$normal_order, change #$reversed_order #${storage
-          .limit(1)}"
+            .limit(1)}"
     }
     val query = baseQuery ++ opFilterQuery ++ orderQuery
 

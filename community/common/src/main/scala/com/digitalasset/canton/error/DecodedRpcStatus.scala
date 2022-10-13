@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.error
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.error.{ErrorCategory, ErrorResource}
 import io.grpc.StatusRuntimeException
 
@@ -108,7 +108,7 @@ object DecodedRpcStatus {
       // fromThrowable might return null
       .flatMap(s => Option(s))
       .flatMap { status =>
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         finaliseDecoding(status.getDetailsList.asScala.foldLeft(empty) {
 
           // extract retry interval

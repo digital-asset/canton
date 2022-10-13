@@ -4,9 +4,9 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, CryptoPublicStoreError}
 import com.digitalasset.canton.crypto.{CertificateId, Fingerprint, PublicKey, SigningPublicKey}
@@ -15,13 +15,13 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization.Parameters
 import com.digitalasset.canton.topology.admin.v0.SignedLegalIdentityClaimGeneration.X509CertificateClaim
-import com.digitalasset.canton.topology.admin.v0._
+import com.digitalasset.canton.topology.admin.v0.*
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -40,7 +40,7 @@ class GrpcTopologyManagerWriteService[T <: CantonError](
     extends TopologyManagerWriteServiceGrpc.TopologyManagerWriteService
     with NamedLogging {
 
-  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 
   private def process(
       authDataPO: Option[AuthorizationData],

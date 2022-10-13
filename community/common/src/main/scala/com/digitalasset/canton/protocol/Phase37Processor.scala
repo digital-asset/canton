@@ -6,7 +6,7 @@ package com.digitalasset.canton.protocol
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.{Deliver, SignedContent}
 import com.digitalasset.canton.topology.MediatorId

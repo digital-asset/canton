@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests
 
-import better.files.{File => BetterFile, _}
+import better.files.{File as BetterFile, *}
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.integration.tests.DemoExampleIntegrationTest.referenceDemo
 
@@ -16,7 +16,7 @@ class DemoExampleIntegrationTest
     with HasExecutionContext {
 
   "run reference demo" in { implicit env =>
-    import env._
+    import env.*
     nodes.local.start()
     ExampleIntegrationTest.ensureSystemProperties(
       "demo-test" -> "1",

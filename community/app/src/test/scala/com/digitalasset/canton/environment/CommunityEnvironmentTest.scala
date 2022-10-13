@@ -13,14 +13,14 @@ import com.digitalasset.canton.domain.config.{
   DomainConfig,
 }
 import com.digitalasset.canton.integration.CommunityConfigTransforms
-import com.digitalasset.canton.participant.config._
+import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.sync.SyncServiceError
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{BaseTest, ConfigStubs, HasExecutionContext}
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 import org.mockito.ArgumentMatchers
 import org.mockito.ArgumentMatchers.anyString
 import org.scalatest.wordspec.AnyWordSpec

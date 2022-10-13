@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
+import cats.syntax.either.*
 import cats.{Applicative, Functor}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutionContext}
@@ -125,7 +125,7 @@ object ThereafterTest {
 
   /** Test that the scala compiler finds the [[Thereafter]] implicits */
   private def implicitResolutionTest(): Unit = {
-    import Thereafter.syntax._
+    import Thereafter.syntax.*
 
     @SuppressWarnings(Array("org.wartremover.warts.Null"))
     implicit val ec: ExecutionContext = null

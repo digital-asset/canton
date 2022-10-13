@@ -5,13 +5,13 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import com.daml.lf.language.LanguageVersion
 import com.daml.lf.transaction.TransactionVersion
-import com.daml.lf.transaction.test.TransactionBuilder.Implicits._
+import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.ExerciseByInterface
-import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture._
-import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest._
+import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
+import com.digitalasset.canton.participant.protocol.submission.DomainsFilterTest.*
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfVersionedTransaction}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfPartyId}
@@ -21,7 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   "DomainsFilter (simple create)" should {
-    import SimpleTopology._
+    import SimpleTopology.*
 
     val filter = DomainsFilterForTx(Transactions.Create.tx(), ProtocolVersion.v3)
     val correctPackages = Transactions.Create.correctPackages
@@ -69,9 +69,9 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
       )
     }
 
-    //TODO(i9910) modify v1_dev to v1_15 when available
+    // TODO(i9910) modify v1_dev to v1_15 when available
     "reject domains when the minimum protocol version is not satisfied " in {
-      import SimpleTopology._
+      import SimpleTopology.*
       val currentDomainPV = ProtocolVersion.v3
       val filter =
         DomainsFilterForTx(Transactions.Create.tx(LanguageVersion.v1_dev), currentDomainPV)
@@ -92,7 +92,7 @@ class DomainsFilterTest extends AnyWordSpec with BaseTest with HasExecutionConte
   }
 
   "DomainsFilter (simple exercise by interface)" should {
-    import SimpleTopology._
+    import SimpleTopology.*
     val exerciseByInterface = Transactions.ExerciseByInterface()
 
     val filter = DomainsFilterForTx(exerciseByInterface.tx, ProtocolVersion.v3)

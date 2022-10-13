@@ -4,11 +4,11 @@
 package com.digitalasset.canton.config
 
 import cats.data.Validated
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.functorFilter._
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.InstanceName
 import com.digitalasset.canton.domain.config.DomainParametersConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -28,7 +28,7 @@ private[config] trait ConfigValidations[C <: CantonConfig] {
 object CommunityConfigValidations
     extends ConfigValidations[CantonCommunityConfig]
     with NamedLogging {
-  import TraceContext.Implicits.Empty._
+  import TraceContext.Implicits.Empty.*
   override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
 
   case class DbAccess(url: String, user: Option[String]) {
@@ -79,7 +79,7 @@ object CommunityConfigValidations
     // Basic attempt to normalize JDBC URL-based configuration and explicit property configuration
     // Limitations: Does not parse nor normalize the JDBC URLs
     def normalize(dbConfig: DbConfig): Option[DbAccess] = {
-      import slick.util.ConfigExtensionMethods._
+      import slick.util.ConfigExtensionMethods.*
 
       val slickConfig = dbConfig.config
 
@@ -190,7 +190,7 @@ object CommunityConfigValidations
   private def warnIfUnsafeMinProtocolVersion(
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
-    config.participants.toSeq.map { case (name, config) =>
+    config.participants.toSeq.foreach { case (name, config) =>
       val minimum = config.parameters.minimumProtocolVersion.map(_.unwrap)
       val isMinimumDeprecatedVersion = minimum.getOrElse(ProtocolVersion.v2).isDeprecated
 
@@ -206,7 +206,7 @@ object CommunityConfigValidations
     config.domains.toSeq.foreach { case (name, config) =>
       val pv = config.init.domainParameters.protocolVersion.unwrap
       if (pv.isDeprecated && !config.init.domainParameters.dontWarnOnDeprecatedPV)
-        DeprecatedProtocolVersion.WarnDomain(name, pv)
+        DeprecatedProtocolVersion.WarnDomain(name, pv).discard
 
       logger.info(s"Domain $name is using protocol version $pv")
     }

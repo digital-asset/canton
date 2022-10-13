@@ -4,12 +4,16 @@
 package com.digitalasset.canton.util
 
 import cats.Order
-import cats.syntax.either._
-import com.digitalasset.canton.serialization.DeserializationError
+import cats.syntax.either.*
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  MaxByteToDecompressExceeded,
+}
 import com.google.protobuf.ByteString
 
-import java.io.EOFException
-import java.util.zip.{GZIPInputStream, ZipException}
+import java.io.{ByteArrayOutputStream, EOFException}
+import java.util.zip.{GZIPInputStream, GZIPOutputStream, ZipException}
 import scala.annotation.tailrec
 
 object ByteStringUtil {
@@ -35,7 +39,12 @@ object ByteStringUtil {
   }
 
   def compressGzip(bytes: ByteString): ByteString = {
-    ByteString.copyFrom(ByteArrayUtil.compressGzip(bytes))
+    val rawSize = bytes.size()
+    val compressed = new ByteArrayOutputStream(rawSize)
+    ResourceUtil.withResource(new GZIPOutputStream(compressed)) { gzipper =>
+      bytes.writeTo(gzipper)
+    }
+    ByteString.copyFrom(compressed.toByteArray)
   }
 
   /** If maxBytesToRead is not specified, we decompress all the gunzipper input stream.
@@ -55,7 +64,7 @@ object ByteStringUtil {
             val read = gunzipper.readNBytes(max + 1)
             if (read.length > max) {
               Left(
-                DeserializationError(
+                MaxByteToDecompressExceeded(
                   s"Max bytes to decompress is exceeded. The limit is $max bytes."
                 )
               )
@@ -71,10 +80,10 @@ object ByteStringUtil {
   private def errorMapping(err: Throwable): DeserializationError = {
     err match {
       // all exceptions that were observed when testing these methods (see also `GzipCompressionTests`)
-      case ex: ZipException => DeserializationError(ex.getMessage)
+      case ex: ZipException => DefaultDeserializationError(ex.getMessage)
       case _: EOFException =>
-        DeserializationError("Compressed byte input ended too early")
-      case error => DeserializationError(error.getMessage)
+        DefaultDeserializationError("Compressed byte input ended too early")
+      case error => DefaultDeserializationError(error.getMessage)
     }
   }
 }

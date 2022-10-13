@@ -18,8 +18,8 @@ class CommunityHealthDumpGenerator(
     override val grpcAdminCommandRunner: GrpcAdminCommandRunner,
 ) extends HealthDumpGenerator[CommunityCantonStatus] {
   override protected implicit val statusEncoder: Encoder[CommunityCantonStatus] = {
-    import io.circe.generic.auto._
-    import CantonHealthAdministrationEncoders._
+    import io.circe.generic.auto.*
+    import CantonHealthAdministrationEncoders.*
     deriveEncoder[CommunityCantonStatus]
   }
 

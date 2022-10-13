@@ -19,7 +19,7 @@ object Notify {
 
   import java.net.NetworkInterface
 
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
 
   def send(): Unit = {
 

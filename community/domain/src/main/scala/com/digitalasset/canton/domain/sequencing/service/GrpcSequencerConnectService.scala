@@ -4,16 +4,16 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.{GetDomainId, GetDomainParameters}
-import com.digitalasset.canton.domain.api.{v0 => proto}
+import com.digitalasset.canton.domain.api.{v0 as proto}
 import com.digitalasset.canton.domain.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticDomainParameters
-import com.digitalasset.canton.protocol.v0.{ServiceAgreement => protoServiceAgreement}
+import com.digitalasset.canton.protocol.v0.{ServiceAgreement as protoServiceAgreement}
 import com.digitalasset.canton.sequencing.protocol.VerifyActiveResponse
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -42,13 +42,13 @@ class GrpcSequencerConnectService(
   def getDomainParameters(
       request: GetDomainParameters.Request
   ): Future[GetDomainParameters.Response] = {
-    val response = staticDomainParameters.protobufVersion.v match {
+    val response = staticDomainParameters.protoVersion.v match {
       case 0 => Future.successful(Parameters.ParametersV0(staticDomainParameters.toProtoV0))
       case 1 => Future.successful(Parameters.ParametersV1(staticDomainParameters.toProtoV1))
       case unsupported =>
         Future.failed(
           new IllegalStateException(
-            s"Unsupported Protobuf version $unsupported for static domain parameters"
+            s"Unsupported Proto version $unsupported for static domain parameters"
           )
         )
     }

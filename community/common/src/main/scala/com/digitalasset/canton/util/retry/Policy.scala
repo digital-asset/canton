@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.util.retry
 
-import cats.syntax.flatMap._
+import cats.syntax.flatMap.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{
@@ -14,7 +15,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.RetryUtil.{
   AllExnRetryable,
   ErrorKind,
@@ -232,7 +233,7 @@ abstract class RetryWithDelay(
                           val retryP = Promise[RetryOutcome[T]]()
                           // ensure that the abort task doesn't get executed anymore (because we
                           // want to return the "last outcome" and here, we can be sure that `run` will give us a new outcome
-                          invocationP.trySuccess(retryP.future)
+                          invocationP.trySuccess(retryP.future).discard
                           LoggerUtil.logAtLevel(
                             level,
                             s"Now retrying operation '$operationName'. $longDescription$actionableMessage",

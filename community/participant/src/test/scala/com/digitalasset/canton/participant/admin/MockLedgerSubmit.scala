@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.daml.ledger.api.v1.commands.{Command => ScalaCommand}
+import com.daml.ledger.api.v1.commands.{Command as ScalaCommand}
 import com.daml.ledger.api.v1.completion.Completion
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable

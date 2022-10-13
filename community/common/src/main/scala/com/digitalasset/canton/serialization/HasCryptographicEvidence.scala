@@ -4,11 +4,7 @@
 package com.digitalasset.canton.serialization
 
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.version.{
-  HasRepresentativeProtocolVersion,
-  HasVersionedToByteString,
-  ProtocolVersion,
-}
+import com.digitalasset.canton.version.HasRepresentativeProtocolVersion
 import com.google.protobuf.ByteString
 
 /** Trait for deterministically serializing an object to a [[com.google.protobuf.ByteString]].
@@ -32,9 +28,7 @@ import com.google.protobuf.ByteString
   * that converts a serialization back into an equal object.
   * In particular, `c.fromByteString(byteString).toByteString` must equal `byteString`.
   */
-trait HasCryptographicEvidence extends HasVersionedToByteString {
-  // TODO(i5768): Remove the default implementation of toByteString(version: ...)
-  override def toByteString(version: ProtocolVersion): ByteString = getCryptographicEvidence
+trait HasCryptographicEvidence {
 
   /** Returns the serialization of the object into a [[com.google.protobuf.ByteString]].
     * In particular, every instance `i` of this trait must equal `fromByteString(i.toByteString)`.

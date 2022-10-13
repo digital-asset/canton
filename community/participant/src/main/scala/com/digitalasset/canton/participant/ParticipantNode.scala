@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
@@ -33,25 +33,25 @@ import com.digitalasset.canton.health.admin.data.ParticipantStatus
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.StaticGrpcServices
-import com.digitalasset.canton.participant.admin.grpc._
-import com.digitalasset.canton.participant.admin.v0._
+import com.digitalasset.canton.participant.admin.grpc.*
+import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.admin.{
   DomainConnectivityService,
   PackageInspectionOpsImpl,
   PackageService,
   ResourceManagementService,
 }
-import com.digitalasset.canton.participant.config._
+import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.domain.{
   AgreementService,
   DomainAliasManager,
-  DomainConnectionConfig => CantonDomainConnectionConfig,
+  DomainConnectionConfig as CantonDomainConnectionConfig,
 }
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
-import com.digitalasset.canton.participant.ledger.api._
+import com.digitalasset.canton.participant.ledger.api.*
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.{DbDamlPackageStore, DbServiceAgreementStore}
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryDamlPackageStore,
@@ -69,10 +69,10 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyDispatcher,
   ParticipantTopologyManager,
 }
-import com.digitalasset.canton.resource._
+import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig}
-import com.digitalasset.canton.time._
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.time.*
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   IdentityProvidingServiceClient,
@@ -581,47 +581,54 @@ class ParticipantNodeBootstrap(
         cantonParameterConfig.processingTimeouts,
         loggerFactory,
       )
-      adminServerRegistry.addService(
-        PartyNameManagementServiceGrpc.bindService(
-          new GrpcPartyNameManagementService(partyNotifier),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          PartyNameManagementServiceGrpc.bindService(
+            new GrpcPartyNameManagementService(partyNotifier),
+            executionContext,
+          )
         )
-      )
-      adminServerRegistry.addService(
-        DomainConnectivityServiceGrpc
-          .bindService(new GrpcDomainConnectivityService(stateService), executionContext)
-      )
-      adminServerRegistry.addService(
-        TransferServiceGrpc.bindService(
-          new GrpcTransferService(sync.transferService),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          DomainConnectivityServiceGrpc
+            .bindService(new GrpcDomainConnectivityService(stateService), executionContext)
         )
-      )
-      adminServerRegistry.addService(
-        InspectionServiceGrpc.bindService(
-          new GrpcInspectionService(sync.stateInspection),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          TransferServiceGrpc.bindService(
+            new GrpcTransferService(sync.transferService),
+            executionContext,
+          )
         )
-      )
-      adminServerRegistry.addService(
-        ResourceManagementServiceGrpc.bindService(
-          new GrpcResourceManagementService(resourceManagementService),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          InspectionServiceGrpc.bindService(
+            new GrpcInspectionService(sync.stateInspection),
+            executionContext,
+          )
         )
-      )
-      adminServerRegistry.addService(
-        DomainTimeServiceGrpc.bindService(
-          GrpcDomainTimeService.forParticipant(sync.lookupDomainTimeTracker, loggerFactory),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          ResourceManagementServiceGrpc.bindService(
+            new GrpcResourceManagementService(resourceManagementService),
+            executionContext,
+          )
         )
-      )
-      adminServerRegistry.addService(replicationServiceFactory(storage))
-      adminServerRegistry.addService(
-        PruningServiceGrpc.bindService(
-          new GrpcPruningService(sync, loggerFactory),
-          executionContext,
+      adminServerRegistry
+        .addServiceU(
+          DomainTimeServiceGrpc.bindService(
+            GrpcDomainTimeService.forParticipant(sync.lookupDomainTimeTracker, loggerFactory),
+            executionContext,
+          )
         )
-      )
+      adminServerRegistry.addServiceU(replicationServiceFactory(storage))
+      adminServerRegistry
+        .addServiceU(
+          PruningServiceGrpc.bindService(
+            new GrpcPruningService(sync, loggerFactory),
+            executionContext,
+          )
+        )
 
       new ParticipantNode(
         participantId,

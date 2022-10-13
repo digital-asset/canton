@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.traverse.*
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -19,7 +19,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
-import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker._
+import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.{
   ContractAndKeyLookup,
   ContractLookup,
@@ -32,7 +32,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
 }
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}

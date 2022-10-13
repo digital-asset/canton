@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication.grpc
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.topology.Member
-import io.grpc._
+import io.grpc.*
 
 class SequencerConnectServerInterceptor(val loggerFactory: NamedLoggerFactory)
     extends ServerInterceptor
@@ -18,7 +18,7 @@ class SequencerConnectServerInterceptor(val loggerFactory: NamedLoggerFactory)
       headers: Metadata,
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
     Option(headers.get(Constant.MEMBER_ID_METADATA_KEY)) match {
       case None => next.startCall(serverCall, headers)

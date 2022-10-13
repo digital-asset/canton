@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.service
 
-import better.files._
+import better.files.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}

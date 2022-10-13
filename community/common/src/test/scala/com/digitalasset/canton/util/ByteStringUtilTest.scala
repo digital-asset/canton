@@ -4,7 +4,11 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
+  DeserializationError,
+  MaxByteToDecompressExceeded,
+}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -82,7 +86,7 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       val inputCompressed = HexString.parseToByteString(compressedHex).value
       val uncompressed = decompressGzip(inputCompressed)
 
-      inside(uncompressed) { case Left(DeserializationError(err)) =>
+      inside(uncompressed) { case Left(DefaultDeserializationError(err)) =>
         err should include(expectedError)
       }
     }
@@ -133,7 +137,7 @@ class ByteStringUtilTest extends AnyWordSpec with BaseTest with GzipCompressionT
       res1 shouldBe Right(uncompressedByteString)
       val res2 = ByteStringUtil.decompressGzip(compressed, maxBytesLimit = Some(777))
       res2 shouldBe Left(
-        DeserializationError("Max bytes to decompress is exceeded. The limit is 777 bytes.")
+        MaxByteToDecompressExceeded("Max bytes to decompress is exceeded. The limit is 777 bytes.")
       )
     }
   }

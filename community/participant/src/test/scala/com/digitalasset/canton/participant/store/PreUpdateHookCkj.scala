@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.store
+
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
   ContractKeyJournalError,
@@ -21,7 +22,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class PreUpdateHookCkj(private val ckj: ContractKeyJournal)(
     override implicit val ec: ExecutionContext
 ) extends ContractKeyJournal {
-  import PreUpdateHookCkj._
+  import PreUpdateHookCkj.*
 
   private val nextAddKeyStateUpdatedHook =
     new AtomicReference[AddKeyStateUpdateHook](noKeyStateUpdateHook)

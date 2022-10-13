@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -146,7 +146,7 @@ trait DbMemberAuthenticationStoreTest extends MemberAuthenticationStoreTest {
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     storage.update_(
       DBIO.seq(

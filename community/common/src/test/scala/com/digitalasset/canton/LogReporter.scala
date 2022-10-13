@@ -6,7 +6,7 @@ package com.digitalasset.canton
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.NoTracing
 import org.scalatest.Reporter
-import org.scalatest.events._
+import org.scalatest.events.*
 
 /** Logs when a test case or suite is started or completed.
   * To use it, register this class with "-C" when ScalaTest is started.

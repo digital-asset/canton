@@ -15,6 +15,7 @@ import com.daml.ledger.api.v1.transaction_service.{
 }
 import com.daml.ledger.api.v1.value.{Record, Value}
 import com.daml.ledger.configuration.LedgerId
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -33,12 +34,12 @@ import scalafx.concurrent.{ScheduledService, Task}
 import scalafx.geometry.{Insets, Pos}
 import scalafx.scene.Scene
 import scalafx.scene.control.Alert.AlertType
-import scalafx.scene.control._
+import scalafx.scene.control.*
 import scalafx.scene.image.{Image, ImageView}
 import scalafx.scene.layout.Priority.Always
-import scalafx.scene.layout._
+import scalafx.scene.layout.*
 import scalafx.scene.text.Font
-import scalafx.util.{Duration => FXDuration}
+import scalafx.util.Duration as FXDuration
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{Executor, TimeUnit}
@@ -58,7 +59,7 @@ object Step {
   ) extends Step
   object Noop extends Step
 }
-import com.digitalasset.canton.demo.Step._
+import com.digitalasset.canton.demo.Step.*
 
 trait BaseScript extends NamedLogging {
 
@@ -69,7 +70,7 @@ trait BaseScript extends NamedLogging {
   def imagePath: String
 
   def run(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     logger.debug("Running script")
     steps.foreach {
       case Noop => ()
@@ -388,7 +389,7 @@ class ParticipantTab(
       editable = false
       hgrow = Always
       vgrow = Always
-      columns ++= List(colState, coltemplateId, colDomainId, colArgs)
+      (columns ++= List(colState, coltemplateId, colDomainId, colArgs)).discard
     }
     // resize the argument column automatically such that it fills out the entire rest of the table while
     // still permitting the user to resize the columns himself (so don't set a resize policy on the tableview)
@@ -441,7 +442,7 @@ class ParticipantTab(
           case None =>
             () // ignore invalidations (if the observable value is "unknown" / invalidated, we'll get null here)
         }
-      }
+      }.discard
       period = FXDuration(500)
     }
     service.start()
@@ -475,14 +476,14 @@ class ParticipantTab(
             new TableView[DarData](dars) {
               editable = false
               columnResizePolicy = TableView.ConstrainedResizePolicy
-              columns ++= List(
+              (columns ++= List(
                 new TableColumn[DarData, String]() {
                   text = "Archive Name"
                   cellValueFactory = { _.value.filename }
                   hgrow = Always
                   minWidth = 80
                 }
-              )
+              )).discard
             },
             new Label("Participant Settings") {
               font = new Font(14)
@@ -869,7 +870,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
   }
 
   def close(): Unit = {
-    import scala.concurrent.duration._
+    import scala.concurrent.duration.*
     participantTabs.values.foreach(_.shutdown())
     sequencerPool.close()
     val _ = Await.result(actorSystem.terminate(), 2.seconds)

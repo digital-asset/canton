@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter

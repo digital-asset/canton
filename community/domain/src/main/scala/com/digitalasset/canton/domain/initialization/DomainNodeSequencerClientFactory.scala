@@ -23,7 +23,7 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
 import com.digitalasset.canton.store.{SendTrackerStore, SequencedEventStore}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersionCompatibility

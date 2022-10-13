@@ -11,7 +11,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 trait StorageConfig {
   type Self <: StorageConfig

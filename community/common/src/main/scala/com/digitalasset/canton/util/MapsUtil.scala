@@ -6,8 +6,8 @@ package com.digitalasset.canton.util
 import cats.FlatMap
 import cats.data.Chain
 import cats.kernel.Semigroup
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.annotation.tailrec

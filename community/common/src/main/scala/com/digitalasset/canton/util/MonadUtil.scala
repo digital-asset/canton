@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import cats.{Monad, Monoid}
 
 import scala.annotation.tailrec

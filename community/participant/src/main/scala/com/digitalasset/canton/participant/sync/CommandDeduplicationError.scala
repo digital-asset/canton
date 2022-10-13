@@ -10,7 +10,7 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TransactionErrorGroup.InjectionErrorGroup
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 
 object CommandDeduplicationError extends InjectionErrorGroup {
 

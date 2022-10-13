@@ -17,7 +17,7 @@ import scala.annotation.tailrec
   * @tparam R Result type of the monad
   */
 sealed abstract class Checked[+A, +N, +R] extends Product with Serializable {
-  import Checked._
+  import Checked.*
 
   def map[RR](f: R => RR): Checked[A, N, RR] = this match {
     case abort @ Abort(_, _) => abort

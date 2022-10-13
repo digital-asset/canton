@@ -400,7 +400,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
           },
         )
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           nextDeliver.counter,
           deliver44.counter,
@@ -468,7 +468,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- client.flush()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           deliver44.counter,
           deliver45.counter,
@@ -496,7 +496,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         _ <- client.flush()
         prehead <- sequencerCounterTrackerStore.preheadSequencerCounter
       } yield {
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
         processedEvents.iterator().asScala.toSeq shouldBe Seq(
           deliver44.counter,
           deliver45.counter,

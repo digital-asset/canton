@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
-import com.daml.lf.value.ValueCoder.{CidEncoder => LfDummyCidEncoder}
+import cats.syntax.either.*
+import com.daml.lf.value.ValueCoder.{CidEncoder as LfDummyCidEncoder}
 import com.daml.lf.value.{ValueCoder, ValueOuterClass}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult

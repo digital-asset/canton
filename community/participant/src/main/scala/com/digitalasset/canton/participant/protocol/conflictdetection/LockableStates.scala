@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -46,8 +46,8 @@ private[conflictdetection] class LockableStates[
     implicit val classTagKey: ClassTag[Key],
 ) extends NamedLogging {
 
-  import LockableStates._
-  import Pretty._
+  import LockableStates.*
+  import Pretty.*
 
   /** The in-memory map for storing the states.
     * This map is also accessed by the [[DomainRouter]]

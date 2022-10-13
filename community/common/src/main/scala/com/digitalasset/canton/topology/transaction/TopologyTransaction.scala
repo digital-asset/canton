@@ -4,21 +4,21 @@
 package com.digitalasset.canton.topology.transaction
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.ProtoDeserializationError._
+import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
   String255,
 }
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.logging.pretty.PrettyInstances._
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 import slick.jdbc.SetParameter
 
@@ -239,13 +239,13 @@ object TopologyTransaction
   override val name: String = "TopologyTransaction"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TopologyTransaction)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(#9694): Move topology transaction changes to PV4
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.dev,
       supportedProtoVersionMemoized(v1.TopologyTransaction)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -375,7 +375,7 @@ final case class TopologyStateUpdate[+Op <: AddRemoveChangeOp] private (
     * If this transaction is a Remove, we return an Add with a new transaction id.
     */
   def reverse: TopologyTransaction[TopologyChangeOp] = {
-    import TopologyChangeOp._
+    import TopologyChangeOp.*
 
     (op: AddRemoveChangeOp) match {
       case Add => TopologyStateUpdate(Remove, element)(representativeProtocolVersion)
@@ -460,7 +460,7 @@ object TopologyStateUpdate {
       mapping <- mappingRes
       id <- TopologyElementId.fromProtoPrimitive(protoTopologyTransaction.id)
     } yield TopologyStateUpdate(op, TopologyStateUpdateElement(id, mapping))(
-      TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
   }
@@ -504,7 +504,7 @@ object TopologyStateUpdate {
       mapping <- mappingRes
       id <- TopologyElementId.fromProtoPrimitive(protoTopologyTransaction.id)
     } yield TopologyStateUpdate(op, TopologyStateUpdateElement(id, mapping))(
-      TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(1)),
+      TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(1)),
       Some(bytes),
     )
   }
@@ -615,7 +615,7 @@ object DomainGovernanceTransaction {
 
     mapping.map(mapping =>
       DomainGovernanceTransaction(DomainGovernanceElement(mapping))(
-        TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+        TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(0)),
         Some(bytes),
       )
     )
@@ -635,7 +635,7 @@ object DomainGovernanceTransaction {
 
     mapping.map(mapping =>
       DomainGovernanceTransaction(DomainGovernanceElement(mapping))(
-        TopologyTransaction.protocolVersionRepresentativeFor(ProtobufVersion(1)),
+        TopologyTransaction.protocolVersionRepresentativeFor(ProtoVersion(1)),
         Some(bytes),
       )
     )

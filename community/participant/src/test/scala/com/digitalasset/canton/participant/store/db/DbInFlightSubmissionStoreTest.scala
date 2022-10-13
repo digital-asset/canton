@@ -20,7 +20,7 @@ trait DbInFlightSubmissionStoreTest
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(sqlu"truncate table in_flight_submission"),
       "clean-up in_flight_submission for test",

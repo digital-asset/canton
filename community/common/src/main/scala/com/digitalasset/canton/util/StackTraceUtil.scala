@@ -6,7 +6,7 @@ package com.digitalasset.canton.util
 object StackTraceUtil {
 
   def formatStackTrace(filter: Thread => Boolean = _ => true): String = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     Thread.getAllStackTraces.asScala.toMap
       .filter { case (thread, _) => filter(thread) }
       .map { case (thread, stackTrace) =>

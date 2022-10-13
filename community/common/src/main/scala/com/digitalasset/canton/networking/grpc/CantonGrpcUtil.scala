@@ -4,7 +4,7 @@
 package com.digitalasset.canton.networking.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.error.CantonError
@@ -13,8 +13,8 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
-import com.digitalasset.canton.util.Thereafter.syntax._
-import io.grpc._
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import io.grpc.*
 import io.grpc.stub.AbstractStub
 
 import java.util.concurrent.TimeUnit

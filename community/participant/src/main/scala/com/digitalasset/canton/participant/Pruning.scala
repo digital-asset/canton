@@ -9,7 +9,7 @@ import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyJ
 import com.digitalasset.canton.participant.store.EventLogId
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 object Pruning {
   trait LedgerPruningError extends Product with Serializable { def message: String }

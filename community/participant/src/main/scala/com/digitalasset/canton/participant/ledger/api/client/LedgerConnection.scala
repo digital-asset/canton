@@ -19,7 +19,7 @@ import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, InclusiveFilters, TransactionFilter}
 import com.daml.ledger.api.v1.value.Identifier
 import com.daml.ledger.client.LedgerClient
-import com.daml.ledger.client.binding.{Primitive => P}
+import com.daml.ledger.client.binding.{Primitive as P}
 import com.daml.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientChannelConfiguration,
@@ -45,7 +45,7 @@ import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 import org.slf4j.event.Level
-import scalaz.syntax.tag._
+import scalaz.syntax.tag.*
 
 import java.util.UUID
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -177,7 +177,7 @@ object LedgerConnection {
       override protected def timeouts: ProcessingTimeout = processingTimeouts
 
       if (commandClientConfiguration.maxParallelSubmissions < 100) {
-        import TraceContext.Implicits.Empty._
+        import TraceContext.Implicits.Empty.*
         // We need a high value to work around https://github.com/digital-asset/daml/issues/8017
         logger.warn(
           s"Creating command client with maxParallelSubmissions = ${commandClientConfiguration.maxParallelSubmissions}.\n" +
@@ -186,7 +186,7 @@ object LedgerConnection {
       }
 
       private val client = {
-        import TraceContext.Implicits.Empty._
+        import TraceContext.Implicits.Empty.*
         processingTimeouts.unbounded.await(
           s"Creation of the ledger client",
           logFailing = Some(Level.WARN),
@@ -206,7 +206,7 @@ object LedgerConnection {
       private val transactionClient = client.transactionClient
 
       private val commandTracker = {
-        import TraceContext.Implicits.Empty._
+        import TraceContext.Implicits.Empty.*
         processingTimeouts.unbounded.await(s"Creation of the command tracker")(
           commandClient.trackCommandsUnbounded[CommandSubmitterWithRetry.CommandsCtx](
             Seq(sender.unwrap)
@@ -401,7 +401,7 @@ object LedgerConnection {
       ): LedgerSubscription =
         new LedgerSubscription {
           override protected def timeouts: ProcessingTimeout = processingTimeouts
-          import TraceContext.Implicits.Empty._
+          import TraceContext.Implicits.Empty.*
           val (killSwitch, completed) = AkkaUtil.runSupervised(
             logger.error("Fatally failed to handle transaction", _),
             source
@@ -423,7 +423,7 @@ object LedgerConnection {
               )
 
           override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-            import TraceContext.Implicits.Empty._
+            import TraceContext.Implicits.Empty.*
             List[AsyncOrSyncCloseable](
               SyncCloseable(s"killSwitch.shutdown $subscriptionName", killSwitch.shutdown()),
               AsyncCloseable(
@@ -465,7 +465,7 @@ object LedgerConnection {
     })
 
   def mapTemplateIds(id: P.TemplateId[_]): TemplateId = {
-    import scalaz.syntax.tag._
+    import scalaz.syntax.tag.*
     id.unwrap match {
       case Identifier(packageId, moduleName, entityName) =>
         TemplateId(

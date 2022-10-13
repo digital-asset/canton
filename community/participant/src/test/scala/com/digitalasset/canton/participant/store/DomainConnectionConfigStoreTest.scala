@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
 }
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.time.{DomainTimeTrackerConfig, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.{BaseTest, DomainAlias}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec

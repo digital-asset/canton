@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.sync
 
 import cats.data.EitherT
 import cats.implicits.showInterpolator
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.traverse._
-import com.daml.ledger.participant.state.v2._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.traverse.*
+import com.daml.ledger.participant.state.v2.*
 import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.error.TransactionError
@@ -25,10 +25,10 @@ import com.digitalasset.canton.participant.topology.{
   ParticipantTopologyManager,
 }
 import com.digitalasset.canton.topology.TopologyManagerError.MappingAlreadyExists
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, Identifier, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, LfTimestamp}
 import io.opentelemetry.api.trace.Tracer
@@ -37,8 +37,8 @@ import java.util.UUID
 import java.util.concurrent.CompletionStage
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.FutureConverters._
-import scala.util.chaining._
+import scala.jdk.FutureConverters.*
+import scala.util.chaining.*
 import scala.util.{Failure, Success}
 
 private[sync] class PartyAllocation(
@@ -163,7 +163,7 @@ private[sync] class PartyAllocation(
       result: SubmissionResult,
   )(implicit
       traceContext: TraceContext
-  ): SubmissionResult = {
+  ): Unit = {
     FutureUtil.doNotAwait(
       participantNodeEphemeralState.participantEventPublisher.publish(
         LedgerSyncEvent.PartyAllocationRejected(
@@ -176,7 +176,6 @@ private[sync] class PartyAllocation(
       ),
       s"Failed to publish allocation rejection for party $displayName",
     )
-    result
   }
 
   private def topologyTransaction(

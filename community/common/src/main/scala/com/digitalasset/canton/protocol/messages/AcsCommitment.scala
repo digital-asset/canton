@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
@@ -15,19 +15,19 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
 
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 final case class CommitmentPeriod(
     fromExclusive: CantonTimestampSecond,
@@ -159,7 +159,7 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
   override val name: String = "AcsCommitment"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.AcsCommitment)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -220,7 +220,7 @@ object AcsCommitment extends HasMemoizedProtocolVersionedWrapperCompanion[AcsCom
       cmt = protoMsg.commitment
       commitment = commitmentTypeFromByteString(cmt)
     } yield new AcsCommitment(domainId, sender, counterParticipant, period, commitment)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     ) {}
   }

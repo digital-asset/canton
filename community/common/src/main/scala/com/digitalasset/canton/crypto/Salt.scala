@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
+import com.digitalasset.canton.serialization.{DefaultDeserializationError, DeterministicEncoding}
 import com.google.protobuf.ByteString
 
 /** A seed to derive further salts from.
@@ -131,7 +131,7 @@ object Salt {
       saltAlgorithm <- SaltAlgorithm.fromProtoOneOf("algorithm", saltP.algorithm)
       salt <- create(saltP.salt, saltAlgorithm).leftMap(err =>
         ProtoDeserializationError.CryptoDeserializationError(
-          DeserializationError(err.toString)
+          DefaultDeserializationError(err.toString)
         )
       )
     } yield salt

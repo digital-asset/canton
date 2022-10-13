@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.topology
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
@@ -17,7 +17,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   ApproximateTime,
   EffectiveTime,
@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{FutureUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.{LedgerSubmissionId, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
@@ -57,7 +57,7 @@ class LedgerServerPartyNotifier(
     with FlagCloseableAsync {
 
   def resumePending(): Future[Unit] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     store.fetchNotNotified().map { todo =>
       if (todo.nonEmpty)
         logger.debug(s"Resuming party notification with ${todo.size} pending notifications")
@@ -282,7 +282,7 @@ class LedgerServerPartyNotifier(
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Seq(
       sequentialQueue.asCloseable(
         "ledger-server-party-notifier-queue",

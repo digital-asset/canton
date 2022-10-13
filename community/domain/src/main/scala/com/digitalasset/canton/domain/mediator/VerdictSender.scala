@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -35,7 +35,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}

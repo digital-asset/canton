@@ -4,7 +4,7 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.TransactionViewDecomposition._
+import com.digitalasset.canton.data.TransactionViewDecomposition.*
 import com.digitalasset.canton.protocol.{
   ConfirmationPolicy,
   ExampleTransactionFactory,
@@ -15,7 +15,7 @@ import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.Await
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class TransactionViewDecompositionTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -40,7 +40,7 @@ class TransactionViewDecompositionTest extends AnyWordSpec with BaseTest with Ha
   }
 
   "A view decomposition" when {
-    import ExampleTransactionFactory._
+    import ExampleTransactionFactory.*
     "a view has the same informees and thresholds as its parent" can {
       "not be constructed" in {
 

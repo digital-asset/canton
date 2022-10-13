@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
@@ -27,7 +27,7 @@ import com.digitalasset.canton.sequencing.client.{
   SubscriptionErrorRetryPolicy,
 }
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil

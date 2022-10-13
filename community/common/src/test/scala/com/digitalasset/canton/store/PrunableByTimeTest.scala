@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
 import org.scalatest.wordspec.AsyncWordSpecLike
 

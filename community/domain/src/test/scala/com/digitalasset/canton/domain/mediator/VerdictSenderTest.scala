@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.mediator
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, FullInformeeTree}
 import com.digitalasset.canton.error.MediatorError
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   ExampleTransactionFactory,
   RequestId,
@@ -14,13 +14,13 @@ import com.digitalasset.canton.protocol.{
   v0,
 }
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.{
   ParticipantAttributes,
   ParticipantPermission,
   TrustLevel,
 }
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId}
 
 class VerdictSenderTest extends BaseTestWordSpec with HasExecutionContext {

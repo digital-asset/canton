@@ -4,8 +4,7 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.Applicative
-import cats.implicits._
-import com.digitalasset.canton.ProtoDeserializationError
+import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -19,7 +18,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedSerializerCompanion,
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
   UntypedVersionedMessage,
@@ -75,7 +74,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
   override val name = "SequencedEvent serializer"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       (),
       _.toProtoV0.toByteString,
@@ -143,7 +142,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
       v0.Batch(envelopesProto) = uncompressedBatchProto
       res <- envelopesProto.toList
         .traverse(envelopeDeserializer)
-        .map(Batch[Env](_)(protocolVersionRepresentativeFor(ProtobufVersion(0))))
+        .map(Batch[Env](_)(protocolVersionRepresentativeFor(ProtoVersion(0))))
     } yield res
   }
 
@@ -157,7 +156,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
       case v0.CompressedBatch.CompressionAlgorithm.Gzip =>
         ByteStringUtil
           .decompressGzip(compressed, maxBytesLimit = maxRequestSize.map(_.unwrap))
-          .leftMap(err => ProtoDeserializationError.OtherError(err.toString))
+          .leftMap(_.toProtoDeserializationError)
       case _ => Left(FieldNotSet("CompressedBatch.Algorithm"))
     }
   }

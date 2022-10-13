@@ -4,9 +4,9 @@
 package com.digitalasset.canton.util
 
 import cats.data.{Chain, EitherT, NonEmptyChain, OptionT}
-import cats.instances.either._
+import cats.instances.either.*
 import cats.laws.discipline.{FunctorTests, MonadErrorTests}
-import cats.syntax.either._
+import cats.syntax.either.*
 import cats.{Eq, Monad}
 import com.digitalasset.canton.BaseTestWordSpec
 import org.scalacheck.Arbitrary

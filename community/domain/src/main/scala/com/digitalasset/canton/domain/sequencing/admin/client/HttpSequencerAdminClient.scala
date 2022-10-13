@@ -4,11 +4,11 @@
 package com.digitalasset.canton.domain.sequencing.admin.client
 
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.either._
+import cats.instances.future.*
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SigningPublicKey
-import com.digitalasset.canton.domain.admin.{v0 => domainProto}
+import com.digitalasset.canton.domain.admin.{v0 as domainProto}
 import com.digitalasset.canton.domain.sequencing.admin.protocol.{InitRequest, InitResponse}
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -19,7 +19,7 @@ import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.TraceContext
-import sttp.client3._
+import sttp.client3.*
 import sttp.model.Uri
 
 import java.net.URL

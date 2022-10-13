@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}

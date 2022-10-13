@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.db.DbSyncDomainPersistentState
 import com.digitalasset.canton.participant.store.memory.InMemorySyncDomainPersistentState
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.store._
+import com.digitalasset.canton.store.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext

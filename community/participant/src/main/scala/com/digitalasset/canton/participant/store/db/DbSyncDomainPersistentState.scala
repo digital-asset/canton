@@ -40,7 +40,7 @@ class DbSyncDomainPersistentState(
     with AutoCloseable
     with NoTracing {
 
-  val eventLog = new DbSingleDimensionEventLog(
+  val eventLog: DbSingleDimensionEventLog[DomainEventLogId] = new DbSingleDimensionEventLog(
     DomainEventLogId(domainId),
     storage,
     indexedStringStore,
@@ -49,7 +49,7 @@ class DbSyncDomainPersistentState(
     loggerFactory,
   )
 
-  val contractStore =
+  val contractStore: DbContractStore =
     new DbContractStore(
       storage,
       domainId,
@@ -61,7 +61,7 @@ class DbSyncDomainPersistentState(
       processingTimeouts,
       loggerFactory,
     )
-  val transferStore = new DbTransferStore(
+  val transferStore: DbTransferStore = new DbTransferStore(
     storage,
     domainId.item,
     protocolVersion,
@@ -69,7 +69,7 @@ class DbSyncDomainPersistentState(
     processingTimeouts,
     loggerFactory,
   )
-  val activeContractStore =
+  val activeContractStore: DbActiveContractStore =
     new DbActiveContractStore(
       storage,
       domainId,
@@ -79,7 +79,7 @@ class DbSyncDomainPersistentState(
       processingTimeouts,
       loggerFactory,
     )
-  val contractKeyJournal = new DbContractKeyJournal(
+  val contractKeyJournal: DbContractKeyJournal = new DbContractKeyJournal(
     storage,
     domainId,
     parameters.maxItemsInSqlClause,
@@ -94,7 +94,7 @@ class DbSyncDomainPersistentState(
     processingTimeouts,
     loggerFactory,
   )
-  val requestJournalStore = new DbRequestJournalStore(
+  val requestJournalStore: DbRequestJournalStore = new DbRequestJournalStore(
     domainId,
     storage,
     parameters.maxItemsInSqlClause,
@@ -113,13 +113,13 @@ class DbSyncDomainPersistentState(
     loggerFactory,
   )
 
-  val parameterStore =
+  val parameterStore: DbDomainParameterStore =
     new DbDomainParameterStore(domainId.item, storage, processingTimeouts, loggerFactory)
   val sequencerCounterTrackerStore =
     new DbSequencerCounterTrackerStore(client, storage, processingTimeouts, loggerFactory)
-  //TODO(i5660): Use the db-based send tracker store
+  // TODO(i5660): Use the db-based send tracker store
   val sendTrackerStore = new InMemorySendTrackerStore()
-  val causalDependencyStore =
+  val causalDependencyStore: DbSingleDomainCausalDependencyStore =
     new DbSingleDomainCausalDependencyStore(
       domainId.item,
       storage,

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store.memory
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.SavePendingSendError.MessageIdAlreadyTracked

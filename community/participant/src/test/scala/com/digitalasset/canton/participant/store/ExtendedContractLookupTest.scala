@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.daml.lf.value.Value.{ValueText, ValueUnit}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
@@ -12,8 +12,8 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   contractInstance,
   transactionId,
 }
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 

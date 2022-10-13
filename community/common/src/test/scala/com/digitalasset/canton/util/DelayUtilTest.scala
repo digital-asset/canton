@@ -12,7 +12,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Await
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class DelayUtilTest extends AnyWordSpec with BaseTest {
   "DelayUtil.delay" should {

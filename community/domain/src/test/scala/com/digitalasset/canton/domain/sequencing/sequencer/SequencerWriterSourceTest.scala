@@ -8,11 +8,11 @@ import akka.actor.ActorSystem
 import akka.stream.QueueOfferResult
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -21,7 +21,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, TestDomainParameters}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -36,7 +36,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -169,7 +169,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   "payload to event time bound" should {
 
     "prevent sequencing deliver events if their payloads are too old" in withEnv() { env =>
-      import env._
+      import env.*
 
       // setup advancing the clock past the payload to event bound immediately after the payload is persisted
       // (but before the event time is generated which will then be beyond a valid bound).
@@ -203,7 +203,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
   "max sequencing time" should {
     "drop sends above the max sequencing time" in withEnv() { env =>
-      import env._
+      import env.*
       val nowish = clock.now.plusSeconds(10)
       clock.advanceTo(nowish)
 
@@ -252,7 +252,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
     )(implicit
         env: Env
     ): Future[Seq[StoreEvent[Payload]]] = {
-      import env._
+      import env.*
 
       clock.advanceTo(nowish)
 
@@ -318,7 +318,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
 
   "deliver with unknown recipients" should {
     "instead write an error" in withEnv() { implicit env =>
-      import env._
+      import env.*
       val messageId = MessageId.tryCreate("test-unknown-recipients")
 
       for {
@@ -356,7 +356,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   }
 
   "notifies the event signaller of writes" in withEnv() { implicit env =>
-    import env._
+    import env.*
 
     def deliverEvent(memberId: SequencerMemberId): Unit =
       offerDeliverOrFail(
@@ -434,7 +434,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
   "an idle writer still updates its watermark to demonstrate that its online" in withEnv(
     Some(NonNegativeFiniteDuration.ofSeconds(1L))
   ) { implicit env =>
-    import env._
+    import env.*
     // the specified keepAliveInterval of 1s ensures the watermark gets updated
     for {
       initialWatermark <- eventuallyF(5.seconds) {

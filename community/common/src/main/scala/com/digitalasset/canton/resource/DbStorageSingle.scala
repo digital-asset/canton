@@ -77,7 +77,7 @@ class DbStorageSingle private (
       )
     } catch {
       case e: SQLException =>
-        DatabaseConnectionLost(ErrorUtil.messageWithStacktrace(e))
+        DatabaseConnectionLost(ErrorUtil.messageWithStacktrace(e)).discard
         false
     })).map(isActiveRef.set)
   }

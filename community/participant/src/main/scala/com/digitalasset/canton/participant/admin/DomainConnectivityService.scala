@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.domain.AgreementService.AgreementServiceError
-import com.digitalasset.canton.participant.domain._
+import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceInternalError.DomainIsMissingInternally
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownDomain
@@ -32,7 +32,7 @@ class DomainConnectivityService(
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
-  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 
   private def waitUntilActiveIfSuccess(success: Boolean, domain: DomainAlias)(implicit
       traceContext: TraceContext

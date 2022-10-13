@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.crypto.{Nonce, Signature}
 import com.digitalasset.canton.domain.Domain.GrpcSequencerAuthenticationErrorGroup
@@ -69,11 +69,13 @@ class GrpcSequencerAuthenticationService(
                 // create error message to appropriately log this incident
                 SequencerAuthenticationFaultyOrMalicious
                   .AuthenticationFailure(request.member, error)
+                  .discard
                 true
               } else {
                 // create error message to appropriate log this incident
                 SequencerAuthenticationFailure
                   .AuthenticationFailure(request.member, error)
+                  .discard
                 false
               }
             Authentication.Response.Value.Failure(
@@ -114,18 +116,22 @@ class GrpcSequencerAuthenticationService(
               if (
                 error.getCode == Status.Code.INTERNAL || error.getCode == Status.Code.INVALID_ARGUMENT
               ) {
-                SequencerAuthenticationFaultyOrMalicious.ChallengeFailure(
-                  request.member,
-                  request.memberProtocolVersions,
-                  error,
-                )
+                SequencerAuthenticationFaultyOrMalicious
+                  .ChallengeFailure(
+                    request.member,
+                    request.memberProtocolVersions,
+                    error,
+                  )
+                  .discard
                 true
               } else {
-                SequencerAuthenticationFailure.ChallengeFailure(
-                  request.member,
-                  request.memberProtocolVersions,
-                  error,
-                )
+                SequencerAuthenticationFailure
+                  .ChallengeFailure(
+                    request.member,
+                    request.memberProtocolVersions,
+                    error,
+                  )
+                  .discard
                 false
               }
             Challenge.Response.Value.Failure(

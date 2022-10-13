@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.Endpoint
@@ -17,7 +17,7 @@ import com.digitalasset.canton.topology.{AuthenticatedMember, DomainId, Unauthen
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 import io.grpc.ForwardingClientCallListener.SimpleForwardingClientCallListener
-import io.grpc._
+import io.grpc.*
 import io.grpc.internal.GrpcAttributes
 import io.grpc.stub.AbstractStub
 

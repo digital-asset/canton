@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
+import com.daml.metrics.MetricHandle.{Gauge, VarGauge}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.metrics.MetricHandle.VarGaugeM
 import com.digitalasset.canton.metrics.{MetricHandle, RefGauge}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
@@ -20,7 +20,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Random
 
 class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
-  import TaskSchedulerTest._
+  import TaskSchedulerTest.*
   import com.digitalasset.canton.data.CantonTimestamp.ofEpochMilli
 
   private lazy val metrics = new MockTaskSchedulerMetrics()
@@ -364,8 +364,8 @@ object TaskSchedulerTest {
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics with MetricHandle.Factory {
     override val registry: MetricRegistry = new MetricRegistry()
     override val prefix: MetricName = MetricName("test")
-    override val sequencerCounterQueue: VarGaugeM[Int] = varGauge(prefix :+ "counter", 0)
-    override val taskQueue: MetricHandle.GaugeM[RefGauge[Int], Int] = refGauge(prefix :+ "queue", 0)
+    override val sequencerCounterQueue: VarGauge[Int] = varGauge(prefix :+ "counter", 0)
+    override val taskQueue: Gauge[RefGauge[Int], Int] = refGauge(prefix :+ "queue", 0)
   }
 
   val Finalization: Int = 0

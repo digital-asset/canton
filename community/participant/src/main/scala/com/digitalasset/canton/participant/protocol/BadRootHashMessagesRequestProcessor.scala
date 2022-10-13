@@ -15,7 +15,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClient
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RequestCounter, SequencerCounter, checked}
 import io.functionmeta.functionFullName

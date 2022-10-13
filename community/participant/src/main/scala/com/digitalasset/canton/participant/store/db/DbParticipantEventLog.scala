@@ -37,9 +37,9 @@ class DbParticipantEventLog(
     )
     with ParticipantEventLog {
 
-  import storage.api._
-  import storage.converters._
-  import ParticipantStorageImplicits._
+  import storage.api.*
+  import storage.converters.*
+  import ParticipantStorageImplicits.*
 
   override def firstEventWithAssociatedDomainAtOrAfter(
       associatedDomain: DomainId,
@@ -86,7 +86,7 @@ class DbParticipantEventLog(
           sql"""select participant_event_publisher_local_offsets.nextval from (select level from dual connect by level <= #$count)"""
             .as[LocalOffset]
         case _: DbStorage.Profile.H2 =>
-          import DbStorage.Implicits.BuilderChain._
+          import DbStorage.Implicits.BuilderChain.*
           (sql"select nextval('participant_event_publisher_local_offsets') from (values " ++
             (1 to count).toList.map(i => sql"(#$i)").intercalate(sql", ") ++
             sql")")

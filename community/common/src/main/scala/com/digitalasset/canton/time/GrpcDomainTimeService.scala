@@ -4,9 +4,9 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
-import cats.syntax.functor._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}

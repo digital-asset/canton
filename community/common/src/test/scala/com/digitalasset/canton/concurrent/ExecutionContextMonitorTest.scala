@@ -11,7 +11,7 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.ScheduledExecutorService
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))

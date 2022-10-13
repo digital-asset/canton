@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.foldable._
-import cats.syntax.option._
+import cats.syntax.foldable.*
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -16,24 +16,25 @@ import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
+import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.PoolClosed
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   TestDomainParameters,
-  v0 => protocolV0,
+  v0 as protocolV0,
 }
-import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.UntypedVersionedMessage
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
-import io.grpc.Status.Code._
+import io.grpc.Status.Code.*
 import io.grpc.StatusException
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 import org.mockito.{ArgumentMatchers, Mockito}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.FixtureAsyncWordSpec
@@ -272,19 +273,19 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           )
         val request = defaultRequest.focus(_.batch.envelopes).replace(List(bigEnvelope))
 
+        val alarmMsg = s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
         loggerFactory.assertLogs(
           {
             sendAndCheckError(
               request.toProtoV0,
               { case SendAsyncError.RequestInvalid(message) =>
-                message should include(
-                  "Max bytes to decompress is exceeded. The limit is 1000 bytes."
-                )
+                message should include(alarmMsg)
               },
             )
           },
-          _.warningMessage should include(
-            "Max bytes to decompress is exceeded. The limit is 1000 bytes."
+          _.shouldBeCantonError(
+            SequencerError.MaxRequestSizeExceeded,
+            _ shouldBe alarmMsg,
           ),
         )
       }

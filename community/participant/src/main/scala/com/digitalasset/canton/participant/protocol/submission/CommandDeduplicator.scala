@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,7 +17,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
   MalformedOffset,
 }
 import com.digitalasset.canton.participant.store.CommandDeduplicationStore.OffsetAndPublicationTime
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncOffset}
 import com.digitalasset.canton.time.Clock

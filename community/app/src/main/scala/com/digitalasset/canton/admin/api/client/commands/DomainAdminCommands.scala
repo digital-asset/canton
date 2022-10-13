@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.data.{
-  StaticDomainParameters => StaticDomainParametersConfig
+  StaticDomainParameters as StaticDomainParametersConfig
 }
-import com.digitalasset.canton.domain.admin.{v0 => adminproto}
+import com.digitalasset.canton.domain.admin.{v0 as adminproto}
 import com.digitalasset.canton.domain.config.store.DomainNodeSequencerConfig
 import com.digitalasset.canton.domain.service.ServiceAgreementAcceptance
-import com.digitalasset.canton.protocol.{StaticDomainParameters => StaticDomainParametersInternal}
+import com.digitalasset.canton.protocol.{StaticDomainParameters as StaticDomainParametersInternal}
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.google.protobuf.empty.Empty
 import io.grpc.{ManagedChannel, Status}

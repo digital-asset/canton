@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.sequencing.protocol.MessageId

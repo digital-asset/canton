@@ -27,7 +27,7 @@ import com.digitalasset.canton.time.TimeProof
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
@@ -57,12 +57,12 @@ class DefaultMessageDispatcher(
     with Spanning
     with NamedLogging {
 
-  import MessageDispatcher._
+  import MessageDispatcher.*
 
   override protected type ProcessingResult = Unit
 
   override implicit val processingResultMonoid: Monoid[ProcessingResult] = {
-    import cats.instances.unit._
+    import cats.instances.unit.*
     Monoid[Unit]
   }
 
@@ -75,7 +75,7 @@ class DefaultMessageDispatcher(
       kind: MessageKind[A],
       run: => FutureUnlessShutdown[A],
   ): FutureUnlessShutdown[ProcessingResult] = {
-    import MessageDispatcher._
+    import MessageDispatcher.*
     // Explicitly enumerate all cases for type safety
     kind match {
       case TopologyTransaction => runAsyncResult(run)

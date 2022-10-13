@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain
 
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{FiniteDuration, *}
 
 package object sequencing {
 

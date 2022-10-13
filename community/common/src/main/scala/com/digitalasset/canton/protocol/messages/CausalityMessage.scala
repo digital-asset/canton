@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -14,7 +14,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -60,7 +60,7 @@ final case class CausalityMessage(
 object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.CausalityMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -93,7 +93,7 @@ object CausalityMessage extends HasProtocolVersionedCompanion[CausalityMessage] 
       domainId,
       tid,
       clocks,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
   override protected def name: String = "CausalityMessage"

@@ -105,7 +105,7 @@ object InFlightSubmission {
   implicit def getResultInFlightSubmission[SequencingInfo <: SubmissionSequencingInfo: GetResult](
       implicit getResultTraceContext: GetResult[TraceContext]
   ): GetResult[InFlightSubmission[SequencingInfo]] = { r =>
-    import com.digitalasset.canton.resource.DbStorage.Implicits._
+    import com.digitalasset.canton.resource.DbStorage.Implicits.*
     val changeId = r.<<[ChangeIdHash]
     val submissionId = r.<<[Option[SerializableSubmissionId]].map(_.submissionId)
     val submissionDomain = r.<<[DomainId]

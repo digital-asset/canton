@@ -55,7 +55,7 @@ import scala.concurrent.Future
 trait ActiveContractStore
     extends ActiveContractSnapshot
     with ConflictDetectionStore[LfContractId, ActiveContractStore.Status, AcsError] {
-  import ActiveContractStore._
+  import ActiveContractStore.*
 
   /** Marks the given contracts as active from `timestamp` (inclusive) onwards.
     *

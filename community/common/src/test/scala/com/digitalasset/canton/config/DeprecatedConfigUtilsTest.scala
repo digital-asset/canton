@@ -4,13 +4,13 @@
 package com.digitalasset.canton.config
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.DeprecatedConfigUtils._
+import com.digitalasset.canton.config.DeprecatedConfigUtils.*
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level.INFO
 import pureconfig.ConfigReader
-import pureconfig.generic.semiauto._
+import pureconfig.generic.semiauto.*
 
 import scala.annotation.nowarn
 

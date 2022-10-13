@@ -21,7 +21,7 @@ trait DbSequencerCounterTrackerStoreTest
   val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(sqlu"truncate table #${DbSequencerCounterTrackerStore.cursorTable}"),
       functionFullName,

@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.console
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 
 import scala.annotation.StaticAnnotation
 import scala.reflect.ClassTag
-import scala.reflect.runtime.{universe => ru}
+import scala.reflect.runtime.{universe as ru}
 
 /** User friendly help messages generator.
   */
@@ -108,7 +108,7 @@ object Help {
         s"Error: method $methodName not found; check your spelling"
       else {
         s"Error: method $methodName not found; are you looking for one of the following?\n  ${similarItems
-          .mkString("\n  ")}"
+            .mkString("\n  ")}"
       }
     }
   }

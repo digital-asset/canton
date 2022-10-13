@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
@@ -15,7 +15,7 @@ import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   HasProtocolVersionedWrapperCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -89,7 +89,7 @@ object MaxRequestSize {
 object SubmissionRequest
     extends HasMemoizedProtocolVersionedWithContextCompanion[SubmissionRequest, MaxRequestSize] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.SubmissionRequest) { case (maxRequestSize, req) =>
         bytes => fromProtoV0(maxRequestSize)(req, Some(bytes))
@@ -156,7 +156,7 @@ object SubmissionRequest
       maxSequencingTime,
       ts,
     )(
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       bytes,
     )
   }

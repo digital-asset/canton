@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
@@ -13,7 +13,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -40,7 +40,7 @@ case class SequencerSnapshot(
 }
 object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.SequencerSnapshot)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -94,7 +94,7 @@ object SequencerSnapshot extends HasProtocolVersionedCompanion[SequencerSnapshot
       heads,
       status,
       request.additional.map(a => ImplementationSpecificInfo(a.implementationName, a.info)),
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
 }
 
 case class SequencerInitialState(

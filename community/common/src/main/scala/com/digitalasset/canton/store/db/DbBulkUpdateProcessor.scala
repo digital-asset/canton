@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store.db
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -13,7 +13,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.store.db.DbBulkUpdateProcessor.BulkUpdatePendingCheck
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, SingleUseCell}
 import slick.dbio.{DBIOAction, Effect, NoStream}
 

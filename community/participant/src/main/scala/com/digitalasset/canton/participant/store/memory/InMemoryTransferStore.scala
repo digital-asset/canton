@@ -28,7 +28,7 @@ class InMemoryTransferStore(
 ) extends TransferStore
     with NamedLogging {
 
-  import TransferStore._
+  import TransferStore.*
 
   private[this] val transferDataMap: TrieMap[TransferId, TransferEntry] =
     new TrieMap[TransferId, TransferEntry]

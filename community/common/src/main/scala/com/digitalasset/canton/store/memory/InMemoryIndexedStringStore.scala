@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.store.memory
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 
@@ -33,8 +34,8 @@ class InMemoryIndexedStringStore(val minIndex: Int, val maxIndex: Int) extends I
         case None =>
           val idx = list.length + minIndex
           require(idx <= maxIndex, s"New index $idx would exceed the maximum index $maxIndex.")
-          list.append(key)
-          cache.put(key, idx)
+          list.append(key).discard
+          cache.put(key, idx).discard
           idx
       }
     }

@@ -14,10 +14,10 @@ import com.digitalasset.canton.domain.mediator.store.{
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, TransferId, v0}
-import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.topology.DefaultTestIdentities._
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
@@ -81,7 +81,7 @@ class MediatorEventDeduplicatorTest extends BaseTestWordSpec with HasExecutionCo
     deduplicationData(is.map(_ -> requestTime): _*)
 
   def mkMediatorRequest(uuid: UUID): OpenEnvelope[MediatorRequest] = {
-    import Pretty._
+    import Pretty.*
 
     val mediatorRequest = mock[MediatorRequest]
     when(mediatorRequest.requestUuid).thenReturn(uuid)

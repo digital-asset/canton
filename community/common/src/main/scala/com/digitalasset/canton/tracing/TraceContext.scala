@@ -5,7 +5,7 @@ package com.digitalasset.canton.tracing
 
 import cats.Show.Shown
 import com.daml.nonempty.NonEmpty
-import com.daml.{telemetry => damlTelemetry}
+import com.daml.{telemetry as damlTelemetry}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -20,7 +20,7 @@ import com.digitalasset.canton.version.{
 }
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
-import io.opentelemetry.context.{Context => OpenTelemetryContext}
+import io.opentelemetry.context.{Context as OpenTelemetryContext}
 
 import scala.collection.immutable
 

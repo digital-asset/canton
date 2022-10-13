@@ -3,15 +3,19 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleTree.{BlindSubtree, RevealIfNeedBe, RevealSubtree}
 import com.digitalasset.canton.protocol.v0.TransferViewTree
 import com.digitalasset.canton.protocol.{ViewHash, v0, v1}
-import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{HasVersionedWrapper, ProtocolVersion, VersionedMessage}
+import com.digitalasset.canton.version.{
+  HasProtocolVersionedWrapper,
+  HasVersionedWrapper,
+  ProtocolVersion,
+  VersionedMessage,
+}
 import com.google.protobuf.ByteString
 
 /** A transfer request tree has two children:
@@ -19,8 +23,8 @@ import com.google.protobuf.ByteString
   * and the `view` only for the involved participants.
   */
 abstract class GenTransferViewTree[
-    CommonData <: HasCryptographicEvidence,
-    View <: HasCryptographicEvidence,
+    CommonData <: HasProtocolVersionedWrapper[CommonData],
+    View <: HasProtocolVersionedWrapper[View],
     Tree,
     MediatorMessage,
 ] protected (commonData: MerkleTree[CommonData], participantData: MerkleTree[View])(

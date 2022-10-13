@@ -14,9 +14,9 @@ import com.digitalasset.canton.protocol.messages.{
   RegisterTopologyTransactionResponseResult,
 }
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SendCallback, SendResult}
-import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.mockito.MockitoSugar

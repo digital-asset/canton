@@ -4,15 +4,15 @@
 package com.digitalasset.canton.participant.sync
 
 import cats.data.EitherT
-import cats.syntax.alternative._
-import cats.syntax.option._
+import cats.syntax.alternative.*
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.TimestampedEvent.{
   EventId,
   TimelyRejectionEventId,
@@ -53,7 +53,7 @@ class ParticipantEventPublisher(
     extends NamedLogging
     with FlagCloseableAsync {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   private val executionQueue = new SimpleExecutionQueue()
 
@@ -175,7 +175,7 @@ class ParticipantEventPublisher(
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Seq(
       executionQueue.asCloseable("participant-event-publisher-queue", timeouts.shutdownShort.unwrap)
     )

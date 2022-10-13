@@ -15,7 +15,6 @@ import scala.annotation.nowarn
 
 @SuppressWarnings(
   Array(
-    "org.wartremover.warts.TraversableOps",
     "org.wartremover.warts.Var",
     "org.wartremover.warts.Null",
   )

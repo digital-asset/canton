@@ -4,9 +4,9 @@
 package com.digitalasset.canton.config
 
 import cats.Order
-import cats.syntax.either._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.InstanceName.InvalidInstanceName
@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.NoCopy
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import io.circe.{Decoder, Encoder, KeyEncoder}
 import io.scalaland.chimney.Transformer
 import pureconfig.error.{CannotConvert, FailureReason}
@@ -93,7 +93,7 @@ object RequireTypes {
 
   final case class NonNegativeNumeric[T] private (value: T)(implicit val num: Numeric[T])
       extends RefinedNumeric[T] {
-    import num._
+    import num.*
 
     def +(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value + other.value)
     def *(other: NonNegativeNumeric[T]) = NonNegativeNumeric.tryCreate(value * other.value)
@@ -171,7 +171,7 @@ object RequireTypes {
 
   final case class PositiveNumeric[T] private (value: T)(implicit val num: Numeric[T])
       extends RefinedNumeric[T] {
-    import num._
+    import num.*
 
     def +(other: PositiveNumeric[T]) = PositiveNumeric.tryCreate(value + other.value)
     def tryAdd(other: T) = PositiveNumeric.tryCreate(value + other)
@@ -340,7 +340,7 @@ object RequireTypes {
     require(
       str.length <= maxLength,
       s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
-        .getOrElse("string")} of length ${str.length} ('$str') was given",
+          .getOrElse("string")} of length ${str.length} ('$str') was given",
     )
 
     def unwrap: String = str
@@ -403,7 +403,7 @@ object RequireTypes {
 
     def errorMsg(tooLongStr: String, maxLength: Int, name: Option[String] = None): String =
       s"The given ${name.getOrElse("string")} has a maximum length of $maxLength but a ${name
-        .getOrElse("string")} of length ${tooLongStr.length} ('${tooLongStr.limit(maxLength + 50)}.') was given"
+          .getOrElse("string")} of length ${tooLongStr.length} ('${tooLongStr.limit(maxLength + 50)}.') was given"
 
     val defaultMaxLength = 255
 

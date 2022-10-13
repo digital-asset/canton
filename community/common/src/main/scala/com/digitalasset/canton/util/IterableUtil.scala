@@ -70,7 +70,7 @@ object IterableUtil {
     *         the returned future contains such an exception, but it is not guaranteed
     *         that the returned exception is the "first" such exception in a fixed sequential execution order.
     */
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
+  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   def mapReducePar[A, B](parallelism: PositiveNumeric[Int], xs: Seq[A])(
       f: A => B
   )(g: (B, B) => B)(implicit ec: ExecutionContext): Future[Option[B]] = {

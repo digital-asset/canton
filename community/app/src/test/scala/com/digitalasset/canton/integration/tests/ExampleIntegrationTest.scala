@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests
 
-import better.files._
+import better.files.*
 import com.digitalasset.canton.ConsoleScriptRunner
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.integration.CommunityTests.{
@@ -21,8 +21,8 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TracingConfig
-import com.digitalasset.canton.util.ShowUtil._
-import monocle.macros.syntax.lens._
+import com.digitalasset.canton.util.ShowUtil.*
+import monocle.macros.syntax.lens.*
 
 import scala.concurrent.blocking
 
@@ -44,7 +44,7 @@ abstract class ExampleIntegrationTest(configPaths: File*)
 }
 
 trait HasConsoleScriptRunner { this: NamedLogging =>
-  import org.scalatest.EitherValues._
+  import org.scalatest.EitherValues.*
   def runScript(scriptPath: File)(implicit env: Environment): Unit = {
     val () = ConsoleScriptRunner.run(env, scriptPath.toJava, logger = logger).value
   }

@@ -6,13 +6,13 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
 import org.slf4j.event.Level
 
 import java.util.regex.Pattern
 import scala.annotation.tailrec
-import scala.concurrent.duration.{Duration, _}
+import scala.concurrent.duration.{Duration, *}
 import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
@@ -159,7 +159,7 @@ object FutureUtil {
     def ready(f: Future[T], d: Duration): Try[Future[T]] = Try(Await.ready(f, d))
     def log(level: Level, message: String): Unit = LoggerUtil.logAtLevel(level, message)
 
-    //TODO(i4008) increase the log level to WARN
+    // TODO(i4008) increase the log level to WARN
     val res =
       noisyAwaitResultForTesting(
         future,

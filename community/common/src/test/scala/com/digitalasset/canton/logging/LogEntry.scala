@@ -6,15 +6,15 @@ package com.digitalasset.canton.logging
 import com.daml.error.ErrorCode
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import org.scalactic.source
-import org.scalatest.AppendedClues._
+import org.scalatest.AppendedClues.*
 import org.scalatest.Assertion
 import org.scalatest.Inspectors.{forAtLeast, forEvery}
-import org.scalatest.matchers.should.Matchers.{include, _}
+import org.scalatest.matchers.should.Matchers.{include, *}
 import org.slf4j.MDC
 import org.slf4j.event.Level
-import org.slf4j.event.Level._
+import org.slf4j.event.Level.*
 import org.slf4j.helpers.FormattingTuple
 
 case class LogEntry(
@@ -133,7 +133,7 @@ case class LogEntry(
 }
 
 object LogEntry {
-  import scala.jdk.CollectionConverters._
+  import scala.jdk.CollectionConverters.*
 
   private[logging] def copyMDC: Map[String, String] =
     Option(MDC.getCopyOfContextMap).map(_.asScala.toMap).getOrElse(Map.empty)

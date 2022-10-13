@@ -4,13 +4,12 @@
 package com.digitalasset.canton.environment
 
 import akka.actor.ActorSystem
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.digitalasset.canton.DomainAlias
-import com.digitalasset.canton.concurrent._
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.concurrent.*
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleGrpcAdminCommandRunner,
@@ -22,7 +21,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.DomainNodeBootstrap
 import com.digitalasset.canton.environment.CantonNodeBootstrap.HealthDumpFunction
-import com.digitalasset.canton.environment.Environment._
+import com.digitalasset.canton.environment.Environment.*
 import com.digitalasset.canton.health.HealthServer
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -30,10 +29,11 @@ import com.digitalasset.canton.metrics.MetricsFactory
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.resource.DbMigrationsFactory
-import com.digitalasset.canton.time._
+import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.{AkkaUtil, SingleUseCell}
+import com.digitalasset.canton.{DiscardOps, DomainAlias}
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
 import io.opentelemetry.api.trace.Tracer
@@ -41,7 +41,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler
 
 import java.util.concurrent.ScheduledExecutorService
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future, blocking}
 import scala.util.control.NonFatal
 
@@ -70,7 +70,9 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         new ConsoleGrpcAdminCommandRunner(_),
   ): Console = {
     val console = _createConsole(consoleOutput, createAdminCommandRunner)
-    healthDumpGenerator.putIfAbsent(createHealthDumpGenerator(console.grpcAdminCommandRunner))
+    healthDumpGenerator
+      .putIfAbsent(createHealthDumpGenerator(console.grpcAdminCommandRunner))
+      .discard
     console
   }
 
@@ -214,6 +216,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       HealthServer(_, metricsFactory.health, timeouts, loggerFactory)(this)
     )
 
+  metricsFactory.forJvm.registerExecutionContextQueueSize(() => executionContext.queueSize).discard
+
   lazy val domains =
     new DomainNodes(
       createDomain,
@@ -264,7 +268,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           .await("auto-connect to local domain")(connectET.value)
       }
     logger.info(s"Auto-connecting local participants ${connectParticipants
-      .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
+        .map(_._1.unwrap)} to local domains ${activeDomains.map(_.name.unwrap)}")
     activeDomains
       .traverse(toDomainConfig)
       .traverse_(config =>
@@ -291,10 +295,12 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         } yield writePortsFile()
 
         // log results
-        startup.bimap(
-          error => logger.error(s"Failed to start ${error.name}: ${error.message}"),
-          _ => logger.info("Successfully started all nodes"),
-        )
+        startup
+          .bimap(
+            error => logger.error(s"Failed to start ${error.name}: ${error.message}"),
+            _ => logger.info("Successfully started all nodes"),
+          )
+          .discard
         startup
       }
 
@@ -311,7 +317,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
           ParticipantApis(node.config.ledgerApi.port.unwrap, node.config.adminApi.port.unwrap),
         )
       }.toMap
-      import io.circe.syntax._
+      import io.circe.syntax.*
       implicit val encoder: Encoder[ParticipantApis] =
         Encoder.forProduct2("ledgerApi", "adminApi") { apis =>
           (apis.ledgerApi, apis.adminApi)

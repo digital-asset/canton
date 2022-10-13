@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.store.memory
 import cats.Id
 import cats.data.{EitherT, OptionT}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.store._
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MapsUtil
 import com.digitalasset.canton.{LfPartyId, RequestCounter}

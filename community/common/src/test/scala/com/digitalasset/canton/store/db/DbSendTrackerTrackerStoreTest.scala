@@ -16,7 +16,7 @@ trait DbSendTrackerTrackerStoreTest extends AsyncWordSpec with BaseTest with Sen
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(DBIO.seq(sqlu"truncate table sequencer_client_pending_sends"), functionFullName)
   }
 

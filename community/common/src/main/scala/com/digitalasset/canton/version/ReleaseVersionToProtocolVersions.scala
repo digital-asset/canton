@@ -7,7 +7,7 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 
 object ReleaseVersionToProtocolVersions {
 
-  import ProtocolVersion._
+  import ProtocolVersion.*
   // For each (major, minor) the list of supported protocol versions
   // Don't make this variable private because it's used in `console-reference.canton`
   val majorMinorToProtocolVersions: Map[(Int, Int), NonEmpty[List[ProtocolVersion]]] = Map(

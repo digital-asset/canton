@@ -138,7 +138,7 @@ private[conflictdetection] class MutableLockableState[Status <: PrettyPrinting](
 ) extends LockableState[Status]
     with PrettyPrinting {
 
-  import LockableState._
+  import LockableState.*
 
   /** [[scala.Right$]] if the underlying store has no more recent state than this
     * [[scala.Left$]] a promise that is completed after the state has been fetched from the store or a state was set.

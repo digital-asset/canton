@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.store.ContractKeyJournal

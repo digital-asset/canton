@@ -79,6 +79,7 @@ object PublicGrpcServerInitialization {
           new SequencerConnectServerInterceptor(loggerFactory),
         )
       )
+      .discard
 
     val server = serverBuilder.build.start()
     toCloseableServer(server, logger, "PublicServer")

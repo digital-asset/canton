@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -17,7 +18,6 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.admin.PackageService.{Dar, DarDescriptor}
@@ -42,12 +42,12 @@ class DbDamlPackageStore(
     extends DamlPackageStore
     with DbStore {
 
-  import DamlPackageStore._
-  import storage.api._
-  import storage.converters._
-  import DbStorage.Implicits._
+  import DamlPackageStore.*
+  import storage.api.*
+  import storage.converters.*
+  import DbStorage.Implicits.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("daml-packages-dars-store")
 
   private def exists(packageId: PackageId): DbAction.ReadOnly[Option[DamlLf.Archive]] =
@@ -234,7 +234,7 @@ class DbDamlPackageStore(
       implicit tc: TraceContext
   ): OptionT[Future, PackageId] = {
 
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
     import com.digitalasset.canton.resource.DbStorage.Implicits.getResultPackageId
 
     val darHex = removeDar.hash.toLengthLimitedHexString

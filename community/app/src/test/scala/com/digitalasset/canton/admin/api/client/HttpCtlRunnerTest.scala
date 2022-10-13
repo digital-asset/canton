@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.commands.HttpAdminCommand
 import com.digitalasset.canton.config.ProcessingTimeout

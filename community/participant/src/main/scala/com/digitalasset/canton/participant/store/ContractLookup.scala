@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.TracedLogger

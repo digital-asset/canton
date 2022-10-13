@@ -4,9 +4,9 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.crypto.HashPurpose
@@ -21,7 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, SignedConten
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
 /** Mediator result for a transfer-out request
@@ -123,12 +123,12 @@ object TransferResult
   override val name: String = "TransferResult"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferResult)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferResult)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -174,7 +174,7 @@ object TransferResult
             .required("TransferResult.verdict", maybeVerdictP)
             .flatMap(Verdict.fromProtoV0)
         } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-          protocolVersionRepresentativeFor(ProtobufVersion(0)),
+          protocolVersionRepresentativeFor(ProtoVersion(0)),
           Some(bytes),
         )
     }
@@ -204,7 +204,7 @@ object TransferResult
         .required("TransferResult.verdict", verdictPO)
         .flatMap(Verdict.fromProtoV1)
     } yield TransferResult(requestId, informees.toSet, domain, verdict)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
   }

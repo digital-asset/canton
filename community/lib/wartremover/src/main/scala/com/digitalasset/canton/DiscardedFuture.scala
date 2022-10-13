@@ -20,7 +20,7 @@ object DiscardedFuture extends WartTraverser {
   val message = "Statements must not discard a Future"
 
   override def apply(u: WartUniverse): u.Traverser = {
-    import u.universe._
+    import u.universe.*
 
     val futureTypeConstructor = typeOf[Future[Unit]].typeConstructor
     val eitherTTypeConstructor = typeOf[EitherT[Future, Unit, Unit]].typeConstructor

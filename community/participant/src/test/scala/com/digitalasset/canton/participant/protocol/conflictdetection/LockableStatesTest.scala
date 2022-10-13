@@ -26,8 +26,8 @@ private[conflictdetection] class LockableStatesTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutorService {
-  import ConflictDetectionHelpers._
-  import LockableStatesTest._
+  import ConflictDetectionHelpers.*
+  import LockableStatesTest.*
 
   implicit val prettyString: Pretty[String] = PrettyUtil.prettyOfString(Predef.identity)
 

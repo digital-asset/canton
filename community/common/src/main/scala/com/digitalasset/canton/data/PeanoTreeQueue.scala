@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.data
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.PeanoQueue.{
   AssociatedValue,
   BeforeHead,
@@ -47,7 +48,7 @@ class PeanoTreeQueue[Discr, V](initHead: Counter[Discr]) extends PeanoQueue[Coun
         case None => if (key == frontV) cleanup()
         case Some(oldValue) =>
           if (oldValue != value) {
-            elems.put(key, oldValue) // undo the changes
+            elems.put(key, oldValue).discard // undo the changes
             associationChanged(oldValue)
           }
       }

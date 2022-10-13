@@ -13,7 +13,7 @@ import com.digitalasset.canton.util.ErrorUtil
 import java.util.{ConcurrentModificationException, PriorityQueue}
 import scala.annotation.tailrec
 import scala.concurrent.{Future, Promise, blocking}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Utility to implement a time awaiter
   *
@@ -34,7 +34,7 @@ trait TimeAwaiter {
   }
   private class ShutdownAware extends Awaiting[UnlessShutdown[Unit]] {
     override def shutdown(): Boolean = {
-      promise.trySuccess(UnlessShutdown.AbortedDueToShutdown)
+      promise.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard
       true
     }
     override def success(): Unit = promise.trySuccess(UnlessShutdown.unit).discard
@@ -68,7 +68,7 @@ trait TimeAwaiter {
     else {
       val awaiter = create
       blocking(awaitTimestampFuturesLock.synchronized {
-        awaitTimestampFutures.offer(timestamp -> awaiter)
+        awaitTimestampFutures.offer(timestamp -> awaiter).discard
       })
       // If the timestamp has been advanced while we're inserting into the priority queue,
       // make sure that we're completing the future.
@@ -94,7 +94,7 @@ trait TimeAwaiter {
         // Thanks to the synchronization, the priority queue cannot be modified concurrently,
         // but let's be paranoid and check.
         if (peeked ne polled) {
-          import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+          import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
           ErrorUtil.internalError(
             new ConcurrentModificationException(
               s"Insufficient synchronization in time awaiter. Peek returned $peeked, polled returned $polled"

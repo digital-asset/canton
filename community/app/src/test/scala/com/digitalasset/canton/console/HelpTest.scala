@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
+
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.Help.forInstance
 import org.scalatest.funsuite.AnyFunSuite
 
 import scala.annotation.nowarn
 
-@SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
 class HelpTest extends AnyFunSuite with BaseTest {
 
   object Example {

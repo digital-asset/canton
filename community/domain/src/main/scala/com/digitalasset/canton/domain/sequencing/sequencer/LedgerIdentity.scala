@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
-import cats.syntax.either._
+
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.domain.admin.v0

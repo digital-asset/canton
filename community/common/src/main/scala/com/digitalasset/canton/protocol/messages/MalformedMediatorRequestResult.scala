@@ -15,7 +15,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWrapperCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -85,12 +85,12 @@ object MalformedMediatorRequestResult
   override val name: String = "MalformedMediatorRequestResult"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.MalformedMediatorRequestResult)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.MalformedMediatorRequestResult)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -124,7 +124,7 @@ object MalformedMediatorRequestResult
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(MediatorReject.fromProtoV0, "rejection", rejectP)
     } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
   }
@@ -143,7 +143,7 @@ object MalformedMediatorRequestResult
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       reject <- ProtoConverter.parseRequired(MediatorReject.fromProtoV1, "rejection", rejectionPO)
     } yield MalformedMediatorRequestResult(requestId, domainId, viewType, reject)(
-      protocolVersionRepresentativeFor(ProtobufVersion(1)),
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
       Some(bytes),
     )
   }

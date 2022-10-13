@@ -32,7 +32,7 @@ object ShowUtil extends ShowUtil {
 }
 
 trait ShowUtil extends cats.syntax.ShowSyntax {
-  import ShowUtil._
+  import ShowUtil.*
 
   /** Enables the syntax `show"This object is pretty: \$myPrettyType"`.
     */

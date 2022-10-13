@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.submission.ChangeIdHash
@@ -173,8 +173,8 @@ trait CommandDeduplicationStoreTest extends BaseTest { this: AsyncWordSpec =>
               store.storeDefiniteAnswer(changeId1a, answer2, accepted = accept),
               _.getMessage should include(
                 s"Cannot update command deduplication data for ${ChangeIdHash(
-                  changeId1a
-                )} from offset ${answer3.offset} to offset ${answer2.offset}"
+                    changeId1a
+                  )} from offset ${answer3.offset} to offset ${answer2.offset}"
               ),
               _.errorMessage should include(ErrorUtil.internalErrorMessage),
             )

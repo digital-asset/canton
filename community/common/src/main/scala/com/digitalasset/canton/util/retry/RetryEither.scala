@@ -4,8 +4,8 @@
 package com.digitalasset.canton.util.retry
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.flatMap._
+import cats.syntax.either.*
+import cats.syntax.flatMap.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.lifecycle.{CloseContext, UnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}

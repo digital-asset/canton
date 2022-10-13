@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.domain.admin.v0.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub
-import com.digitalasset.canton.domain.admin.{v0 => adminproto}
+import com.digitalasset.canton.domain.admin.{v0 as adminproto}
 import com.digitalasset.canton.domain.sequencing.sequencer.SequencerPruningStatus
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel

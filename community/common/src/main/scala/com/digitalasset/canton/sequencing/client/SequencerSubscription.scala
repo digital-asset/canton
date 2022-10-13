@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.client
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.{AsyncCloseable, AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
@@ -64,12 +65,12 @@ trait SequencerSubscription[HandlerError] extends FlagCloseableAsync with NamedL
   ): Unit
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
+    import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
 
     Seq(
       AsyncCloseable(
         "sequencer-subscription", {
-          closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed)
+          closeReasonPromise.trySuccess(SubscriptionCloseReason.Closed).discard
           closeReasonPromise.future
         },
         timeouts.shutdownNetwork.duration,

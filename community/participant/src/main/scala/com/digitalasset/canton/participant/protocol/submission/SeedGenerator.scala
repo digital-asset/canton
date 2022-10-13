@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 
 import java.util.UUID
 

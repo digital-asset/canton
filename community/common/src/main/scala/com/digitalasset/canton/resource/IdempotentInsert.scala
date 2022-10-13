@@ -4,7 +4,7 @@
 package com.digitalasset.canton.resource
 
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.resource.DbStorage.Profile._
+import com.digitalasset.canton.resource.DbStorage.Profile.*
 import com.digitalasset.canton.util.ErrorUtil
 import slick.jdbc.canton.SQLActionBuilder
 
@@ -94,8 +94,8 @@ object IdempotentInsert {
       oracleIgnoreIndex: String,
       insertBuilder: => SQLActionBuilder,
   ): DbStorage.DbAction.WriteOnly[Int] = {
-    import DbStorage.Implicits.BuilderChain._
-    import storage.api._
+    import DbStorage.Implicits.BuilderChain.*
+    import storage.api.*
 
     val insertInto: SQLActionBuilder = storage.profile match {
       case _: Postgres | _: H2 => sql"insert into"

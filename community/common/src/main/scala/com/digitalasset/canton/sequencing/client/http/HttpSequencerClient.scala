@@ -4,13 +4,13 @@
 package com.digitalasset.canton.sequencing.client.http
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.{Password, ProcessingTimeout}
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.crypto.store.ProtectedKeyStore
 import com.digitalasset.canton.domain.api.v0.SequencerConnect.GetDomainParameters.Response.Parameters
-import com.digitalasset.canton.domain.api.{v0 => domainProto}
+import com.digitalasset.canton.domain.api.{v0 as domainProto}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.http.HttpClientError.{
@@ -21,7 +21,7 @@ import com.digitalasset.canton.networking.http.{HttpClient, HttpClientError}
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.client.http.HttpSequencerEndpoints.endpointVersion
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{HttpSequencerConnection, OrdinarySerializedEvent}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
@@ -34,11 +34,11 @@ import io.circe.Codec
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveEnumerationCodec
 import io.circe.generic.semiauto.deriveCodec
-import sttp.client3._
+import sttp.client3.*
 import sttp.model.{Header, Uri}
 
 import java.net.URL
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Low-level HTTP Sequencer API Client.
@@ -59,7 +59,7 @@ class HttpSequencerClient(
     extends FlagCloseable
     with NamedLogging {
 
-  import HttpSequencerClientError._
+  import HttpSequencerClientError.*
 
   /** CCF returns the body and in the headers the transaction sequencer number and transaction view, which we use to
     * validate that a transaction has been globally committed.

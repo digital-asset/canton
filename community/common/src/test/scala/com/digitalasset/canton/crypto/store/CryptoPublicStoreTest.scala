@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto.store
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CommunityCryptoConfig
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.resource.MemoryStorage

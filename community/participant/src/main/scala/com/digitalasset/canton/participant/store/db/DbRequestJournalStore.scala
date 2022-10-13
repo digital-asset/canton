@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.option._
+import cats.syntax.option.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -12,12 +13,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
-import com.digitalasset.canton.participant.admin.RepairService.RepairContext._
+import com.digitalasset.canton.participant.admin.RepairService.RepairContext.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.db.DbRequestJournalStore.ReplaceRequest
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
@@ -29,12 +29,12 @@ import com.digitalasset.canton.store.db.{
 }
 import com.digitalasset.canton.store.{CursorPreheadStore, IndexedDomain}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
-import slick.jdbc._
+import slick.jdbc.*
 
 import java.util.ConcurrentModificationException
 import scala.concurrent.{ExecutionContext, Future}
@@ -53,10 +53,10 @@ class DbRequestJournalStore(
     extends RequestJournalStore
     with DbStore {
 
-  import DbStorage.Implicits._
-  import storage.api._
+  import DbStorage.Implicits.*
+  import storage.api.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("request-journal-store")
 
   private[store] override val cleanPreheadStore: CursorPreheadStore[RequestCounterDiscriminator] =
@@ -188,7 +188,7 @@ class DbRequestJournalStore(
       rcs: NonEmpty[Seq[RequestCounter]]
   ): Iterable[DbAction.ReadOnly[Iterable[RequestData]]] =
     DbStorage.toInClauses_("request_counter", rcs, maxItemsInSqlInClause).map { inClause =>
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
       val query =
         sql"""select request_counter, request_state_index, request_timestamp, commit_time, repair_context
               from journal_requests where domain_id = $domainId and """ ++ inClause
@@ -329,7 +329,7 @@ class DbRequestJournalStore(
     storage
       .query(
         {
-          import BuilderChain._
+          import BuilderChain.*
           val endFilter = end.fold(sql"")(ts => sql" and request_timestamp <= $ts")
           (sql"""
              select 1

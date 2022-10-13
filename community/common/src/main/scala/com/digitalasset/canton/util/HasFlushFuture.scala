@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.lifecycle.SyncCloseable
@@ -40,12 +41,12 @@ trait HasFlushFuture
     else {
       val promise = Promise[Unit]()
       val newTask = new HasFlushFuture.NamedTask(name, promise.future)
-      tasks.put(newTask, ())
+      tasks.put(newTask, ()).discard
       // Make sure to remove the task again when the future is done.
       // This runs via a direct execution context as part of the task's execution context
       // so that we don't have to worry about execution contexts being closed here.
       val removeF = future.transform { _ =>
-        tasks.remove(newTask)
+        tasks.remove(newTask).discard
         Success(())
       }(directExecutionContext)
       promise.completeWith(removeF)

@@ -4,14 +4,14 @@
 package com.digitalasset.canton.crypto.provider.tink
 
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.instances.future.*
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.crypto.tink.KeysetHandle
 import com.google.crypto.tink.hybrid.HybridKeyTemplates
-import com.google.crypto.tink.proto._
+import com.google.crypto.tink.proto.*
 import com.google.crypto.tink.signature.SignatureKeyTemplates
 
 import java.security.GeneralSecurityException

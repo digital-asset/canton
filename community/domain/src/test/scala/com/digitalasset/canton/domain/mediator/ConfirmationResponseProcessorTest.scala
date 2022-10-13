@@ -4,17 +4,17 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.store.{
   InMemoryFinalizedResponseStore,
   InMemoryMediatorDeduplicationStore,
@@ -23,19 +23,19 @@ import com.digitalasset.canton.domain.mediator.store.{
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString
-import org.mockito.ArgumentMatchers.{eq => eqMatch}
+import org.mockito.ArgumentMatchers.{eq as eqMatch}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 

@@ -15,7 +15,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -93,7 +93,7 @@ object RootHashMessage
     ], ByteString => ParsingResult[RootHashMessagePayload]] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.RootHashMessage)((deserializer, proto) =>
         fromProtoV0(deserializer)(proto)
@@ -131,7 +131,7 @@ object RootHashMessage
       domainId,
       viewType,
       payloadO,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
   implicit def rootHashMessageProtocolMessageContentCast[Payload <: RootHashMessagePayload](implicit

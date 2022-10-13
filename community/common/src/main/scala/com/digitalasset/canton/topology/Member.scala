@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology
 
 import cats.kernel.Order
-import cats.syntax.either._
-import com.daml.ledger.client.binding.Primitive.{Party => ClientParty}
+import cats.syntax.either.*
+import com.daml.ledger.client.binding.Primitive.{Party as ClientParty}
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255, String300}
 import com.digitalasset.canton.crypto.RandomOps

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.protocol.{v0, v1}
@@ -12,7 +12,7 @@ import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, 
 import com.digitalasset.canton.topology.{DomainId, Member, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -58,7 +58,7 @@ object RegisterTopologyTransactionRequest
     extends HasProtocolVersionedCompanion[RegisterTopologyTransactionRequest] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.RegisterTopologyTransactionRequest)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -101,7 +101,7 @@ object RegisterTopologyTransactionRequest
       requestId,
       transactions,
       DomainId(domainUid),
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
   override protected def name: String = "RegisterTopologyTransactionRequest"

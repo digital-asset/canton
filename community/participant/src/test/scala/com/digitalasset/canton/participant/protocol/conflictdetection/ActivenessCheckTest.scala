@@ -9,7 +9,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class ActivenessCheckTest extends AnyWordSpec with BaseTest {
 
-  import ConflictDetectionHelpers._
+  import ConflictDetectionHelpers.*
 
   val coid00: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
   val coid01: LfContractId = ExampleTransactionFactory.suffixedId(0, 1)

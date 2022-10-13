@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.DefaultTestIdentities

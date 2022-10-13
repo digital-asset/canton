@@ -11,7 +11,7 @@ import com.digitalasset.canton.integration.CommunityTests.{
   SharedCommunityEnvironment,
 }
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.PruningNotSupportedInCommunityEdition
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 
 class EnterpriseFeatureInCommunityIntegrationTest
     extends CommunityIntegrationTest
@@ -50,7 +50,7 @@ class EnterpriseFeatureInCommunityIntegrationTest
   }
 
   "participant pruning should fail gracefully" in { implicit env =>
-    import env._
+    import env.*
 
     participant1.start()
     participant1.domains.connect_local(mydomain)

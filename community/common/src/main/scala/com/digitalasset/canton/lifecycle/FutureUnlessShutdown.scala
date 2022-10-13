@@ -10,7 +10,7 @@ import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil.logOnThrow_
 import com.digitalasset.canton.util.Thereafter
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import scala.concurrent.{Awaitable, ExecutionContext, Future}
 import scala.util.Try

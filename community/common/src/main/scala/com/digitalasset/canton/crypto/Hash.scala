@@ -4,13 +4,14 @@
 package com.digitalasset.canton.crypto
 
 import cats.Order
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.String68
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
+  DefaultDeserializationError,
   DeserializationError,
   DeterministicEncoding,
   HasCryptographicEvidence,
@@ -171,8 +172,8 @@ object Hash {
       (length, hashBytes) = lengthAndBytes
       algorithm <- HashAlgorithm
         .lookup(index, length)
-        .leftMap(err => DeserializationError(s"Invalid hash algorithm: $err"))
-      hash <- create(hashBytes, algorithm).leftMap(err => DeserializationError(err))
+        .leftMap(err => DefaultDeserializationError(s"Invalid hash algorithm: $err"))
+      hash <- create(hashBytes, algorithm).leftMap(err => DefaultDeserializationError(err))
     } yield hash
 
   /** Decode a serialized [[Hash]] using [[fromByteString]] except for the empty [[com.google.protobuf.ByteString]],
@@ -184,7 +185,7 @@ object Hash {
   def fromHexString(hexString: String): Either[DeserializationError, Hash] =
     HexString
       .parse(hexString)
-      .toRight(DeserializationError(s"Failed to parse hex string: $hexString"))
+      .toRight(DefaultDeserializationError(s"Failed to parse hex string: $hexString"))
       .map(ByteString.copyFrom)
       .flatMap(fromByteString)
 

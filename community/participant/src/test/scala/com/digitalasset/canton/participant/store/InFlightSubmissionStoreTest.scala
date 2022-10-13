@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
-import com.digitalasset.canton.participant.protocol.submission._
+import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightByMessageId,
   InFlightBySequencingInfo,
@@ -14,7 +14,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
 import com.digitalasset.canton.sequencing.protocol.{DeliverErrorReason, MessageId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, DefaultDamlValues, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 

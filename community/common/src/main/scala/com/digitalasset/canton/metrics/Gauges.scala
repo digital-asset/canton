@@ -6,9 +6,10 @@ package com.digitalasset.canton.metrics
 import cats.data.{EitherT, OptionT}
 import com.codahale.metrics.{Gauge, Timer}
 import com.daml.metrics.Timed
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.util.CheckedT
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
@@ -85,12 +86,12 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
   private def cleanup(tm: Long): Unit = {
     // keep on cleaning up
     if (measure.lengthCompare(1) > 0 && measure(1)._2 <= tm - intervalNanos) {
-      measure.remove(0)
+      measure.remove(0).discard
       cleanup(tm)
     }
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.TraversableOps"))
+  @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.IterableOps"))
   override def getValue: Double = {
     val endTs = now
     val startTs = endTs - intervalNanos
@@ -135,7 +136,9 @@ class IntGauge(initial: Integer) extends Gauge[Integer] {
   private val ref = new AtomicInteger(initial)
 
   def incrementAndGet(): Integer = ref.incrementAndGet()
+  def increment(): Unit = incrementAndGet().discard
   def decrementAndGet(): Integer = ref.decrementAndGet()
+  def decrement(): Unit = decrementAndGet().discard
   def setValue(value: Int): Unit = ref.set(value)
 
   override def getValue: Integer = ref.get()

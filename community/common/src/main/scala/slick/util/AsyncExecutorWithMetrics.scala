@@ -3,6 +3,7 @@
 
 package slick.util
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.QueryCostMonitoringConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.DbQueueMetrics
@@ -12,11 +13,11 @@ import slick.util.AsyncExecutor.{PrioritizedRunnable, Priority, WithConnection}
 
 import java.lang.management.ManagementFactory
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import java.util.concurrent.{TimeUnit, _}
+import java.util.concurrent.{TimeUnit, *}
 import javax.management.{InstanceNotFoundException, ObjectName}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContextExecutor
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.util.control.NonFatal
 
 @SuppressWarnings(
@@ -158,13 +159,13 @@ class AsyncExecutorWithMetrics(
     case class QueryInfo(callsite: String, added: Long, scheduled: Option[Long]) {
 
       def created(): QueryInfo = {
-        metrics.queue.metric.incrementAndGet()
+        metrics.queue.metric.increment()
         this
       }
 
       def updateScheduled(): QueryInfo = {
-        metrics.queue.metric.decrementAndGet()
-        metrics.running.metric.incrementAndGet()
+        metrics.queue.metric.decrement()
+        metrics.running.metric.increment()
         val tm = System.nanoTime()
         metrics.waitTimer.metric.update(tm - added, TimeUnit.NANOSECONDS)
         QueryInfo(callsite, added, Some(tm))
@@ -174,7 +175,7 @@ class AsyncExecutorWithMetrics(
         val tm = System.nanoTime()
         scheduled match {
           case Some(st) =>
-            metrics.running.metric.decrementAndGet()
+            metrics.running.metric.decrement()
             QueryCostTracker.track(callsite, tm - st)
           case None =>
             QueryCostTracker.track(s"$callsite - missing start time", tm - added)
@@ -243,14 +244,14 @@ class AsyncExecutorWithMetrics(
             .getOrElse("<unknown>")
         } else "query-tracking-disabled"
         // initialize statistics gathering
-        stats.put(command, QueryInfo(tr, added = System.nanoTime(), None).created())
+        stats.put(command, QueryInfo(tr, added = System.nanoTime(), None).created()).discard
         try {
           super.execute(command)
         } catch {
           // if we throw here, the task will never be executed. therefore, we'll have to remove the task statistics
           // again to not leak memory
           case NonFatal(e) =>
-            stats.remove(command)
+            stats.remove(command).discard
             throw e
         }
       }

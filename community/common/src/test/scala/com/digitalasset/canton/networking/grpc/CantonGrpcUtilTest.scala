@@ -7,12 +7,12 @@ import cats.data.EitherT
 import com.digitalasset.canton.domain.api.v0.HelloServiceGrpc.{HelloService, HelloServiceStub}
 import com.digitalasset.canton.domain.api.v0.{Hello, HelloServiceGrpc}
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.networking.grpc.GrpcError._
+import com.digitalasset.canton.networking.grpc.GrpcError.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.ServerInterceptors.intercept
-import io.grpc.Status.Code._
-import io.grpc._
+import io.grpc.Status.Code.*
+import io.grpc.*
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.util.MutableHandlerRegistry
 import org.scalatest.Outcome
@@ -69,7 +69,7 @@ object CantonGrpcUtilTest {
 }
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
 class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContext {
-  import CantonGrpcUtilTest._
+  import CantonGrpcUtilTest.*
 
   override type FixtureParam = Env
 
@@ -86,7 +86,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the client sends a request" must {
       "send a response" in { env =>
-        import env._
+        import env.*
 
         server.start()
 
@@ -98,7 +98,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the client cancels a request" must {
       "abort the request with CANCELLED and not log a warning" in { env =>
-        import env._
+        import env.*
 
         server.start()
 
@@ -120,7 +120,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the client cancels a request with a specific exception" must {
       "abort the request with CANCELLED and log a warning" in { env =>
-        import env._
+        import env.*
 
         val ex = new IllegalStateException("test description")
 
@@ -152,7 +152,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the request deadline exceeds" must {
       "abort the request with DEADLINE_EXCEEDED" in { env =>
-        import env._
+        import env.*
 
         server.start()
 
@@ -174,7 +174,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the request timeout is negative" must {
       "abort the request with DEADLINE_EXCEEDED" in { env =>
-        import env._
+        import env.*
 
         val requestF = loggerFactory.assertLogs(
           sendRequest(-100).value,
@@ -191,7 +191,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the server is permanently unavailable" must {
       "give up" in { env =>
-        import env._
+        import env.*
 
         val requestF = loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
@@ -220,7 +220,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the server is temporarily unavailable" must {
       "wait for the server" in { env =>
-        import env._
+        import env.*
 
         when(service.hello(request)).thenReturn(Future.successful(response))
 
@@ -246,7 +246,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the service is unavailable" must {
       "give up" in { env =>
-        import env._
+        import env.*
 
         server.start()
         registry.removeService(helloServiceDefinition) shouldBe true
@@ -278,7 +278,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the server fails with status INVALID_ARGUMENT" must {
       "report invalid argument" in { env =>
-        import env._
+        import env.*
 
         val status = Status.INVALID_ARGUMENT
           .withCause(new NullPointerException)
@@ -305,7 +305,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the server fails with an async IllegalArgumentException" must {
       "report internal" in { env =>
-        import env._
+        import env.*
 
         server.start()
         when(service.hello(request))
@@ -329,7 +329,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the server fails with a sync IllegalArgumentException" must {
       "report unknown" in { env =>
-        import env._
+        import env.*
 
         server.start()
         when(service.hello(request)).thenThrow(new IllegalArgumentException("test exception"))
@@ -356,7 +356,7 @@ class CantonGrpcUtilTest extends FixtureAnyWordSpec with BaseTest with HasExecut
 
     "the client is broken" must {
       "fail" in { env =>
-        import env._
+        import env.*
 
         // Create a mocked client
         val brokenClient =

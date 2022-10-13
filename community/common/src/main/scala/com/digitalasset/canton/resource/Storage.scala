@@ -4,12 +4,12 @@
 package com.digitalasset.canton.resource
 
 import cats.data.{Chain, EitherT, OptionT}
-import cats.syntax.either._
-import cats.syntax.functor._
+import cats.syntax.either.*
+import cats.syntax.functor.*
 import cats.{Functor, Monad}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String255}
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
@@ -24,7 +24,7 @@ import com.digitalasset.canton.logging.{
   TracedLogger,
 }
 import com.digitalasset.canton.metrics.{DbQueueMetrics, DbStorageMetrics}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, LfHash}
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
@@ -32,8 +32,8 @@ import com.digitalasset.canton.resource.StorageFactory.StorageCreationException
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbSerializationException}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.retry.RetryUtil.DbExceptionRetryable
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
@@ -44,11 +44,11 @@ import com.zaxxer.hikari.pool.HikariPool.PoolInitializationException
 import io.functionmeta.functionFullName
 import org.slf4j.event.Level
 import slick.SlickException
-import slick.dbio._
+import slick.dbio.*
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInterpolationCanton
-import slick.jdbc.canton._
-import slick.jdbc.{ActionBasedSQLInterpolation => _, SQLActionBuilder => _, _}
+import slick.jdbc.canton.*
+import slick.jdbc.{ActionBasedSQLInterpolation as _, SQLActionBuilder as _, *}
 import slick.lifted.Aliases
 import slick.util.{AsyncExecutor, AsyncExecutorWithMetrics, ClassLoaderUtil}
 
@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.rowset.serial.SerialBlob
 import scala.annotation.nowarn
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
 
@@ -616,7 +616,7 @@ object DbStorage {
       logger: Logger,
   ): Either[String, Database] = {
     // copy paste from JdbcBackend.forConfig
-    import slick.util.ConfigExtensionMethods._
+    import slick.util.ConfigExtensionMethods.*
     try {
       val classLoader: ClassLoader = ClassLoaderUtil.defaultClassLoader
       val source = JdbcDataSource.forConfig(config, null, "", classLoader)
@@ -720,7 +720,7 @@ object DbStorage {
         }
       }
 
-      import profile.DbStorageAPI._
+      import profile.DbStorageAPI.*
       profile match {
         case _: Oracle =>
           // Oracle has the habit of not properly rolling back, if an error occurs and
@@ -769,7 +769,7 @@ object DbStorage {
       values: NonEmpty[Seq[T]],
       maxValuesInSqlList: PositiveNumeric[Int],
   )(implicit f: SetParameter[T]): Iterable[(Seq[T], SQLActionBuilder)] = {
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
 
     values
       .grouped(maxValuesInSqlList.unwrap)

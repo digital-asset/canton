@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.console.commands
 
-import cats.syntax.either._
-import cats.syntax.option._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.option.*
+import cats.syntax.traverseFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands
-import com.digitalasset.canton.admin.api.client.data._
+import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
@@ -31,13 +31,13 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.protocol.{DynamicDomainParameters => DynamicDomainParametersInternal}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.protocol.{DynamicDomainParameters as DynamicDomainParametersInternal}
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseQuery
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{StoredTopologyTransactions, TimeQuery}
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -53,7 +53,7 @@ class TopologyAdministrationGroup(
 
   private val runner: AdminCommandRunner = instance
 
-  import runner._
+  import runner.*
 
   // small cache to avoid repetitive calls to fetchId (as the id is immutable once set)
   protected val idCache = new AtomicReference[Option[UniqueIdentifier]](None)

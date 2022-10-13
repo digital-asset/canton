@@ -1,4 +1,4 @@
-import sbt._
+import sbt.*
 
 object Dependencies {
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
@@ -10,7 +10,7 @@ object Dependencies {
   lazy val osClassifier: String =
     if (sys.props("os.name").contains("Mac")) "osx" else sys.props("os.name").toLowerCase
 
-  lazy val scala_version = "2.13.8"
+  lazy val scala_version = "2.13.9"
   lazy val scala_version_short = "2.13"
 
   // TODO(#9883) We have cloned akka's BroadcastHub implementation in community/lib/akka/src/main/scala/akka/stream/scaladsl/BroadcastHub.scala
@@ -21,7 +21,7 @@ object Dependencies {
   lazy val logback_version = "1.2.8"
   lazy val slf4j_version = "1.7.29"
   lazy val log4j_version = "2.17.0"
-  lazy val ammonite_version = "2.5.1"
+  lazy val ammonite_version = "2.5.4-34-1c7b3c38"
   lazy val pprint_version = "0.7.1"
   // if you update the slick version, please also update our forked code in common/slick.util.*
   lazy val slick_version = "3.3.3"

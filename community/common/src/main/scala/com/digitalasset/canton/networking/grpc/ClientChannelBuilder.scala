@@ -4,6 +4,7 @@
 package com.digitalasset.canton.networking.grpc
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ClientConfig, KeepAliveClientConfig, TlsClientConfig}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -39,24 +40,25 @@ trait ClientChannelBuilder {
 
     builder.executor(executor)
     maxInboundMessageSize.foreach(s => builder.maxInboundMessageSize(s.unwrap))
-    ClientChannelBuilder.configureKeepAlive(keepAliveClient, builder)
+    ClientChannelBuilder.configureKeepAlive(keepAliveClient, builder).discard
     if (traceContextPropagation == Propagation.Enabled)
-      builder.intercept(TraceContextGrpc.clientInterceptor)
+      builder.intercept(TraceContextGrpc.clientInterceptor).discard
 
     if (useTls) {
       builder
         .useTransportSecurity() // this is strictly unnecessary as is the default for the channel builder, but can't hurt either
 
       // add certificates if provided
-      trustCertificate.fold(builder) { certChain =>
-        val sslContext = withResource(certChain.newInput()) { inputStream =>
-          GrpcSslContexts.forClient().trustManager(inputStream).build()
+      trustCertificate
+        .fold(builder) { certChain =>
+          val sslContext = withResource(certChain.newInput()) { inputStream =>
+            GrpcSslContexts.forClient().trustManager(inputStream).build()
+          }
+          builder.sslContext(sslContext)
         }
-        builder.sslContext(sslContext)
-      }
-    } else {
-      builder.usePlaintext()
-    }
+        .discard
+    } else
+      builder.usePlaintext().discard
 
     builder
   }

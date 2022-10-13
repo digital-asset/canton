@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.data.{Chain, EitherT, NonEmptyChain, OptionT}
-import cats.syntax.either._
+import cats.syntax.either.*
 import cats.{Applicative, FlatMap, Functor, Monad, MonadError}
 
 /** Monad Transformer for [[Checked]], allowing the effect of a monad `F` to be combined with the aborting and

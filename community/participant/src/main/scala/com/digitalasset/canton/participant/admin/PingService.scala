@@ -5,13 +5,13 @@ package com.digitalasset.canton.participant.admin
 
 import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.ContractNotFound
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.daml.ledger.api.v1.commands.{Command => ScalaCommand}
+import com.daml.ledger.api.v1.commands.{Command as ScalaCommand}
 import com.daml.ledger.api.v1.transaction.Transaction
-import com.daml.ledger.client.binding.{Contract, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.error.ErrorCodeUtils
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.workflows.{PingPong => M}
+import com.digitalasset.canton.participant.admin.workflows.{PingPong as M}
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.Failed
 import com.digitalasset.canton.participant.ledger.api.client.{
   CommandSubmitterWithRetry,
@@ -32,7 +32,7 @@ import java.util.UUID
 import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
-import scala.concurrent._
+import scala.concurrent.*
 import scala.concurrent.duration.DurationLong
 import scala.math.min
 import scala.util.control.NonFatal
@@ -358,7 +358,7 @@ class PingService(
           logger.debug(
             s"$adminParty observed second collapsed for id $id and path $path. Collapsing."
           )
-          merges.remove(index)
+          merges.remove(index).discard
           // We intentionally don't return the future here, as we just submit the command here and do timeout tracking
           // explicitly with the timeout scheduler.
           submitAsync(

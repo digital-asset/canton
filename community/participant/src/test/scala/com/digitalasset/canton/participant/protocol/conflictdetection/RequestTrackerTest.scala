@@ -22,7 +22,7 @@ import scala.util.{Failure, Success}
 
 private[conflictdetection] trait RequestTrackerTest {
   this: AsyncWordSpec with BaseTest with ConflictDetectionHelpers =>
-  import ConflictDetectionHelpers._
+  import ConflictDetectionHelpers.*
 
   val coid00: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
   val coid01: LfContractId = ExampleTransactionFactory.suffixedId(0, 1)

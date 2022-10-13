@@ -7,7 +7,7 @@ import cats.data.{Chain, EitherT}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
-import com.digitalasset.canton.participant.store.TransferStore._
+import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
 import com.digitalasset.canton.participant.store.{TransferStore, TransferStoreTest}
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -25,7 +25,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Try
 
 class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorService {
-  import TransferStoreTest._
+  import TransferStoreTest.*
 
   val transferDataF =
     mkTransferDataForDomain(transfer10, mediator1, targetDomainId = TransferStoreTest.targetDomain)
@@ -192,7 +192,7 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
     }
 
     "pick sensibly from concurrent completing requests" in {
-      import cats.implicits._
+      import cats.implicits.*
       implicit val ec: ExecutionContextIdlenessExecutorService = executorService
 
       val store = new InMemoryTransferStore(targetDomain, loggerFactory)

@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.networking
 
-import cats.syntax.either._
-import cats.syntax.reducible._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.reducible.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.Port
 import io.grpc.Attributes
 

@@ -46,7 +46,7 @@ import scala.concurrent.ExecutionContext
 class TopologyTransactionTestFactory(loggerFactory: NamedLoggerFactory, initEc: ExecutionContext)
     extends TestingOwnerWithKeys(domainManager, loggerFactory, initEc) {
 
-  import SigningKeys._
+  import SigningKeys.*
 
   val ns1 = Namespace(key1.fingerprint)
   val ns6 = Namespace(key6.fingerprint)
@@ -200,7 +200,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
     "receiving transactions with signatures" should {
       "succeed to add if the signature is valid" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(ts(0), List(ns1k1_k1, ns1k2_k1))
         } yield {
@@ -209,7 +209,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
       "fail to add if the signature is invalid" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         val invalid = ns1k2_k1.copy(signature = ns1k1_k1.signature)(
           signedTransactionProtocolVersionRepresentative,
           None,
@@ -234,7 +234,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
       "reject if the transaction is for the wrong domain" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         val wrongDomain = DomainId(UniqueIdentifier.tryCreate("wrong", ns1.fingerprint.unwrap))
         val pid = ParticipantId(UniqueIdentifier.tryCreate("correct", ns1.fingerprint.unwrap))
         val wrong = mkAdd(
@@ -267,7 +267,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
     "observing namespace delegations" should {
       "succeed if transaction is properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(ts(0), List(ns1k1_k1, ns1k2_k1, ns1k3_k2))
         } yield {
@@ -276,7 +276,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
       "fail if transaction is not properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
@@ -289,7 +289,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "succeed and use load existing delegations" in {
         val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
+        import Factory.*
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, ns1k3_k2))
@@ -300,7 +300,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
       "fail on incremental non-authorized transactions" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(1),
@@ -317,7 +317,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
     "observing identifier delegations" should {
       "succeed if transaction is properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
@@ -329,7 +329,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
       "fail if transaction is not properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
@@ -345,7 +345,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
       "succeed if transaction is properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
@@ -357,7 +357,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       }
       "fail if transaction is not properly authorized" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         for {
           res <- validator.validateAndUpdateHeadAuthState(
             ts(0),
@@ -371,7 +371,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val store: InMemoryTopologyStore[TopologyStoreId.AuthorizedStore] =
           new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
+        import Factory.*
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1, id1ak4_k1))
           res <- validator.validateAndUpdateHeadAuthState(ts(1), List(ns1k2_k1, p1p2F_k2, p1p1B_k2))
@@ -384,7 +384,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
     "observing removals" should {
       "accept authorized removals" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         val Rns1k2_k1 = revert(ns1k2_k1)
         val Rid1ak4_k1 = revert(id1ak4_k1)
         for {
@@ -399,7 +399,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
 
       "reject un-authorized after removal" in {
         val validator = mk()
-        import Factory._
+        import Factory.*
         val Rns1k2_k1 = revert(ns1k2_k1)
         val Rid1ak4_k1 = revert(id1ak4_k1)
         for {
@@ -418,7 +418,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "namespace additions" in {
         val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
+        import Factory.*
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns6k6_k6))
           res <- validator.validateAndUpdateHeadAuthState(
@@ -434,7 +434,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
         val store: InMemoryTopologyStore[TopologyStoreId] =
           new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
+        import Factory.*
         val Rns1k1_k1 = revert(ns1k1_k1)
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
@@ -448,7 +448,7 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "identifier additions and removals" in {
         val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
+        import Factory.*
         val Rid1ak4_k1 = revert(id1ak4_k1)
         for {
           _ <- store.append(SequencedTime(ts(0)), EffectiveTime(ts(0)), List(ns1k1_k1))
@@ -464,8 +464,8 @@ class IncomingTopologyTransactionAuthorizationValidatorTest
       "cascading invalidation pre-existing identifier uids" in {
         val store = new InMemoryTopologyStore(TopologyStoreId.AuthorizedStore, loggerFactory)
         val validator = mk(store)
-        import Factory._
-        import Factory.SigningKeys._
+        import Factory.*
+        import Factory.SigningKeys.*
         // scenario: we have id1ak4_k2 previously loaded. now we get a removal on k2. we need to ensure that
         // nothing can be added by k4
         val Rns1k2_k1 = revert(ns1k2_k1)

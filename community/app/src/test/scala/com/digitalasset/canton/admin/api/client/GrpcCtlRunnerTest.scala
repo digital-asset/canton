@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.admin.api.client
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import io.grpc.stub.AbstractStub
@@ -11,7 +11,7 @@ import io.grpc.{CallOptions, Channel, ManagedChannel}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class GrpcCtlRunnerTest extends AsyncWordSpec with BaseTest {
 

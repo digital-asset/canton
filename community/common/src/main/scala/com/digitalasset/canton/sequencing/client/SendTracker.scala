@@ -4,7 +4,8 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -87,7 +88,7 @@ class SendTracker(
           )
         case _none => // we're good
       }
-      _ = metrics.submissions.inFlight.metric.incrementAndGet()
+      _ = metrics.submissions.inFlight.metric.increment()
     } yield ()
   }
 
@@ -185,14 +186,16 @@ class SendTracker(
   ): Future[Unit] = {
     val pendingO = pendingSends.remove(messageId)
 
-    OptionUtil.zipWith(pendingO, resultO) { (pending, result) =>
-      updateSequencedMetrics(pending, result)
-      pending.callback(result)
-    }
+    OptionUtil
+      .zipWith(pendingO, resultO) { (pending, result) =>
+        updateSequencedMetrics(pending, result)
+        pending.callback(result)
+      }
+      .discard
 
     for {
       _ <- store.removePendingSend(messageId)
-      _ = metrics.submissions.inFlight.metric.decrementAndGet()
+      _ = metrics.submissions.inFlight.metric.decrement()
     } yield ()
   }
 

@@ -4,16 +4,16 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functor._
+import cats.syntax.either.*
+import cats.syntax.functor.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data._
-import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory._
+import com.digitalasset.canton.data.*
+import com.digitalasset.canton.participant.protocol.submission.ConfirmationRequestFactory.*
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   UnableToDetermineKey,
   UnableToDetermineParticipant,
@@ -23,9 +23,9 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   SerializableContractOfId,
   TransactionTreeConversionError,
 }
-import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationRequest,
   EncryptedView,
@@ -35,17 +35,17 @@ import com.digitalasset.canton.protocol.messages.{
   InformeeMessage,
 }
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.transaction.ParticipantPermission._
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 class ConfirmationRequestFactoryTest extends AsyncWordSpec with BaseTest with HasExecutorService {

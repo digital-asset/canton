@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.daml.lf.value.Value.ValueInt64
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.store.ContractKeyJournal.{
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.store.PrunableByTimeTest
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
 import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
@@ -28,7 +28,7 @@ import scala.util.Random
 
 @nowarn("msg=match may not be exhaustive")
 trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLike with BaseTest =>
-  import ContractKeyJournalTest._
+  import ContractKeyJournalTest.*
 
   def contractKeyJournal(mkCkj: ExecutionContext => ContractKeyJournal): Unit = {
     def mk(): ContractKeyJournal = mkCkj(executionContext)

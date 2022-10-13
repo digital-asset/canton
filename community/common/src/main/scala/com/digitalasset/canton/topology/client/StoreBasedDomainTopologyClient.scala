@@ -4,11 +4,10 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.functor._
-import cats.syntax.functorFilter._
+import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SigningPublicKey
@@ -17,7 +16,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, U
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DomainParameters, DynamicDomainParameters}
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
@@ -25,12 +24,13 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
-import java.time.{Duration => JDuration}
+import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.collection.compat.immutable.ArraySeq
 import scala.concurrent.duration.Duration
@@ -96,12 +96,12 @@ trait TopologyAwaiter extends FlagCloseable {
     conditions.updateAndGet(_ :+ waiter)
     if (!isClosing) {
       if (timeout.isFinite) {
-        clock.scheduleAfter(
-          _ => {
-            val _ = waiter.promise.trySuccess(UnlessShutdown.Outcome(false))
-          },
-          JDuration.ofMillis(timeout.toMillis),
-        )
+        clock
+          .scheduleAfter(
+            _ => waiter.promise.trySuccess(UnlessShutdown.Outcome(false)).discard,
+            JDuration.ofMillis(timeout.toMillis),
+          )
+          .discard
       }
       waiter.check()
     } else {
@@ -185,21 +185,23 @@ abstract class BaseDomainTopologyClient
       val deltaDuration = effectiveTimestamp.value - sequencedTimestamp.value
       pendingChanges.incrementAndGet()
       // schedule using after as we don't know the clock synchronisation level, but we know the relative time.
-      clock.scheduleAfter(
-        _ => {
-          updateHead(
-            effectiveTimestamp,
-            ApproximateTime(effectiveTimestamp.value),
-            potentialTopologyChange = true,
-          )
-          if (pendingChanges.decrementAndGet() == 0) {
-            logger.debug(
-              s"Effective at $effectiveTimestamp, there are no more pending topology changes (last were from $sequencedTimestamp)"
+      clock
+        .scheduleAfter(
+          _ => {
+            updateHead(
+              effectiveTimestamp,
+              ApproximateTime(effectiveTimestamp.value),
+              potentialTopologyChange = true,
             )
-          }
-        },
-        deltaDuration,
-      )
+            if (pendingChanges.decrementAndGet() == 0) {
+              logger.debug(
+                s"Effective at $effectiveTimestamp, there are no more pending topology changes (last were from $sequencedTimestamp)"
+              )
+            }
+          },
+          deltaDuration,
+        )
+        .discard
     }
     FutureUnlessShutdown.unit
   }
@@ -611,7 +613,7 @@ class StoreBasedTopologySnapshot(
   override def findParticipantCertificate(
       participantId: ParticipantId
   )(implicit traceContext: TraceContext): Future[Option[LegalIdentityClaimEvidence.X509Cert]] = {
-    import cats.implicits._
+    import cats.implicits.*
     findTransactions(
       asOfInclusive = false,
       includeSecondary = false,

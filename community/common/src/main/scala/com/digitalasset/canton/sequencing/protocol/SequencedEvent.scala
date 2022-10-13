@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.Applicative
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v0
@@ -16,7 +16,7 @@ import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtocolVersionedSerializerCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
   UntypedVersionedMessage,
@@ -69,7 +69,7 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
   override val name = "SequencedEvent serializer"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       (),
       _.toProtoV0.toByteString,
@@ -104,11 +104,11 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
       sequencedEventP: v0.SequencedEvent,
       bytes: ByteString,
   ): ParsingResult[SequencedEvent[Env]] = {
-    import cats.syntax.traverse._
+    import cats.syntax.traverse.*
     val v0.SequencedEvent(counter, tsP, domainIdP, mbMsgIdP, mbBatchP, mbDeliverErrorReasonP) =
       sequencedEventP
 
-    val protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+    val protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtoVersion(0))
     val sequencerCounter = SequencerCounter(counter)
 
     for {

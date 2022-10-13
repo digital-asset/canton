@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.TransactionViewTree
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessSet,
 }
 import com.digitalasset.canton.participant.store.ContractKeyJournal
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 

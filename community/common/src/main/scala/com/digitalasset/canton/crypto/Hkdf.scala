@@ -20,7 +20,7 @@ trait HkdfOps {
       outputBytes: Int,
       algorithm: HmacAlgorithm = defaultHmacAlgorithm,
   ): Either[HkdfError, Unit] = {
-    import HkdfError._
+    import HkdfError.*
 
     for {
       _ <- Either.cond(outputBytes >= 0, (), HkdfOutputNegative(outputBytes))

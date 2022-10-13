@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.daml.ledger.client.binding.{Contract, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.participant.admin.workflows.{PingPong => M}
+import com.digitalasset.canton.participant.admin.workflows.{PingPong as M}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -14,7 +14,7 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.concurrent.ScheduledExecutorService
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))

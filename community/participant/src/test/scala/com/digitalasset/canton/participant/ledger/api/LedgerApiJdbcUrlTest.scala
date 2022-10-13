@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.ledger.api
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.CommunityDbConfig._
+import com.digitalasset.canton.config.CommunityDbConfig.*
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.FailedToConfigureLedgerApiStorage
 import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AnyWordSpec
@@ -66,6 +66,7 @@ class LedgerApiJdbcUrlTest extends AnyWordSpec with BaseTest {
                                  |  sslcert = "path/to/certificate.crt"
                                  |  sslrootcert = "path/to/root_certificate.crt"
                                  |  sslkey = "path/to/key.pk8"
+                                 |  currentSchema = "participant_schema"
                                  |}
                                  |numThreads = 10
                                  |""".stripMargin)

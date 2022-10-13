@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

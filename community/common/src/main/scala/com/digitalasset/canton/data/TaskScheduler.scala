@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.data
 
+import com.daml.metrics.MetricHandle.{Gauge, VarGauge}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.MetricHandle.{GaugeM, VarGaugeM}
 import com.digitalasset.canton.metrics.RefGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.{SequencerCounter, SequencerCounterDiscriminator}
+import com.digitalasset.canton.{DiscardOps, SequencerCounter, SequencerCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -218,7 +218,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
               )
             case _ =>
           }
-          sequencerCounterQueue.insert(sequencerCounter, timestamp)
+          sequencerCounterQueue.insert(sequencerCounter, timestamp).discard
           metrics.sequencerCounterQueue.metric.updateValue(_ + 1)
         case BeforeHead =>
           if (timestamp > latestTime)
@@ -245,7 +245,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   def flush(): Future[Unit] = queue.flush()
 
   override def closeAsync() = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Seq(
       SyncCloseable("unregister-metrics", metrics.taskQueue.metric.setReference(None)),
       queue.asCloseable("TaskScheduler.flush", timeouts.shutdownShort.unwrap),
@@ -300,7 +300,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
             show"A task failed with an exception.\n$task",
           )
           taskQueue.dequeue()
-        }
+        }.discard
         go()
     }
 
@@ -313,7 +313,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       case Some(barrier) if barrier.timestamp > observedTime => ()
       case Some(barrier) =>
         barrier.completion.success(())
-        barrierQueue.dequeue()
+        barrierQueue.dequeue().discard
         go()
     }
 
@@ -322,8 +322,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
 }
 
 trait TaskSchedulerMetrics {
-  def sequencerCounterQueue: VarGaugeM[Int]
-  def taskQueue: GaugeM[RefGauge[Int], Int]
+  def sequencerCounterQueue: VarGauge[Int]
+  def taskQueue: Gauge[RefGauge[Int], Int]
 }
 
 object TaskScheduler {

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.{DbConfig, MemoryStorageConfig, StorageConfig}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.{
   FailedToStopLedgerApiServer,

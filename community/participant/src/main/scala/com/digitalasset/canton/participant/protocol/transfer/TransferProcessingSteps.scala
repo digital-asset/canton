@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, SaltError}
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -21,19 +21,19 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.EncryptedViewMessageCreationError
-import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps._
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolProcessor}
 import com.digitalasset.canton.participant.store.TransferStore.TransferStoreError
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.Verdict.{
   Approve,
   MediatorReject,
   ParticipantReject,
 }
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
@@ -157,7 +157,7 @@ trait TransferProcessingSteps[
       stakeholders: List[LfPartyId],
       snapshot: TopologySnapshot,
   ): Future[List[LfPartyId]] = {
-    import cats.implicits._
+    import cats.implicits.*
     stakeholders.traverseFilter { stk =>
       for {
         relationshipO <- snapshot.hostedOn(stk, participantId)

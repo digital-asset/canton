@@ -3,16 +3,16 @@
 
 package com.digitalasset.canton.data
 
-import cats.implicits._
-import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.crypto._
+import cats.implicits.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.MerkleSeq.MerkleSeqElement
-import com.digitalasset.canton.data.MerkleTree._
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v0, v1}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
+import com.digitalasset.canton.version.HasProtocolVersionedWrapper
+import com.digitalasset.canton.{DiscardOps, ProtoDeserializationError}
 import com.google.protobuf.ByteString
 
 import scala.collection.mutable
@@ -63,7 +63,7 @@ trait MerkleTree[+A] extends Product with Serializable with PrettyPrinting {
   ): MerkleTree[A] = {
 
     val optimizedBlindingPolicy = mutable.Map[RootHash, BlindingCommand]()
-    optimizeBlindingPolicy(this)
+    optimizeBlindingPolicy(this).discard
 
     // Optimizes the blinding policy by replacing RevealIfNeedBe with RevealSubtree or BlindSubtree
     // whenever possible.
@@ -210,6 +210,7 @@ case class BlindedNode[+A](rootHash: RootHash) extends MerkleTree[A] {
 }
 
 object MerkleTree {
+  type VersionedMerkleTree[A] = MerkleTree[A] with HasProtocolVersionedWrapper[_]
 
   /** Command indicating whether and how to blind a Merkle tree. */
   sealed trait BlindingCommand extends Product with Serializable
@@ -222,21 +223,21 @@ object MerkleTree {
   case object RevealIfNeedBe extends BlindingCommand
 
   /** Map a Merkle tree node to its protobuf node */
-  def toBlindableNodeV0(node: MerkleTree[_ <: HasVersionedToByteString]): v0.BlindableNode =
+  def toBlindableNodeV0(node: MerkleTree[HasProtocolVersionedWrapper[_]]): v0.BlindableNode =
     v0.BlindableNode(blindedOrNot = node.unwrap match {
       case Left(h) => v0.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
       case Right(n) =>
         v0.BlindableNode.BlindedOrNot.Unblinded(
-          n.toByteString(ProtocolVersion.v2Todo_i10354)
+          n.toByteString
         )
     })
 
-  def toBlindableNodeV1(node: MerkleTree[_ <: HasVersionedToByteString]): v1.BlindableNode =
+  def toBlindableNodeV1(node: MerkleTree[HasProtocolVersionedWrapper[_]]): v1.BlindableNode =
     v1.BlindableNode(blindedOrNot = node.unwrap match {
       case Left(h) => v1.BlindableNode.BlindedOrNot.BlindedHash(h.toProtoPrimitive)
       case Right(n) =>
         v1.BlindableNode.BlindedOrNot.Unblinded(
-          n.toByteString(ProtocolVersion.v4)
+          n.toByteString
         )
     })
 
@@ -245,7 +246,7 @@ object MerkleTree {
       protoNode: Option[v0.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
-    import v0.BlindableNode.{BlindedOrNot => BON}
+    import v0.BlindableNode.{BlindedOrNot as BON}
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash
@@ -264,7 +265,7 @@ object MerkleTree {
       protoNode: Option[v1.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
-    import v1.BlindableNode.{BlindedOrNot => BON}
+    import v1.BlindableNode.{BlindedOrNot as BON}
     protoNode.map(_.blindedOrNot) match {
       case Some(BON.BlindedHash(hashBytes)) =>
         RootHash

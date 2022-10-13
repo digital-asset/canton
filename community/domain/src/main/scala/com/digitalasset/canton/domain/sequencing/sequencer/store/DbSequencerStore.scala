@@ -4,10 +4,10 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.foldable._
-import com.daml.nonempty.catsinstances._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -22,9 +22,9 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction.ReadOnly
-import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain._
+import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain.*
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Oracle, Postgres}
-import com.digitalasset.canton.resource.DbStorage._
+import com.digitalasset.canton.resource.DbStorage.*
 import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
@@ -37,13 +37,13 @@ import com.google.protobuf.ByteString
 import com.zaxxer.hikari.pool.HikariProxyConnection
 import io.functionmeta.functionFullName
 import oracle.jdbc.{OracleArray, OracleConnection}
-import org.h2.api.{ErrorCode => H2ErrorCode}
+import org.h2.api.{ErrorCode as H2ErrorCode}
 import org.postgresql.util.PSQLState
-import slick.jdbc._
+import slick.jdbc.*
 
 import java.sql.{Connection, JDBCType, SQLException, SQLNonTransientException}
 import java.util.UUID
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 import scala.annotation.tailrec
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
@@ -64,10 +64,10 @@ class DbSequencerStore(
     with FlagCloseable
     with HasCloseContext {
 
-  import DbStorage.Implicits._
-  import Member.DbStorageImplicits._
-  import storage.api._
-  import storage.converters._
+  import DbStorage.Implicits.*
+  import Member.DbStorageImplicits.*
+  import storage.api.*
+  import storage.converters.*
 
   private implicit val setRecipientsArrayOParameter
       : SetParameter[Option[NonEmpty[SortedSet[SequencerMemberId]]]] = (v, pp) => {
@@ -578,7 +578,7 @@ class DbSequencerStore(
   override def saveWatermark(instanceIndex: Int, ts: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SaveWatermarkError, Unit] = {
-    import SaveWatermarkError._
+    import SaveWatermarkError.*
 
     def save: DBIOAction[Int, NoStream, Effect.Write with Effect.Transactional] =
       profile match {
@@ -1147,7 +1147,7 @@ class DbSequencerStore(
           _ <- EitherTUtil.condUnitET[Future](
             configuredCommitMode.postgresSettings.toList.contains(setting),
             s"Postgres 'synchronous_commit' setting is '$setting' but expecting one of: ${configuredCommitMode.postgresSettings.toList
-              .mkString(",")}",
+                .mkString(",")}",
           )
         } yield ()
     }

@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton
 
-import com.daml.ledger.api.v1.value.{Identifier => ApiIdentifier}
+import com.daml.ledger.api.v1.value.{Identifier as ApiIdentifier}
 import com.daml.ledger.client.binding
 import com.daml.lf.data.{FrontStack, ImmArray}
 import com.daml.lf.transaction.test.TransactionBuilder
 import com.daml.lf.transaction.test.TransactionBuilder.Implicits.{toIdentifier, toPackageId}
 import com.digitalasset.canton.ComparesLfTransactions.{TbContext, TxTree}
-import com.digitalasset.canton.logging.pretty.PrettyTestInstances._
+import com.digitalasset.canton.logging.pretty.PrettyTestInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{
   LfContractId,
@@ -103,7 +103,7 @@ trait ComparesLfTransactions {
   val notUsed: LfValue = LfValue.ValueUnit
 
   protected def templateIdFromTemplate[T](template: binding.Primitive.TemplateId[T]) = {
-    import scalaz.syntax.tag._
+    import scalaz.syntax.tag.*
     template.unwrap match {
       case ApiIdentifier(packageId, moduleName, entityName) =>
         toIdentifier(s"${moduleName}:${entityName}")(toPackageId(packageId))

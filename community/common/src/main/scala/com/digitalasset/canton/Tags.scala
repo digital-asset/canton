@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,

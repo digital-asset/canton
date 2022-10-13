@@ -4,8 +4,8 @@
 package com.digitalasset.canton.data
 
 import com.daml.lf.value.Value
-import com.digitalasset.canton.data.ActionDescription._
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.data.ActionDescription.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.{BaseTest, LfInterfaceId}

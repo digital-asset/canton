@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.domain.grpc
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.common.domain.ServiceAgreement
 import com.digitalasset.canton.domain.api.v0.DomainServiceGrpc.DomainServiceStub
 import com.digitalasset.canton.domain.api.v0.{

@@ -7,29 +7,29 @@ import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
-import com.daml.platform.apiserver.{ApiServerConfig => DamlApiServerConfig}
+import com.daml.platform.apiserver.{ApiServerConfig as DamlApiServerConfig}
 import com.daml.platform.configuration.{
   CommandConfiguration,
-  IndexServiceConfig => DamlIndexServiceConfig,
+  IndexServiceConfig as DamlIndexServiceConfig,
 }
 import com.daml.platform.indexer.ha.HaConfig
 import com.daml.platform.indexer.{
-  IndexerConfig => DamlIndexerConfig,
+  IndexerConfig as DamlIndexerConfig,
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.daml.platform.store.DbSupport.{DataSourceProperties => DamlDataSourceProperties}
+import com.daml.platform.store.DbSupport.{DataSourceProperties as DamlDataSourceProperties}
 import com.daml.platform.store.backend.postgresql.{
-  PostgresDataSourceConfig => DamlPostgresDataSourceConfig
+  PostgresDataSourceConfig as DamlPostgresDataSourceConfig
 }
 import com.daml.platform.usermanagement.UserManagementConfig
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.LocalNodeConfig.LocalNodeConfigDeprecationImplicits
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt._
-import com.digitalasset.canton.config.RequireTypes._
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.*
+import com.digitalasset.canton.config.RequireTypes.*
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -42,15 +42,15 @@ import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.time.NonNegativeFiniteDuration._
+import com.digitalasset.canton.time.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import io.netty.handler.ssl.{ClientAuth, SslContext}
-import io.scalaland.chimney.dsl._
-import monocle.macros.syntax.lens._
+import io.scalaland.chimney.dsl.*
+import monocle.macros.syntax.lens.*
 
 import java.security.InvalidParameterException
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig {
@@ -375,7 +375,7 @@ object LedgerApiServerConfig {
     ) = indexServiceConfig
 
     def fromClientAuth(clientAuth: ClientAuth): ServerAuthRequirementConfig = {
-      import ServerAuthRequirementConfig._
+      import ServerAuthRequirementConfig.*
       clientAuth match {
         case ClientAuth.REQUIRE =>
           None // not passing "require" as we need adminClientCerts in this case which are not available here

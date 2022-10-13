@@ -15,7 +15,7 @@ import com.digitalasset.canton.environment.{
 import com.digitalasset.canton.integration.CommunityTests.CommunityTestConsoleEnvironment
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.typesafe.config.ConfigFactory
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 
 case class CommunityEnvironmentDefinition(
     override val baseConfig: CantonCommunityConfig,

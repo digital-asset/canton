@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission.routing
 
-import cats.syntax.alternative._
+import cats.syntax.alternative.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.{LfContractId, WithContractMetadata}
 import com.digitalasset.canton.topology.DomainId

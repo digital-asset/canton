@@ -4,8 +4,8 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.{
   HashPurpose,
@@ -325,8 +325,8 @@ class SequencedEventValidatorImpl(
     extends SequencedEventValidator
     with NamedLogging {
 
-  import SequencedEventValidationError._
-  import SequencedEventValidatorImpl._
+  import SequencedEventValidationError.*
+  import SequencedEventValidatorImpl.*
 
   private val priorEventRef: AtomicReference[Option[PossiblyIgnoredSerializedEvent]] =
     new AtomicReference[Option[PossiblyIgnoredSerializedEvent]](initialPriorEvent)

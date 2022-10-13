@@ -19,7 +19,7 @@ import com.digitalasset.canton.protocol.{
   * and actual transactions differ unexpectedly.
   */
 trait PrettyTestInstances {
-  import Pretty._
+  import Pretty.*
 
   implicit lazy val prettyLfCommittedTransaction: Pretty[LfCommittedTransaction] = prettyOfClass(
     param("nodes", _.nodes),

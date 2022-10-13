@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology
 
 import cats.Order
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPartyId, checked}
 import io.circe.Encoder
 import slick.jdbc.{GetResult, SetParameter}

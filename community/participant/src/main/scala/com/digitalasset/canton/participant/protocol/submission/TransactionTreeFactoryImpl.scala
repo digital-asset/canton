@@ -4,29 +4,29 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.value.ValueCoder
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory._
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import io.scalaland.chimney.dsl._
+import io.scalaland.chimney.dsl.*
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
@@ -159,13 +159,13 @@ abstract class TransactionTreeFactoryImpl(
             submitterMetadata,
             commonMetadata,
             participantMetadata,
-            MerkleSeq.fromSeq(cryptoOps)(rootViews),
+            MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
           )
         )
     } yield rootViews
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
+  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def tryReconstruct(
       subaction: WellFormedTransaction[WithoutSuffixes],
       rootPosition: ViewPosition,

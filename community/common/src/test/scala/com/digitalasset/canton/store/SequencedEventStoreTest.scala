@@ -4,16 +4,16 @@
 package com.digitalasset.canton.store
 
 import cats.data.Validated.Valid
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Signature, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTestUtils}
-import com.digitalasset.canton.store.SequencedEventStore._
+import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, SequencerCounter}

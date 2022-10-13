@@ -4,18 +4,18 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.store._
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedDomain
@@ -46,14 +46,14 @@ class DbContractStore(
     extends ContractStore
     with DbStore {
 
-  import DbStorage.Implicits._
-  import storage.api._
-  import storage.converters._
+  import DbStorage.Implicits.*
+  import storage.api.*
+  import storage.converters.*
 
   private val profile = storage.profile
   private val domainId = domainIdIndexed.index
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("contract-store")
 
   override protected[store] def logger: TracedLogger = super.logger
@@ -104,7 +104,7 @@ class DbContractStore(
   private def lookupQueries(
       ids: NonEmpty[Seq[LfContractId]]
   ): Iterable[DbAction.ReadOnly[Seq[Option[StoredContract]]]] = {
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
 
     DbStorage.toInClauses("contract_id", ids, maxContractIdSqlInListSize).map {
       case (idGroup, inClause) =>
@@ -169,7 +169,7 @@ class DbContractStore(
   )(implicit traceContext: TraceContext): Future[List[SerializableContract]] =
     processingTime.metric.event {
 
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
 
       // If filter is set returns a conjunctive (`and` prepended) constraint on attribute `name`.
       // Otherwise empty sql action.
@@ -227,7 +227,7 @@ class DbContractStore(
 
   // Not to be called directly: use contractsCache
   private def contractInsert(storedContract: StoredContract): DbAction.WriteOnly[Int] = {
-    import DbStorage.Implicits._
+    import DbStorage.Implicits.*
     val contractId = storedContract.contractId
     val contract = storedContract.contract.rawContractInstance
     val metadata = storedContract.contract.metadata
@@ -323,7 +323,7 @@ class DbContractStore(
   override def deleteIgnoringUnknown(
       contractIds: Iterable[LfContractId]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    import DbStorage.Implicits.BuilderChain._
+    import DbStorage.Implicits.BuilderChain.*
     MonadUtil
       .batchedSequentialTraverse_(
         parallelism = 2 * maxDbConnections,

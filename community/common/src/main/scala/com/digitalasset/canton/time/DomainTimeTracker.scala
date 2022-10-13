@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.time
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
@@ -14,18 +14,18 @@ import com.digitalasset.canton.sequencing.protocol.Envelope
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
-import com.digitalasset.canton.time.DomainTimeTracker._
+import com.digitalasset.canton.time.DomainTimeTracker.*
 import com.digitalasset.canton.time.admin.v0
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.util.*
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.PriorityBlockingQueue
 import java.util.concurrent.atomic.AtomicReference
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 /** Configuration for the domain time tracker.

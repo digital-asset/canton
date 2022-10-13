@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.event
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.TaskSchedulerTest.MockTaskSchedulerMetrics
@@ -15,12 +15,12 @@ import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisherTest.Fixture
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
-import com.digitalasset.canton.participant.protocol._
+import com.digitalasset.canton.participant.protocol.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker
 import com.digitalasset.canton.participant.store.EventLogId.DomainEventLogId
 import com.digitalasset.canton.participant.store.MultiDomainEventLog
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.PublicationData
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}

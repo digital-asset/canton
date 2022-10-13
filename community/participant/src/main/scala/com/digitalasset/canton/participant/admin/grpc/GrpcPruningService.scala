@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
 import com.daml.error.definitions.LedgerApiErrors.RequestValidation.NonHexOffset
 import com.daml.error.{BaseError, ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.error.CantonError

@@ -11,7 +11,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, MessageId}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Test implementation that stores all requests in a queue.
   */

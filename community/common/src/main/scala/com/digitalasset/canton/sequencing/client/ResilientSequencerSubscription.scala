@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerSubscriptionErrorGroup
@@ -33,7 +33,7 @@ import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success, Try}
 
@@ -231,7 +231,7 @@ class ResilientSequencerSubscription[HandlerError](
       case Failure(exception) =>
         logger.error(s"Closing resilient sequencer subscription due to exception", exception)
     }
-    closeReasonPromise.tryComplete(reason)
+    closeReasonPromise.tryComplete(reason).discard
     close()
   }
 

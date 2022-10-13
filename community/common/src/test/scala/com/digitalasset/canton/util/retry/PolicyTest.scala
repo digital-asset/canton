@@ -14,7 +14,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.Jitter.RandomSource
 import com.digitalasset.canton.util.retry.RetryUtil.{AllExnRetryable, DbExceptionRetryable}
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
@@ -23,7 +23,7 @@ import org.slf4j.event.Level
 
 import java.util.Random
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 class PolicyTest extends AsyncFunSpec with BaseTest with HasExecutorService {

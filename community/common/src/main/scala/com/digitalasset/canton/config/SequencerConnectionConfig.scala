@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.config
 
-import better.files._
-import cats.syntax.traverse._
+import better.files.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
 import com.digitalasset.canton.crypto.X509CertificatePem
