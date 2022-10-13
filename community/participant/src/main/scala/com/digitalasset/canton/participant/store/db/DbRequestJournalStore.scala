@@ -14,7 +14,6 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext._
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
@@ -32,6 +31,7 @@ import com.digitalasset.canton.store.{CursorPreheadStore, IndexedDomain}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
+import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 import slick.jdbc._
@@ -59,8 +59,8 @@ class DbRequestJournalStore(
   private val processingTime: GaugeM[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("request-journal-store")
 
-  private[store] override val cleanPreheadStore: CursorPreheadStore[RequestCounter] =
-    new DbCursorPreheadStore[RequestCounter](
+  private[store] override val cleanPreheadStore: CursorPreheadStore[RequestCounterDiscriminator] =
+    new DbCursorPreheadStore[RequestCounterDiscriminator](
       SequencerClientDiscriminator.fromIndexedDomainId(domainId),
       storage,
       cursorTable = "head_clean_counters",
@@ -78,7 +78,7 @@ class DbRequestJournalStore(
 
   implicit val getResultRequestData: GetResult[RequestData] = GetResult(r =>
     RequestData(
-      r.nextLong(),
+      GetResult[RequestCounter].apply(r),
       getResultRequestState(r),
       GetResult[CantonTimestamp].apply(r),
       GetResult[Option[CantonTimestamp]].apply(r),

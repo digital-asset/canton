@@ -76,7 +76,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
 
   def toProtoV1: v1.InformeeMessage =
     v1.InformeeMessage(
-      fullInformeeTree = Some(fullInformeeTree.toProtoV0),
+      fullInformeeTree = Some(fullInformeeTree.toProtoV1),
       protocolVersion = protocolVersion.toProtoPrimitive,
     )
 
@@ -148,7 +148,7 @@ object InformeeMessage extends HasProtocolVersionedWithContextCompanion[Informee
         "InformeeMessage.informeeTree",
         maybeFullInformeeTreeP,
       )
-      fullInformeeTree <- FullInformeeTree.fromProtoV0(hashOps, fullInformeeTreeP)
+      fullInformeeTree <- FullInformeeTree.fromProtoV1(hashOps, fullInformeeTreeP)
       protocolVersion = ProtocolVersion(protocolVersionP)
     } yield new InformeeMessage(fullInformeeTree)(protocolVersion)
   }

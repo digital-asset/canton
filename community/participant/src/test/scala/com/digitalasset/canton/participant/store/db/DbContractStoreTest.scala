@@ -63,6 +63,7 @@ object DbContractStoreTest {
       ),
       protocolVersion = protocolVersion,
       maxContractIdSqlInListSize = PositiveNumeric.tryCreate(2),
+      maxDbConnections = 10,
       cacheConfig = CachingConfigs.testing.contractStore,
       dbQueryBatcherConfig = BatchAggregatorConfig.defaultsForTesting,
       timeouts = DefaultProcessingTimeouts.testing,

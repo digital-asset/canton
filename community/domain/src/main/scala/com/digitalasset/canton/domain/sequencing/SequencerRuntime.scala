@@ -237,6 +237,7 @@ class SequencerRuntime(
           // Since the sequencer runtime trusts itself, there is no point in validating the events.
           SequencedEventValidatorFactory.noValidation(domainId, sequencerId, warn = false),
           clock,
+          SequencerClient.signSubmissionRequest(syncCrypto),
           sequencedEventStore,
           new SendTracker(Map(), SendTrackerStore(storage), metrics.sequencerClient, loggerFactory),
           metrics.sequencerClient,

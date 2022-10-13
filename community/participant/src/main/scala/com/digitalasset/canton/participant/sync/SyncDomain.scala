@@ -6,18 +6,17 @@ package com.digitalasset.canton.participant.sync
 import akka.stream.Materializer
 import cats.Monad
 import cats.data.EitherT
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.{CantonError, HasDegradationState}
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.{
@@ -32,7 +31,7 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmitted,
 }
-import com.digitalasset.canton.participant.protocol._
+import com.digitalasset.canton.participant.protocol.*
 import com.digitalasset.canton.participant.protocol.submission.{
   ConfirmationRequestFactory,
   InFlightSubmissionTracker,
@@ -42,7 +41,7 @@ import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingS
   DomainNotReady,
   TransferProcessorError,
 }
-import com.digitalasset.canton.participant.protocol.transfer._
+import com.digitalasset.canton.participant.protocol.transfer.*
 import com.digitalasset.canton.participant.pruning.{
   AcsCommitmentProcessor,
   PruneObserver,
@@ -62,7 +61,7 @@ import com.digitalasset.canton.participant.topology.{
 }
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements
 import com.digitalasset.canton.sequencing.handlers.{CleanSequencerCounterTracker, EnvelopeOpener}
@@ -75,8 +74,9 @@ import com.digitalasset.canton.sequencing.{
   PossiblyIgnoredProtocolEvent,
   SubscriptionStart,
 }
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
+import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent
-import com.digitalasset.canton.store.{CursorPrehead, SequencedEventStore}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{
@@ -86,7 +86,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import io.functionmeta.functionFullName
@@ -335,10 +335,10 @@ class SyncDomain(
         // TODO(i9270) extract magic numbers
         storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
           parallelism = 20,
-          batchSize = 500,
+          chunkSize = 500,
         )(change.activations.toSeq)(withMetadataSeq)
         storedDeactivatedContracts <- MonadUtil
-          .batchedSequentialTraverse(parallelism = 20, batchSize = 500)(change.deactivations.toSeq)(
+          .batchedSequentialTraverse(parallelism = 20, chunkSize = 500)(change.deactivations.toSeq)(
             withMetadataSeq
           )
       } yield {
@@ -448,7 +448,9 @@ class SyncDomain(
 
       _unit <- EitherT.right(
         persistent.causalDependencyStore.initialize(
-          lastLocalOffset.map(lo => lo.min(cleanHeadRc - 1))
+          lastLocalOffset.map(lo =>
+            RequestCounter(lo.min(cleanHeadRc.asLocalOffset - 1))
+          ) // TODO(#10497) is this conversion fine?
         )
       )
 
@@ -467,7 +469,7 @@ class SyncDomain(
       // the multi-domain event log before the crash
       pending <- EitherT.right(
         participantNodePersistentState.multiDomainEventLog
-          .fetchUnpublished(persistent.eventLog.id, Some(cleanHeadRc - 1L))
+          .fetchUnpublished(persistent.eventLog.id, Some(cleanHeadRc.asLocalOffset - 1L))
       )
 
       _unit = ephemeral.recordOrderPublisher.scheduleRecoveries(pending)
@@ -491,7 +493,7 @@ class SyncDomain(
       _ <- loadPendingEffectiveTimesFromTopologyStore(acsChangesReplayStartRt.timestamp)
       acsChangesToReplay <-
         if (
-          cleanHeadPrets >= acsChangesReplayStartRt.timestamp && cleanHeadRc > GenesisRequestCounter
+          cleanHeadPrets >= acsChangesReplayStartRt.timestamp && cleanHeadRc > RequestCounter.Genesis
         ) {
           logger.info(
             s"Looking for ACS changes to replay between ${acsChangesReplayStartRt.timestamp} and $cleanHeadPrets"
@@ -521,7 +523,7 @@ class SyncDomain(
     def firstUnpersistedEventScF: Future[SequencerCounter] =
       persistent.sequencedEventStore
         .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))(initializationTraceContext)
-        .fold(_ => GenesisSequencerCounter, _.counter + 1)
+        .fold(_ => SequencerCounter.Genesis, _.counter + 1)
 
     val sequencerCounterPreheadTsO =
       ephemeral.startingPoints.rewoundSequencerCounterPrehead.map(_.timestamp)
@@ -806,7 +808,7 @@ class SyncDomain(
   override def toString: String = s"SyncDomain(domain=$domainId, participant=$participantId)"
 
   private def notifyInFlightSubmissionTracker(
-      tracedCleanSequencerCounterPrehead: Traced[CursorPrehead[SequencerCounter]]
+      tracedCleanSequencerCounterPrehead: Traced[SequencerCounterCursorPrehead]
   ): Future[Unit] =
     tracedCleanSequencerCounterPrehead.withTraceContext {
       implicit traceContext => cleanSequencerCounterPrehead =>

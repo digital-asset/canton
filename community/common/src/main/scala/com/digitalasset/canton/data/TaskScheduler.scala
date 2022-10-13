@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}
@@ -14,6 +13,7 @@ import com.digitalasset.canton.metrics.RefGauge
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.{SequencerCounter, SequencerCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 import io.functionmeta.functionFullName
 
@@ -74,7 +74,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
     * Invariant for public methods: The head is always the front. Timestamps strictly increase with sequencer counters.
     */
   private[this] val sequencerCounterQueue: PeanoQueue[SequencerCounter, CantonTimestamp] =
-    new PeanoTreeQueue[CantonTimestamp](initSc)
+    new PeanoTreeQueue[SequencerCounterDiscriminator, CantonTimestamp](initSc)
 
   /** Contains all the time barriers in the order in which they must be signalled.
     *
@@ -183,7 +183,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
         s"Signalling sequencer counter $sequencerCounter at $timestamp to the task scheduler. Head is ${sequencerCounterQueue.head}"
       )
       ErrorUtil.requireArgument(
-        sequencerCounter != Long.MaxValue,
+        sequencerCounter.isNotMaxValue,
         "Sequencer counter Long.MaxValue signalled to task scheduler.",
       )
 

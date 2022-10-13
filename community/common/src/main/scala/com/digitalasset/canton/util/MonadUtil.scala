@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.foldable._
 import cats.syntax.traverse._
 import cats.{Monad, Monoid}
 
@@ -65,18 +66,32 @@ object MonadUtil {
 
   /** Batched version of sequential traverse
     *
-    * Can be used to avoid overloading the database queue
+    * Can be used to avoid overloading the database queue. Use e.g. maxDbConnections * 2
+    * as parameter for parallelism to not overload the database queue but to make sufficient use
+    * of the existing resources.
     */
-  def batchedSequentialTraverse[X, M[_], S](parallelism: Int, batchSize: Int)(
+  def batchedSequentialTraverse[X, M[_], S](parallelism: Int, chunkSize: Int)(
       xs: Seq[X]
-  )(f: Seq[X] => M[Seq[S]])(implicit
+  )(processChunk: Seq[X] => M[Seq[S]])(implicit
       monad: Monad[M]
   ): M[Seq[S]] =
     monad.map(
-      sequentialTraverse(xs.grouped(parallelism).grouped(batchSize).toSeq)(_.flatTraverse(f))
+      sequentialTraverse(xs.grouped(chunkSize).grouped(parallelism).toSeq)(
+        _.flatTraverse(processChunk)
+      )
     )(
       _.flatten
     )
+
+  def batchedSequentialTraverse_[X, M[_], S](parallelism: Int, chunkSize: Int)(
+      xs: Seq[X]
+  )(processChunk: Seq[X] => M[Unit])(implicit
+      monad: Monad[M]
+  ): M[Unit] = {
+    sequentialTraverse_(xs.grouped(chunkSize).grouped(parallelism))(chunk =>
+      chunk.toSeq.traverse_(processChunk)
+    )
+  }
 
   /** Conceptually equivalent to `sequentialTraverse(xs)(step).map(monoid.combineAll)`.
     * The caller must ensure that the Iterable is immutable.

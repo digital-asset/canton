@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -12,12 +13,12 @@ import com.digitalasset.canton.topology.Member
   * @param member the member subscribing to the sequencer
   * @param counter the counter of the first event to receive.
   */
-case class SubscriptionRequest(member: Member, counter: Long) {
+case class SubscriptionRequest(member: Member, counter: SequencerCounter) {
 
   // despite being serialized in the HttpSequencerClient, we don't introduce a `VersionedSubscriptionRequest` because
   // we assume that the subscription endpoint will also be bumped if a V1 SubscriptionRequest is ever introduced
   def toProtoV0: v0.SubscriptionRequest =
-    v0.SubscriptionRequest(member.toProtoPrimitive, counter)
+    v0.SubscriptionRequest(member.toProtoPrimitive, counter.v)
 }
 
 object SubscriptionRequest {
@@ -27,7 +28,7 @@ object SubscriptionRequest {
     val v0.SubscriptionRequest(memberP, counter) = subscriptionRequestP
     for {
       member <- Member.fromProtoPrimitive(memberP, "member")
-    } yield SubscriptionRequest(member, counter)
+    } yield SubscriptionRequest(member, SequencerCounter(counter))
   }
 
 }

@@ -101,6 +101,19 @@ object TransferOutViewTree
         hashOps,
       )
     )(transferOutViewTreeP)
+
+  def fromProtoV1(hashOps: HashOps)(
+      transferOutViewTreeP: v1.TransferViewTree
+  ): ParsingResult[TransferOutViewTree] =
+    GenTransferViewTree.fromProtoV1(
+      TransferOutCommonData.fromByteString(hashOps),
+      TransferOutView.fromByteString(hashOps),
+    )((commonData, view) =>
+      TransferOutViewTree(commonData, view)(
+        protocolVersionRepresentativeFor(ProtobufVersion(1)),
+        hashOps,
+      )
+    )(transferOutViewTreeP)
 }
 
 /** Aggregates the data of a transfer-out request that is sent to the mediator and the involved participants.

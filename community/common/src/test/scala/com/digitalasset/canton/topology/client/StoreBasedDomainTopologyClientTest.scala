@@ -24,7 +24,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission._
 import com.digitalasset.canton.topology.transaction.TrustLevel._
 import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.duration.Duration
@@ -44,7 +44,7 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
 
     def advance(ts: CantonTimestamp): Unit = {
       this
-        .observed(SequencedTime(ts), EffectiveTime(ts), 0, List())
+        .observed(SequencedTime(ts), EffectiveTime(ts), SequencerCounter(0), List())
         .failOnShutdown(s"advance to $ts")
         .futureValue
     }
@@ -156,7 +156,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
             adds.result,
           )
           _ <- client
-            .observed(timestamp, timestamp, 1, transactions)
+            .observed(timestamp, timestamp, SequencerCounter(1), transactions)
             .failOnShutdown(s"observe timestamp $timestamp")
         } yield ()
       }
@@ -204,7 +204,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
             party2participant3,
           ),
         )
-        _ = fixture.client.observed(ts.immediateSuccessor, ts.immediateSuccessor, 0, Seq())
+        _ = fixture.client.observed(
+          ts.immediateSuccessor,
+          ts.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         recent = fixture.client.currentSnapshotApproximation
         party1Mappings <- recent.activeParticipantsOf(party1.toLf)
         party2Mappings <- recent.activeParticipantsOf(party2.toLf)
@@ -222,7 +227,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       val fixture = new Fixture()
       for {
         _ <- fixture.add(ts, Seq(ns1k2, okm1, party2participant1, ps2))
-        _ = fixture.client.observed(ts.immediateSuccessor, ts.immediateSuccessor, 0, Seq())
+        _ = fixture.client.observed(
+          ts.immediateSuccessor,
+          ts.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         snapshot <- fixture.client.snapshot(ts.immediateSuccessor)
         party1Mappings <- snapshot.activeParticipantsOf(party1.toLf)
       } yield {
@@ -251,7 +261,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
           ts2,
           Seq(factory.revert(ps2), factory.mkAdd(ps1m.copy(permission = Disabled))),
         )
-        _ = fixture.client.observed(ts2.immediateSuccessor, ts2.immediateSuccessor, 0, Seq())
+        _ = fixture.client.observed(
+          ts2.immediateSuccessor,
+          ts2.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         snapshotA <- fixture.client.snapshot(ts1)
         snapshotB <- fixture.client.snapshot(ts1.immediateSuccessor)
         snapshotC <- fixture.client.snapshot(ts2.immediateSuccessor)
@@ -292,7 +307,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       for {
         _ <- f.add(ts, Seq(ns1k2, okm1))
         _ <- f.add(ts1, Seq(okm2))
-        _ = f.client.observed(ts1.immediateSuccessor, ts1.immediateSuccessor, 0, Seq())
+        _ = f.client.observed(
+          ts1.immediateSuccessor,
+          ts1.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         spA <- f.client.snapshot(ts1)
         spB <- f.client.snapshot(ts1.immediateSuccessor)
         dmKeys <- spA.signingKeys(domainManager)
@@ -310,7 +330,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       for {
         _ <- f.add(ts, Seq(ps1, party2participant2b))
         _ <- f.add(ts1, Seq(party2participant2a))
-        _ = f.client.observed(ts1.immediateSuccessor, ts1.immediateSuccessor, 0, Seq())
+        _ = f.client.observed(
+          ts1.immediateSuccessor,
+          ts1.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         snapshot1 <- f.client.snapshot(ts1)
         snapshot2 <- f.client.snapshot(ts1.immediateSuccessor)
         res1 <- snapshot1.activeParticipantsOf(party2.toLf)
@@ -359,7 +384,12 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       val party4 = PartyId(UniqueIdentifier(Identifier.tryCreate(s"unrelated"), namespace))
       for {
         _ <- f.add(ts, txs.map(mkAdd(_)))
-        _ = f.client.observed(ts1.immediateSuccessor, ts1.immediateSuccessor, 0, Seq())
+        _ = f.client.observed(
+          ts1.immediateSuccessor,
+          ts1.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
         sp <- f.client.snapshot(ts1)
         p1 <- get(sp, party1)
         p2 <- get(sp, party2)

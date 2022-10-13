@@ -5,9 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.foldable._
 import cats.syntax.traverse._
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter.GenesisRequestCounter
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState._
 import com.digitalasset.canton.participant.protocol.RequestJournal.{
@@ -15,6 +13,7 @@ import com.digitalasset.canton.participant.protocol.RequestJournal.{
   RequestData,
 }
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStoreTest}
+import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.Future
@@ -23,7 +22,7 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
   this: AsyncWordSpecLike with BaseTest =>
 
   def requestJournalStore(mk: () => RequestJournalStore): Unit = {
-    val rc = 0L
+    val rc = RequestCounter(0)
     val ts = CantonTimestamp.Epoch
     def tsWithSecs(secs: Long) = CantonTimestamp.ofEpochSecond(secs)
     val commitTime = CantonTimestamp.ofEpochSecond(1000)
@@ -282,21 +281,21 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
     }
 
     "clean prehead" should {
-      behave like (cursorPreheadStore(() => mk().cleanPreheadStore))
+      behave like (cursorPreheadStore(() => mk().cleanPreheadStore, RequestCounter.apply))
     }
 
     "deleteSince" should {
       "remove all requests from the given counter on" in {
         val store = mk()
-        val cursorHead = CursorPrehead(1L, tsWithSecs(2))
+        val cursorHead = CursorPrehead(RequestCounter(1), tsWithSecs(2))
         for {
           _ <- setupRequests(store)
           _ <- store.advancePreheadCleanTo(cursorHead)
-          _ <- store.deleteSince(2L)
-          result0 <- valueOrFail(store.query(0L))("Request 0 is retained")
-          result2 <- store.query(2L).value
+          _ <- store.deleteSince(RequestCounter(2))
+          result0 <- valueOrFail(store.query(RequestCounter(0)))("Request 0 is retained")
+          result2 <- store.query(RequestCounter(2)).value
           clean <- store.preheadClean
-          _ <- store.insert(RequestData(2L, Pending, tsWithSecs(10)))
+          _ <- store.insert(RequestData(RequestCounter(2), Pending, tsWithSecs(10)))
         } yield {
           result0 shouldBe RequestData(rc, Pending, tsWithSecs(1))
           result2 shouldBe None
@@ -307,9 +306,9 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
       "remove all requests even if there is no request for the counter" in {
         val store = mk()
         for {
-          _ <- store.insert(RequestData(-3L, Pending, tsWithSecs(-1)))
-          _ <- store.deleteSince(-5L)
-          result <- store.query(-3L).value
+          _ <- store.insert(RequestData(RequestCounter(-3), Pending, tsWithSecs(-1)))
+          _ <- store.deleteSince(RequestCounter(-5))
+          result <- store.query(RequestCounter(-3)).value
           clean <- store.preheadClean
         } yield {
           result shouldBe None
@@ -320,11 +319,11 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
       "tolerate bounds above what has been stored" in {
         val store = mk()
         for {
-          _ <- store.insert(RequestData(0L, Pending, tsWithSecs(0)))
-          _ <- store.deleteSince(1)
-          result <- valueOrFail(store.query(0))("Lookup request 0")
+          _ <- store.insert(RequestData(RequestCounter(0), Pending, tsWithSecs(0)))
+          _ <- store.deleteSince(RequestCounter(1))
+          result <- valueOrFail(store.query(RequestCounter(0)))("Lookup request 0")
         } yield {
-          result shouldBe RequestData(0L, Pending, tsWithSecs(0))
+          result shouldBe RequestData(RequestCounter(0), Pending, tsWithSecs(0))
         }
       }
     }
@@ -333,35 +332,35 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
       "return the repair requests in ascending order" in {
         val store = mk()
         val requests = List(
-          RequestData(0L, Pending, tsWithSecs(0)),
+          RequestData(RequestCounter(0), Pending, tsWithSecs(0)),
           RequestData(
-            1L,
+            RequestCounter(1),
             Pending,
             tsWithSecs(0),
             repairContext = Some(RepairContext.tryCreate("repair1")),
           ),
           RequestData(
-            2L,
+            RequestCounter(2),
             Pending,
             tsWithSecs(0),
             repairContext = Some(RepairContext.tryCreate("repair2")),
           ),
-          RequestData(3L, Pending, tsWithSecs(3)),
+          RequestData(RequestCounter(3), Pending, tsWithSecs(3)),
           RequestData(
-            4L,
+            RequestCounter(4),
             Pending,
             tsWithSecs(4),
             repairContext = Some(RepairContext.tryCreate("repair3")),
           ),
-          RequestData(6L, Pending, tsWithSecs(5)),
+          RequestData(RequestCounter(6), Pending, tsWithSecs(5)),
         )
         for {
-          empty <- store.repairRequests(GenesisRequestCounter)
+          empty <- store.repairRequests(RequestCounter.Genesis)
           _ <- requests.traverse_(store.insert)
-          repair1 <- store.repairRequests(1L)
-          repair2 <- store.repairRequests(2L)
-          repair4 <- store.repairRequests(4L)
-          repair6 <- store.repairRequests(6L)
+          repair1 <- store.repairRequests(RequestCounter(1))
+          repair2 <- store.repairRequests(RequestCounter(2))
+          repair4 <- store.repairRequests(RequestCounter(4))
+          repair6 <- store.repairRequests(RequestCounter(6))
         } yield {
           empty shouldBe Seq.empty
           repair1 shouldBe Seq(requests(1), requests(2), requests(4))

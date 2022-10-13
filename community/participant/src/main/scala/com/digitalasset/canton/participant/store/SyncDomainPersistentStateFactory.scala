@@ -133,6 +133,7 @@ class SyncDomainPersistentStateFactory(
           pureCryptoApi,
           parameters.stores,
           parameters.cachingConfigs,
+          parameters.maxDbConnections,
           parameters.processingTimeouts,
           parameters.enableAdditionalConsistencyChecks,
           indexedStringStore,

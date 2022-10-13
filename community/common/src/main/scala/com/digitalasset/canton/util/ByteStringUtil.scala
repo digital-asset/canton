@@ -4,6 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.Order
+import cats.syntax.either._
 import com.digitalasset.canton.serialization.DeserializationError
 import com.google.protobuf.ByteString
 
@@ -37,21 +38,43 @@ object ByteStringUtil {
     ByteString.copyFrom(ByteArrayUtil.compressGzip(bytes))
   }
 
-  def decompressGzip(bytes: ByteString): Either[DeserializationError, ByteString] = {
-    try {
-      val gunzipper = new GZIPInputStream(bytes.newInput())
-      val decompressed = ByteString.readFrom(gunzipper)
-      gunzipper.close()
-      Right(decompressed)
-    } catch {
+  /** If maxBytesToRead is not specified, we decompress all the gunzipper input stream.
+    * If maxBytesToRead is specified, we decompress maximum maxBytesToRead bytes, and if the input is larger
+    * we throw MaxBytesToDecompressExceeded error.
+    */
+  def decompressGzip(
+      bytes: ByteString,
+      maxBytesLimit: Option[Int],
+  ): Either[DeserializationError, ByteString] = {
+    ResourceUtil
+      .withResourceEither(new GZIPInputStream(bytes.newInput())) { gunzipper =>
+        maxBytesLimit match {
+          case None =>
+            Right(ByteString.readFrom(gunzipper))
+          case Some(max) =>
+            val read = gunzipper.readNBytes(max + 1)
+            if (read.length > max) {
+              Left(
+                DeserializationError(
+                  s"Max bytes to decompress is exceeded. The limit is $max bytes."
+                )
+              )
+            } else {
+              Right(ByteString.copyFrom(read))
+            }
+        }
+      }
+      .leftMap(errorMapping)
+      .flatten
+  }
+
+  private def errorMapping(err: Throwable): DeserializationError = {
+    err match {
       // all exceptions that were observed when testing these methods (see also `GzipCompressionTests`)
-      case ex: ZipException => Left(DeserializationError(ex.getMessage, bytes))
+      case ex: ZipException => DeserializationError(ex.getMessage)
       case _: EOFException =>
-        Left(DeserializationError("Compressed byte input ended too early", bytes))
+        DeserializationError("Compressed byte input ended too early")
+      case error => DeserializationError(error.getMessage)
     }
   }
-}
-
-object ByteStringImplicits {
-  implicit val orderByteString: Order[ByteString] = ByteStringUtil.orderByteString
 }

@@ -159,6 +159,7 @@ object TopologyManagementInitialization {
           managerId,
           sequencedEventStore,
           sendTrackerStore,
+          SequencerClient.signSubmissionRequest(syncCrypto),
         )
       }
       timeTracker = DomainTimeTracker(config.timeTracker, clock, newClient, loggerFactory)

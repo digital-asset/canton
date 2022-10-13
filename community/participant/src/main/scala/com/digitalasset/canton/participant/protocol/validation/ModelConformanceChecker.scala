@@ -17,7 +17,6 @@ import com.digitalasset.canton.data.{
   TransactionViewTree,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker._
@@ -36,7 +35,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
 

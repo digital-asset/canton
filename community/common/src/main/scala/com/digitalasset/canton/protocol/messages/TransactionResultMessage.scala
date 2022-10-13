@@ -62,7 +62,7 @@ case class TransactionResultMessage private (
     v1.TransactionResultMessage(
       requestId = Some(requestId.toProtoPrimitive),
       verdict = Some(verdict.toProtoV1),
-      notificationTree = Some(notificationTree.toProtoV0),
+      notificationTree = Some(notificationTree.toProtoV1),
     )
 
   override protected[messages] def toProtoSomeSignedProtocolMessage
@@ -144,7 +144,7 @@ object TransactionResultMessage
         .flatMap(Verdict.fromProtoV1)
       notificationTree <- ProtoConverter
         .required("notification_tree", notificationTreePO)
-        .flatMap(InformeeTree.fromProtoV0(hashOps, _))
+        .flatMap(InformeeTree.fromProtoV1(hashOps, _))
     } yield TransactionResultMessage(requestId, transactionResult, notificationTree)(
       protocolVersionRepresentativeFor(ProtobufVersion(1)),
       Some(bytes),

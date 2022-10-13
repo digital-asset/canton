@@ -35,6 +35,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.DomainAliasManager
 import com.digitalasset.canton.participant.event.RecordTime
@@ -51,7 +52,6 @@ import com.digitalasset.canton.participant.sync.{
 }
 import com.digitalasset.canton.participant.util.DAMLe.ContractWithMetadata
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.resource.TransactionalStoreUpdate
 import com.digitalasset.canton.store.{
@@ -681,16 +681,15 @@ class RepairService(
       skipInactive: Boolean,
       batchSize: PositiveInt,
   )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
-    // TODO(i9270) extract magic numbers
     MonadUtil
-      .batchedSequentialTraverse(20, batchSize.value)(cids)(
+      .batchedSequentialTraverse(parameters.maxDbConnections * 2, batchSize.value)(cids)(
         moveContracts(_, repairSource, repairTarget, skipInactive).map(_ => Seq[Unit]())
       )
       .map(_ => ())
 
   /** Move contract from `repairSource` to `repairTarget`. */
   private def moveContracts(
-      cids: Seq[LfContractId],
+      cids: Iterable[LfContractId],
       repairSource: RepairRequest,
       repairTarget: RepairRequest,
       skipInactive: Boolean,
@@ -994,7 +993,7 @@ class RepairService(
             blindingInfo = None,
             contractMetadata = Map(), // TODO(#9795) wire proper value
           ),
-          repair.rc,
+          repair.rc.asLocalOffset,
           None,
         )
         val eventLog = repair.domainPersistence.eventLog

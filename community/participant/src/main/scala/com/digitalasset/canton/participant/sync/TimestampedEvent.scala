@@ -77,12 +77,12 @@ object TimestampedEvent {
     GetResult { r =>
       import TraceContext.hasVersionedWrapperGetResult
 
-      val requestCounter = r.nextLong()
-      val requestSequencerCounter = r.nextLongOption()
+      val localOffset = r.nextLong()
+      val requestSequencerCounter = GetResult[Option[SequencerCounter]].apply(r)
       val eventId = GetResult[Option[EventId]].apply(r)
       val event = implicitly[GetResult[LedgerSyncEvent]].apply(r)
       val traceContext = implicitly[GetResult[TraceContext]].apply(r)
-      TimestampedEvent(event, requestCounter, requestSequencerCounter, eventId)(traceContext)
+      TimestampedEvent(event, localOffset, requestSequencerCounter, eventId)(traceContext)
     }
 
   /** The size of the event for the metric in the [[com.digitalasset.canton.participant.store.MultiDomainEventLog]]. */

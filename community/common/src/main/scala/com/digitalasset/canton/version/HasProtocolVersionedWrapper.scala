@@ -314,6 +314,9 @@ trait HasMemoizedProtocolVersionedWithContextCompanion[
     valueClass <- supportedProtoVersions
       .deserializerFor(ProtobufVersion(proto.version))(context, bytes, data)
   } yield valueClass
+
+  def fromByteArray(context: Context)(bytes: Array[Byte]): ParsingResult[ValueClass] =
+    fromByteString(context)(ByteString.copyFrom(bytes))
 }
 
 trait HasProtocolVersionedCompanion[

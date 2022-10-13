@@ -5,7 +5,7 @@ package com.digitalasset.canton.console
 
 import better.files.File
 import cats.data.NonEmptyList
-import cats.syntax.traverse.*
+import cats.syntax.traverse._
 import com.codahale.metrics
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, CommunityCantonStatus}
 import com.digitalasset.canton.config.NonNegativeDuration

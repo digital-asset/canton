@@ -6,9 +6,9 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.kernel.Order
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
@@ -35,7 +35,7 @@ import scala.concurrent.Future
   * It becomes active with every transfer-in and transferred away with every transfer-out.
   * If the ACS detects irregularities, the change method reports them.</p>
   *
-  * <p>These methods are supposed to be called by the [[com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector]] only,
+  * <p>These methods are supposed to be called by the `ConflictDetector` only,
   * which coordinates the request journal updates and the updates to the ACS.</p>
   *
   * <p>Updates may be written asynchronously.
@@ -120,7 +120,7 @@ trait ActiveContractStore
     *
     * This method is used by the protocol processors for conflict detection.
     * In-flight transactions may have changesets not yet written to the ACS datastore.
-    * Since only the [[com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector]] tracks in-flight changesets,
+    * Since only the `ConflictDetector` tracks in-flight changesets,
     * this method cannot be used as a source of valid data to other components.
     *
     * If a contract is created or transferred-in and archived or transferred-out at the same [[com.digitalasset.canton.participant.util.TimeOfChange]],

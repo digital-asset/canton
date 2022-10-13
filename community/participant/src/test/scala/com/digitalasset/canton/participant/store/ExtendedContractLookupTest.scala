@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store
 import cats.syntax.foldable._
 import com.daml.lf.value.Value.{ValueText, ValueUnit}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
@@ -15,7 +14,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 }
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.{BaseTest, LfPartyId}
+import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
@@ -40,9 +39,9 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
   val david: LfPartyId = LfPartyId.assertFromString("david")
   val eleonore: LfPartyId = LfPartyId.assertFromString("eleonore")
 
-  val rc0 = 0L
-  val rc1 = 1L
-  val rc2 = 2L
+  val rc0 = RequestCounter(0)
+  val rc1 = RequestCounter(1)
+  val rc2 = RequestCounter(2)
 
   def mk(
       entries: (

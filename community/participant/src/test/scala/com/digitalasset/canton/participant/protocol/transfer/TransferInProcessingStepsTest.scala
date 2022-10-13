@@ -229,7 +229,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         TransferData(
           SourceProtocolVersion(testedProtocolVersion),
           transferId.requestTimestamp,
-          0L,
+          RequestCounter(0),
           fullTransferOutTree,
           CantonTimestamp.ofEpochSecond(10),
           contract,
@@ -415,8 +415,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- valueOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmptyUtil.fromUnsafe(decrypted.views),
             Seq.empty,
             cryptoSnapshot,
@@ -442,8 +442,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmpty(Seq, WithRecipients(inTree2, RecipientsTest.testInstance)),
             Seq.empty,
             cryptoSnapshot,
@@ -465,8 +465,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         result <- leftOrFail(
           transferInProcessingSteps.computeActivenessSetAndPendingContracts(
             CantonTimestamp.Epoch,
-            1L,
-            1L,
+            RequestCounter(1),
+            SequencerCounter(1),
             NonEmpty(
               Seq,
               WithRecipients(inTree, RecipientsTest.testInstance),
@@ -485,8 +485,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail if there are not transfer-in view trees with the right root hash" in {
       transferInProcessingSteps.pendingDataAndResponseArgsForMalformedPayloads(
         CantonTimestamp.Epoch,
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         Seq.empty,
         cryptoSnapshot,
       ) shouldBe Left(ReceivedNoRequests)
@@ -528,8 +528,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pendingDataAndResponseArgs2 = TransferInProcessingSteps.PendingDataAndResponseArgs(
           fullTransferInTree2,
           CantonTimestamp.Epoch,
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           cryptoSnapshot,
           transferringParticipant = true,
         )
@@ -576,8 +576,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
         pendingDataAndResponseArgs = TransferInProcessingSteps.PendingDataAndResponseArgs(
           fullTransferInTree,
           CantonTimestamp.Epoch,
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           cryptoSnapshot,
           transferringParticipant = true,
         )
@@ -675,7 +675,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       TransferData(
         SourceProtocolVersion(testedProtocolVersion),
         CantonTimestamp.Epoch,
-        1L,
+        RequestCounter(1),
         fullTransferOutTree,
         CantonTimestamp.Epoch,
         contract,
@@ -751,8 +751,8 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
       val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
       val pendingRequestData = TransferInProcessingSteps.PendingTransferIn(
         RequestId(CantonTimestamp.Epoch),
-        1L,
-        1L,
+        RequestCounter(1),
+        SequencerCounter(1),
         mock[RootHash],
         contract,
         transactionId1,
@@ -941,7 +941,7 @@ object TransferInProcessingStepsTest {
       Batch.of(protocolVersion, (signedResult, Recipients.cc(participantId)))
     val deliver: Deliver[OpenEnvelope[SignedProtocolMessage[TransferOutResult]]] =
       Deliver.create(
-        0L,
+        SequencerCounter(0),
         CantonTimestamp.Epoch,
         sourceDomain,
         Some(MessageId.tryCreate("msg-0")),

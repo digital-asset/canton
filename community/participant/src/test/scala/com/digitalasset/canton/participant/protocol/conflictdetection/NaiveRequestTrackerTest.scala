@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.store.memory.{InMemoryTransferStore, TransferCache}
 import com.digitalasset.canton.participant.store.{
@@ -12,7 +11,7 @@ import com.digitalasset.canton.participant.store.{
   ContractKeyJournal,
   TransferStoreTest,
 }
-import com.digitalasset.canton.{BaseTest, HasExecutorService, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 class NaiveRequestTrackerTest
@@ -64,24 +63,41 @@ class NaiveRequestTrackerTest
     for {
       acs <- mkAcs()
       ckj <- mkCkj()
-      rt = mk(0L, 0L, CantonTimestamp.MinValue, acs, ckj)
+      rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue, acs, ckj)
       (cdF, toF) <- enterCR(
         rt,
-        0L,
-        1L,
+        RequestCounter(0),
+        SequencerCounter(1),
         CantonTimestamp.ofEpochMilli(1),
         CantonTimestamp.ofEpochMilli(10),
         ActivenessSet.empty,
       )
-      _ = assert(rt.requestInFlight(0L), "Request present immediately after adding")
-      _ = enterTick(rt, 0L, CantonTimestamp.Epoch)
-      _ <- checkConflictResult(0L, cdF, ActivenessResult.success)
-      _ = assert(rt.requestInFlight(0L), "Request present immediately after conflict detection")
-      finalize0 <- enterTR(rt, 0L, 2L, CantonTimestamp.ofEpochMilli(2), CommitSet.empty, 1L, toF)
-      _ = assert(rt.requestInFlight(0L), "Request present immediately after transaction result")
-      _ = enterTick(rt, 3L, CantonTimestamp.ofEpochMilli(3))
+      _ = assert(rt.requestInFlight(RequestCounter(0)), "Request present immediately after adding")
+      _ = enterTick(rt, SequencerCounter(0), CantonTimestamp.Epoch)
+      _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+      _ = assert(
+        rt.requestInFlight(RequestCounter(0)),
+        "Request present immediately after conflict detection",
+      )
+      finalize0 <- enterTR(
+        rt,
+        RequestCounter(0),
+        SequencerCounter(2),
+        CantonTimestamp.ofEpochMilli(2),
+        CommitSet.empty,
+        1L,
+        toF,
+      )
+      _ = assert(
+        rt.requestInFlight(RequestCounter(0)),
+        "Request present immediately after transaction result",
+      )
+      _ = enterTick(rt, SequencerCounter(3), CantonTimestamp.ofEpochMilli(3))
       _ <- finalize0.map(result => assert(result == Right(())))
-      _ = assert(!rt.requestInFlight(0L), "Request evicted immediately after finalization")
+      _ = assert(
+        !rt.requestInFlight(RequestCounter(0)),
+        "Request evicted immediately after finalization",
+      )
     } yield succeed
   }
 
@@ -89,19 +105,22 @@ class NaiveRequestTrackerTest
     for {
       acs <- mkAcs()
       ckj <- mkCkj()
-      rt = mk(0L, 0L, CantonTimestamp.Epoch, acs, ckj)
+      rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch, acs, ckj)
       (cdF, toF) <- enterCR(
         rt,
-        0L,
-        0L,
+        RequestCounter(0),
+        SequencerCounter(0),
         CantonTimestamp.ofEpochMilli(1),
         CantonTimestamp.ofEpochMilli(10),
         ActivenessSet.empty,
       )
-      _ <- checkConflictResult(0L, cdF, ActivenessResult.success)
-      _ = enterTick(rt, 1L, CantonTimestamp.ofEpochMilli(10))
+      _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+      _ = enterTick(rt, SequencerCounter(1), CantonTimestamp.ofEpochMilli(10))
       _ <- toF.map(timeout => assert(timeout.timedOut))
-      _ = assert(!rt.requestInFlight(0L), "Request evicted immediately after timeout")
+      _ = assert(
+        !rt.requestInFlight(RequestCounter(0)),
+        "Request evicted immediately after timeout",
+      )
     } yield succeed
   }
 }

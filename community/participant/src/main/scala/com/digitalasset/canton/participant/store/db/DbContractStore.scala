@@ -14,7 +14,6 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
@@ -25,7 +24,7 @@ import com.digitalasset.canton.util.EitherUtil.RichEitherIterable
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{BatchAggregator, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, checked}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, checked}
 import com.github.blemale.scaffeine.AsyncCache
 import io.functionmeta.functionFullName
 import slick.jdbc.{GetResult, SetParameter}
@@ -38,6 +37,7 @@ class DbContractStore(
     domainIdIndexed: IndexedDomain,
     protocolVersion: ProtocolVersion,
     maxContractIdSqlInListSize: PositiveNumeric[Int],
+    maxDbConnections: Int, // used to throttle query batching
     cacheConfig: CacheConfig,
     dbQueryBatcherConfig: BatchAggregatorConfig,
     override protected val timeouts: ProcessingTimeout,
@@ -143,7 +143,6 @@ class DbContractStore(
   override def lookupManyUncached(
       ids: Seq[LfContractId]
   )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] = {
-    logger.debug(s"Loading ${ids.length}")
     NonEmpty
       .from(ids)
       .fold(Future.successful(List.empty[Option[StoredContract]])) { items =>
@@ -325,22 +324,24 @@ class DbContractStore(
       contractIds: Iterable[LfContractId]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     import DbStorage.Implicits.BuilderChain._
-
-    NonEmpty
-      .from(contractIds.toSeq)
-      .map { contractIds =>
-        val inClauses =
-          DbStorage.toInClauses_("contract_id", contractIds, maxContractIdSqlInListSize)
-        MonadUtil.sequentialTraverse_(inClauses) { inClause =>
-          processingTime.metric.event {
+    MonadUtil
+      .batchedSequentialTraverse_(
+        parallelism = 2 * maxDbConnections,
+        chunkSize = maxContractIdSqlInListSize.value,
+      )(contractIds.toSeq) { cids =>
+        val inClause = sql"contract_id in (" ++
+          cids
+            .map(value => sql"$value")
+            .toSeq
+            .intercalate(sql", ") ++ sql")"
+        processingTime.metric
+          .event {
             storage.update_(
               (sql"""delete from contracts where domain_id = $domainId and """ ++ inClause).asUpdate,
               functionFullName,
             )
           }
-        }
       }
-      .getOrElse(Future.unit)
       .thereafter(_ => cache.synchronous().invalidateAll(contractIds))
   }
 

@@ -20,7 +20,7 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   UniqueIdentifier,
 }
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import io.grpc.stub.ServerCallStreamObserver
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -55,7 +55,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
       val message = MockMessageContent.toByteString
       val event = SignedContent(
         Deliver.create(
-          0L,
+          SequencerCounter(0),
           CantonTimestamp.Epoch,
           domainId,
           Some(MessageId.tryCreate("test-deliver")),

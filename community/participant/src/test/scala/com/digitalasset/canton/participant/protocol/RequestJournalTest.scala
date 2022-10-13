@@ -5,12 +5,13 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.Monad
 import cats.data.OptionT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import com.digitalasset.canton.BaseTest
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import com.codahale.metrics.MetricRegistry
+import com.daml.metrics.MetricName
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
-import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState._
+import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
+import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.{
   NonterminalRequestState,
   RequestData,
@@ -23,6 +24,7 @@ import com.digitalasset.canton.participant.store.{PreHookRequestJournalStore, Re
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
@@ -36,8 +38,13 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
   def mk(
       initRc: RequestCounter,
       store: RequestJournalStore = new InMemoryRequestJournalStore(loggerFactory),
-  ): RequestJournal =
-    new RequestJournal(store, loggerFactory, initRc)
+  ): RequestJournal = {
+    new RequestJournal(store, mkSyncDomainMetrics, loggerFactory, initRc)
+  }
+
+  private def mkSyncDomainMetrics = {
+    new SyncDomainMetrics(MetricName(getClass.getSimpleName), new MetricRegistry())
+  }
 
   def insertWithCursor(
       rj: RequestJournal,
@@ -132,7 +139,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     CantonTimestamp.assertFromInstant(Instant.parse("2020-01-03T00:00:00.00Z"))
 
   "created with initial request counter 0" when {
-    val initRc = 0L
+    val initRc = RequestCounter(0)
     val rj = mk(initRc)
 
     "queries" should {
@@ -341,7 +348,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     "cursor futures are consistent with the persisted cursors" in {
       val rjs = new InMemoryRequestJournalStore(loggerFactory)
       val hooked = new PreHookRequestJournalStore(rjs, loggerFactory)
-      val rj = new RequestJournal(hooked, loggerFactory, initRc)
+      val rj = new RequestJournal(hooked, mkSyncDomainMetrics, loggerFactory, initRc)
 
       def cleanCounterHook3(clean4: Future[Unit]): CleanCounterHook = { prehead =>
         val CursorPrehead(rc, _requestTimestamp) = prehead
@@ -435,7 +442,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     "preheads do not move backwards" in {
       val rjs = new InMemoryRequestJournalStore(loggerFactory)
       val hooked = new PreHookRequestJournalStore(rjs, loggerFactory)
-      val rj = new RequestJournal(hooked, loggerFactory, initRc)
+      val rj = new RequestJournal(hooked, mkSyncDomainMetrics, loggerFactory, initRc)
       val ts1 = CantonTimestamp.ofEpochSecond(1)
 
       // No test for the Pending prehead because we don't have a hook into that.
@@ -458,12 +465,12 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
   }
 
   "created with a non-zero start value" when {
-    val initRc = 0x100000000L
+    val initRc = RequestCounter(0x100000000L)
 
     val insertsBelowCursor =
       List(
         (initRc - 1, CantonTimestamp.assertFromInstant(Instant.parse("2011-12-11T00:00:00.00Z"))),
-        (Long.MinValue, CantonTimestamp.ofEpochSecond(0)),
+        (RequestCounter(Long.MinValue), CantonTimestamp.ofEpochSecond(0)),
       )
 
     "inserting lower request counters" should {

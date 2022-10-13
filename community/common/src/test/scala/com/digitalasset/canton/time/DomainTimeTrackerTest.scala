@@ -4,7 +4,6 @@
 package com.digitalasset.canton.time
 
 import cats.syntax.option._
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -13,6 +12,7 @@ import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, MessageId, S
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -40,7 +40,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     OrdinarySequencedEvent(
       SignedContent(
         Deliver.create(
-          0L,
+          SequencerCounter(0),
           ts,
           DefaultTestIdentities.domainId,
           TimeProof.mkTimeProofRequestMessageId.some,
@@ -57,7 +57,7 @@ class DomainTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
     val event = OrdinarySequencedEvent(
       SignedContent(
         Deliver.create(
-          0L,
+          SequencerCounter(0),
           ts,
           DefaultTestIdentities.domainId,
           MessageId.tryCreate("not a time proof").some,

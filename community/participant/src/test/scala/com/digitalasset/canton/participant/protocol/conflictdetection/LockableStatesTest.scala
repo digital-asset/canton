@@ -7,7 +7,6 @@ import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
   PendingActivenessCheckCounter,
@@ -18,22 +17,25 @@ import com.digitalasset.canton.participant.store.{ConflictDetectionStore, HasPru
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutorService}
+import com.digitalasset.canton.{BaseTest, DiscardOps, HasExecutorService, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorService {
+private[conflictdetection] class LockableStatesTest
+    extends AsyncWordSpec
+    with BaseTest
+    with HasExecutorService {
   import ConflictDetectionHelpers._
   import LockableStatesTest._
 
   implicit val prettyString: Pretty[String] = PrettyUtil.prettyOfString(Predef.identity)
 
-  val toc0 = TimeOfChange(0L, CantonTimestamp.Epoch)
-  val toc1 = TimeOfChange(1L, CantonTimestamp.ofEpochSecond(1))
-  val toc2 = TimeOfChange(2L, CantonTimestamp.ofEpochSecond(2))
-  val toc3 = TimeOfChange(3L, CantonTimestamp.ofEpochSecond(3))
-  val tocEarly = TimeOfChange(0L, CantonTimestamp.ofEpochSecond(-1))
+  val toc0 = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
+  val toc1 = TimeOfChange(RequestCounter(1), CantonTimestamp.ofEpochSecond(1))
+  val toc2 = TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(2))
+  val toc3 = TimeOfChange(RequestCounter(3), CantonTimestamp.ofEpochSecond(3))
+  val tocEarly = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(-1))
 
   val freshId = "FRESH"
   val fresh2Id = "FRESH2"
@@ -107,7 +109,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         active = Set(activeId, fresh2Id, free2Id),
         lock = Set(evictableActive2Id),
       )
-      val handle = sut.pendingActivenessCheck(0L, check)
+      val handle = sut.pendingActivenessCheck(RequestCounter(0), check)
       handle.toBeFetched.toSet shouldBe (check.checkFresh ++ check.checkFree ++ check.checkActive ++ check.lock)
       handle.noOutstandingFetches shouldBe false
       handle.availableF.isCompleted shouldBe true // no further outstanding fetches other than the ones reported
@@ -121,7 +123,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         active = Set(activeId),
         lock = Set(evictableActive2Id),
       )
-      val handle1 = sut.pendingActivenessCheck(1L, check1)
+      val handle1 = sut.pendingActivenessCheck(RequestCounter(1), check1)
       handle1.toBeFetched.toSet shouldBe Set(freshId, freeId, activeId, evictableActive2Id)
 
       val check2 = mkActivenessCheck(
@@ -130,7 +132,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         active = Set(activeId, evictableActiveId),
         lock = Set(evictableActive2Id, activeId, fresh3Id),
       )
-      val handle2 = sut.pendingActivenessCheck(2L, check2)
+      val handle2 = sut.pendingActivenessCheck(RequestCounter(2), check2)
       // Do not report items that are already being fetched
       handle2.toBeFetched.toSet shouldBe Set(fresh2Id, free2Id, evictableActiveId, fresh3Id)
       handle2.availableF.isCompleted shouldBe false // there are further outstanding fetches
@@ -160,7 +162,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
     "handle the empty check" in {
       val sut = mkSut()
       for {
-        (result, locked) <- pendingAndCheck(sut, 0L, ActivenessCheck.empty)
+        (result, locked) <- pendingAndCheck(sut, RequestCounter(0), ActivenessCheck.empty)
       } yield {
         result shouldBe ActivenessCheckResult.success
         locked shouldBe empty
@@ -187,7 +189,7 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
       )
 
       for {
-        (result, locked) <- pendingAndCheck(sut, 2L, check)
+        (result, locked) <- pendingAndCheck(sut, RequestCounter(2), check)
       } yield {
         forEvery(all) { id =>
           sut.getInternalState(id) should contain(mkState(state = preload.get(id), locks = 1))
@@ -213,8 +215,8 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
       )
 
       for {
-        (result1, locked1) <- pendingAndCheck(sut, 2L, check1)
-        (result2, locked2) <- pendingAndCheck(sut, 3L, check2)
+        (result1, locked1) <- pendingAndCheck(sut, RequestCounter(2), check1)
+        (result2, locked2) <- pendingAndCheck(sut, RequestCounter(3), check2)
       } yield {
         locked1.toSet shouldBe locked
         result1 shouldBe mkActivenessCheckResult(unknown = Set(freshId))
@@ -236,8 +238,8 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
       )
 
       for {
-        (result1, locked1) <- pendingAndCheck(sut, 2L, check1)
-        (result2, locked2) <- pendingAndCheck(sut, 3L, check2)
+        (result1, locked1) <- pendingAndCheck(sut, RequestCounter(2), check1)
+        (result2, locked2) <- pendingAndCheck(sut, RequestCounter(3), check2)
       } yield {
         locked1.toSet shouldBe toBeLocked1
         result1 shouldBe mkActivenessCheckResult(unknown = Set(freshId))
@@ -273,10 +275,10 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
         lock = lock,
       )
 
-      val handle1 = sut.pendingActivenessCheck(1L, check1)
+      val handle1 = sut.pendingActivenessCheck(RequestCounter(1), check1)
       sut.providePrefetchedStates(handle1, Map.empty)
       for {
-        (result, locked) <- pendingAndCheck(sut, 2L, check2)
+        (result, locked) <- pendingAndCheck(sut, RequestCounter(2), check2)
       } yield {
         locked.toSet shouldBe lock
         result shouldBe ActivenessCheckResult.success
@@ -296,7 +298,11 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
     "propagate store errors" in {
       val sut = mkSutWithErrStore()
       for {
-        failure <- pendingAndCheck(sut, 0L, mkActivenessCheck(fresh = Set(freshId))).failed
+        failure <- pendingAndCheck(
+          sut,
+          RequestCounter(0),
+          mkActivenessCheck(fresh = Set(freshId)),
+        ).failed
       } yield {
         failure shouldBe a[ConflictDetectionStoreAccessError]
       }
@@ -304,7 +310,8 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
 
     "complain about outstanding prefetches" in {
       val sut = mkSut()
-      val handle = sut.pendingActivenessCheck(0L, mkActivenessCheck(fresh = Set(freshId)))
+      val handle =
+        sut.pendingActivenessCheck(RequestCounter(0), mkActivenessCheck(fresh = Set(freshId)))
       loggerFactory.assertThrowsAndLogs[IllegalConflictDetectionStateException](
         sut.checkAndLock(handle),
         _.errorMessage should include("An internal error has occurred."),
@@ -314,8 +321,8 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
     "complain about outstanding prefetches by other requests" in {
       val sut = mkSut()
       val check = mkActivenessCheck(fresh = Set(freshId))
-      sut.pendingActivenessCheck(0L, check).discard
-      val handle2 = sut.pendingActivenessCheck(1L, check)
+      sut.pendingActivenessCheck(RequestCounter(0), check).discard
+      val handle2 = sut.pendingActivenessCheck(RequestCounter(1), check)
       loggerFactory.assertThrowsAndLogs[IllegalConflictDetectionStateException](
         sut.checkAndLock(handle2),
         _.errorMessage should include("An internal error has occurred."),

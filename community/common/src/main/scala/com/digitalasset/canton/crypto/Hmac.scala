@@ -90,7 +90,7 @@ object Hmac {
         .create(hmacP.hmac, hmacAlgorithm)
         .leftMap(err =>
           ProtoDeserializationError.CryptoDeserializationError(
-            DeserializationError(s"Failed to deserialize HMAC: $err", hmacP.hmac)
+            DeserializationError(s"Failed to deserialize HMAC: $err")
           )
         )
     } yield hmac

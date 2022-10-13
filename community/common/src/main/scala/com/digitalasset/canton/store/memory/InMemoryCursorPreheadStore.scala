@@ -11,31 +11,29 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.Ordered.orderingToOrdered
 import scala.concurrent.{ExecutionContext, Future}
 
-class InMemoryCursorPreheadStore[Counter](protected val loggerFactory: NamedLoggerFactory)(implicit
-    order: Ordering[Counter]
-) extends CursorPreheadStore[Counter]
+class InMemoryCursorPreheadStore[Discr](protected val loggerFactory: NamedLoggerFactory)
+    extends CursorPreheadStore[Discr]
     with NamedLogging {
 
   override private[store] implicit val ec: ExecutionContext = DirectExecutionContext(logger)
 
-  private val preheadRef = new AtomicReference[Option[CursorPrehead[Counter]]](None)
+  private val preheadRef = new AtomicReference[Option[CursorPrehead[Discr]]](None)
 
   override def prehead(implicit
       traceContext: TraceContext
-  ): Future[Option[CursorPrehead[Counter]]] =
+  ): Future[Option[CursorPrehead[Discr]]] =
     Future.successful(preheadRef.get())
 
   @VisibleForTesting
-  private[canton] override def overridePreheadUnsafe(newPrehead: Option[CursorPrehead[Counter]])(
+  private[canton] override def overridePreheadUnsafe(newPrehead: Option[CursorPrehead[Discr]])(
       implicit traceContext: TraceContext
   ): Future[Unit] =
     Future.successful(preheadRef.set(newPrehead))
 
   override def advancePreheadToTransactionalStoreUpdate(
-      newPrehead: CursorPrehead[Counter]
+      newPrehead: CursorPrehead[Discr]
   )(implicit traceContext: TraceContext): TransactionalStoreUpdate =
     TransactionalStoreUpdate.InMemoryTransactionalStoreUpdate {
       val _ = preheadRef.getAndUpdate {
@@ -46,7 +44,7 @@ class InMemoryCursorPreheadStore[Counter](protected val loggerFactory: NamedLogg
     }
 
   override def rewindPreheadTo(
-      newPreheadO: Option[CursorPrehead[Counter]]
+      newPreheadO: Option[CursorPrehead[Discr]]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     logger.info(s"Rewinding prehead to $newPreheadO")
     newPreheadO match {

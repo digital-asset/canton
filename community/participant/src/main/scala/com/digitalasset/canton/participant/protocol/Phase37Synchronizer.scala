@@ -5,11 +5,11 @@ package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue, SynchronizedPeanoTreeQueue}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer._
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -51,10 +51,10 @@ class Phase37Synchronizer(initRc: RequestCounter, override val loggerFactory: Na
   /** Keeps track of the timestamps in [[byTimestamp]] by requests that have reached
     * [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Confirmed]].
     * Timestamps of requests below the head are removed from [[byTimestamp]].
-    * Skipped [[com.digitalasset.canton.participant.RequestCounter]]s are associated with [[scala.None$]].
+    * Skipped [[com.digitalasset.canton.RequestCounter]]s are associated with [[scala.None$]].
     */
   private[this] val queue: PeanoQueue[RequestCounter, Option[CantonTimestamp]] =
-    new SynchronizedPeanoTreeQueue[Option[CantonTimestamp]](initRc)
+    new SynchronizedPeanoTreeQueue[RequestCounterDiscriminator, Option[CantonTimestamp]](initRc)
 
   /** The returned future completes after the given request has reached
     * [[com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Confirmed]].

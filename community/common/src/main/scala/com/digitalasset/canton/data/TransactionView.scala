@@ -161,11 +161,12 @@ case class TransactionView private (
   }
 
   protected def toProtoV0: v0.ViewNode = v0.ViewNode(
-    viewCommonData = Some(MerkleTree.toBlindableNode(viewCommonData)),
-    viewParticipantData = Some(MerkleTree.toBlindableNode(viewParticipantData)),
-    subviews = subviews.map(subview => MerkleTree.toBlindableNode(subview)),
+    viewCommonData = Some(MerkleTree.toBlindableNodeV0(viewCommonData)),
+    viewParticipantData = Some(MerkleTree.toBlindableNodeV0(viewParticipantData)),
+    subviews = subviews.map(subview => MerkleTree.toBlindableNodeV0(subview)),
   )
 
+  // TODO(i9707): Remove non-versioned serialization
   override def toByteString(version: ProtocolVersion): ByteString = toProtoV0.toByteString
 
   /** The global key inputs that the [[com.daml.lf.transaction.ContractStateMachine]] computes
@@ -442,11 +443,11 @@ object TransactionView {
       protoView: v0.ViewNode,
   ): ParsingResult[TransactionView] = {
     for {
-      commonData <- MerkleTree.fromProtoOption(
+      commonData <- MerkleTree.fromProtoOptionV0(
         protoView.viewCommonData,
         ViewCommonData.fromByteString(hashOps),
       )
-      participantData <- MerkleTree.fromProtoOption(
+      participantData <- MerkleTree.fromProtoOptionV0(
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
@@ -461,7 +462,7 @@ object TransactionView {
       hashOps: HashOps
   )(protoViews: Seq[v0.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
     protoViews.traverse(protoView =>
-      MerkleTree.fromProtoOption(Some(protoView), fromByteString(hashOps))
+      MerkleTree.fromProtoOptionV0(Some(protoView), fromByteString(hashOps))
     )
 
   /** Indicates an attempt to create an invalid view. */

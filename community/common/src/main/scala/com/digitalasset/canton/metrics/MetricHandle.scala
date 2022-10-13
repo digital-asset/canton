@@ -6,7 +6,8 @@ package com.digitalasset.canton.metrics
 import cats.data.EitherT
 import com.codahale.metrics
 import com.codahale.metrics.{Gauge, Timer}
-import com.daml.metrics.{MetricName, Timed, VarGauge}
+import com.daml.metrics.Gauges.VarGauge
+import com.daml.metrics.{MetricName, Timed}
 
 import scala.annotation.StaticAnnotation
 import scala.concurrent.duration.FiniteDuration

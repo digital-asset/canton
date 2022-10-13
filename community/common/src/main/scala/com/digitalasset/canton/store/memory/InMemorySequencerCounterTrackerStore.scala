@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.store.memory
 
-import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 
@@ -11,7 +11,7 @@ class InMemorySequencerCounterTrackerStore(override val loggerFactory: NamedLogg
     extends SequencerCounterTrackerStore
     with NamedLogging {
   override protected[store] val cursorStore =
-    new InMemoryCursorPreheadStore[SequencerCounter](loggerFactory)
+    new InMemoryCursorPreheadStore[SequencerCounterDiscriminator](loggerFactory)
 
   override def close(): Unit = ()
 }

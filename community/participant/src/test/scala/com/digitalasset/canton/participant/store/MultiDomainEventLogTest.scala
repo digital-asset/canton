@@ -84,7 +84,7 @@ trait MultiDomainEventLogTest
       timestampedEvent(0, 3),
       InFlightBySequencingInfo(
         domainIds(1),
-        SequencedSubmission(0L, CantonTimestamp.ofEpochSecond(1)),
+        SequencedSubmission(SequencerCounter(0), CantonTimestamp.ofEpochSecond(1)),
       ).some,
     ),
     (

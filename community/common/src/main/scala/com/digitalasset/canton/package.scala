@@ -8,6 +8,7 @@ import com.daml.lf.command.ReplayCommand
 import com.daml.lf.data.{IdString, Ref, Time}
 import com.daml.lf.transaction.{ContractStateMachine, Versioned}
 import com.daml.lf.value.Value
+import com.digitalasset.canton.data.{Counter, CounterCompanion}
 
 import scala.annotation.nowarn
 
@@ -90,15 +91,34 @@ package object canton {
   val LfWorkflowId: Ref.WorkflowId.type = Ref.WorkflowId
 
   type LfKeyResolver = ContractStateMachine.KeyResolver
-  val lfKeyResolver: Map.type = Map
 
   /** The counter assigned by the sequencer to messages sent to the participant.
     * The counter is specific to every participant.
     */
-  type SequencerCounter = Long
+  type SequencerCounterDiscriminator
+  type SequencerCounter = Counter[SequencerCounterDiscriminator]
 
-  /** The [[SequencerCounter]] used for the first message from a sequencer to a participant */
-  val GenesisSequencerCounter: SequencerCounter = 0L
+  val SequencerCounter = new CounterCompanion[SequencerCounterDiscriminator] {}
+
+  /** The counter assigned by the transaction processor to confirmation and transfer requests. */
+  type RequestCounterDiscriminator
+  type RequestCounter = Counter[RequestCounterDiscriminator]
+
+  object RequestCounter extends CounterCompanion[RequestCounterDiscriminator] {
+
+    /** A strict lower bound on all request counters */
+    val LowerBound: RequestCounter = RequestCounter(-1)
+  }
+
+  implicit class RichRequestCounter(val rc: RequestCounter) extends AnyVal {
+
+    /** Use this method to indicate that unwrapping to use the request counter as
+      * a local offset is fine.
+      *
+      * Note: type alias is not available here so using plain Long.
+      */
+    def asLocalOffset: Long = rc.unwrap
+  }
 
   /** Wrap a method call with this method to document that the caller is sure that the callee's preconditions are met. */
   def checked[A](x: => A): A = x

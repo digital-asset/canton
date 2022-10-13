@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
+
 import com.digitalasset.canton.data.PeanoQueue.{
   AssociatedValue,
   BeforeHead,
@@ -13,25 +14,28 @@ import com.google.common.annotations.VisibleForTesting
 import scala.collection.mutable
 import scala.concurrent.blocking
 
-/** Implementation of [[PeanoQueue]] for [[java.lang.Long]] keys based on a tree map.
+/** Implementation of [[PeanoQueue]] for [[Counter]] keys based on a tree map.
   *
   * This implementation is not thread safe.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
-class PeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
+class PeanoTreeQueue[Discr, V](initHead: Counter[Discr]) extends PeanoQueue[Counter[Discr], V] {
 
-  private val elems: mutable.TreeMap[Long, V] = mutable.TreeMap.empty[Long, V]
+  private val elems: mutable.TreeMap[Counter[Discr], V] = mutable.TreeMap.empty[Counter[Discr], V]
 
-  private var headV: Long = initHead
+  private var headV: Counter[Discr] = initHead
 
-  override def head: Long = headV
+  override def head: Counter[Discr] = headV
 
-  private var frontV: Long = initHead
+  private var frontV: Counter[Discr] = initHead
 
-  override def front: Long = frontV
+  override def front: Counter[Discr] = frontV
 
-  override def insert(key: Long, value: V): Boolean = {
-    require(key != Long.MaxValue, s"The maximal key value ${Long.MaxValue} cannot be inserted.")
+  override def insert(key: Counter[Discr], value: V): Boolean = {
+    require(
+      key.isNotMaxValue,
+      s"The maximal key value ${Counter.MaxValue} cannot be inserted.",
+    )
 
     def associationChanged(oldValue: V): Nothing =
       throw new IllegalArgumentException(
@@ -61,7 +65,7 @@ class PeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
     } else false
   }
 
-  override def alreadyInserted(key: Long): Boolean = {
+  override def alreadyInserted(key: Counter[Discr]): Boolean = {
     if (key >= frontV) {
       elems.contains(key)
     } else {
@@ -82,7 +86,7 @@ class PeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
     frontV = next
   }
 
-  def get(key: Long): AssociatedValue[V] = {
+  def get(key: Counter[Discr]): AssociatedValue[V] = {
     if (key < headV) BeforeHead
     else
       elems.get(key) match {
@@ -94,7 +98,7 @@ class PeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
       }
   }
 
-  override def poll(): Option[(Long, V)] = {
+  override def poll(): Option[(Counter[Discr], V)] = {
     if (headV >= frontV) None
     else {
       val key = headV
@@ -126,25 +130,28 @@ class PeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
 }
 
 object PeanoTreeQueue {
-  def apply[V](init: Long) = new PeanoTreeQueue[V](init)
+  def apply[Discr, V](init: Counter[Discr]) = new PeanoTreeQueue[Discr, V](init)
 }
 
 /** A thread-safe [[PeanoTreeQueue]] thanks to synchronizing all methods */
-class SynchronizedPeanoTreeQueue[V](initHead: Long) extends PeanoQueue[Long, V] {
-  private[this] val queue: PeanoQueue[Long, V] = new PeanoTreeQueue(initHead)
+class SynchronizedPeanoTreeQueue[Discr, V](initHead: Counter[Discr])
+    extends PeanoQueue[Counter[Discr], V] {
+  private[this] val queue: PeanoQueue[Counter[Discr], V] = new PeanoTreeQueue(initHead)
 
-  override def head: Long = blocking { queue synchronized queue.head }
+  override def head: Counter[Discr] = blocking { queue synchronized queue.head }
 
-  override def front: Long = blocking { queue synchronized queue.front }
+  override def front: Counter[Discr] = blocking { queue synchronized queue.front }
 
-  override def insert(key: Long, value: V): Boolean =
+  override def insert(key: Counter[Discr], value: V): Boolean =
     blocking { queue synchronized queue.insert(key, value) }
 
-  override def alreadyInserted(key: Long): Boolean =
+  override def alreadyInserted(key: Counter[Discr]): Boolean =
     blocking { queue synchronized queue.alreadyInserted(key) }
 
-  override def get(key: Long): AssociatedValue[V] = blocking { queue synchronized queue.get(key) }
+  override def get(key: Counter[Discr]): AssociatedValue[V] = blocking {
+    queue synchronized queue.get(key)
+  }
 
-  override def poll(): Option[(Long, V)] = blocking { queue synchronized queue.poll() }
+  override def poll(): Option[(Counter[Discr], V)] = blocking { queue synchronized queue.poll() }
 
 }

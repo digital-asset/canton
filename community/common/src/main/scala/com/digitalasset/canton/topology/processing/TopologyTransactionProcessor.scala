@@ -126,7 +126,7 @@ class TopologyTransactionProcessor(
       approximate: ApproximateTime,
       potentialChanges: Boolean,
   )(implicit traceContext: TraceContext): Unit = {
-    listeners.foreach(_.updateHead(effective, approximate, potentialChanges))
+    listeners.toList.foreach(_.updateHead(effective, approximate, potentialChanges))
   }
 
   private def initialise(

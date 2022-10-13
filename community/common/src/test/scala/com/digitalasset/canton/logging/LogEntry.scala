@@ -4,14 +4,13 @@
 package com.digitalasset.canton.logging
 
 import com.daml.error.ErrorCode
-import com.digitalasset.canton.error.BaseCantonError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil._
 import org.scalactic.source
 import org.scalatest.AppendedClues._
 import org.scalatest.Assertion
-import org.scalatest.Inspectors.{forAll, forAtLeast, forEvery}
+import org.scalatest.Inspectors.{forAtLeast, forEvery}
 import org.scalatest.matchers.should.Matchers.{include, _}
 import org.slf4j.MDC
 import org.slf4j.event.Level
@@ -47,33 +46,33 @@ case class LogEntry(
 
   /** test if a log message corresponds to a particular canton error
     *
-    * @param additionalContext additional context that should be checked. it can be used to remove an argument from
-    *                          the context assertion by supplying an empty string for that particular key
-    * @param strict            if strict is true, then the context arguments will be evaluated in a strict sense (need to match).
-    *                          if strict is false, the context values passed need to "include" the passed context arguments
+    * @param errorCode         the error code that should be checked
+    * @param messageAssertion  a check on the log entry's message text; this function receives the log entry's message
+    *                          text only, stripped of the error code
+    * @param contextAssertion  a check on the log entry's context map; the default is to not check anything
     */
   def shouldBeCantonError(
-      err: BaseCantonError,
-      additionalContext: Map[String, String] = Map.empty,
-      strict: Boolean = true,
+      errorCode: ErrorCode,
+      messageAssertion: String => Assertion,
+      contextAssertion: Map[String, String] => Assertion = _ => succeed,
   )(implicit pos: source.Position): Assertion = {
-    // first, test the error message
-    this.message should include(err.code.id)
-    if (!err.code.category.securitySensitive) { // TODO(i10133): we can't just ignore the message!
-      this.message should include(err.cause)
+    // Decompose the log entry's message
+    // NOTE: The format is defined by code in `com.daml.error.ErrorCode`
+    val (msgCode, msgDesc) = message match {
+      case s"$a: $b" => (a, b)
+      case _ => fail("Malformed log entry message")
     }
-    // test context
-    forAll((err.context ++ additionalContext).filter(_._2.nonEmpty)) {
-      // getOrElse will not fail unless BaseError is faulty
-      case (key, value) =>
-        val item = mdc.getOrElse(key, s"MISSING ${key}")
-        if (strict)
-          item shouldBe value
-        else
-          item should include(value)
-    }
-    succeed
-  }
+
+    // Check the error code and group ID
+    msgCode should fullyMatch regex s"${errorCode.id}\\(${errorCode.category.asInt},.*\\)"
+
+    // Check the message contents
+    messageAssertion(msgDesc)
+
+    // Check the context
+    mdc.keySet should contain("location")
+    contextAssertion(mdc)
+  } withClue s"\n\nThe LogEntry is:\n$this\n\nand contains:\n- message: \"$message\"\n- context: $mdc"
 
   val CommandFailureLoggerNames: Seq[String] =
     Seq(

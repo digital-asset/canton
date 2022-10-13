@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
   TestingConfigInternal,
 }
 import com.digitalasset.canton.crypto.Nonce
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -209,6 +210,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         participant,
         sequencedEventStore,
         sendTrackerStore,
+        _ => request => EitherT.rightT(SignedContent(request, SymbolicCrypto.emptySignature, None)),
       ).value,
       10.seconds,
     )
@@ -308,6 +310,8 @@ class GrpcSequencerIntegrationTest
       val anotherParticipant = ParticipantId("another")
 
       when(env.sequencer.sendAsync(any[SubmissionRequest])(anyTraceContext))
+        .thenReturn(EitherT.pure[Future, SendAsyncError](()))
+      when(env.sequencer.sendAsyncSigned(any[SignedContent[SubmissionRequest]])(anyTraceContext))
         .thenReturn(EitherT.pure[Future, SendAsyncError](()))
 
       val result = for {

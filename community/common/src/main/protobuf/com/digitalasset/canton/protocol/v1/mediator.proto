@@ -8,6 +8,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "com/digitalasset/canton/protocol/v0/common.proto";
 import "com/digitalasset/canton/protocol/v0/mediator.proto";
+import "com/digitalasset/canton/protocol/v1/merkle.proto";
 
 // Messages related to the transaction or transfer protocol sent by a mediator
 // sbt protobufContinuityCheck will pass even if fields are added, because the mediator is trusted.
@@ -15,7 +16,7 @@ import "com/digitalasset/canton/protocol/v0/mediator.proto";
 message TransactionResultMessage {
     google.protobuf.Timestamp request_id = 1;
     Verdict verdict = 2; // new Verdict type
-    com.digitalasset.canton.protocol.v0.InformeeTree notification_tree = 5;
+    InformeeTree notification_tree = 5;
 }
 
 message Verdict {
@@ -25,6 +26,10 @@ message Verdict {
         MediatorReject mediator_reject = 3;
     };
     reserved 4; // removed "Empty timeout" from some_verdict
+}
+
+message InformeeTree {
+    GenTransactionTree tree = 1;
 }
 
 // Renamed RejectionReasons -> ParticipantReject

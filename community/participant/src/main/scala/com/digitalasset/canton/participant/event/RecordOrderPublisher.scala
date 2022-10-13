@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.event
 import cats.syntax.foldable._
 import cats.syntax.option._
 import cats.syntax.traverse._
-import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -17,7 +16,6 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync, SyncCloseable}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.PendingPublish
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventClock
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -40,6 +38,7 @@ import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
@@ -168,7 +167,7 @@ class RecordOrderPublisher(
       timestamp: CantonTimestamp,
       requestCounter: RequestCounter,
       acsChange: AcsChange,
-  )(implicit traceContext: TraceContext): Unit = {
+  ): Unit = TraceContext.withNewTraceContext { implicit traceContext =>
     taskScheduler.scheduleTask(
       AcsChangePublicationTask(recordSequencerCounter, timestamp, requestCounter.some)(acsChange)
     )
@@ -179,7 +178,7 @@ class RecordOrderPublisher(
   def scheduleEmptyAcsChangePublication(
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Unit =
+  ): Unit = TraceContext.withNewTraceContext { implicit traceContext =>
     if (sequencerCounter >= initSc) {
       taskScheduler.scheduleTask(
         AcsChangePublicationTask(sequencerCounter, timestamp, requestCounterO = None)(
@@ -187,6 +186,7 @@ class RecordOrderPublisher(
         )
       )
     }
+  }
 
   /** Signals the progression of time to the record order publisher
     *
@@ -281,8 +281,8 @@ class RecordOrderPublisher(
   )(implicit val traceContext: TraceContext)
       extends PublicationTask {
 
-    def recordTime: RecordTime = RecordTime(timestamp, tieBreaker = requestCounter)
-    def tieBreaker: Long = requestCounter
+    def recordTime: RecordTime = RecordTime(timestamp, tieBreaker = requestCounter.unwrap)
+    def tieBreaker: Long = requestCounter.unwrap
 
     override def perform(): Future[Unit] = {
       for {
@@ -366,7 +366,7 @@ class RecordOrderPublisher(
       extends PublicationTask {
 
     def recordTime: RecordTime =
-      RecordTime(timestamp, requestCounterO.getOrElse(RecordTime.lowestTiebreaker))
+      RecordTime(timestamp, requestCounterO.map(_.unwrap).getOrElse(RecordTime.lowestTiebreaker))
 
     override def perform(): Future[Unit] = {
       Future.successful(acsChangeListener.get.foreach(_.publish(recordTime, acsChange)))
@@ -392,7 +392,7 @@ class RecordOrderPublisher(
 }
 object RecordOrderPublisher {
   sealed trait PendingPublish {
-    def rc: RequestCounter
+    def rc: RequestCounter // TODO(#10497) should that be a localOffset ?
     val update: Option[CausalityUpdate]
     val ts: CantonTimestamp
     val createsEvent: Boolean
@@ -415,7 +415,7 @@ object RecordOrderPublisher {
       ts: CantonTimestamp,
       eventLogId: EventLogId,
   ) extends PendingPublish {
-    override def rc = event.localOffset
+    override def rc = RequestCounter(event.localOffset)
     override val createsEvent: Boolean = true
   }
 

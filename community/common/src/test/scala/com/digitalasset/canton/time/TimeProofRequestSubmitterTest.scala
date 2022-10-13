@@ -5,7 +5,6 @@ package com.digitalasset.canton.time
 
 import cats.data.EitherT
 import cats.syntax.option._
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.String73
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,6 +14,7 @@ import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
@@ -70,7 +70,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
         OrdinarySequencedEvent(
           SignedContent(
             Deliver.create(
-              0L,
+              SequencerCounter(0),
               CantonTimestamp.ofEpochSecond(seconds.toLong),
               DefaultTestIdentities.domainId,
               Some(MessageId(String73(s"tick-$seconds")())),

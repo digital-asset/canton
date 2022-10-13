@@ -4,16 +4,15 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.NonEmptyChain
-import cats.syntax.foldable._
-import com.digitalasset.canton._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates
-import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker._
-import com.digitalasset.canton.participant.store.ActiveContractStore._
+import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.*
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractKeyJournal}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
+import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -21,7 +20,8 @@ import java.time.Instant
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
-trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetectionHelpers =>
+private[conflictdetection] trait RequestTrackerTest {
+  this: AsyncWordSpec with BaseTest with ConflictDetectionHelpers =>
   import ConflictDetectionHelpers._
 
   val coid00: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)
@@ -51,12 +51,12 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     "allow transaction result at the decision time" in {
       val ts = CantonTimestamp.Epoch
       val ts1 = ts.plusMillis(1)
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
         _ <- singleCRwithTR(
           rt,
-          0,
-          0,
+          RequestCounter(0),
+          SequencerCounter(0),
           ts,
           ts1,
           ActivenessSet.empty,
@@ -68,8 +68,8 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "report timeouts" in {
-      val sc = 0L
-      val rc = 0L
+      val sc = SequencerCounter(0)
+      val rc = RequestCounter(0)
       val ts = CantonTimestamp.Epoch
       val rt = mk(rc, sc, CantonTimestamp.MinValue)
       for {
@@ -94,16 +94,23 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
 
     "complain about too early decision time" in {
       val ts = ofEpochMilli(1)
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       loggerFactory.assertInternalError[IllegalArgumentException](
-        rt.addRequest(3L, 4L, ts, ts, CantonTimestamp.Epoch, ActivenessSet.empty),
+        rt.addRequest(
+          RequestCounter(3),
+          SequencerCounter(4),
+          ts,
+          ts,
+          CantonTimestamp.Epoch,
+          ActivenessSet.empty,
+        ),
         _.getMessage shouldBe "Request 3: Activeness check at 1970-01-01T00:00:00.001Z must be before the decision time at 1970-01-01T00:00:00Z.",
       ) // earlier decision time
 
       loggerFactory.assertInternalError[IllegalArgumentException](
         rt.addRequest(
-          4L,
-          5L,
+          RequestCounter(4),
+          SequencerCounter(5),
           CantonTimestamp.MaxValue,
           CantonTimestamp.MaxValue,
           CantonTimestamp.MaxValue,
@@ -115,68 +122,102 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
 
     "complain about too early activeness check time" in {
       val ts = ofEpochMilli(1)
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       loggerFactory.assertInternalError[IllegalArgumentException](
-        rt.addRequest(3L, 4L, ts, ts.minusMillis(1), CantonTimestamp.MaxValue, ActivenessSet.empty),
+        rt.addRequest(
+          RequestCounter(3),
+          SequencerCounter(4),
+          ts,
+          ts.minusMillis(1),
+          CantonTimestamp.MaxValue,
+          ActivenessSet.empty,
+        ),
         _.getMessage shouldBe "Request 3: Activeness time 1970-01-01T00:00:00Z must not be earlier than the request timestamp 1970-01-01T00:00:00.001Z.",
       )
     }
 
     "complain about too late activeness check time" in {
       val ts = ofEpochMilli(1)
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       loggerFactory.assertInternalError[IllegalArgumentException](
-        rt.addRequest(3L, 4L, ts, ts.minusMillis(10), ts.plusMillis(1), ActivenessSet.empty),
+        rt.addRequest(
+          RequestCounter(3),
+          SequencerCounter(4),
+          ts,
+          ts.minusMillis(10),
+          ts.plusMillis(1),
+          ActivenessSet.empty,
+        ),
         _.getMessage shouldBe "Request 3: Activeness time 1969-12-31T23:59:59.991Z must not be earlier than the request timestamp 1970-01-01T00:00:00.001Z.",
       )
     }
 
     "complain about nonexistent requests for transaction results" in {
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
-      val resTR = rt.addResult(0L, 5L, ofEpochMilli(1), ofEpochMilli(1))
-      resTR shouldBe Left(RequestNotFound(0))
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
+      val resTR =
+        rt.addResult(RequestCounter(0), SequencerCounter(5), ofEpochMilli(1), ofEpochMilli(1))
+      resTR shouldBe Left(RequestNotFound(RequestCounter(0)))
     }
 
     "complain if the transaction result is timestamped before the confirmation request" in {
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       for {
-        (cdF, toF) <- enterCR(rt, 1L, 1L, ofEpochMilli(2), ofEpochMilli(10), ActivenessSet.empty)
-        resTR = rt.addResult(1L, 0L, ofEpochMilli(1), ofEpochMilli(3))
+        (cdF, toF) <- enterCR(
+          rt,
+          RequestCounter(1),
+          SequencerCounter(1),
+          ofEpochMilli(2),
+          ofEpochMilli(10),
+          ActivenessSet.empty,
+        )
+        resTR = rt.addResult(
+          RequestCounter(1),
+          SequencerCounter(0),
+          ofEpochMilli(1),
+          ofEpochMilli(3),
+        )
         _ = assert(
-          resTR == Left(RequestNotFound(1L)),
+          resTR == Left(RequestNotFound(RequestCounter(1))),
           "complain that the request does not exist at the given time",
         )
-        _ = enterTick(rt, 2L, ofEpochMilli(10)) // timeout everything
-        _ <- checkConflictResult(1L, cdF, ActivenessResult.success)
+        _ = enterTick(rt, SequencerCounter(2), ofEpochMilli(10)) // timeout everything
+        _ <- checkConflictResult(RequestCounter(1), cdF, ActivenessResult.success)
         timeout <- toF
         _ = assert(timeout.timedOut, "timeout happened")
       } yield succeed
     }
 
     "complain about non-increasing timestamps" in {
-      val rt1 = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt1 = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       // initial timestamp must be smaller than ticks
       loggerFactory
         .assertInternalError[IllegalArgumentException](
-          rt1.tick(0L, CantonTimestamp.Epoch),
+          rt1.tick(SequencerCounter(0), CantonTimestamp.Epoch),
           _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00Z for sequence counter 0 is not after current time 1970-01-01T00:00:00Z.",
         )
 
-      val rt2 = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt2 = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       for {
-        _ <- enterCR(rt2, 0L, 0L, ofEpochMilli(1), ofEpochMilli(3), ActivenessSet.empty)
+        _ <- enterCR(
+          rt2,
+          RequestCounter(0),
+          SequencerCounter(0),
+          ofEpochMilli(1),
+          ofEpochMilli(3),
+          ActivenessSet.empty,
+        )
         // timestamps must strictly increase with sequencer counters
         _ = loggerFactory
           .assertInternalError[IllegalArgumentException](
-            rt2.tick(1L, ofEpochMilli(1)),
+            rt2.tick(SequencerCounter(1), ofEpochMilli(1)),
             _.getMessage shouldBe "Timestamp 1970-01-01T00:00:00.001Z for sequence counter 1 is not after current time 1970-01-01T00:00:00.001Z.",
           )
       } yield succeed
     }
 
     "process tasks in timestamp order" in {
-      val rc = 0L
-      val sc = 0L
+      val rc = RequestCounter(0)
+      val sc = SequencerCounter(0)
       val ts = CantonTimestamp.assertFromInstant(Instant.parse("2000-01-01T00:00:00.00Z"))
       for {
         acs <- mkAcs()
@@ -184,15 +225,15 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
         rt = mk(rc, sc, ts.minusMillis(2), acs, ckj)
 
         rc0 = rc
-        scCR0 = 1L
-        scTR0 = 2L
+        scCR0 = SequencerCounter(1)
+        scTR0 = SequencerCounter(2)
         tsCR0 = ts
         tsCommit0 = ts.plusMillis(2)
         tsTimeout0 = ts.plusMillis(3)
 
         rc1 = rc + 1
-        scCR1 = 4L
-        scTR1 = 6L
+        scCR1 = SequencerCounter(4)
+        scTR1 = SequencerCounter(6)
         tsCR1 = ts.plusMillis(3)
         tsCommit1 = ts.plusMillis(5)
         tsTimeout1 = ts.plusMillis(6)
@@ -209,7 +250,7 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
         )
 
         _ = assert(!toF0.isCompleted, "timeout for request 0 not completed")
-        _ = enterTick(rt, 0L, ts.minusMillis(1))
+        _ = enterTick(rt, SequencerCounter(0), ts.minusMillis(1))
         cd0 <- cdF0
         _ = assert(cd0 == ActivenessResult.success, "validation of request 0 succeeded")
         _ = assert(!cdF1.isCompleted, "request 1 is still pending")
@@ -228,7 +269,7 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
         _ <- checkContractState(acs, coid00, (Active, rc, tsCR0))("contract 00 created")
         _ <- checkContractState(acs, coid01, (Active, rc, tsCR0))("contract 01 created")
 
-        _ = enterTick(rt, 3L, tsCommit0.addMicros(1))
+        _ = enterTick(rt, SequencerCounter(3), tsCommit0.addMicros(1))
 
         _ <- checkConflictResult(rc1, cdF1, ActivenessResult.success)
 
@@ -241,8 +282,8 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
           1L,
           toF1,
         )
-        _ = enterTick(rt, 5L, tsCR1.plusMillis(1))
-        _ = enterTick(rt, 7L, tsCommit1.plusMillis(5))
+        _ = enterTick(rt, SequencerCounter(5), tsCR1.plusMillis(1))
+        _ = enterTick(rt, SequencerCounter(7), tsCommit1.plusMillis(5))
         _ <- checkFinalize(rc1, finalize1)
 
         _ <- checkSnapshot(acs, tsCR0.addMicros(1), Map(coid00 -> tsCR0, coid01 -> tsCR0))
@@ -251,12 +292,12 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "transactions may have identical timestamps" in {
-      val rc = 10L
-      val sc = 10L
+      val rc = RequestCounter(10)
+      val sc = SequencerCounter(10)
       val ts = ofEpochMilli(100)
       val timeout = ts.plusMillis(100)
       val actSet1 = mkActivenessSet(deact = Set(coid01, coid10))
-      val toc0 = TimeOfChange(0L, CantonTimestamp.Epoch)
+      val toc0 = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
       for {
         acs <- mkAcs(
           (coid00, toc0, Active),
@@ -306,12 +347,12 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "detect conflicts" in {
-      val rc = 10L
-      val sc = 10L
+      val rc = RequestCounter(10)
+      val sc = SequencerCounter(10)
       val ts = CantonTimestamp.assertFromInstant(Instant.parse("2050-10-11T00:00:10.00Z"))
-      val toc0 = TimeOfChange(0L, ts.minusMillis(10))
-      val toc1 = TimeOfChange(1L, ts.minusMillis(5))
-      val toc2 = TimeOfChange(2L, ts.minusMillis(1))
+      val toc0 = TimeOfChange(RequestCounter(0), ts.minusMillis(10))
+      val toc1 = TimeOfChange(RequestCounter(1), ts.minusMillis(5))
+      val toc2 = TimeOfChange(RequestCounter(2), ts.minusMillis(1))
       for {
         acs <- mkAcs(
           (coid00, toc0, Active),
@@ -374,16 +415,28 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
 
     "complain about invalid commit sets due to archivals" in {
       val ts = ofEpochMilli(1)
-      val toc0 = TimeOfChange(0L, CantonTimestamp.Epoch)
+      val toc0 = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
       for {
         acs <- mkAcs((coid00, toc0, Active), (coid01, toc0, Active))
         ckj <- mkCkj()
-        rt = mk(1L, 1L, CantonTimestamp.Epoch, acs, ckj)
+        rt = mk(RequestCounter(1), SequencerCounter(1), CantonTimestamp.Epoch, acs, ckj)
         activenessSet = mkActivenessSet(deact = Set(coid00, coid10), useOnly = Set(coid01))
-        (cdF, toF) <- enterCR(rt, 1L, 1L, ts, ts.plusMillis(1), activenessSet)
-        _ <- checkConflictResult(1L, cdF, mkActivenessResult(unknown = Set(coid10)))
+        (cdF, toF) <- enterCR(
+          rt,
+          RequestCounter(1),
+          SequencerCounter(1),
+          ts,
+          ts.plusMillis(1),
+          activenessSet,
+        )
+        _ <- checkConflictResult(RequestCounter(1), cdF, mkActivenessResult(unknown = Set(coid10)))
         commitSet = mkCommitSet(arch = Set(coid00, coid11))
-        resTR = rt.addResult(1L, 2L, ts.plusMillis(1), ts.plusMillis(1))
+        resTR = rt.addResult(
+          RequestCounter(1),
+          SequencerCounter(2),
+          ts.plusMillis(1),
+          ts.plusMillis(1),
+        )
         _ = assert(
           resTR == Right(()),
           s"adding the transaction result's timestamp succeeds for request 1",
@@ -392,11 +445,15 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
         _ = assert(!timeout.timedOut, s"timeout promise for request 1 is kept with NoTimeout")
         _ <- loggerFactory.suppressWarningsAndErrors {
           for {
-            finalizationResult <- rt.addCommitSet(1L, Success(commitSet)).value.value.failed
+            finalizationResult <- rt
+              .addCommitSet(RequestCounter(1), Success(commitSet))
+              .value
+              .value
+              .failed
           } yield {
             assert(
               finalizationResult == InvalidCommitSet(
-                1L,
+                RequestCounter(1),
                 commitSet,
                 LockedStates(Set.empty, Seq(coid00, coid10), Seq.empty),
               ),
@@ -409,19 +466,24 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
 
     "complain about invalid commit sets due to creates" in {
       val ts = ofEpochMilli(1)
-      val rt = mk(1L, 1L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(1), SequencerCounter(1), CantonTimestamp.Epoch)
       for {
         (cdF, toF) <- enterCR(
           rt,
-          1L,
-          1L,
+          RequestCounter(1),
+          SequencerCounter(1),
           ts,
           ts.plusMillis(1),
           mkActivenessSet(create = Set(coid00, coid01)),
         )
-        _ <- checkConflictResult(1L, cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(1), cdF, ActivenessResult.success)
         commitSet = mkCommitSet(create = Set(coid00, coid11))
-        resTR = rt.addResult(1L, 2L, ts.plusMillis(1), ts.plusMillis(1))
+        resTR = rt.addResult(
+          RequestCounter(1),
+          SequencerCounter(2),
+          ts.plusMillis(1),
+          ts.plusMillis(1),
+        )
         _ = assert(
           resTR == Right(()),
           s"adding the transaction result's timestamp succeeds for request 1",
@@ -430,12 +492,12 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
         _ = assert(!timeout.timedOut, s"timeout promise for request 1 is kept with NoTimeout")
         _ <- loggerFactory.suppressWarningsAndErrors {
           for {
-            finalize <- rt.addCommitSet(1L, Success(commitSet)).value.value.failed
+            finalize <- rt.addCommitSet(RequestCounter(1), Success(commitSet)).value.value.failed
           } yield {
             assert(
               finalize ==
                 InvalidCommitSet(
-                  1L,
+                  RequestCounter(1),
                   commitSet,
                   LockedStates(Set.empty, Seq(coid00, coid01), Seq.empty),
                 ),
@@ -448,39 +510,46 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
 
     "complain about too early commit time" in {
       val ts = ofEpochMilli(10)
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       for {
-        (cdF, toF) <- enterCR(rt, 0L, 0L, ts, ts.plusMillis(100), ActivenessSet.empty)
-        _ <- checkConflictResult(0L, cdF, ActivenessResult.success)
+        (cdF, _toF) <- enterCR(
+          rt,
+          RequestCounter(0),
+          SequencerCounter(0),
+          ts,
+          ts.plusMillis(100),
+          ActivenessSet.empty,
+        )
+        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
         _ = loggerFactory.assertInternalError[IllegalArgumentException](
-          rt.addResult(0L, 1L, ts.plusMillis(1), ts.addMicros(1)),
+          rt.addResult(RequestCounter(0), SequencerCounter(1), ts.plusMillis(1), ts.addMicros(1)),
           _.getMessage shouldBe "Request 0: Commit time 1970-01-01T00:00:00.010001Z before result timestamp 1970-01-01T00:00:00.011Z",
         )
       } yield succeed
     }
 
     "complain about elapsed decision time" in {
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
         (cdF, toF) <- enterCR(
           rt,
-          0L,
-          0L,
+          RequestCounter(0),
+          SequencerCounter(0),
           CantonTimestamp.Epoch,
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(0L, cdF, ActivenessResult.success)
+        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
         _ = loggerFactory.assertInternalError[IllegalArgumentException](
-          rt.addResult(0L, 1L, ofEpochMilli(11), ofEpochMilli(11)),
+          rt.addResult(RequestCounter(0), SequencerCounter(1), ofEpochMilli(11), ofEpochMilli(11)),
           _.getMessage shouldBe "Request 0: Result timestamp 1970-01-01T00:00:00.011Z after the decision time 1970-01-01T00:00:00.010Z.",
         )
       } yield succeed
     }
 
     "a timeout unlocks the contract immediately before the next confirmation request" in {
-      val rc = 10L
-      val sc = 10L
+      val rc = RequestCounter(10)
+      val sc = SequencerCounter(10)
       val ts = CantonTimestamp.assertFromInstant(Instant.parse("2010-10-10T12:00:00.00Z"))
       val tocN1 = TimeOfChange(rc - 1, ts.minusMillis(1))
       for {
@@ -513,8 +582,8 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "contracts become active immediately before the commit time" in {
-      val rc = 0L
-      val sc = 0L
+      val rc = RequestCounter(0)
+      val sc = SequencerCounter(0)
       val ts = CantonTimestamp.Epoch
       val rt = mk(rc, sc, CantonTimestamp.MinValue)
       for {
@@ -546,75 +615,115 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "addConfirmationRequest is idempotent" in {
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
-        (cdF, toF) <- enterCR(rt, 0L, 1L, ofEpochMilli(1), ofEpochMilli(10), ActivenessSet.empty)
-        (cdF2, toF2) <- enterCR(rt, 0L, 1L, ofEpochMilli(1), ofEpochMilli(10), ActivenessSet.empty)
+        (cdF, toF) <- enterCR(
+          rt,
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(10),
+          ActivenessSet.empty,
+        )
+        (cdF2, toF2) <- enterCR(
+          rt,
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(10),
+          ActivenessSet.empty,
+        )
         _ = assert(
           (cdF == cdF2) && (toF == toF2),
           "adding the same confirmation request twice yields the same futures",
         )
         ts5 = ofEpochMilli(100)
-        resCR = rt.addRequest(0L, 5L, ts5, ts5, ofEpochMilli(1000), ActivenessSet.empty)
-        _ = assert(resCR == Left(RequestAlreadyExists(0L, 1L, ofEpochMilli(1))))
-        _ = enterTick(rt, 0, CantonTimestamp.Epoch)
-        _ = enterTick(rt, 2, ofEpochMilli(10))
+        resCR = rt.addRequest(
+          RequestCounter(0),
+          SequencerCounter(5),
+          ts5,
+          ts5,
+          ofEpochMilli(1000),
+          ActivenessSet.empty,
+        )
+        _ = assert(
+          resCR == Left(
+            RequestAlreadyExists(RequestCounter(0), SequencerCounter(1), ofEpochMilli(1))
+          )
+        )
+        _ = enterTick(rt, SequencerCounter(0), CantonTimestamp.Epoch)
+        _ = enterTick(rt, SequencerCounter(2), ofEpochMilli(10))
         timeout <- toF
         _ = assert(timeout.timedOut)
       } yield succeed
     }
 
     "addTransactionResult is idempotent" in {
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
-        (cdF, toF) <- enterCR(
+        (cdF, _toF) <- enterCR(
           rt,
-          0L,
-          0L,
+          RequestCounter(0),
+          SequencerCounter(0),
           CantonTimestamp.Epoch,
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(0, cdF, ActivenessResult.success)
-        resTR1 = rt.addResult(0L, 1L, ofEpochMilli(1), ofEpochMilli(3))
-        resTR2 = rt.addResult(0L, 1L, ofEpochMilli(1), ofEpochMilli(3))
+        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        resTR1 = rt.addResult(
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(3),
+        )
+        resTR2 = rt.addResult(
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(3),
+        )
         _ = assert(resTR1 == Right(()), "first transaction result call succeeds")
         _ = assert(resTR2 == Right(()), "second transaction result call is swallowed")
         resTR3 = loggerFactory.suppressWarningsAndErrors(
-          rt.addResult(0L, 2L, ofEpochMilli(2), ofEpochMilli(4))
+          rt.addResult(RequestCounter(0), SequencerCounter(2), ofEpochMilli(2), ofEpochMilli(4))
         )
         _ = assert(
-          resTR3 == Left(ResultAlreadyExists(0L)),
+          resTR3 == Left(ResultAlreadyExists(RequestCounter(0))),
           "transaction result with different parameters fails",
         )
       } yield succeed
     }
 
     "addCommitSet is idempotent" in {
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
         (cdF, toF) <- enterCR(
           rt,
-          0L,
-          0L,
+          RequestCounter(0),
+          SequencerCounter(0),
           CantonTimestamp.Epoch,
           ofEpochMilli(10),
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(0, cdF, ActivenessResult.success)
-        resTR1 = rt.addResult(0L, 1L, ofEpochMilli(1), ofEpochMilli(2))
+        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        resTR1 = rt.addResult(
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(2),
+        )
         _ = assert(resTR1 == Right(()), "transaction result call succeeds")
-        finalize1 = rt.addCommitSet(0L, Success(CommitSet.empty))
+        finalize1 = rt.addCommitSet(RequestCounter(0), Success(CommitSet.empty))
         _ = assert(finalize1.isRight, "first call to commit set succeeds")
-        finalize2 = rt.addCommitSet(0L, Success(CommitSet.empty))
+        finalize2 = rt.addCommitSet(RequestCounter(0), Success(CommitSet.empty))
         finalize3 = loggerFactory.suppressWarningsAndErrors(
-          rt.addCommitSet(0L, Success(mkCommitSet(arch = Set(coid00))))
+          rt.addCommitSet(RequestCounter(0), Success(mkCommitSet(arch = Set(coid00))))
         )
         _ = assert(
-          finalize3 == Left(CommitSetAlreadyExists(0L)),
+          finalize3 == Left(CommitSetAlreadyExists(RequestCounter(0))),
           "setting a different commit set fails",
         )
-        _ = enterTick(rt, 2, ofEpochMilli(100))
+        _ = enterTick(rt, SequencerCounter(2), ofEpochMilli(100))
         finalize1Result <- finalize1.value.value
         _ = assert(finalize1Result == Right(()), "request finalized")
         _ = assert(finalize2.value == finalize1.value, "same result returned")
@@ -622,42 +731,52 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "complain if the same request counter is used for different requests" in {
-      val rt = mk(0L, 0L, CantonTimestamp.Epoch)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.Epoch)
       for {
-        _ <- enterCR(rt, 0L, 1L, ofEpochMilli(1), ofEpochMilli(10), ActivenessSet.empty)
+        _ <- enterCR(
+          rt,
+          RequestCounter(0),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(10),
+          ActivenessSet.empty,
+        )
       } yield assert(
         rt.addRequest(
-          0L,
-          1L,
+          RequestCounter(0),
+          SequencerCounter(1),
           ofEpochMilli(1),
           ofEpochMilli(1),
           ofEpochMilli(11),
           ActivenessSet.empty,
-        ) == Left(RequestAlreadyExists(0L, 1L, ofEpochMilli(1))),
+        ) == Left(RequestAlreadyExists(RequestCounter(0), SequencerCounter(1), ofEpochMilli(1))),
         "request counter used twice",
       )
     }
 
     "complain about adding commit set before transaction result" in {
-      val rt = mk(0L, 0L, CantonTimestamp.MinValue)
+      val rt = mk(RequestCounter(0), SequencerCounter(0), CantonTimestamp.MinValue)
       for {
         (cdF, toF) <- enterCR(
           rt,
-          0L,
-          0L,
+          RequestCounter(0),
+          SequencerCounter(0),
           CantonTimestamp.Epoch,
           CantonTimestamp.MaxValue,
           ActivenessSet.empty,
         )
-        _ <- checkConflictResult(0L, cdF, ActivenessResult.success)
-        resCS = rt.addCommitSet(0L, Success(CommitSet.empty))
-        _ = assert(resCS == Left(ResultNotFound(0L)), "transaction result is missing")
+        _ <- checkConflictResult(RequestCounter(0), cdF, ActivenessResult.success)
+        resCS = rt.addCommitSet(RequestCounter(0), Success(CommitSet.empty))
+        _ = assert(
+          resCS == Left(ResultNotFound(RequestCounter(0))),
+          "transaction result is missing",
+        )
       } yield succeed
     }
 
     "transaction results may arrive out of order" in {
-      val rc = 0L
-      val sc = 0L
+      val rc = RequestCounter(0)
+      val sc = SequencerCounter(0)
       val ts = ofEpochMilli(1000)
       val tocN2 = TimeOfChange(rc - 2, ts.minusMillis(20))
       val tocN1 = TimeOfChange(rc - 1, ts.minusMillis(10))
@@ -712,8 +831,8 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "conflict detection progresses even if a commit set is missing" in {
-      val rc = 0L
-      val sc = 0L
+      val rc = RequestCounter(0)
+      val sc = SequencerCounter(0)
       val ts = ofEpochMilli(1000)
       val rt = mk(rc, sc, CantonTimestamp.Epoch)
       for {
@@ -762,48 +881,66 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
       for {
         acs <- mkAcs()
         ckj <- mkCkj()
-        rt = mk(1L, 1L, CantonTimestamp.Epoch, acs, ckj)
+        rt = mk(RequestCounter(1), SequencerCounter(1), CantonTimestamp.Epoch, acs, ckj)
 
         activenessSet0 = mkActivenessSet(create = Set(coid00, coid01, coid11))
-        (cdF0, toF0) <- enterCR(rt, 1L, 1L, ofEpochMilli(1), ofEpochMilli(100), activenessSet0)
-        _ <- checkConflictResult(1L, cdF0, ActivenessResult.success)
+        (cdF0, toF0) <- enterCR(
+          rt,
+          RequestCounter(1),
+          SequencerCounter(1),
+          ofEpochMilli(1),
+          ofEpochMilli(100),
+          activenessSet0,
+        )
+        _ <- checkConflictResult(RequestCounter(1), cdF0, ActivenessResult.success)
 
         activenessSet1 = mkActivenessSet(create = Set(coid00, coid01, coid10))
-        (cdF1, toF1) <- enterCR(rt, 2L, 2L, ofEpochMilli(2), ofEpochMilli(100), activenessSet1)
-        _ <- checkConflictResult(2L, cdF1, mkActivenessResult(locked = Set(coid00, coid01)))
+        (cdF1, toF1) <- enterCR(
+          rt,
+          RequestCounter(2),
+          SequencerCounter(2),
+          ofEpochMilli(2),
+          ofEpochMilli(100),
+          activenessSet1,
+        )
+        _ <- checkConflictResult(
+          RequestCounter(2),
+          cdF1,
+          mkActivenessResult(locked = Set(coid00, coid01)),
+        )
 
         finalize0 <- enterTR(
           rt,
-          1L,
-          3L,
+          RequestCounter(1),
+          SequencerCounter(3),
           ofEpochMilli(3),
           mkCommitSet(create = Set(coid01, coid11)),
           0L,
           toF0,
         )
-        _ <- checkFinalize(1L, finalize0)
+        _ <- checkFinalize(RequestCounter(1), finalize0)
 
         finalize1 <- enterTR(
           rt,
-          2L,
-          4L,
+          RequestCounter(2),
+          SequencerCounter(4),
           ofEpochMilli(4),
           mkCommitSet(create = Set(coid10)),
           0L,
           toF1,
         )
-        _ <- checkFinalize(2L, finalize1)
+        _ <- checkFinalize(RequestCounter(2), finalize1)
 
         _ <- checkContractState(acs, coid00, None)(s"contract $coid00's creation is rolled back")
-        _ <- checkContractState(acs, coid01, (Active, 1L, ofEpochMilli(1)))(
+        _ <- checkContractState(acs, coid01, (Active, RequestCounter(1), ofEpochMilli(1)))(
           s"contract $coid01 is active"
         )
       } yield succeed
     }
 
     "rollback archival while contract is being created" in {
-      val rc = 10L
-      val sc = 10L
+      val rc = RequestCounter(10)
+      val sc = SequencerCounter(10)
       val ts = ofEpochMilli(10)
       val timeout = ts.plusMillis(100)
       for {
@@ -836,7 +973,11 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
           timeout,
           mkActivenessSet(deact = Set(coid01)),
         )
-        _ <- checkConflictResult(rc = 2, cdF2, mkActivenessResult(locked = Set(coid01)))
+        _ <- checkConflictResult(
+          rc = RequestCounter(2),
+          cdF2,
+          mkActivenessResult(locked = Set(coid01)),
+        )
         finalize1 <- enterTR(rt, rc + 1, sc + 3, ts.plusMillis(5), CommitSet.empty, 0L, toF1)
         _ <- checkFinalize(rc + 1, finalize1)
         finalize0 <- enterTR(
@@ -867,8 +1008,8 @@ trait RequestTrackerTest { this: AsyncWordSpec with BaseTest with ConflictDetect
     }
 
     "halt upon a commit set failure" in {
-      val rc = 100L
-      val sc = 100L
+      val rc = RequestCounter(100)
+      val sc = SequencerCounter(100)
       val ts = ofEpochMilli(10)
       val timeout = ts.plusMillis(100)
       val failure = new RuntimeException("Failing commit set")

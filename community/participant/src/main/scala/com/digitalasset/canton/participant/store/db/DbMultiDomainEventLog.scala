@@ -14,7 +14,6 @@ import cats.syntax.traverseFilter._
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
-import com.digitalasset.canton.LedgerTransactionId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
@@ -45,12 +44,7 @@ import com.digitalasset.canton.participant.store.db.DbMultiDomainEventLog._
 import com.digitalasset.canton.participant.store.{EventLogId, MultiDomainEventLog}
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TransactionEventId
 import com.digitalasset.canton.participant.sync.{TimestampedEvent, TimestampedEventAndCausalChange}
-import com.digitalasset.canton.participant.{
-  GlobalOffset,
-  LedgerSyncEvent,
-  LocalOffset,
-  RequestCounter,
-}
+import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncEvent, LocalOffset}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Implicits.{
   getResultLfPartyId => _,
@@ -64,6 +58,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.util._
+import com.digitalasset.canton.{LedgerTransactionId, RequestCounter}
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 

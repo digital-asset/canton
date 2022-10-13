@@ -25,19 +25,4 @@ package object participant {
   // Ledger record time is "single-dimensional"
   type LedgerSyncRecordTime = Time.Timestamp
   val LedgerSyncRecordTime: Time.Timestamp.type = Time.Timestamp
-
-  /** The counter assigned by the transaction processor to confirmation and transfer requests. */
-  type RequestCounter = Long
-
-  object RequestCounter {
-
-    /** A strict lower bound on all request counters
-      */
-    def LowerBound: RequestCounter = -1
-
-    /** The request counter assigned to the first request in the lifetime of a participant */
-    val GenesisRequestCounter: RequestCounter = 0L
-
-    def MaxValue: RequestCounter = Long.MaxValue
-  }
 }

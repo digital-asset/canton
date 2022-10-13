@@ -11,10 +11,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LocalOffset
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventPerPartyCausalState
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore
-import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore.{
-  CausalityWrite,
-  CausalityWriteFinished,
-}
+import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore.CausalityWrite
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.topology.DomainId
@@ -130,10 +127,9 @@ class SingleDomainCausalTracker(
     }
 
     writeF.map { write =>
-      EventPerPartyCausalState((update.domain), update.ts, update.rc)(
-        write.stateAtWrite,
-        write.finished,
-      )
+      EventPerPartyCausalState((update.domain), update.ts, update.rc.asLocalOffset)(
+        write.stateAtWrite
+      ) // TODO(#10497) check whether this `rc.asLocalOffset` is legit here
     }
   }
 
@@ -150,11 +146,10 @@ object SingleDomainCausalTracker {
       localTs: CantonTimestamp,
       offset: LocalOffset,
   )(
-      val dependencies: Map[LfPartyId, Map[DomainId, CantonTimestamp]],
-      val writeFinished: CausalityWriteFinished,
+      val dependencies: Map[LfPartyId, Map[DomainId, CantonTimestamp]]
   ) {
     lazy val waitOn: Map[DomainId, CantonTimestamp] = {
-      val clocks = dependencies.map(_._2).toList
+      val clocks = dependencies.map { case (_, domainClocks) => domainClocks }.toList
       val sup = bound(clocks)
       sup - domainId
     }

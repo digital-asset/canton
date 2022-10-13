@@ -10,9 +10,8 @@ import scala.concurrent.{Future, Promise}
 import scala.util.{Failure, Success, Try}
 
 // This class has been copied from Akka 2.6.18
-// and instrumented with logging.
-// The changes are marked with `INSTRUMENT`
-// TODO(#9883) remove when no longer needed
+// and instrumented with logging and a bug fix for the race condition reported in https://github.com/akka/akka/issues/31530
+// The changes are marked with `INSTRUMENT` and `FIXED` respectively
 
 /** A BroadcastHub is a special streaming hub that is able to broadcast streamed elements to a dynamic set of consumers.
   * It consists of two parts, a [[Sink]] and a [[Source]]. The [[Sink]] broadcasts elements from a producer to the
@@ -63,8 +62,12 @@ object BroadcastHub {
 
 /** INTERNAL API
   */
-private[akka] class BroadcastHub[T](bufferSize: Int)
-    extends GraphStageWithMaterializedValue[SinkShape[T], Source[T, NotUsed]] {
+private[akka] class BroadcastHub[T](
+    bufferSize: Int,
+    // INSTRUMENT BEGIN
+    registrationPendingCallback: Long => Unit = _ => (),
+    // INSTRUMENT END
+) extends GraphStageWithMaterializedValue[SinkShape[T], Source[T, NotUsed]] {
   require(bufferSize > 0, "Buffer size must be positive")
   require(bufferSize < 4096, "Buffer size larger then 4095 is not allowed")
   require((bufferSize & bufferSize - 1) == 0, "Buffer size must be a power of two")
@@ -164,6 +167,10 @@ private[akka] class BroadcastHub[T](bufferSize: Int)
               // INSTRUMENT END
               activeConsumers += 1
               addConsumer(consumer, startFrom)
+              // INSTRUMENT BEGIN
+              // add a callback hook so that we can control the interleaving in tests
+              registrationPendingCallback(consumer.id)
+              // INSTRUMENT END
               // in case the consumer is already stopped we need to undo registration
               implicit val ec = materializer.executionContext
               consumer.callback.invokeWithFeedback(Initialize(startFrom)).failed.foreach {
@@ -284,11 +291,6 @@ private[akka] class BroadcastHub[T](bufferSize: Int)
 
     private def unblockIfPossible(offsetOfConsumerRemoved: Int): Boolean = {
       var unblocked = false
-      // INSTRUMENT BEGIN
-      logger.debug(
-        s"${BroadcastHub.this}'s BroadcastSinkLogic: unblockIfPossible(offsetOfConsumerRemoved=$offsetOfConsumerRemoved) at head=$head, state=${state.get()} without active consumers"
-      )
-      // INSTRUMENT END
       if (offsetOfConsumerRemoved == head) {
         // Try to advance along the wheel. We can skip any wheel slots which have no waiting Consumers, until
         // we either find a nonempty one, or we reached the end of the buffer.
@@ -298,11 +300,6 @@ private[akka] class BroadcastHub[T](bufferSize: Int)
           unblocked = true
         }
       }
-      // INSTRUMENT BEGIN
-      logger.debug(
-        s"${BroadcastHub.this}'s BroadcastSinkLogic: unblockIfPossible(offsetOfConsumerRemoved=$offsetOfConsumerRemoved) updated head to $head. unblocked=$unblocked"
-      )
-      // INSTRUMENT END
       unblocked
     }
 
@@ -466,7 +463,23 @@ private[akka] class BroadcastHub[T](bufferSize: Int)
           }
 
           override def postStop(): Unit = {
-            if (hubCallback ne null)
+            // INSTRUMENT BEGIN
+            logger.debug(
+              s"${BroadcastHub.this}'s BroadcastSinkLogic's source $id: postStop with previouslyPublishedOffset=$previousPublishedOffset, offset=$offset, offsetInitialized=$offsetInitialized"
+            )
+            // INSTRUMENT END
+            // FIXED BEGIN
+            // This used to be
+            // ```
+            //   if (hubCallback ne null)
+            // ```
+            // If `postStop` is called before the consumer has processed the `RegistrationPending`'s `Initialize` event,
+            // then the `Initialize` message will fail with a `StreamDetachedException`,
+            // upon which the `RegistrationPending` logic itself unregisters this consumer.
+            // In particular, this client must not send the `Unregister` event itself because the values in
+            // `previousPublishedOffset` and `offset` are wrong.
+            if ((hubCallback ne null) && offsetInitialized)
+              // FIXED END
               hubCallback.invoke(UnRegister(id, previousPublishedOffset, offset))
           }
 

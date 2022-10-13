@@ -3,14 +3,12 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.DomainPerPartyCausalState
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore
 import com.digitalasset.canton.protocol.TransferId
@@ -18,6 +16,7 @@ import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import io.functionmeta.functionFullName
 
 import scala.collection.concurrent.TrieMap

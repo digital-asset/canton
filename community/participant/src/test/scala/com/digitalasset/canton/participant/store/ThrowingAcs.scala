@@ -6,8 +6,8 @@ package com.digitalasset.canton.participant.store
 import cats.data.EitherT
 import cats.syntax.either._
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   AcsError,

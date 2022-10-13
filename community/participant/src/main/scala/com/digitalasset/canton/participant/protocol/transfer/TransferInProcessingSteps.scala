@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data._
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.PendingRequestData
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.PendingRequestDataOrReplayData
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
@@ -42,7 +43,6 @@ import com.digitalasset.canton.participant.protocol.{
 import com.digitalasset.canton.participant.store._
 import com.digitalasset.canton.participant.sync.{LedgerEvent, TimestampedEvent}
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.participant.{LedgerSyncEvent, RequestCounter}
 import com.digitalasset.canton.protocol._
 import com.digitalasset.canton.protocol.messages._
 import com.digitalasset.canton.sequencing.protocol._
@@ -54,7 +54,7 @@ import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
 import com.digitalasset.canton.util.ShowUtil._
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, SequencerCounter, checked}
+import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
@@ -252,7 +252,7 @@ private[transfer] class TransferInProcessingSteps(
       ) { bytes =>
         FullTransferInTree
           .fromByteString(snapshot.pureCrypto)(bytes)
-          .leftMap(e => DeserializationError(e.toString, bytes))
+          .leftMap(e => DeserializationError(e.toString))
       }
       .map(WithRecipients(_, envelope.recipients))
 
@@ -705,7 +705,9 @@ private[transfer] class TransferInProcessingSteps(
           if (transferringParticipant) None
           else {
             val event = createUpdateForTransferIn(contract, creatingTransactionId, requestId.unwrap)
-            Some(TimestampedEvent(event, requestCounter, Some(requestSequencerCounter)))
+            Some(
+              TimestampedEvent(event, requestCounter.asLocalOffset, Some(requestSequencerCounter))
+            )
           }
 
         EitherT.pure(

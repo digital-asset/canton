@@ -211,8 +211,7 @@ object MerkleTreeTest {
         remainder.isEmpty,
         (),
         DeserializationError(
-          "Unable to deserialize Int from ByteString. Remaining bytes: ",
-          remainder,
+          "Unable to deserialize Int from ByteString. Remaining bytes: "
         ),
       )
     } yield mkLeaf(index)

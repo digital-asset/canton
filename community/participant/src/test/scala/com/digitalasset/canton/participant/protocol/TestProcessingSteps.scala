@@ -12,7 +12,6 @@ import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, Hash, HashOp
 import com.digitalasset.canton.data.{CantonTimestamp, Informee, ViewTree, ViewType}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   PendingRequestData,
   WrapsProcessorError,
@@ -52,7 +51,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, SequencerCounter}
+import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent
@@ -214,7 +213,9 @@ class TestProcessingSteps(
       traceContext: TraceContext
   ): EitherT[Future, TestProcessingError, StorePendingDataAndSendResponseAndCreateTimeout] = {
     val res = StorePendingDataAndSendResponseAndCreateTimeout(
-      pendingRequestData.getOrElse(TestPendingRequestData(0L, 0L, Set.empty)),
+      pendingRequestData.getOrElse(
+        TestPendingRequestData(RequestCounter(0), SequencerCounter(0), Set.empty)
+      ),
       Seq.empty,
       List.empty,
       (),

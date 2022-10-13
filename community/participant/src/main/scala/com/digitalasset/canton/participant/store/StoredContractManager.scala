@@ -9,9 +9,7 @@ import cats.syntax.foldable._
 import cats.syntax.functorFilter._
 import cats.syntax.traverse._
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.protocol.{
   LfContractId,
   SerializableContract,
@@ -20,6 +18,7 @@ import com.digitalasset.canton.protocol.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT, MapsUtil}
+import com.digitalasset.canton.{LfPartyId, RequestCounter}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}

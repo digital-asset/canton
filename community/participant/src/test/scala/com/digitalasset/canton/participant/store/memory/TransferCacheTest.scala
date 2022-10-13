@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.memory
 import cats.data.{Chain, EitherT}
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
 import com.digitalasset.canton.participant.store.TransferStore._
 import com.digitalasset.canton.participant.store.memory.TransferCacheTest.HookTransferStore
@@ -17,7 +16,7 @@ import com.digitalasset.canton.protocol.messages.DeliveredTransferOutResult
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, RequestCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -30,7 +29,7 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
 
   val transferDataF =
     mkTransferDataForDomain(transfer10, mediator1, targetDomainId = TransferStoreTest.targetDomain)
-  val toc = TimeOfChange(0L, CantonTimestamp.Epoch)
+  val toc = TimeOfChange(RequestCounter(0), CantonTimestamp.Epoch)
 
   "find transfers in the backing store" in {
     val store = new InMemoryTransferStore(targetDomain, loggerFactory)
@@ -89,8 +88,8 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
       val backingStore = new InMemoryTransferStore(targetDomain, loggerFactory)
       val store = new HookTransferStore(backingStore)
       val cache = new TransferCache(store, loggerFactory)
-      val toc2 = TimeOfChange(0L, CantonTimestamp.ofEpochSecond(1))
-      val toc3 = TimeOfChange(1L, CantonTimestamp.Epoch)
+      val toc2 = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(1))
+      val toc3 = TimeOfChange(RequestCounter(1), CantonTimestamp.Epoch)
 
       val promise = Promise[Checked[Nothing, TransferStoreError, Unit]]()
 
@@ -121,7 +120,7 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
       val backingStore = new InMemoryTransferStore(targetDomain, loggerFactory)
       val store = new HookTransferStore(backingStore)
       val cache = new TransferCache(store, loggerFactory)
-      val toc2 = TimeOfChange(0L, CantonTimestamp.ofEpochSecond(1))
+      val toc2 = TimeOfChange(RequestCounter(0), CantonTimestamp.ofEpochSecond(1))
 
       val promise = Promise[Checked[Nothing, TransferStoreError, Unit]]()
 
@@ -169,7 +168,8 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
     }
 
     val earlierTimestampedCompletion = toc
-    val laterTimestampedCompletion = TimeOfChange(2L, CantonTimestamp.ofEpochSecond(2))
+    val laterTimestampedCompletion =
+      TimeOfChange(RequestCounter(2), CantonTimestamp.ofEpochSecond(2))
 
     "store the first completing request" in {
       val store = new InMemoryTransferStore(targetDomain, loggerFactory)
@@ -199,7 +199,7 @@ class TransferCacheTest extends AsyncWordSpec with BaseTest with HasExecutorServ
       val cache = new TransferCache(store, loggerFactory)(executorService)
 
       val timestamps = (1L to 100L).toList.map { ts =>
-        TimeOfChange(ts, CantonTimestamp.ofEpochSecond(ts))
+        TimeOfChange(RequestCounter(ts), CantonTimestamp.ofEpochSecond(ts))
       }
 
       def completeAndLookup(time: TimeOfChange): Future[

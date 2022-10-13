@@ -18,6 +18,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfPartyId}
+import org.scalatest.Assertion
 import org.scalatest.funspec.PathAnyFunSpec
 
 import java.util.UUID
@@ -86,6 +87,16 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         testedProtocolVersion,
       )
 
+    // TODO(i10210): We probably do not want this appearing in the context of the logged error
+    val checkTestedProtocolVersion: Map[String, String] => Assertion =
+      _ should contain(
+        "representativeProtocolVersion" -> Verdict
+          .protocolVersionRepresentativeFor(
+            testedProtocolVersion
+          )
+          .toString
+      )
+
     describe("under the Signatory policy") {
       def testReject() =
         LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())(testedProtocolVersion)
@@ -135,8 +146,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           )
         )
 
+        val alarmMsg =
+          s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0"
         val alarm = MediatorError.MalformedMessage.Reject(
-          s"Rejected transaction as a view has threshold below the confirmation policy's minimum threshold. viewHash=${viewThresholdTooLow.viewHash}, threshold=0",
+          alarmMsg,
           v0.MediatorRejection.Code.ViewThresholdBelowMinimumThreshold,
           testedProtocolVersion,
         )
@@ -147,7 +160,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             InformeeMessage(fullInformeeTreeThresholdTooLow)(testedProtocolVersion),
             testedProtocolVersion,
           )(loggerFactory),
-          _.shouldBeCantonError(alarm),
+          _.shouldBeCantonError(
+            MediatorError.MalformedMessage,
+            _ shouldBe alarmMsg,
+            checkTestedProtocolVersion,
+          ),
         )
 
         sut.state shouldBe Left(alarm)
@@ -170,10 +187,9 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             .value
             .futureValue,
           _.shouldBeCantonError(
-            MediatorError.MalformedMessage.Reject(
-              s"Unknown request $requestId: received mediator response by $solo for view hash ${view1.viewHash} for root hash ${view1.rootHash}",
-              testedProtocolVersion,
-            )
+            MediatorError.MalformedMessage,
+            _ shouldBe s"Unknown request $requestId: received mediator response by $solo for view hash ${view1.viewHash} for root hash ${someOtherRootHash.value}",
+            checkTestedProtocolVersion,
           ),
         )
         result shouldBe None
@@ -418,7 +434,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             valueOrFail(sut.progress(changeTs, response, topologySnapshot).value.futureValue)(
               "Malformed response for a view hash"
             ),
-            _.shouldBeCantonError(testReject("malformed view")),
+            _.shouldBeCantonError(
+              LocalReject.MalformedRejects.Payloads,
+              _ shouldBe "Rejected transaction due to malformed payload within views malformed view",
+            ),
           )
 
           result.version shouldBe changeTs
@@ -437,12 +456,13 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
       describe("without a view hash") {
         it("should update the pending confirming parties for all hosted parties in all views") {
+          val rejectMsg = "malformed request"
           val response =
             MediatorResponse.tryCreate(
               requestId,
               solo,
               None,
-              testReject("malformed request"),
+              testReject(rejectMsg),
               None,
               Set.empty,
               domainId,
@@ -453,8 +473,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               "Malformed response without view hash"
             ),
             _.shouldBeCantonError(
-              testReject("malformed request"),
-              Map("reportedBy" -> s"$solo", "requestId" -> requestId.toString),
+              LocalReject.MalformedRejects.Payloads,
+              _ shouldBe s"Rejected transaction due to malformed payload within views $rejectMsg",
+              _ should (contain("reportedBy" -> s"$solo") and contain(
+                "requestId" -> requestId.toString
+              )),
             ),
           )
           result.version shouldBe changeTs
@@ -463,12 +486,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               view1.viewHash -> ViewState(
                 Set(alice),
                 3,
-                List(Set(bob.party) -> testReject("malformed request")),
+                List(Set(bob.party) -> testReject(rejectMsg)),
               ),
               view2.viewHash -> ViewState(
                 Set(alice),
                 3,
-                List(Set(bob.party, dave.party) -> testReject("malformed request")),
+                List(Set(bob.party, dave.party) -> testReject(rejectMsg)),
               ),
             )
           )
@@ -535,17 +558,17 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             .value
             .futureValue shouldBe None,
           _.shouldBeCantonError(
-            MediatorError.MalformedMessage.Reject(
-              s"Request $requestId: unauthorized mediator response for view ${view1.viewHash} by $solo on behalf of ${Set(bob.party)}",
-              testedProtocolVersion,
-            )
+            MediatorError.MalformedMessage,
+            _ shouldBe s"Request ${requestId.unwrap}: unauthorized mediator response for view ${view1.viewHash} by $solo on behalf of ${Set(bob.party)}",
+            checkTestedProtocolVersion,
           ),
         )
       }
 
       it("should ignore malformed non-VIP responses") {
+        val rejectMsg = "malformed request"
         val reject =
-          LocalReject.MalformedRejects.Payloads.Reject("malformed request")(testedProtocolVersion)
+          LocalReject.MalformedRejects.Payloads.Reject(rejectMsg)(testedProtocolVersion)
         val response =
           MediatorResponse.tryCreate(
             requestId,
@@ -565,8 +588,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               .futureValue
           )(s"$nonVip responds Malformed"),
           _.shouldBeCantonError(
-            reject,
-            Map("reportedBy" -> s"$nonVip", "requestId" -> requestId.toString),
+            LocalReject.MalformedRejects.Payloads,
+            _ shouldBe s"Rejected transaction due to malformed payload within views $rejectMsg",
+            _ should (contain("reportedBy" -> s"$nonVip") and contain(
+              "requestId" -> requestId.toString
+            )),
           ),
         )
         result.state shouldBe Right(initialState)

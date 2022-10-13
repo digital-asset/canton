@@ -270,7 +270,7 @@ class DbSequencedEventStore(
         )
 
         events = ((firstSc max from) to to).map { sc =>
-          val ts = firstTs.addMicros(sc - firstSc)
+          val ts = firstTs.addMicros((sc - firstSc).unwrap)
           IgnoredSequencedEvent(ts, sc, None)(traceContext)
         }
 

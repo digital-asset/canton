@@ -43,8 +43,7 @@ object SecureRandomness {
     if (bytes.size != expectedLength)
       Left(
         DeserializationError(
-          s"Expected $expectedLength bytes of serialized randomness, got ${bytes.size}",
-          bytes,
+          s"Expected $expectedLength bytes of serialized randomness, got ${bytes.size}"
         )
       )
     else Right(SecureRandomness(bytes))

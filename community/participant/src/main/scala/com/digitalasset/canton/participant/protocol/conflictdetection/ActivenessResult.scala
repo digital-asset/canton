@@ -14,7 +14,7 @@ import pprint.Tree
   * @param contracts The contracts whose activeness check has failed
   * @param inactiveTransfers The transfers that shall be completed, but that are not active.
   */
-case class ActivenessResult(
+final case class ActivenessResult(
     contracts: ActivenessCheckResult[LfContractId, ActiveContractStore.Status],
     inactiveTransfers: Set[TransferId],
     keys: ActivenessCheckResult[LfGlobalKey, ContractKeyJournal.Status],
@@ -54,7 +54,7 @@ object ActivenessResult {
   * @param notFree The items that shall be free, but are not.
   * @param notActive The contracts that shall be active, but are not.
   */
-case class ActivenessCheckResult[Key, Status <: PrettyPrinting](
+private[conflictdetection] final case class ActivenessCheckResult[Key, Status <: PrettyPrinting](
     alreadyLocked: Set[Key],
     notFresh: Set[Key],
     unknown: Set[Key],
@@ -76,7 +76,7 @@ case class ActivenessCheckResult[Key, Status <: PrettyPrinting](
 
 }
 
-object ActivenessCheckResult {
+private[conflictdetection] object ActivenessCheckResult {
   def success[Key: Pretty, Status <: PrettyPrinting] =
     ActivenessCheckResult[Key, Status](Set.empty, Set.empty, Set.empty, Map.empty, Map.empty)
 }

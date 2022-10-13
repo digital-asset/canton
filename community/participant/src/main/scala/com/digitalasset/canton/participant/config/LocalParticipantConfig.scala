@@ -162,6 +162,8 @@ case class ParticipantNodeParameters(
     enableCausalityTracking: Boolean,
     unsafeEnableDamlLfDevVersion: Boolean,
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
+    maxDbConnections: Int,
+    excludeInfrastructureTransactions: Boolean,
 ) extends LocalNodeParameters {
   override def devVersionSupport: Boolean = protocolConfig.devVersionSupport
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -755,6 +757,7 @@ object TestingTimeServiceConfig {
   * @param willCorruptYourSystemDevVersionSupport If set to true, development protocol versions (and database schemas) will be supported. Do NOT use this in production, as it will break your system.
   * @param dontWarnOnDeprecatedPV If true, then this participant will not emit a warning when connecting to a sequencer using a deprecated protocol version (such as 2.0.0).
   * @param warnIfOverloadedFor If all incoming commands have been rejected due to PARTICIPANT_BACKPRESSURE during this interval, the participant will log a warning.
+  * @param excludeInfrastructureTransactions If set, infrastructure transactions (i.e. ping, bong and dar distribution) will be excluded from participant metering.
   */
 case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -777,6 +780,7 @@ case class ParticipantNodeParameterConfig(
       NonNegativeFiniteDuration.ofSeconds(20)
     ),
     ledgerApiServerParameters: LedgerApiServerParametersConfig = LedgerApiServerParametersConfig(),
+    excludeInfrastructureTransactions: Boolean = true,
 )
 
 /** Parameters for the participant node's stores

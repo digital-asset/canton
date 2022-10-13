@@ -40,7 +40,7 @@ object AuthenticationToken {
     Either.cond(
       bytes.size() == length,
       new AuthenticationToken(bytes),
-      DeserializationError(s"Authentication token of wrong size: ${bytes.size()}", bytes),
+      DeserializationError(s"Authentication token of wrong size: ${bytes.size()}"),
     )
 
   def tryFromProtoPrimitive(bytes: ByteString): AuthenticationToken =

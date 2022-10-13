@@ -67,6 +67,6 @@ object TinkKeyFormat {
       .catchNonFatal(
         CleartextKeysetHandle.read(BinaryKeysetReader.withInputStream(bytes.newInput()))
       )
-      .leftMap(err => DeserializationError(s"Failed to deserialize tink keyset: $err", bytes))
+      .leftMap(err => DeserializationError(s"Failed to deserialize tink keyset: $err"))
 
 }

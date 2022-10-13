@@ -55,7 +55,7 @@ import com.digitalasset.canton.topology.transaction._
 import com.digitalasset.canton.topology.{DomainId, Member, TestingOwnerWithKeys}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax._
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 
@@ -623,7 +623,7 @@ class DomainTopologySenderTest
             async = Some(
               SendResult.Error(
                 DeliverError.create(
-                  counter = 1,
+                  counter = SequencerCounter(1),
                   timestamp = CantonTimestamp.Epoch,
                   domainId,
                   messageId = MessageId.tryCreate("booh"),

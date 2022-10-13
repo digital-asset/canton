@@ -75,6 +75,7 @@ class SyncDomainEphemeralState(
   val requestJournal =
     new RequestJournal(
       persistentState.requestJournalStore,
+      metrics,
       loggerFactory,
       startingPoints.processing.nextRequestCounter,
     )

@@ -152,14 +152,17 @@ class GrpcSequencerService(
   override def sendAsyncSigned(request: protocolV0.SignedContent): Future[v0.SendAsyncResponse] =
     send[SignedContent[SubmissionRequest]](
       SignedContent
-        .fromProtoV0[SubmissionRequest](SubmissionRequest.fromByteString, request)
+        .fromProtoV0[SubmissionRequest](
+          SubmissionRequest.fromByteString(MaxRequestSize.Limit(maxInBoundMessageSize)),
+          request,
+        )
         .map(request => GrpcSequencerService.SignedSubmissionRequest(request))
     )
 
   override def sendAsync(requestP: v0.SubmissionRequest): Future[v0.SendAsyncResponse] =
     send[SubmissionRequest](
       SubmissionRequest
-        .fromProtoV0(requestP)
+        .fromProtoV0(requestP, MaxRequestSize.Limit(maxInBoundMessageSize))
         .map(request => GrpcSequencerService.PlainSubmissionRequest(request, requestP))
     )
 
@@ -173,6 +176,7 @@ class GrpcSequencerService(
       val validatedRequestEither: Either[SendAsyncError, WrappedSubmissionRequest[Req]] = for {
         result <- deserealize
           .leftMap { error =>
+            // Todo(i10271): add an alarm to report a deserialization error.
             logger.warn(error.toString)
             SendAsyncError.RequestInvalid(error.toString)
           }
@@ -226,7 +230,7 @@ class GrpcSequencerService(
         // before we switch threads
         val validatedRequestEither = for {
           request <- SubmissionRequest
-            .fromProtoV0(requestP)
+            .fromProtoV0(requestP, MaxRequestSize.Limit(maxInBoundMessageSize))
             .leftMap(err => SendAsyncError.RequestInvalid(err.toString))
           validatedRequest <- validateSubmissionRequest(requestP, request)
           sender = validatedRequest.sender

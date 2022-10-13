@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.store
 
-import com.digitalasset.canton.SequencerCounter
+import com.digitalasset.canton.SequencerCounterDiscriminator
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.db.{
   DbSequencerCounterTrackerStore,
   SequencerClientDiscriminator,
@@ -23,22 +24,26 @@ import scala.concurrent.{ExecutionContext, Future}
   * The prehead of the cursor is advanced only so far that all sequencer counters up to the prehead are clean.
   */
 trait SequencerCounterTrackerStore extends AutoCloseable {
-  protected[store] val cursorStore: CursorPreheadStore[SequencerCounter]
+  protected[store] val cursorStore: CursorPreheadStore[SequencerCounterDiscriminator]
 
   /** Gets the prehead clean sequencer counter. All sequencer counters below are assumed to be clean. */
   def preheadSequencerCounter(implicit
       traceContext: TraceContext
-  ): Future[Option[CursorPrehead[SequencerCounter]]] =
+  ): Future[Option[SequencerCounterCursorPrehead]] =
     cursorStore.prehead
 
   /** Sets the prehead clean sequencer counter to `sequencerCounter` unless it has previously been set to a higher value. */
-  def advancePreheadSequencerCounterTo(sequencerCounter: CursorPrehead[SequencerCounter])(implicit
+  def advancePreheadSequencerCounterTo(
+      sequencerCounter: SequencerCounterCursorPrehead
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     cursorStore.advancePreheadTo(sequencerCounter)
 
   /** Rewinds the prehead clean sequencer counter to `newPrehead` unless the prehead is already at or before the new `preHead`. */
-  def rewindPreheadSequencerCounter(newPreheadO: Option[CursorPrehead[SequencerCounter]])(implicit
+  def rewindPreheadSequencerCounter(
+      newPreheadO: Option[SequencerCounterCursorPrehead]
+  )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
     cursorStore.rewindPreheadTo(newPreheadO)

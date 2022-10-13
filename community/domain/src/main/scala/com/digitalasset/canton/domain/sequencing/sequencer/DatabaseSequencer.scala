@@ -109,7 +109,13 @@ class DatabaseSequencer(
     cryptoApi: DomainSyncCryptoClient,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
-    extends BaseSequencer(DomainTopologyManagerId(domainId), loggerFactory, health, clock)
+    extends BaseSequencer(
+      DomainTopologyManagerId(domainId),
+      loggerFactory,
+      health,
+      clock,
+      BaseSequencer.checkSignature(cryptoApi),
+    )
     with FlagCloseable {
   private val store: SequencerStore =
     SequencerStore(
@@ -212,7 +218,6 @@ class DatabaseSequencer(
   override protected def sendAsyncSignedInternal(
       signedSubmission: SignedContent[SubmissionRequest]
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] =
-    // TODO(Danilo): implement signature check for db sequencer
     sendAsyncInternal(signedSubmission.content)
 
   override def readInternal(member: Member, offset: SequencerCounter)(implicit

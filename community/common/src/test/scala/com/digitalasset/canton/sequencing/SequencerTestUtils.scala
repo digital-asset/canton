@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.{
@@ -17,6 +16,7 @@ import com.digitalasset.canton.sequencing.protocol.{
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId}
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 
 object SequencerTestUtils extends BaseTest {
@@ -44,7 +44,7 @@ object SequencerTestUtils extends BaseTest {
     val batch = Batch.empty(testedProtocolVersion)
 
     val deliver = Deliver.create[ClosedEnvelope](
-      counter,
+      SequencerCounter(counter),
       timestamp,
       domainId,
       messageId,
@@ -65,14 +65,14 @@ object SequencerTestUtils extends BaseTest {
   }
 
   def mockDeliver(
-      counter: Long = 0L,
+      sc: Long = 0,
       timestamp: CantonTimestamp = CantonTimestamp.Epoch,
       domainId: DomainId = DefaultTestIdentities.domainId,
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
   ): Deliver[Nothing] = {
     val batch = Batch.empty(testedProtocolVersion)
     Deliver.create[Nothing](
-      counter,
+      SequencerCounter(sc),
       timestamp,
       domainId,
       messageId,

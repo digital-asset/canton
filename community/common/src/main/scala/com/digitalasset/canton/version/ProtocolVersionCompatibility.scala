@@ -14,7 +14,6 @@ import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.version.ProtocolVersion.InvalidProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersionCompatibility.UnsupportedVersion
-import com.digitalasset.canton.version.ReleaseVersionToProtocolVersions.releaseVersionToProtocolVersions
 import pureconfig.error.FailureReason
 import pureconfig.{ConfigReader, ConfigWriter}
 
@@ -31,10 +30,10 @@ object ProtocolVersionCompatibility {
         ProtocolVersion.unstable.forgetNE
       else List.empty
 
-    releaseVersionToProtocolVersions.getOrElse(
+    ReleaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of a participant of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+        s"Please add the supported protocol versions of a participant of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ unstable
   }
@@ -50,10 +49,10 @@ object ProtocolVersionCompatibility {
         ProtocolVersion.unstable.forgetNE
       else List.empty
 
-    releaseVersionToProtocolVersions.getOrElse(
+    ReleaseVersionToProtocolVersions.getOrElse(
       release,
       sys.error(
-        s"Please add the supported protocol versions of domain nodes of release version $release to `releaseVersionToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
+        s"Please add the supported protocol versions of domain nodes of release version $release to `majorMinorToProtocolVersions` in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ unstable
   }

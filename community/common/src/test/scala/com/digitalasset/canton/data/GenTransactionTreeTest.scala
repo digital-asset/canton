@@ -93,13 +93,6 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       }
 
       "be serialized and deserialized" in {
-        val transactionTree = example.transactionTree
-        GenTransactionTree
-          .fromByteString(
-            factory.cryptoOps,
-            transactionTree.toProtoV0.toByteString,
-          ) shouldEqual Right(transactionTree)
-
         val fullInformeeTree = example.fullInformeeTree
         FullInformeeTree
           .fromByteString(factory.cryptoOps)(

@@ -71,7 +71,7 @@ class HttpSequencerSubscriptionTest
 
       // this should start the subscription
       val subscription = mkSubscription(pollingResults) { event =>
-        if (event.content.counter == 2) finished.success(())
+        if (event.content.counter == SequencerCounter(2)) finished.success(())
         Future.successful(Right(()))
       }
 
@@ -164,7 +164,7 @@ class HttpSequencerSubscriptionTest
       handler: RawSignedContentSerializedEvent => Future[Either[String, Unit]]
   )(implicit materializer: Materializer): HttpSequencerSubscription[String] =
     new HttpSequencerSubscription(
-      0L,
+      SequencerCounter(0),
       event => handler(event.signedEvent),
       pollingResults.readEvent,
       DefaultProcessingTimeouts.testing,
@@ -172,11 +172,10 @@ class HttpSequencerSubscriptionTest
       pollingInterval,
     )
 
-  def mkEvent(counter: SequencerCounter): OrdinarySerializedEvent =
+  def mkEvent(sc: Long): OrdinarySerializedEvent =
     OrdinarySequencedEvent(
       SignedContent(
-        SequencerTestUtils
-          .mockDeliver(counter, CantonTimestamp.Epoch, DefaultTestIdentities.domainId),
+        SequencerTestUtils.mockDeliver(sc, CantonTimestamp.Epoch, DefaultTestIdentities.domainId),
         SymbolicCrypto.emptySignature,
         None,
       )
@@ -193,7 +192,7 @@ class HttpSequencerSubscriptionTest
     def readEvent(
         counter: Traced[SequencerCounter]
     ): EitherT[Future, HttpSequencerClientError, Option[OrdinarySerializedEvent]] = {
-      polls += counter.value
+      polls += counter.value.v
       val resultIndex = nextResultIndex.getAndIncrement()
 
       // bit shady but just don't complete the future once we've run out of expected events
@@ -210,7 +209,7 @@ class HttpSequencerSubscriptionTest
   case class PollingResultsBuilder(
       results: Seq[Either[HttpSequencerClientError, Option[OrdinarySerializedEvent]]] = Seq.empty
   ) {
-    def event(counter: SequencerCounter) = copy(results :+ Right(Some(mkEvent(counter))))
+    def event(sc: Long) = copy(results :+ Right(Some(mkEvent(sc))))
     def empty(): PollingResultsBuilder = copy(results :+ Right(None))
     def error(error: HttpSequencerClientError) = copy(results :+ Left(error))
 

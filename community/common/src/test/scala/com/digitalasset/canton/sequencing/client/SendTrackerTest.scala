@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.SequencerClientMetrics
@@ -21,6 +20,7 @@ import com.digitalasset.canton.store.SavePendingSendError
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.store.memory.InMemorySendTrackerStore
 import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -50,7 +50,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
     OrdinarySequencedEvent(
       sign(
         Deliver.create(
-          0,
+          SequencerCounter(0),
           timestamp,
           DefaultTestIdentities.domainId,
           Some(msgId),
@@ -64,7 +64,7 @@ class SendTrackerTest extends AsyncWordSpec with BaseTest {
     OrdinarySequencedEvent(
       sign(
         DeliverError.create(
-          0,
+          SequencerCounter(0),
           timestamp,
           DefaultTestIdentities.domainId,
           msgId,

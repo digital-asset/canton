@@ -50,7 +50,7 @@ object Nonce {
       bytes.size() == length,
       new Nonce(bytes),
       CryptoDeserializationError(
-        DeserializationError(s"Nonce of invalid length: ${bytes.size()}", bytes)
+        DeserializationError(s"Nonce of invalid length: ${bytes.size()}")
       ),
     )
 

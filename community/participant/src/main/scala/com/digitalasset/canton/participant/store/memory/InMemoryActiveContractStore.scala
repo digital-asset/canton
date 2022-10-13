@@ -10,9 +10,9 @@ import cats.syntax.foldable._
 import cats.syntax.functor._
 import cats.syntax.functorFilter._
 import com.daml.lf.data.Ref.PackageId
+import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.RequestCounter
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}

@@ -110,7 +110,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     val testConfig =
       CommunitySequencerReaderConfig(
         readBatchSize = 10,
-        checkpointInterval = NonNegativeFiniteDuration.ofMillis(200),
+        checkpointInterval = NonNegativeFiniteDuration.ofMillis(400),
       )
     val eventSignaller = new ManualEventSignaller()
     val reader = new SequencerReader(
@@ -133,11 +133,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       */
     def readAsSeq(
         member: Member,
-        counter: SequencerCounter,
+        sc: SequencerCounter,
         take: Int,
     ): Future[Seq[OrdinarySerializedEvent]] =
       loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.WARN))(
-        valueOrFail(reader.read(member, counter))(s"Events source for $member") flatMap {
+        valueOrFail(reader.read(member, sc))(s"Events source for $member") flatMap {
           _.take(take.toLong)
             .idleTimeout(defaultTimeout)
             .runWith(Sink.seq)
@@ -240,9 +240,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           .map(ts0.plusSeconds)
           .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
         _ <- storeAndWatermark(events)
-        events <- readAsSeq(alice, 0, 20)
+        events <- readAsSeq(alice, SequencerCounter(0), 20)
       } yield {
-        forAll(events.zipWithIndex) { case (event, n) => event.counter shouldBe n }
+        forAll(events.zipWithIndex) { case (event, n) =>
+          event.counter shouldBe SequencerCounter(n)
+        }
       }
     }
 
@@ -257,11 +259,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
           .toList
         _ <- storeAndWatermark(delivers)
-        events <- readAsSeq(alice, 5, 15)
+        events <- readAsSeq(alice, SequencerCounter(5), 15)
       } yield {
-        events.headOption.value.counter shouldBe 5L
+        events.headOption.value.counter shouldBe SequencerCounter(5)
         events.headOption.value.timestamp shouldBe ts0.plusSeconds(6)
-        events.lastOption.value.counter shouldBe 19L
+        events.lastOption.value.counter shouldBe SequencerCounter(19)
         events.lastOption.value.timestamp shouldBe ts0.plusSeconds(20)
       }
     }
@@ -277,12 +279,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId, traceContext = traceContext)()))
           .toList
         _ <- storeAndWatermark(delivers)
-        queue = readWithQueue(alice, 0)
+        queue = readWithQueue(alice, SequencerCounter(0))
         // read off all of the initial delivers
         _ <- MonadUtil.sequentialTraverse_(delivers.zipWithIndex.map(_._2)) { expectedCounter =>
           for {
             eventO <- pullFromQueue(queue)
-          } yield eventO.value.counter shouldBe expectedCounter
+          } yield eventO.value.counter shouldBe SequencerCounter(expectedCounter)
         }
         // start reading the next event
         nextEventF = pullFromQueue(queue)
@@ -298,7 +300,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         // wait for the next event
         nextEventO <- nextEventF
         _ = queue.cancel() // cancel the queue now we're done with it
-      } yield nextEventO.value.counter shouldBe 5L // it'll be alices fifth event
+      } yield nextEventO.value.counter shouldBe SequencerCounter(5) // it'll be alices fifth event
     }
 
     "attempting to read an unregistered member returns error" in { env =>
@@ -307,7 +309,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
         // we haven't registered alice
-        error <- leftOrFail(reader.read(alice, 0L))("read unknown member")
+        error <- leftOrFail(reader.read(alice, SequencerCounter(0)))("read unknown member")
       } yield error shouldBe CreateSubscriptionError.UnknownMember(alice)
     }
 
@@ -317,7 +319,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         for {
           // we haven't registered the topology client member
           _ <- store.registerMember(alice, ts0)
-          error <- leftOrFail(reader.read(alice, 0L))("read unknown topology client")
+          error <- leftOrFail(reader.read(alice, SequencerCounter(0)))(
+            "read unknown topology client"
+          )
         } yield error shouldBe CreateSubscriptionError.UnknownMember(topologyClientMember)
     }
 
@@ -328,7 +332,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         _ <- store.disableMember(aliceId)
-        error <- leftOrFail(reader.read(alice, 0L))("read disabled member")
+        error <- leftOrFail(reader.read(alice, SequencerCounter(0)))("read disabled member")
       } yield error shouldBe CreateSubscriptionError.MemberDisabled(alice)
     }
 
@@ -341,7 +345,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         _ <- store.registerMember(topologyClientMember, ts0)
         aliceId <- store.registerMember(alice, ts0)
         // start reading for an event but don't wait for it
-        eventsF = readAsSeq(alice, 0, 1)
+        eventsF = readAsSeq(alice, SequencerCounter(0), 1)
         // set a timer to wait for a little
         _ = actorSystem.scheduler.scheduleOnce(500.millis)(waitP.success(()))
         // still shouldn't have read anything
@@ -384,9 +388,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           _ <- storeAndWatermark(delivers)
           // store a counter check point at 5s
           _ <- store
-            .saveCounterCheckpoint(aliceId, checkpoint(5, ts(6)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(5), ts(6)))
             .valueOrFail("saveCounterCheckpoint")
-          events <- readAsSeq(alice, 10, 15)
+          events <- readAsSeq(alice, SequencerCounter(10), 15)
         } yield {
           // this assertion is a bit redundant as we're actually just looking for the prior fetch to complete rather than get stuck
           events should have size (15)
@@ -421,13 +425,15 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             )
           }
           _ <- storeAndWatermark(delivers)
+          start = System.nanoTime()
           // take some events
-          queue = readWithQueue(alice, 0)
+          queue = readWithQueue(alice, SequencerCounter(0))
           // read a bunch of items
           readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
           _ <- waitFor(testConfig.checkpointInterval.toScala * 6)
           checkpointsWritten = saveCounterCheckpointCallCount
+          stop = System.nanoTime()
           // close the queue before we make any assertions
           _ = queue.cancel()
           lastEventRead = readEvents.lastOption.value.value
@@ -443,8 +449,16 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             CantonTimestamp.ofEpochSecond(11)
           )
 
+          val readingDurationMillis = java.time.Duration.ofNanos(stop - start).toMillis
+          val checkpointsUpperBound = (readingDurationMillis.toFloat /
+            testConfig.checkpointInterval.duration.toMillis.toFloat).ceil.toInt
+          logger.debug(
+            s"Expecting at most $checkpointsUpperBound checkpoints because reading overall took at most $readingDurationMillis ms"
+          )
           // make sure we didn't write a checkpoint for every event (in practice this should be <3)
-          checkpointsWritten should (be > 0 and be < 20)
+          checkpointsWritten should (be > 0 and be <= checkpointsUpperBound)
+          // The next assertion fails if the test takes too long. Increase the checkpoint interval in `testConfig` if necessary.
+          checkpointsUpperBound should be < 20
         }
       }
 
@@ -463,17 +477,20 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           _ <- storeAndWatermark(delivers)
           checkpointTimestamp = ts0.plusSeconds(11)
           _ <- valueOrFail(
-            store.saveCounterCheckpoint(aliceId, checkpoint(10L, checkpointTimestamp))
+            store.saveCounterCheckpoint(
+              aliceId,
+              checkpoint(SequencerCounter(10), checkpointTimestamp),
+            )
           )("saveCounterCheckpoint")
           // read from a point ahead of this checkpoint
-          events <- readAsSeq(alice, 15L, 3)
+          events <- readAsSeq(alice, SequencerCounter(15), 3)
         } yield {
           // it should have started reading from the closest counter checkpoint timestamp
           verify(storeSpy).readEvents(eqTo(aliceId), eqTo(Some(checkpointTimestamp)), anyInt)(
             anyTraceContext
           )
           // but only emitted events starting from 15
-          events.headOption.value.counter shouldBe 15L
+          events.headOption.value.counter shouldBe SequencerCounter(15)
           // our deliver events start at ts0+1s and as alice is registered before the first deliver event their first
           // event (0) is for ts0+1s.
           // event 15 should then have ts ts0+16s
@@ -502,11 +519,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             _ <- storeAndWatermark(delivers)
             _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
             error <- loggerFactory.assertLogs(
-              leftOrFail(reader.read(alice, 0L))("read"),
+              leftOrFail(reader.read(alice, SequencerCounter(0)))("read"),
               _.errorMessage shouldBe expectedMessage,
             )
-          } yield inside(error) { case CreateSubscriptionError.EventsUnavailable(0L, message) =>
-            message should include(expectedMessage)
+          } yield inside(error) {
+            case CreateSubscriptionError.EventsUnavailable(SequencerCounter(0), message) =>
+              message should include(expectedMessage)
           }
       }
 
@@ -528,15 +546,16 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
               )
             _ <- storeAndWatermark(delivers)
             _ <- store
-              .saveCounterCheckpoint(aliceId, checkpoint(9L, ts(10)))
+              .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(9), ts(10)))
               .valueOrFail("saveCounterCheckpoint")
             _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
             error <- loggerFactory.assertLogs(
-              leftOrFail(reader.read(alice, 9L))("read"),
+              leftOrFail(reader.read(alice, SequencerCounter(9)))("read"),
               _.errorMessage shouldBe expectedMessage,
             )
-          } yield inside(error) { case CreateSubscriptionError.EventsUnavailable(9L, message) =>
-            message shouldBe expectedMessage
+          } yield inside(error) {
+            case CreateSubscriptionError.EventsUnavailable(SequencerCounter(9), message) =>
+              message shouldBe expectedMessage
           }
       }
 
@@ -552,10 +571,10 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             .map(Sequenced(_, mockDeliverStoreEvent(sender = aliceId)()))
           _ <- storeAndWatermark(delivers)
           _ <- store
-            .saveCounterCheckpoint(aliceId, checkpoint(11L, ts(10)))
+            .saveCounterCheckpoint(aliceId, checkpoint(SequencerCounter(11), ts(10)))
             .valueOrFail("saveCounterCheckpoint")
           _ <- store.saveLowerBound(ts(10)).valueOrFail("saveLowerBound")
-          _ <- reader.read(alice, 12L).valueOrFail("read")
+          _ <- reader.read(alice, SequencerCounter(12)).valueOrFail("read")
         } yield succeed // the above not failing is enough of an assertion
       }
     }
@@ -639,10 +658,12 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         import env._
         setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
-            aliceEvents <- readAsSeq(alice, 0L, delivers.length)
+            aliceEvents <- readAsSeq(alice, SequencerCounter(0), delivers.length)
           } yield {
             aliceEvents.length shouldBe delivers.length
-            aliceEvents.map(_.counter) shouldBe (0L until delivers.length.toLong)
+            aliceEvents.map(_.counter) shouldBe (SequencerCounter(0) until SequencerCounter(
+              delivers.length.toLong
+            ))
             val deliverWithSigningTimestamps =
               aliceEvents.zip(delivers).zipWithIndex.collect {
                 filterForSigningTimestamps
@@ -658,7 +679,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                 val expectedSequencedEvent =
                   if (signingTimestamp + signingTolerance >= sequencingTimestamp)
                     Deliver.create(
-                      sc,
+                      SequencerCounter(sc),
                       sequencingTimestamp,
                       domainId,
                       messageId.some,
@@ -667,7 +688,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                     )
                   else
                     DeliverError.create(
-                      sc,
+                      SequencerCounter(sc),
                       sequencingTimestamp,
                       domainId,
                       messageId,
@@ -685,10 +706,11 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
         import env._
         setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
-            bobEvents <- readAsSeq(bob, 0L, delivers.length)
+            bobEvents <- readAsSeq(bob, SequencerCounter(0), delivers.length)
           } yield {
             bobEvents.length shouldBe delivers.length
             bobEvents.map(_.counter) shouldBe (0L until delivers.length.toLong)
+              .map(SequencerCounter(_))
             val deliverWithSigningTimestamps =
               bobEvents.zip(delivers).zipWithIndex.collect {
                 filterForSigningTimestamps
@@ -697,14 +719,14 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
               case DeliveredEventToCheck(
                     delivered,
                     sequencingTimestamp,
-                    messageId,
+                    _messageId,
                     signingTimestamp,
                     sc,
                   ) =>
                 val expectedSequencedEvent =
                   if (signingTimestamp + signingTolerance >= sequencingTimestamp)
                     Deliver.create(
-                      sc,
+                      SequencerCounter(sc),
                       sequencingTimestamp,
                       domainId,
                       None,
@@ -713,7 +735,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
                     )
                   else
                     Deliver.create(
-                      sc,
+                      SequencerCounter(sc),
                       sequencingTimestamp,
                       domainId,
                       None,
@@ -744,7 +766,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
             // Sequencing ts, signing ts relative to ts0, recipients
             (1L, None, recipientsTopo),
             (signingToleranceInSec + 1L, Some(0L), recipientsTopo),
-          ) ++ (2L to 20L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
+          ) ++ (2L to 40L).map(i => (signingToleranceInSec + i, None, recipientsAlice))
           batch = Batch.fromClosed(
             testedProtocolVersion,
             ClosedEnvelope(ByteString.copyFromUtf8("test envelope"), Recipients.cc(alice, bob)),
@@ -765,7 +787,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           }
           _ <- storePayloadsAndWatermark(delivers)
           // take some events
-          queue = readWithQueue(alice, 0)
+          queue = readWithQueue(alice, SequencerCounter(0))
           // read a bunch of items
           readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
@@ -779,7 +801,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           )
         } yield {
           // check it created a checkpoint for a recent event
-          checkpointForLastEventO.value.counter should be >= 10L
+          checkpointForLastEventO.value.counter should be >= SequencerCounter(10)
           checkpointForLastEventO.value.latestTopologyClientTimestamp shouldBe Some(
             // This is before the timestamp of the second event
             CantonTimestamp.ofEpochSecond(1)
