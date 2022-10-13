@@ -13,7 +13,7 @@ import scala.concurrent.Future
 trait DbParticipantSettingsStoreTest extends ParticipantSettingsStoreTest with DbTest {
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update_(sqlu"truncate table participant_settings", functionFullName)
   }
 

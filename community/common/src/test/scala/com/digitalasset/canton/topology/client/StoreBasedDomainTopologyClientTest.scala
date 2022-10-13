@@ -11,7 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
@@ -20,9 +20,9 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction.ParticipantPermission._
-import com.digitalasset.canton.topology.transaction.TrustLevel._
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
+import com.digitalasset.canton.topology.transaction.TrustLevel.*
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -101,7 +101,7 @@ class BaseDomainTopologyClientTest extends BaseTestWordSpec {
 @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
 trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with HasExecutionContext {
 
-  import EffectiveTimeTestHelpers._
+  import EffectiveTimeTestHelpers.*
 
   def topologySnapshot(mk: () => TopologyStore[TopologyStoreId]): Unit = {
 
@@ -110,9 +110,9 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
       loggerFactory,
       parallelExecutionContext,
     )
-    import DefaultTestIdentities._
-    import factory.TestingTransactions._
-    import factory._
+    import DefaultTestIdentities.*
+    import factory.TestingTransactions.*
+    import factory.*
 
     lazy val party2participant1 = mkAdd(
       PartyToParticipant(RequestSide.Both, party1, participant1, Confirmation)
@@ -165,7 +165,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
 
     "work with empty store" in {
       val fixture = new Fixture()
-      import fixture._
+      import fixture.*
       val _ = client.currentSnapshotApproximation
       val mrt = client.approximateTimestamp
       val sp = client.trySnapshot(mrt)

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
+import com.digitalasset.canton.DiscardOps
 import org.bouncycastle.crypto.digests.canton.Blake2bDigest
 
 /** Derives Blake2xb on top of Blake2b as defined in:
@@ -26,7 +27,7 @@ object Blake2xb {
     for (i <- 0.until(nrChunks)) {
       b2(outputBytes, i, MAX_2B_BYTES, h0).copyToArray(out, i * MAX_2B_BYTES)
     }
-    b2(outputBytes, nrChunks, lastChunkLen, h0).copyToArray(out, nrChunks * MAX_2B_BYTES)
+    b2(outputBytes, nrChunks, lastChunkLen, h0).copyToArray(out, nrChunks * MAX_2B_BYTES).discard
     out
   }
 }

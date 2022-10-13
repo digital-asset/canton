@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.health.admin.data
 
-import cats.syntax.functor._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.functor.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.health.admin.data.NodeStatus.{multiline, portsString}
 import com.digitalasset.canton.health.admin.v0

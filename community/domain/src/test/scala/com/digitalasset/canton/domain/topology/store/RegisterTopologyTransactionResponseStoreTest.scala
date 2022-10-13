@@ -102,7 +102,7 @@ trait DbRegisterTopologyTransactionResponseStoreTest
   val pureCryptoApi: CryptoPureApi = TestingIdentityFactory.pureCrypto()
 
   def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update_(
       sqlu"truncate table register_topology_transaction_responses",
       functionFullName,

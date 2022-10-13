@@ -13,7 +13,7 @@ import com.digitalasset.canton.sequencing.client.{
   SubscriptionErrorRetryPolicy,
 }
 import com.digitalasset.canton.sequencing.handshake.SupportsHandshake
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion

@@ -17,10 +17,10 @@ import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
 import com.daml.platform.LedgerApiServer
 import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
-import com.daml.platform.configuration.{IndexServiceConfig => LedgerIndexServiceConfig, ServerRole}
+import com.daml.platform.configuration.{IndexServiceConfig as LedgerIndexServiceConfig, ServerRole}
 import com.daml.platform.index.IndexServiceOwner
 import com.daml.platform.indexer.{
-  IndexerConfig => DamlIndexerConfig,
+  IndexerConfig as DamlIndexerConfig,
   IndexerServiceOwner,
   IndexerStartupMode,
 }
@@ -43,7 +43,7 @@ import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.Future
-import scala.jdk.DurationConverters._
+import scala.jdk.DurationConverters.*
 
 /** The StartableStoppableLedgerApi enables a canton participant node to start and stop the ledger API server
   * depending on whether the participant node is a High Availability active or passive replica.

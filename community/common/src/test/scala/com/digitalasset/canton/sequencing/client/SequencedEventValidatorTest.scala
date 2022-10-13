@@ -3,13 +3,13 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, InformeeMessage}
-import com.digitalasset.canton.sequencing.client.SequencedEventValidationError._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinarySerializedEvent,
   PossiblyIgnoredSerializedEvent,
@@ -19,7 +19,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
   IgnoredSequencedEvent,
   OrdinarySequencedEvent,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.{BaseTest, HasExecutorService, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -62,7 +62,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       counter: Long = updatedCounter,
       timestamp: CantonTimestamp = CantonTimestamp.Epoch,
   ): Future[OrdinarySerializedEvent] = {
-    import cats.syntax.option._
+    import cats.syntax.option.*
     val message = {
       val factory: ExampleTransactionFactory = new ExampleTransactionFactory()()(executorService)
       val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree

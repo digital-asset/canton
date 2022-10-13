@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 
 /** A tagged class used to return exported private keys */
 case class SerializedPrivateKey(payload: String)

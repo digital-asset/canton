@@ -19,7 +19,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{LedgerTransactionId, checked}
 import slick.jdbc.SetParameter

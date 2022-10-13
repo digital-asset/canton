@@ -11,7 +11,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ForkJoinPool, LinkedBlockingQueue, ThreadPoolExecutor, TimeUnit}
 import scala.annotation.tailrec
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 trait IdlenessExecutorServiceTest extends BaseTest { this: AnyWordSpec =>

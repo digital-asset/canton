@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.console
+
 import ammonite.compiler.Parsers
 import ammonite.interp.Watchable
-import ammonite.util.{Res, _}
+import ammonite.util.{Res, *}
 import com.digitalasset.canton.CantonScript
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
@@ -139,7 +140,7 @@ object InteractiveConsole extends NoTracing {
     */
   private def toStringLiteral(raw: String): String = {
     // uses the scala reflection primitives but doesn't actually do any reflection
-    import scala.reflect.runtime.universe._
+    import scala.reflect.runtime.universe.*
 
     Literal(Constant(raw)).toString()
   }

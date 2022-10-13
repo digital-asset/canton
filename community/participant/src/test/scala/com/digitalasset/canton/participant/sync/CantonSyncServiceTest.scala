@@ -303,7 +303,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
 
     def stats(sync: CantonSyncService, packageId: String): Option[Int] = {
 
-      import TransactionBuilder.Implicits._
+      import TransactionBuilder.Implicits.*
 
       val builder = TransactionBuilder()
       val createNode = builder.create(

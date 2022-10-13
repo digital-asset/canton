@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.FinalReason
 import com.daml.ledger.participant.state.v2.Update.{CommandRejected, TransactionAccepted}
@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightReference,
 }
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.DeduplicationInfo
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.InMemoryCommandDeduplicationStore
 import com.digitalasset.canton.participant.sync.UpstreamOffsetConvert
 import com.digitalasset.canton.participant.{GlobalOffset, LedgerSyncOffset, LocalOffset}
@@ -31,7 +31,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, DefaultDamlValues}
 import com.google.rpc.Code
-import com.google.rpc.status.{Status => RpcStatus}
+import com.google.rpc.status.{Status as RpcStatus}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID

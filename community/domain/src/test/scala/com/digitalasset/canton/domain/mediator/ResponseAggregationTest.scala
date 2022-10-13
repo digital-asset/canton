@@ -7,13 +7,13 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.ResponseAggregation.ViewState
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.Verdict.ParticipantReject
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, RequestId, RootHash, ViewHash, v0}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.TrustLevel
 import com.digitalasset.canton.tracing.TraceContext
@@ -57,8 +57,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         salt(54171),
         testedProtocolVersion,
       )
-    val view2 = TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil)
-    val view1 = TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), view2 :: Nil)
+    val view2 =
+      TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+    val view1 =
+      TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), view2 :: Nil, testedProtocolVersion)
 
     val requestId = RequestId(CantonTimestamp.Epoch)
 
@@ -106,7 +108,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             b(0),
             commonMetadataSignatory,
             b(2),
-            MerkleSeq.fromSeq(hashOps)(view1 :: Nil),
+            MerkleSeq.fromSeq(hashOps)(view1 :: Nil, testedProtocolVersion),
           )
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
@@ -136,13 +138,18 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             testedProtocolVersion,
           )
         val viewThresholdTooLow =
-          TransactionView.tryCreate(hashOps)(viewcommonDataThresholdTooLow, b(100), Nil)
+          TransactionView.tryCreate(hashOps)(
+            viewcommonDataThresholdTooLow,
+            b(100),
+            Nil,
+            testedProtocolVersion,
+          )
         val fullInformeeTreeThresholdTooLow = FullInformeeTree(
           GenTransactionTree(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
-            MerkleSeq.fromSeq(hashOps)(viewThresholdTooLow :: Nil),
+            MerkleSeq.fromSeq(hashOps)(viewThresholdTooLow :: Nil, testedProtocolVersion),
           )
         )
 
@@ -399,8 +406,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         salt(54171),
         testedProtocolVersion,
       )
-      val view2 = TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil)
-      val view1 = TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil)
+      val view2 =
+        TransactionView.tryCreate(hashOps)(viewCommonData2, b(100), Nil, testedProtocolVersion)
+      val view1 =
+        TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil, testedProtocolVersion)
 
       val informeeMessage = InformeeMessage(
         FullInformeeTree(
@@ -408,7 +417,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             b(0),
             commonMetadataSignatory,
             b(2),
-            MerkleSeq.fromSeq(hashOps)(view1 :: view2 :: Nil),
+            MerkleSeq.fromSeq(hashOps)(view1 :: view2 :: Nil, testedProtocolVersion),
           )
         )
       )(testedProtocolVersion)
@@ -514,7 +523,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             b(0),
             commonMetadata,
             b(2),
-            MerkleSeq.fromSeq(hashOps)(view1 :: Nil),
+            MerkleSeq.fromSeq(hashOps)(view1 :: Nil, testedProtocolVersion),
           )
         )
       val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)

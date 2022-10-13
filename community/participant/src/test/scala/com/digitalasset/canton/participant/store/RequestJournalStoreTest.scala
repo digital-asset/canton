@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.foldable._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
-import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState._
+import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.{
   NonterminalRequestState,
   RequestData,

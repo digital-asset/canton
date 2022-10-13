@@ -4,20 +4,20 @@
 package com.digitalasset.canton.data
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.GenTransactionTree.InvalidGenTransactionTree
 import com.digitalasset.canton.data.InformeeTree.InvalidInformeeTree
 import com.digitalasset.canton.data.LightTransactionViewTree.InvalidLightTransactionViewTree
-import com.digitalasset.canton.data.MerkleTree._
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.TransactionViewTree.InvalidTransactionViewTree
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -46,7 +46,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
   VersionedMessage,
@@ -84,7 +84,7 @@ case class GenTransactionTree(
         )
       }
 
-      usedHashes.add(rootHash)
+      usedHashes.add(rootHash).discard
       tree.subtrees.foreach(checkUniqueness)
     }
 
@@ -291,8 +291,9 @@ object GenTransactionTree {
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
-      rootViews <- MerkleSeq.fromProtoV0(hashOps, TransactionView.fromByteString(hashOps))(
-        rootViewsP
+      rootViews <- MerkleSeq.fromProtoV0(
+        (hashOps, TransactionView.fromByteString(ProtoVersion(0))(hashOps)),
+        rootViewsP,
       )
       genTransactionTree <- createGenTransactionTreeV0V1(
         hashOps,
@@ -325,8 +326,12 @@ object GenTransactionTree {
         )
       rootViewsP <- ProtoConverter
         .required("GenTransactionTree.rootViews", protoTransactionTree.rootViews)
-      rootViews <- MerkleSeq.fromProtoV1(hashOps, TransactionView.fromByteString(hashOps))(
-        rootViewsP
+      rootViews <- MerkleSeq.fromProtoV1(
+        (
+          hashOps,
+          TransactionView.fromByteString(ProtoVersion(1))(hashOps),
+        ),
+        rootViewsP,
       )
       genTransactionTree <- createGenTransactionTreeV0V1(
         hashOps,
@@ -431,7 +436,7 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
       throw InvalidTransactionViewTree(
         "The submitter metadata must be unblinded if and only if the represented view is top-level. " +
           s"Submitter metadata: ${tree.submitterMetadata.unwrap
-            .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
+              .fold(_ => "blinded", _ => "unblinded")}, isTopLevel: $isTopLevel"
       )
     }
 
@@ -797,7 +802,7 @@ object SubmitterMetadata
   override val name: String = "SubmitterMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.SubmitterMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -902,7 +907,7 @@ object SubmitterMetadata
       salt,
       submissionId,
       dedupPeriod,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(0)), Some(bytes))
+    )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(0)), Some(bytes))
   }
 }
 
@@ -956,7 +961,7 @@ object CommonMetadata
   override val name: String = "CommonMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.CommonMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -999,7 +1004,7 @@ object CommonMetadata
       uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
     } yield CommonMetadata(confirmationPolicy, DomainId(domainUid), mediatorId, salt, uuid)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
 }
@@ -1050,7 +1055,7 @@ object ParticipantMetadata
   override val name: String = "ParticipantMetadata"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ParticipantMetadata)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -1092,7 +1097,7 @@ object ParticipantMetadata
         .leftMap(_.inField("salt"))
     } yield ParticipantMetadata(let, submissionTime, workflowId, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
 }
@@ -1368,7 +1373,7 @@ object LightTransactionViewTree
   * then the grandparent's, etc.
   */
 case class Witnesses(unwrap: Seq[Set[Informee]]) {
-  import Witnesses._
+  import Witnesses.*
 
   def prepend(informees: Set[Informee]) = Witnesses(informees +: unwrap)
 

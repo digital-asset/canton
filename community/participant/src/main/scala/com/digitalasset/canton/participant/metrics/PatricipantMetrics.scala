@@ -4,17 +4,12 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.{MetricName, Metrics => LedgerApiServerMetrics}
+import com.daml.metrics.MetricHandle.{Counter, Gauge, Meter, VarGauge}
+import com.daml.metrics.{MetricName, Metrics as LedgerApiServerMetrics}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
-import com.digitalasset.canton.metrics.MetricHandle.{
-  CounterM,
-  GaugeM,
-  MeterM,
-  NodeMetrics,
-  VarGaugeM,
-}
-import com.digitalasset.canton.metrics._
+import com.digitalasset.canton.metrics.MetricHandle.NodeMetrics
+import com.digitalasset.canton.metrics.*
 
 import scala.collection.concurrent.TrieMap
 
@@ -35,10 +30,10 @@ class ParticipantMetrics(override val prefix: MetricName, override val registry:
   @MetricDoc.Tag(
     summary = "Number of updates published through the read service to the indexer",
     description =
-      """When an update is published through the read service, it has already been committed to the ledger. 
+      """When an update is published through the read service, it has already been committed to the ledger.
         |The indexer will subsequently store the update in a form that allows for querying the ledger efficiently.""",
   )
-  val updatesPublished: MeterM = meter(prefix :+ "updates-published")
+  val updatesPublished: Meter = meter(prefix :+ "updates-published")
 
 }
 
@@ -58,17 +53,17 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
           |the tasks whenever a new timestamp has been observed. This metric exposes the number of
           |un-processed sequencer messages that will trigger a timestamp advancement.""",
     )
-    val sequencerCounterQueue: VarGaugeM[Int] =
+    val sequencerCounterQueue: VarGauge[Int] =
       varGauge[Int](prefix :+ "sequencer-counter-queue", 0)
 
     @MetricDoc.Tag(
       summary = "Size of conflict detection task queue",
       description = """The task scheduler will schedule tasks to run at a given timestamp. This metric
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.
-                      |A huge number does not necessarily indicate a bottleneck; 
+                      |A huge number does not necessarily indicate a bottleneck;
                       |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
     )
-    val taskQueue: GaugeM[RefGauge[Int], Int] = refGauge(prefix :+ "task-queue", 0)
+    val taskQueue: Gauge[RefGauge[Int], Int] = refGauge(prefix :+ "task-queue", 0)
 
   }
 
@@ -81,7 +76,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                     |A huge number does not necessarily indicate a bottleneck;
                     |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
   )
-  val numDirtyRequests: CounterM = counter(prefix :+ "dirty-requests")
+  val numDirtyRequests: Counter = counter(prefix :+ "dirty-requests")
 
   object recordOrderPublisher extends TaskSchedulerMetrics {
 
@@ -92,7 +87,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       description = """Same as for conflict-detection, but measuring the sequencer counter
           |queues for the publishing to the ledger api server according to record time.""",
     )
-    val sequencerCounterQueue: VarGaugeM[Int] =
+    val sequencerCounterQueue: VarGauge[Int] =
       varGauge[Int](prefix :+ "sequencer-counter-queue", 0)
 
     @MetricDoc.Tag(
@@ -100,7 +95,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       description = """The task scheduler will schedule tasks to run at a given timestamp. This metric
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.""",
     )
-    val taskQueue: GaugeM[RefGauge[Int], Int] = refGauge(prefix :+ "task-queue", 0)
+    val taskQueue: Gauge[RefGauge[Int], Int] = refGauge(prefix :+ "task-queue", 0)
   }
 
 }

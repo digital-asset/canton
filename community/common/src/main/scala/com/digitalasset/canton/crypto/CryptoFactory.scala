@@ -5,8 +5,8 @@ package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
 import cats.implicits.showInterpolator
-import cats.instances.future._
-import cats.syntax.either._
+import cats.instances.future.*
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
   CryptoConfig,

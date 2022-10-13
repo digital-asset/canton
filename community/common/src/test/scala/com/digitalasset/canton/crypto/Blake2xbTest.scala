@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto
+
 import com.digitalasset.canton.BaseTest
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -9,7 +10,7 @@ import scala.io.Source
 
 class Blake2xbTest extends AnyWordSpec with BaseTest {
 
-  import TestVectors._
+  import TestVectors.*
 
   def hexString(buf: Array[Byte]): String = buf.map("%02X" format _).mkString.toLowerCase()
 

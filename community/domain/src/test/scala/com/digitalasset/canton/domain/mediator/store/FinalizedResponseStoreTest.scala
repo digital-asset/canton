@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
 import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.protocol.messages.InformeeMessage
@@ -48,7 +48,12 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         s(999),
         testedProtocolVersion,
       )
-    val view = TransactionView.tryCreate(hashOps)(viewCommonData, BlindedNode(rh(0)), Nil)
+    val view = TransactionView.tryCreate(hashOps)(
+      viewCommonData,
+      BlindedNode(rh(0)),
+      Nil,
+      testedProtocolVersion,
+    )
     val commonMetadata = CommonMetadata(hashOps)(
       ConfirmationPolicy.Signatory,
       domainId,
@@ -62,7 +67,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         BlindedNode(rh(11)),
         commonMetadata,
         BlindedNode(rh(12)),
-        MerkleSeq.fromSeq(hashOps)(view :: Nil),
+        MerkleSeq.fromSeq(hashOps)(view :: Nil, testedProtocolVersion),
       )
     )
   }
@@ -138,7 +143,7 @@ trait DbFinalizedResponseStoreTest
   val pureCryptoApi: CryptoPureApi = TestingIdentityFactory.pureCrypto()
 
   def cleanDb(storage: DbStorage): Future[Int] = {
-    import storage.api._
+    import storage.api.*
     storage.update(sqlu"truncate table response_aggregations", functionFullName)
   }
   "DbFinalizedResponseStore" should {

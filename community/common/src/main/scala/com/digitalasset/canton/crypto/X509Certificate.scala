@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.crypto
 
-import better.files._
+import better.files.*
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{
   LengthLimitedStringWrapper,
   LengthLimitedStringWrapperCompanion,
@@ -20,11 +20,11 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x500.style.{BCStyle, IETFUtils}
-import org.bouncycastle.asn1.x509._
+import org.bouncycastle.asn1.x509.*
 import org.bouncycastle.asn1.{ASN1ObjectIdentifier, ASN1Sequence, DERIA5String}
 import org.bouncycastle.cert.X509v3CertificateBuilder
 import org.bouncycastle.cert.jcajce.{JcaX509CertificateConverter, JcaX509CertificateHolder}
@@ -40,12 +40,12 @@ import java.security.cert.{
   CertificateException,
   CertificateFactory,
   CertificateParsingException,
-  X509Certificate => JX509Certificate,
+  X509Certificate as JX509Certificate,
 }
 import java.time.{Duration, Instant}
 import java.util.Date
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 case class CertificateId(override val str: String255)
     extends LengthLimitedStringWrapper

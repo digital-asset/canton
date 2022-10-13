@@ -5,7 +5,7 @@ package com.digitalasset.canton.util.retry
 
 import java.util.Random
 import java.util.concurrent.ThreadLocalRandom
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 trait Jitter {
 

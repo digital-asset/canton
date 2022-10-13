@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.google.protobuf.ByteString
 import io.circe.{Decoder, Encoder}
 

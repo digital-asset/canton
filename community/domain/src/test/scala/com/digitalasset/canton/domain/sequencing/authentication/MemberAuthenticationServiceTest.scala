@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.Nonce
@@ -15,17 +15,17 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   ParticipantDisabled,
 }
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import scala.concurrent.Future
 
 @SuppressWarnings(Array("org.wartremover.warts.Null"))
 class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest {
 
-  import DefaultTestIdentities._
+  import DefaultTestIdentities.*
 
   val p1 = participant1
 

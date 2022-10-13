@@ -161,8 +161,8 @@ class DbMemberAuthenticationStore(
     extends MemberAuthenticationStore
     with DbStore {
 
-  import storage.api._
-  import Member.DbStorageImplicits._
+  import storage.api.*
+  import Member.DbStorageImplicits.*
 
   override def saveNonce(storedNonce: StoredNonce)(implicit
       traceContext: TraceContext

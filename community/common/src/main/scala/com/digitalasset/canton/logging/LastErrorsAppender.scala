@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.logging
 
-import cats.syntax.functor._
-import cats.syntax.option._
+import cats.syntax.functor.*
+import cats.syntax.option.*
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.spi.AppenderAttachable
@@ -79,11 +79,14 @@ class LastErrorsAppender()
         lazy val relatedEventsSeq = relatedEvents.toSeq
 
         // Update the errors cache with the new related events since the last flush or create a first error entry
-        errorsCache.asMap().updateWith(tid) {
-          case Some(errorWithEvents) =>
-            Some(errorWithEvents.copy(events = errorWithEvents.events ++ relatedEventsSeq))
-          case None => Some(ErrorWithEvents(event, relatedEventsSeq))
-        }
+        errorsCache
+          .asMap()
+          .updateWith(tid) {
+            case Some(errorWithEvents) =>
+              Some(errorWithEvents.copy(events = errorWithEvents.events ++ relatedEventsSeq))
+            case None => Some(ErrorWithEvents(event, relatedEventsSeq))
+          }
+          .discard
 
         // Flush error with related events to last errors file appender
         lastErrorsFileAppender.foreach { appender =>
@@ -153,7 +156,7 @@ class LastErrorsAppender()
     } else {
       val index = appenders.indexOf(appender)
       if (index > -1) {
-        appenders.remove(index)
+        appenders.remove(index).discard
       }
       index != -1
     }

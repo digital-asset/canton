@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import cats.syntax.alternative._
-import cats.syntax.traverse._
+import cats.syntax.alternative.*
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref.{PackageId, Party}
 import com.daml.lf.engine.Blinding
 import com.daml.lf.transaction.TransactionVersion

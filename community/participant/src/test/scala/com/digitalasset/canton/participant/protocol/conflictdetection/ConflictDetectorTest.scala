@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{Chain, EitherT, NonEmptyChain}
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functor._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
-import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector._
+import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
   PendingActivenessCheckCounter,
@@ -26,7 +26,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Active,
   Archived,
   ChangeAfterArchival,
-  ContractState => AcsContractState,
+  ContractState as AcsContractState,
   DoubleContractArchival,
   DoubleContractCreation,
   Status,
@@ -43,7 +43,7 @@ import com.digitalasset.canton.participant.store.TransferStore.{
   TransferCompleted,
   UnknownTransferId,
 }
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryTransferStore,
   TransferCache,
@@ -56,7 +56,7 @@ import com.digitalasset.canton.protocol.{
   LfGlobalKey,
   TransferId,
 }
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter}
 import org.scalactic.source
@@ -75,7 +75,7 @@ private[conflictdetection] class ConflictDetectorTest
     with HasExecutorService
     with ConflictDetectionHelpers {
 
-  import ConflictDetectionHelpers._
+  import ConflictDetectionHelpers.*
   import TransferStoreTest.{domain1, domain2, mediator1, mediator2, targetDomain}
 
   val coid00: LfContractId = ExampleTransactionFactory.suffixedId(0, 0)

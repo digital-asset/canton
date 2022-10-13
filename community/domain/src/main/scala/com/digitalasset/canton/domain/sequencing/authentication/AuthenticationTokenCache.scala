@@ -67,13 +67,13 @@ class AuthenticationTokenCache(
     } yield ()
 
   private def cacheToken(stored: StoredAuthenticationToken): Unit = {
-    tokenCache.putIfAbsent(stored.token, stored)
+    tokenCache.putIfAbsent(stored.token, stored).discard
 
     val _ = clock.scheduleAt(
       _ => {
         TraceContext.withNewTraceContext { implicit traceContext =>
           logger.debug(s"Expiring token for ${stored.member}@${stored.expireAt}")
-          tokenCache.remove(stored.token)
+          tokenCache.remove(stored.token).discard
           FutureUtil
             .doNotAwait(store.expireNoncesAndTokens(clock.now), "Expiring old nonces and tokens")
         }

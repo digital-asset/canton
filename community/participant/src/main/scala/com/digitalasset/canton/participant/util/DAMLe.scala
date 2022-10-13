@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.util
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
 import com.daml.lf.data.Ref.PackageId
-import com.daml.lf.engine._
-import com.daml.lf.interpretation.{Error => LfInterpretationError}
+import com.daml.lf.engine.*
+import com.daml.lf.interpretation.{Error as LfInterpretationError}
 import com.daml.lf.language.Ast.Package
 import com.daml.lf.transaction.Versioned
 import com.digitalasset.canton.data.CantonTimestamp
@@ -18,7 +18,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PackageService
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.{ContractWithMetadata, PackageResolver}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPartyId, LfVersioned}

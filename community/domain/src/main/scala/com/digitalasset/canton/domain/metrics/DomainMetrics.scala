@@ -4,8 +4,9 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.codahale.metrics.MetricRegistry
+import com.codahale.{metrics as codahale}
+import com.daml.metrics.MetricHandle.{Gauge, Meter, VarGauge}
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.metrics.MetricHandle.{MeterM, NodeMetrics, VarGaugeM}
 import com.digitalasset.canton.metrics.{
   DbStorageMetrics,
   MetricDoc,
@@ -13,7 +14,8 @@ import com.digitalasset.canton.metrics.{
   SequencerClientMetrics,
 }
 
-class SequencerMetrics(parent: MetricName, val registry: MetricRegistry) extends NodeMetrics {
+class SequencerMetrics(parent: MetricName, val registry: MetricRegistry)
+    extends MetricHandle.NodeMetrics {
   override val prefix = MetricName(parent :+ "sequencer")
 
   object sequencerClient extends SequencerClientMetrics(prefix, registry)
@@ -24,20 +26,20 @@ class SequencerMetrics(parent: MetricName, val registry: MetricRegistry) extends
       """This metric indicates the number of active subscriptions currently open and actively
         |served subscriptions at the sequencer.""",
   )
-  val subscriptionsGauge: VarGaugeM[Int] = varGauge(MetricName(prefix :+ "subscriptions"), 0)
+  val subscriptionsGauge: VarGauge[Int] = varGauge(MetricName(prefix :+ "subscriptions"), 0)
   @MetricDoc.Tag(
     summary = "Number of messages processed by the sequencer",
     description = """This metric measures the number of successfully validated messages processed
                     |by the sequencer since the start of this process.""",
   )
-  val messagesProcessed: MeterM = meter(prefix :+ "processed")
+  val messagesProcessed: Meter = meter(prefix :+ "processed")
 
   @MetricDoc.Tag(
     summary = "Number of message bytes processed by the sequencer",
     description =
       """This metric measures the total number of message bytes processed by the sequencer.""",
   )
-  val bytesProcessed: MeterM = meter(prefix :+ "processed-bytes")
+  val bytesProcessed: Meter = meter(prefix :+ "processed-bytes")
 
   @MetricDoc.Tag(
     summary = "Number of time requests received by the sequencer",
@@ -47,7 +49,7 @@ class SequencerMetrics(parent: MetricName, val registry: MetricRegistry) extends
         |portion of the total requests to the sequencer it could indicate that the strategy for requesting times may
         |need to be revised to deal with different clock skews and latencies between the sequencer and participants.""",
   )
-  val timeRequests: MeterM = meter(prefix :+ "time-requests")
+  val timeRequests: Meter = meter(prefix :+ "time-requests")
 
   object dbStorage extends DbStorageMetrics(prefix, registry)
 }
@@ -56,8 +58,32 @@ object SequencerMetrics {
   val notImplemented = new SequencerMetrics(MetricName("todo"), new MetricRegistry())
 }
 
+class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Factory {
+  override def prefix: MetricName = MetricName("env")
+
+  private val executionContextQueueSizeName = prefix :+ "execution-context" :+ "queue-size"
+  @MetricDoc.Tag(
+    summary = "Gives the number size of the global execution context queue",
+    description = """This execution context is shared across all nodes running on the JVM""",
+  )
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private val executionContextQueueSizeDoc: Gauge[codahale.Gauge[Int], Int] = // For docs only
+    Gauge(executionContextQueueSizeName, null)
+
+  def registerExecutionContextQueueSize(f: () => Int): Gauge[codahale.Gauge[Int], Int] = {
+    gaugeWithSupplier(
+      executionContextQueueSizeName,
+      () =>
+        new codahale.Gauge[Int] {
+          override def getValue: Int = f()
+        },
+    )
+  }
+
+}
+
 class DomainMetrics(override val prefix: MetricName, override val registry: MetricRegistry)
-    extends NodeMetrics {
+    extends MetricHandle.NodeMetrics {
 
   object dbStorage extends DbStorageMetrics(prefix, registry)
 
@@ -69,7 +95,7 @@ class DomainMetrics(override val prefix: MetricName, override val registry: Metr
 }
 
 class MediatorNodeMetrics(override val prefix: MetricName, override val registry: MetricRegistry)
-    extends NodeMetrics {
+    extends MetricHandle.NodeMetrics {
   object dbStorage extends DbStorageMetrics(prefix, registry)
 
   object mediator extends MediatorMetrics(prefix, registry)
@@ -85,16 +111,16 @@ class MediatorMetrics(basePrefix: MetricName, override val registry: MetricRegis
   @MetricDoc.Tag(
     summary = "Number of currently outstanding requests",
     description = """This metric provides the number of currently open requests registered
-        |with the mediator.""",
+                    |with the mediator.""",
   )
-  val outstanding: VarGaugeM[Int] = this.varGauge(prefix :+ "outstanding-requests", 0)
+  val outstanding: VarGauge[Int] = this.varGauge(prefix :+ "outstanding-requests", 0)
 
   @MetricDoc.Tag(
     summary = "Number of totally processed requests",
     description = """This metric provides the number of totally processed requests since the system
-        |has been started.""",
+                    |has been started.""",
   )
-  val requests: MeterM = this.meter(prefix :+ "requests")
+  val requests: Meter = this.meter(prefix :+ "requests")
 
 }
 

@@ -41,7 +41,7 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.admin.{workflows, _}
+import com.digitalasset.canton.participant.admin.{workflows, *}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -82,7 +82,7 @@ import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
@@ -138,7 +138,7 @@ class CantonSyncService(
     with Spanning
     with NamedLogging {
 
-  import ShowUtil._
+  import ShowUtil.*
 
   val maxDeduplicationDuration: NonNegativeFiniteDuration =
     participantNodePersistentState.settingsStore.settings.maxDeduplicationDuration
@@ -343,7 +343,7 @@ class CantonSyncService(
       _loggingContext: LoggingContext, // not used - contains same properties as canton named logger
       telemetryContext: TelemetryContext,
   ): CompletionStage[SubmissionResult] = {
-    import scala.jdk.FutureConverters._
+    import scala.jdk.FutureConverters.*
     implicit val traceContext: TraceContext =
       TraceContext.fromDamlTelemetryContext(telemetryContext)
     withSpan("CantonSyncService.submitTransaction") { implicit traceContext => span =>
@@ -830,15 +830,17 @@ class CantonSyncService(
                   logger.warn(
                     s"Skipping failing domain $con after ${parent.code.toMsg(parent.cause, traceContext.traceId)}. Will schedule subsequent retry."
                   )
-                  attemptReconnect.put(
-                    con,
-                    AttemptReconnect(
+                  attemptReconnect
+                    .put(
                       con,
-                      clock.now,
-                      parameters.sequencerClient.startupConnectionRetryDelay.toScala,
-                      traceContext,
-                    ),
-                  )
+                      AttemptReconnect(
+                        con,
+                        clock.now,
+                        parameters.sequencerClient.startupConnectionRetryDelay.toScala,
+                        traceContext,
+                      ),
+                    )
+                    .discard
                   scheduleReconnectAttempt(
                     clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.duration)
                   )
@@ -976,7 +978,7 @@ class CantonSyncService(
                  if keepRetrying && err.retryable.nonEmpty =>
                if (initial)
                  logger.warn(s"Initial connection attempt to ${domainAlias} failed with ${err.code
-                   .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
+                     .toMsg(err.cause, traceContext.traceId)}. Will keep on trying.")
                else
                  logger.info(
                    s"Initial connection attempt to ${domainAlias} failed. Will keep on trying."
@@ -1018,7 +1020,9 @@ class CantonSyncService(
               val nextRetry = item.retryDelay.*(2.0)
               val maxRetry = parameters.sequencerClient.maxConnectionRetryDelay.toScala
               val nextRetryCapped = if (nextRetry > maxRetry) maxRetry else nextRetry
-              attemptReconnect.put(alias, item.copy(last = ts, retryDelay = nextRetryCapped))
+              attemptReconnect
+                .put(alias, item.copy(last = ts, retryDelay = nextRetryCapped))
+                .discard
               (reconnect :+ item, mergeLarger(next, ts.plusMillis(nextRetryCapped.toMillis)))
             }
           }
@@ -1520,7 +1524,7 @@ class CantonSyncService(
     } yield ()
 
   override def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     val connectQueueFlush =
       connectQueue.asCloseable("connectQueue", parameters.processingTimeouts.network.unwrap)
 

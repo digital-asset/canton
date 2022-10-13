@@ -4,7 +4,7 @@
 package com.digitalasset.canton.store
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
@@ -15,7 +15,7 @@ import com.digitalasset.canton.protocol.messages.EnvelopeContent
 import com.digitalasset.canton.protocol.v0
 import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   OrdinarySerializedEvent,
   PossiblyIgnoredProtocolEvent,
@@ -24,7 +24,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.SequencedEventStore.PossiblyIgnoredSequencedEvent.dbTypeOfEvent
-import com.digitalasset.canton.store.SequencedEventStore._
+import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbType
 import com.digitalasset.canton.store.db.{DbSequencedEventStore, SequencerClientDiscriminator}
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore

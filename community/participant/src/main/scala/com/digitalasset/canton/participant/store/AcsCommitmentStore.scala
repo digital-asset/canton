@@ -19,7 +19,7 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
-import scala.util.control.Breaks._
+import scala.util.control.Breaks.*
 
 /** Read and write interface for ACS commitments. Apart from pruning, should only be used by the ACS commitment processor */
 trait AcsCommitmentStore

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import org.scalatest.wordspec.AsyncWordSpec
 
 class ActiveContractStoreTestInMemory

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -37,16 +37,16 @@ import com.digitalasset.canton.participant.protocol.{
   ProcessingStartingPoints,
   SingleDomainCausalTracker,
 }
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{MultiDomainEventLog, SyncDomainEphemeralState}
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{

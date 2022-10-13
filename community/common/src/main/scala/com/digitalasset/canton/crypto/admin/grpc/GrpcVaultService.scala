@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.crypto.admin.grpc
 
-import cats.syntax.either._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.crypto.admin.v0
-import com.digitalasset.canton.crypto.{v0 => cryptoproto, _}
+import com.digitalasset.canton.crypto.{v0 as cryptoproto, *}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.TraceContext

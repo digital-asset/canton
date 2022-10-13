@@ -4,8 +4,8 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.String73
 import com.digitalasset.canton.crypto.HashOps
@@ -13,7 +13,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.OrdinaryProtocolEvent
 import com.digitalasset.canton.sequencing.client.{SendAsyncClientError, SequencerClient}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{HasCryptographicEvidence, ProtoConverter}
 import com.digitalasset.canton.store.SequencedEventStore.{

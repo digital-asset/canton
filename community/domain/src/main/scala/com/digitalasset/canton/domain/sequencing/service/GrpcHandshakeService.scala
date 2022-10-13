@@ -22,7 +22,7 @@ trait GrpcHandshakeService {
       request: com.digitalasset.canton.protocol.v0.Handshake.Request
   ): Future[com.digitalasset.canton.protocol.v0.Handshake.Response] = {
     import com.digitalasset.canton.protocol.v0
-    import v0.Handshake._
+    import v0.Handshake.*
 
     val response = handshakeValidation(request).fold[Response.Value](
       failure => Response.Value.Failure(Failure(failure)),

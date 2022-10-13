@@ -7,8 +7,8 @@ package com.digitalasset.canton.protocol.v1;
 // Messages related to Merkle trees (including GenTransactionTree)
 // Note on V1: This file is identical to the v0
 // The reason for a v1 is that MerkleSeqElement was not serialized with the protobuf version wrapper, making it
-// impossible to differentiate between different protobuf versions in the future. Since serialization has been changed,
-// a new protobuf version is being introduced here.
+// impossible to differentiate between different Proto versions in the future. Since serialization has been changed,
+// a new Proto version is being introduced here.
 
 message GenTransactionTree {
     BlindableNode submitter_metadata = 1;

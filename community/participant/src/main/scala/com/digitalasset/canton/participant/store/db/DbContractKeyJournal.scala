@@ -5,16 +5,16 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.Monad
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.store.ContractKeyJournal
 import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyJournalError
@@ -41,11 +41,11 @@ class DbContractKeyJournal(
     with DbStore
     with DbPrunableByTimeDomain[ContractKeyJournalError] {
 
-  import ContractKeyJournal._
-  import DbStorage.Implicits._
-  import storage.api._
+  import ContractKeyJournal.*
+  import DbStorage.Implicits.*
+  import storage.api.*
 
-  override protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("contract-key-journal")
 
   override protected[this] def pruning_status_table: String = "contract_key_pruning"
@@ -56,7 +56,7 @@ class DbContractKeyJournal(
     if (keys.isEmpty) Future.successful(Map.empty)
     else {
       processingTime.metric.event {
-        import DbStorage.Implicits.BuilderChain._
+        import DbStorage.Implicits.BuilderChain.*
         NonEmpty.from(keys.toSeq) match {
           case None => Future.successful(Map.empty)
           case Some(keysNel) =>
@@ -112,7 +112,7 @@ class DbContractKeyJournal(
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit] =
     processingTime.metric.eitherTEvent {
-      import DbStorage.Implicits.BuilderChain._
+      import DbStorage.Implicits.BuilderChain.*
 
       // Keep trying to insert the updates until all updates are in the DB or an exception occurs or we've found an inconsistency.
       val fut =
@@ -127,16 +127,16 @@ class DbContractKeyJournal(
                   remainingKeys
                     .map(key =>
                       sql"select $domainId domain_id, $key contract_key_hash, ${checked(
-                        updates(key)
-                      )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
+                          updates(key)
+                        )} status, ${toc.timestamp} ts, ${toc.rc} request_counter from dual"
                     )
                     .intercalate(sql" union all ")
                 case _ =>
                   remainingKeys
                     .map(key =>
                       sql"""($domainId, $key, CAST(${checked(
-                        updates(key)
-                      )} as key_status), ${toc.timestamp}, ${toc.rc})"""
+                          updates(key)
+                        )} as key_status), ${toc.timestamp}, ${toc.rc})"""
                     )
                     .intercalate(sql", ")
               }

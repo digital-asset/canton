@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.option._
-import cats.syntax.traverse._
-import com.digitalasset.canton._
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
+import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDuration}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.event.{AcsChange, RecordTime}
@@ -30,7 +30,7 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
   CommitmentsPruningBound,
   RunningCommitments,
 }
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryAcsCommitmentStore,
   InMemoryActiveContractStore,
@@ -38,35 +38,35 @@ import com.digitalasset.canton.participant.store.memory.{
   InMemoryRequestJournalStore,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
   DefaultOpenEnvelope,
   SignedProtocolMessage,
 }
-import com.digitalasset.canton.sequencing.client._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.store.memory.InMemorySequencerCounterTrackerStore
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest

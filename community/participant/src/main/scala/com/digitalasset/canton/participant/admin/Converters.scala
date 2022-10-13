@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.ledger.client.binding.{Primitive => P}
+import com.daml.ledger.client.binding.{Primitive as P}
 import com.digitalasset.canton.topology.UniqueIdentifier
 
 /** Conversions between types used by the admin-api */

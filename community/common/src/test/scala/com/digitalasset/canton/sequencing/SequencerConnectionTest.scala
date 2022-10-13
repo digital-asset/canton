@@ -15,7 +15,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.net.URL
 
 class SequencerConnectionTest extends AnyWordSpec with BaseTest {
-  import SequencerConnectionTest._
+  import SequencerConnectionTest.*
 
   "SequencerConnection.merge" should {
     "merge grpc connection endpoints" in {

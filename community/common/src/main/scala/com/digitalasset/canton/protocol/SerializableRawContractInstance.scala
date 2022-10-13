@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.lf.transaction.{TransactionCoder, TransactionOuterClass}
 import com.daml.lf.value.ValueCoder
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError

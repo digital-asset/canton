@@ -6,14 +6,14 @@ package com.digitalasset.canton.participant.domain.grpc
 import akka.stream.Materializer
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
-import com.digitalasset.canton.participant.domain._
+import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.store.{
   SyncDomainPersistentState,
@@ -26,7 +26,7 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreFactory, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -91,7 +91,7 @@ class GrpcDomainRegistry(
     override def loggerFactory: NamedLoggerFactory = GrpcDomainRegistry.this.loggerFactory
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-      import TraceContext.Implicits.Empty._
+      import TraceContext.Implicits.Empty.*
       List[AsyncOrSyncCloseable](
         SyncCloseable(
           "topologyOutbox",

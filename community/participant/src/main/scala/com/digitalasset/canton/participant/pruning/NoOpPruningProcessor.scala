@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.Pruning.{

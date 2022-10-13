@@ -52,7 +52,7 @@ class ConfirmationPolicyTest extends AnyWordSpec with BaseTest with HasExecution
           .map(_.versionedUnsuffixedTransaction)
           .filter(
             _.nodes.nonEmpty
-          ) //TODO (M12, i1046) handling of empty transaction remains a bit murky
+          ) // TODO (M12, i1046) handling of empty transaction remains a bit murky
           .map(ConfirmationPolicy.choose(_, topologySnapshot).futureValue)
         assert(policies.forall(_.headOption === Some(Signatory)))
       }

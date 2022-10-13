@@ -57,7 +57,7 @@ object DelayedSequencerClient {
       member: String,
   ): DelayedSequencerClient = {
     val delayedLog = new DelayedSequencerClient(domainId, member)
-    clients.putIfAbsent((environmentId, domainId, member), delayedLog)
+    clients.putIfAbsent((environmentId, domainId, member), delayedLog).discard
     delayedLog
   }
 

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.config.{DbConfig, H2DbConfig, PostgresDbConfig}
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.FailedToConfigureLedgerApiStorage
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStorage.ledgerApiSchemaName
@@ -31,6 +31,7 @@ object LedgerApiJdbcUrl {
   private val userKey = "user"
   private val passwordKey = "password"
   private val databaseNameKey = "databaseName"
+  private val currentSchema = "currentSchema"
 
   private val nonParametersProperties = Set(
     serverNameKey,
@@ -149,8 +150,8 @@ object LedgerApiJdbcUrl {
         .forPostgres(cantonUrl)
         .addIfMissing(userKey, pgConfig.getDbConfig(userKey))
         .addIfMissing(passwordKey, pgConfig.getDbConfig(passwordKey))
-        .replace("currentSchema", ledgerApiSchemaName)
         .addAll(additionalProperties)
+        .replace(currentSchema, ledgerApiSchemaName)
         .build
 
       ReuseCantonDb(ledgerApiUrl, pgCantonUrl)

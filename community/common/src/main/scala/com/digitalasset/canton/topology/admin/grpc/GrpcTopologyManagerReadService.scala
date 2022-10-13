@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
@@ -12,7 +12,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{mapErrNew, wrapErr}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.admin.{v0 => adminProto}
+import com.digitalasset.canton.topology.admin.{v0 as adminProto}
 import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
@@ -22,7 +22,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
@@ -461,7 +461,7 @@ class GrpcTopologyManagerReadService(
   override def listDomainParametersChanges(
       request: adminProto.ListDomainParametersChangesRequest
   ): Future[adminProto.ListDomainParametersChangesResult] = {
-    import adminProto.ListDomainParametersChangesResult._
+    import adminProto.ListDomainParametersChangesResult.*
 
     TraceContext.fromGrpcContext { implicit traceContext =>
       val ret = for {
@@ -474,15 +474,15 @@ class GrpcTopologyManagerReadService(
       } yield {
         val results = res
           .collect { case (context, domainParametersChange: DomainParametersChange) =>
-            val protobufVersion = domainParametersChange.domainParameters.protobufVersion.v
+            val protoVersion = domainParametersChange.domainParameters.protoVersion.v
 
             val parameters =
-              if (protobufVersion == 0)
+              if (protoVersion == 0)
                 Some(Result.Parameters.V0(domainParametersChange.domainParameters.toProtoV0))
-              else if (protobufVersion == 1)
+              else if (protoVersion == 1)
                 Some(Result.Parameters.V1(domainParametersChange.domainParameters.toProtoV1))
               else {
-                logger.warn(s"Unable to serialize domain parameters with version $protobufVersion")
+                logger.warn(s"Unable to serialize domain parameters with version $protoVersion")
                 None
               }
 

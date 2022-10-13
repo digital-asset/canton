@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

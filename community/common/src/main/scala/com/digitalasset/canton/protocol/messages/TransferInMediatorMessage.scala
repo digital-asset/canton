@@ -8,7 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{Informee, TransferInViewTree, ViewType}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, MediatorId}
@@ -16,7 +16,7 @@ import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.Transfer.TargetProtocolVersion
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -104,14 +104,14 @@ object TransferInMediatorMessage
     extends HasProtocolVersionedWithContextCompanion[TransferInMediatorMessage, HashOps] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.TransferInMediatorMessage)((hashOps, proto) =>
         fromProtoV0(hashOps)(proto)
       ),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersion(v1.TransferInMediatorMessage)((hashOps, proto) =>
         fromProtoV1(hashOps)(proto)

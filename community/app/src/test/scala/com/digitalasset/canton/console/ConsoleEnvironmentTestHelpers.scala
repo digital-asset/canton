@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.console
 
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 
 /** Utilities for accessing the console environment
   */

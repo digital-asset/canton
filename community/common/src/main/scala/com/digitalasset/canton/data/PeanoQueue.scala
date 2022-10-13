@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.data
+
 import com.digitalasset.canton.data.PeanoQueue.AssociatedValue
 
 import scala.annotation.tailrec

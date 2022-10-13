@@ -32,7 +32,7 @@ object SnapshottableList {
   def empty[A]: SnapshottableList[A] = new SnapshottableList[A]
 
   def prettySnapshottableList[A: Pretty]: Pretty[SnapshottableList[A]] = {
-    import Pretty._
+    import Pretty.*
     prettyOfParam(_.snapshot)
   }
 }

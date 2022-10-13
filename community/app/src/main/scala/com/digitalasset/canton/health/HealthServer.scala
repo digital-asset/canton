@@ -7,13 +7,13 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.marshalling.{Marshaller, ToResponseMarshaller}
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, StatusCodes}
-import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.server.Directives.*
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.directives.DebuggingDirectives
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{HealthConfig, ProcessingTimeout}
 import com.digitalasset.canton.environment.Environment
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.HealthMetrics
 import com.digitalasset.canton.tracing.TraceContext
@@ -30,14 +30,14 @@ class HealthServer(
     with NamedLogging {
 
   private val binding = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     timeouts.unbounded.await(s"Binding the health server")(
       Http().newServerAt(address, port.unwrap).bind(HealthServer.route(check))
     )
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     List[AsyncOrSyncCloseable](
       AsyncCloseable("binding", binding.unbind(), timeouts.shutdownNetwork.unwrap),
       SyncCloseable("check", Lifecycle.close(check)(logger)),

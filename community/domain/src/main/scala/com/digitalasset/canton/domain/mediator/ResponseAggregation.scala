@@ -4,10 +4,10 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.data.OptionT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
@@ -19,12 +19,12 @@ import com.digitalasset.canton.error.MediatorError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.Verdict.{Approve, ParticipantReject}
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 

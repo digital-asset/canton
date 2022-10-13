@@ -7,8 +7,8 @@ import com.daml.ledger.api.refinements.ApiTypes
 import com.daml.ledger.api.v1.event.{ArchivedEvent, CreatedEvent}
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.value.Identifier
-import com.daml.ledger.api.v1.{value => V}
-import com.daml.ledger.client.binding.{Contract, Primitive => P, Template, TemplateCompanion}
+import com.daml.ledger.api.v1.{value as V}
+import com.daml.ledger.client.binding.{Contract, Primitive as P, Template, TemplateCompanion}
 
 object DecodeUtil {
   def decodeAllCreated[T](
@@ -53,10 +53,8 @@ object DecodeUtil {
     )
   }
 
-  private def templateMatches[A](expected: P.TemplateId[A])(actual: Identifier): Boolean = {
-    val result = ApiTypes.TemplateId.unwrap(expected) == actual
-    result
-  }
+  private def templateMatches[A](expected: P.TemplateId[A])(actual: Identifier): Boolean =
+    ApiTypes.TemplateId.unwrap(expected) == actual
 
   def decodeArchived[T](
       companion: TemplateCompanion[T]
@@ -81,7 +79,7 @@ object DecodeUtil {
     for {
       event <- transaction.eventsById.values.toList
       archive <- event.kind.exercised.toList.filter(e =>
-        e.consuming && e.templateId.contains(companion.id)
+        e.consuming && e.templateId.fold(false)(templateMatches(companion.id)(_))
       )
     } yield P.ContractId(archive.contractId)
 

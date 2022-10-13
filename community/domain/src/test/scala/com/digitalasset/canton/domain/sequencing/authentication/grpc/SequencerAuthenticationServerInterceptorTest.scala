@@ -42,7 +42,7 @@ import io.grpc.{ManagedChannel, ServerInterceptors, Status}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.Future
 

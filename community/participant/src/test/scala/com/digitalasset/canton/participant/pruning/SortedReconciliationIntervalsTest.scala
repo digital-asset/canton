@@ -17,7 +17,7 @@ import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
 import java.time.{Duration, Instant}
 import scala.language.implicitConversions
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 class SortedReconciliationIntervalsTest
     extends AnyWordSpec
@@ -356,7 +356,7 @@ class SortedReconciliationIntervalsTest
   }
 
   "SortedReconciliationIntervals.commitmentPeriodPreceding" must {
-    import SortedReconciliationIntervalsTestHelpers._
+    import SortedReconciliationIntervalsTestHelpers.*
 
     "compute reasonable commitment periods for a basic example" in {
       val eventTimestamps = List(-2, 6, 24, 25, 26, 31L).map(CantonTimestamp.ofEpochSecond)
@@ -415,7 +415,7 @@ class SortedReconciliationIntervalsPropertyTest
     with ScalaCheckDrivenPropertyChecks
     with SortedReconciliationIntervalsHelpers {
 
-  import SortedReconciliationIntervalsTestHelpers._
+  import SortedReconciliationIntervalsTestHelpers.*
 
   "SortedReconciliationIntervals" must {
     val interval = PositiveSeconds.ofSeconds(5)

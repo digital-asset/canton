@@ -1,8 +1,8 @@
 // Linting plugins
-addSbtPlugin("org.wartremover" % "sbt-wartremover" % "2.4.16")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "1.3.13")
-addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.3")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.0")
+addSbtPlugin("org.wartremover" % "sbt-wartremover" % "2.4.20")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.0.1")
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.3")
 
 // Code coverage
 addSbtPlugin("org.scoverage" % "sbt-scoverage" % "1.9.2")

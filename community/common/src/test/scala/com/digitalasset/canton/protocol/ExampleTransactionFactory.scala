@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.ledger.api.DeduplicationPeriod.DeduplicationDuration
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
@@ -19,8 +19,8 @@ import com.daml.lf.value.Value.{
   VersionedValue,
 }
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton._
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.TransactionViewDecomposition.{
   NewView,
@@ -28,8 +28,8 @@ import com.digitalasset.canton.data.TransactionViewDecomposition.{
   createWithConfirmationPolicy,
 }
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
-import com.digitalasset.canton.data._
-import com.digitalasset.canton.protocol.ExampleTransactionFactory._
+import com.digitalasset.canton.data.*
+import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
@@ -47,12 +47,13 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{LfTransactionBuilder, LfTransactionUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.EitherValues
 
-import java.time.{Duration => JDuration}
+import java.time.{Duration as JDuration}
 import java.util.UUID
 import scala.collection.immutable.{HashMap, StringOps}
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
 
 /** Provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
@@ -354,7 +355,8 @@ object ExampleTransactionFactory {
   * Also provides convenience methods for creating [[ExampleTransaction]]s and parts thereof.
   */
 class ExampleTransactionFactory(
-    val cryptoOps: HashOps with HmacOps with HkdfOps with RandomOps = new SymbolicPureCrypto
+    val cryptoOps: HashOps with HmacOps with HkdfOps with RandomOps = new SymbolicPureCrypto,
+    versionOverride: Option[ProtocolVersion] = None,
 )(
     val transactionSalt: Salt = TestSalt.generateSalt(0),
     val transactionSeed: SaltSeed = TestSalt.generateSeed(0),
@@ -371,7 +373,7 @@ class ExampleTransactionFactory(
 )(implicit ec: ExecutionContext)
     extends EitherValues {
 
-  private val protocolVersion = BaseTest.testedProtocolVersion
+  private val protocolVersion = versionOverride.getOrElse(BaseTest.testedProtocolVersion)
 
   private def awaitCreateWithConfirmationPolicy(
       confirmationPolicy: ConfirmationPolicy,
@@ -539,7 +541,12 @@ class ExampleTransactionFactory(
       protocolVersion,
     )
 
-    TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, subviews)
+    TransactionView.tryCreate(cryptoOps)(
+      viewCommonData,
+      viewParticipantData,
+      subviews,
+      protocolVersion,
+    )
   }
 
   def mkMetadata(seeds: Map[LfNodeId, LfHash] = Map.empty): TransactionMetadata =
@@ -591,7 +598,7 @@ class ExampleTransactionFactory(
       submitterMetadata,
       commonMetadata,
       participantMetadata,
-      MerkleSeq.fromSeq(cryptoOps)(rootViews),
+      MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
     )
 
   def blindedForInformeeTree(
@@ -600,7 +607,12 @@ class ExampleTransactionFactory(
   ): TransactionView =
     view match {
       case TransactionView(viewCommonData, viewParticipantData, _) =>
-        TransactionView.tryCreate(cryptoOps)(viewCommonData, blinded(viewParticipantData), subviews)
+        TransactionView.tryCreate(cryptoOps)(
+          viewCommonData,
+          blinded(viewParticipantData),
+          subviews,
+          protocolVersion,
+        )
     }
 
   def informeeTree(rootViews: MerkleTree[TransactionView]*): InformeeTree =
@@ -609,7 +621,7 @@ class ExampleTransactionFactory(
         blinded(submitterMetadata),
         commonMetadata,
         blinded(participantMetadata),
-        MerkleSeq.fromSeq(cryptoOps)(rootViews),
+        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
       )
     )
 
@@ -619,7 +631,7 @@ class ExampleTransactionFactory(
         submitterMetadata,
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(cryptoOps)(rootViews),
+        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
       )
     )
 
@@ -630,6 +642,7 @@ class ExampleTransactionFactory(
           blinded(viewCommonData),
           blinded(viewParticipantData),
           subviews,
+          protocolVersion,
         )
     }
 
@@ -639,7 +652,7 @@ class ExampleTransactionFactory(
         blinded(submitterMetadata),
         commonMetadata,
         participantMetadata,
-        MerkleSeq.fromSeq(cryptoOps)(rootViews),
+        MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
       )
     )
 

@@ -16,7 +16,7 @@ trait DbServiceAgreementAcceptanceStoreTest
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     storage.update_(
       sqlu"truncate table service_agreement_acceptances",

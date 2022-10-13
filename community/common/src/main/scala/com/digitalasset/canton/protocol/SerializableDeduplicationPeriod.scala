@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol
 
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.offset.Offset
-import com.daml.lf.data.{Bytes => LfBytes}
+import com.daml.lf.data.{Bytes as LfBytes}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.{DurationConverter, ParsingResult}
 

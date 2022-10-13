@@ -7,12 +7,12 @@ import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ForwardingServerCall.SimpleForwardingServerCall
 import io.grpc.ForwardingServerCallListener.SimpleForwardingServerCallListener
-import io.grpc.Status.Code._
-import io.grpc._
+import io.grpc.Status.Code.*
+import io.grpc.*
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try

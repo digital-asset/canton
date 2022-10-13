@@ -4,13 +4,13 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import cats.syntax.foldable._
-import cats.syntax.traverseFilter._
+import cats.syntax.foldable.*
+import cats.syntax.traverseFilter.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.config.DomainNodeParameters
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyDispatchingErrorGroup
@@ -24,10 +24,10 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.DomainTopologyTransactionMessage
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
-import com.digitalasset.canton.sequencing.client._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.client.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
   DomainTopologyClient,
   DomainTopologyClientWithInit,
@@ -47,9 +47,9 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter, checked}
@@ -57,7 +57,7 @@ import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 import scala.math.Ordered.orderingToOrdered
 import scala.util.{Failure, Success}
@@ -178,7 +178,7 @@ private[domain] class DomainTopologyDispatcher(
           updateTopologyClientTs(ts.value.validFrom.value)
           logger.info(
             show"Resuming topology dispatching with ${actuallyPending.length} transactions: ${actuallyPending
-              .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
+                .map(x => (x.value.transaction.operation, x.value.transaction.transaction.element.mapping))}"
           )
           flush()
         case None => logger.debug("Started domain topology dispatching (nothing to catch up)")
@@ -722,7 +722,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
             logger.debug(msg)
           finalizeCurrentJob(UnlessShutdown.Outcome(Right(())))
         case SendResult.Error(error) =>
-          TopologyDispatchingInternalError.SendResultError(error)
+          TopologyDispatchingInternalError.SendResultError(error).discard
           stopDispatching("Stopping due to an internal send result error")
         case _: SendResult.Timeout =>
           degradationOccurred(TopologyDispatchingDegradation.SendTrackerTimeout())
@@ -745,7 +745,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
                 .discard
               x
             case x @ Success(UnlessShutdown.Outcome(Left(error))) =>
-              TopologyDispatchingInternalError.AsyncResultError(error)
+              TopologyDispatchingInternalError.AsyncResultError(error).discard
               stopDispatching("Stopping due to an unexpected async result error")
               x
             case x @ Success(UnlessShutdown.Outcome(Right(_))) =>
@@ -755,7 +755,7 @@ object DomainTopologySender extends TopologyDispatchingErrorGroup {
               abortDueToShutdown()
               x
             case x @ Failure(ex) =>
-              TopologyDispatchingInternalError.UnexpectedException(ex)
+              TopologyDispatchingInternalError.UnexpectedException(ex).discard
               stopDispatching("Stopping due to an unexpected exception")
               x
           }.unwrap,

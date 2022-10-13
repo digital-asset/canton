@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.symbolic
 
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.serialization.{DeserializationError, DeterministicEncoding}
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.google.protobuf.ByteString

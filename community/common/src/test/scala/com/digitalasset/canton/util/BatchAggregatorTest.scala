@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.BatchAggregatorConfig
@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, TracedLogger}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.github.blemale.scaffeine.Scaffeine
 import org.scalatest.Assertion

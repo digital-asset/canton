@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
-import cats.syntax.alternative._
+import cats.syntax.alternative.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.Envelope

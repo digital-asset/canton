@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.lf.data.Bytes
 import com.digitalasset.canton.ProtoDeserializationError.ValueDeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult

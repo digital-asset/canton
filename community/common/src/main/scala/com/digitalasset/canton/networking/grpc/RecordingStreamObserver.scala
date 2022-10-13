@@ -7,7 +7,7 @@ import io.grpc.stub.StreamObserver
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Stream observer that records all incoming events.
   */

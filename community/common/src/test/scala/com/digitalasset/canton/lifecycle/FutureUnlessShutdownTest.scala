@@ -4,7 +4,7 @@
 package com.digitalasset.canton.lifecycle
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.{BaseTest, DiscardedFuture, DiscardedFutureTest}
 import org.scalatest.wordspec.AnyWordSpec
 import org.wartremover.test.WartTestTraverser

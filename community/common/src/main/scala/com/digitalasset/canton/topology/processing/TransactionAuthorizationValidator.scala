@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.topology.processing
 
-import cats.instances.list._
-import cats.instances.option._
-import cats.syntax.traverse._
+import cats.instances.list.*
+import cats.instances.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,7 +16,7 @@ import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction
 }
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -146,7 +146,7 @@ trait TransactionAuthorizationValidator {
             s"graph shouldnt exist before loading ${namespaces} vs ${namespaceCache.keySet}",
           )
           val graph = new AuthorizationGraph(namespace, extraDebugInfo = false, loggerFactory)
-          namespaceCache.put(namespace, graph)
+          namespaceCache.put(namespace, graph).discard
           // use un-authorized batch load. while we are checking for proper authorization when we
           // add a certificate the first time, we allow for the situation where an intermediate certificate
           // is currently expired, but might be replaced with another cert. in this case,

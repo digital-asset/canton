@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.TransferOutMediatorMessage
 import com.digitalasset.canton.protocol.{LfContractId, RootHash, ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -23,7 +23,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasRepresentativeProtocolVersion,
   HasVersionedToByteString,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -71,7 +71,7 @@ object TransferOutViewTree
   override val name: String = "TransferOutViewTree"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.TransferViewTree)((hashOps, proto) => fromProtoV0(hashOps)(proto)),
       _.toProtoV0.toByteString,
@@ -97,7 +97,7 @@ object TransferOutViewTree
       TransferOutView.fromByteString(hashOps),
     )((commonData, view) =>
       TransferOutViewTree(commonData, view)(
-        protocolVersionRepresentativeFor(ProtobufVersion(0)),
+        protocolVersionRepresentativeFor(ProtoVersion(0)),
         hashOps,
       )
     )(transferOutViewTreeP)
@@ -110,7 +110,7 @@ object TransferOutViewTree
       TransferOutView.fromByteString(hashOps),
     )((commonData, view) =>
       TransferOutViewTree(commonData, view)(
-        protocolVersionRepresentativeFor(ProtobufVersion(1)),
+        protocolVersionRepresentativeFor(ProtoVersion(1)),
         hashOps,
       )
     )(transferOutViewTreeP)
@@ -191,12 +191,12 @@ object TransferOutCommonData
   override val name: String = "TransferOutCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferOutCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferOutCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -249,7 +249,7 @@ object TransferOutCommonData
     )(
       hashOps,
       SourceProtocolVersion(
-        protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
+        protocolVersionRepresentativeFor(ProtoVersion(0)).representative
       ),
       Some(bytes),
     )
@@ -350,12 +350,12 @@ object TransferOutView
   override val name: String = "TransferOutView"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferOutView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferOutView)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -395,7 +395,7 @@ object TransferOutView
       contractId <- LfContractId.fromProtoPrimitive(contractIdP)
       targetDomain <- DomainId.fromProtoPrimitive(targetDomainP, "targetDomain")
 
-      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtoVersion(0))
       targetDomainPV = protocolVersionRepresentative.representative
 
       targetTimeProof <- ProtoConverter
@@ -443,7 +443,7 @@ object TransferOutView
       targetProtocolVersion,
     )(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(1)),
+      protocolVersionRepresentativeFor(ProtoVersion(1)),
       Some(bytes),
     )
   }

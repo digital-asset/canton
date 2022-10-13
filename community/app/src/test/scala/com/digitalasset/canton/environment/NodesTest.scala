@@ -4,10 +4,10 @@
 package com.digitalasset.canton.environment
 
 import cats.data.EitherT
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.InstanceName
-import com.digitalasset.canton.config._
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.lifecycle.ShutdownFailedException
 import com.digitalasset.canton.logging.NamedLoggerFactory

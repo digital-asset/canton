@@ -3,20 +3,20 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.HashPurpose
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.MediatorResponse.InvalidMediatorResponse
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
 /** Payload of a response sent to the mediator in reaction to a request.
@@ -129,12 +129,12 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
   override val name: String = "MediatorResponse"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.MediatorResponse)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.MediatorResponse)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -240,7 +240,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             confirmingParties.toSet,
             domainId,
           )(
-            supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(0)),
+            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(0)),
             Some(bytes),
           )
         )
@@ -284,7 +284,7 @@ object MediatorResponse extends HasMemoizedProtocolVersionedWrapperCompanion[Med
             confirmingParties.toSet,
             domainId,
           )(
-            supportedProtoVersions.protocolVersionRepresentativeFor(ProtobufVersion(1)),
+            supportedProtoVersions.protocolVersionRepresentativeFor(ProtoVersion(1)),
             Some(bytes),
           )
         )

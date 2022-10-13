@@ -4,16 +4,16 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.{CantonTimestamp, TransactionViewTree}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl
-import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker._
+import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.ContractLookup
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId, RequestCounter}
@@ -22,7 +22,6 @@ import org.scalatest.wordspec.AsyncWordSpec
 import java.time.Duration
 import scala.concurrent.{ExecutionContext, Future}
 
-@SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
 class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
   implicit val ec: ExecutionContext = directExecutionContext
@@ -50,9 +49,9 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     val (_viewTree, (reinterpretedTx, metadata, keyResolver), _witnesses) =
       example.reinterpretedSubtransactions.find { case (viewTree, (tx, md, keyResolver), _) =>
         viewTree.viewParticipantData.rootAction.command == cmd &&
-          // Commands are otherwise not sufficiently unique (whereas with nodes, we can produce unique nodes, e.g.
-          // based on LfNodeCreate.agreementText not part of LfCreateCommand.
-          rootSeed == md.seeds.get(tx.roots(0))
+        // Commands are otherwise not sufficiently unique (whereas with nodes, we can produce unique nodes, e.g.
+        // based on LfNodeCreate.agreementText not part of LfCreateCommand.
+        rootSeed == md.seeds.get(tx.roots(0))
       }.value
 
     EitherT.rightT[Future, DAMLeError]((reinterpretedTx, metadata, keyResolver))
@@ -147,8 +146,8 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
       val singleCreate = factory.SingleCreate(seed = ExampleTransactionFactory.lfHash(0))
       val viewTreesWithInconsistentTransactionIds = Seq(
-        factory.MultipleRootsAndViewNestings.rootTransactionViewTrees.head,
-        singleCreate.rootTransactionViewTrees.head,
+        factory.MultipleRootsAndViewNestings.rootTransactionViewTrees.headOption.value,
+        singleCreate.rootTransactionViewTrees.headOption.value,
       )
 
       "yield an error" in {
@@ -183,7 +182,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
     }
 
     "differences in the reconstructed transaction must yield an error" should {
-      import ExampleTransactionFactory._
+      import ExampleTransactionFactory.*
       "subview missing" in {
         val subviewMissing = factory.SingleExercise(lfHash(0))
         val reinterpreted = transaction(

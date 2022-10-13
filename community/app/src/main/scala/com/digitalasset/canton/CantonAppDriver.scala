@@ -4,7 +4,7 @@
 package com.digitalasset.canton
 
 import better.files.File
-import cats.syntax.either._
+import cats.syntax.either.*
 import ch.qos.logback.classic.{Logger, LoggerContext}
 import ch.qos.logback.core.status.{ErrorStatus, Status, StatusListener, WarnStatus}
 import com.daml.nonempty.NonEmpty
@@ -95,14 +95,15 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
       }
 
     val configFromMap = {
-      import scala.jdk.CollectionConverters._
+      import scala.jdk.CollectionConverters.*
       ConfigFactory.parseMap(cliOptions.configMap.asJava)
     }
     val finalConfig = CantonConfig.mergeConfigs(mergedUserConfigs, Seq(configFromMap))
 
     loadConfig(finalConfig) match {
       case Left(_) =>
-        if (cliOptions.configFiles.sizeCompare(1) > 0) writeConfigToTmpFile(mergedUserConfigs)
+        if (cliOptions.configFiles.sizeCompare(1) > 0)
+          writeConfigToTmpFile(mergedUserConfigs)
         sys.exit(1)
       case Right(loaded) =>
         if (cliOptions.manualStart) withManualStart(loaded)
@@ -116,11 +117,13 @@ abstract class CantonAppDriver[E <: Environment] extends App with NamedLogging w
       s"An error occurred after parsing a config file that was obtained by merging multiple config " +
         s"files. The resulting merged-together config file, for which the error occurred, was written to '$tmp'."
     )
-    tmp.write(
-      mergedUserConfigs
-        .root()
-        .render(CantonConfig.defaultConfigRenderer)
-    )
+    tmp
+      .write(
+        mergedUserConfigs
+          .root()
+          .render(CantonConfig.defaultConfigRenderer)
+      )
+      .discard
   }
 
   // verify that run script and bootstrap script aren't mixed

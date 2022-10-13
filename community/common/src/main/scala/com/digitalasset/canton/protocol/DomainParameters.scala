@@ -4,14 +4,14 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
-import com.digitalasset.canton.protocol.{v0 => protoV0, v1 => protoV1}
+import com.digitalasset.canton.protocol.{v0 as protoV0, v1 as protoV1}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.{
@@ -21,10 +21,10 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 
 object DomainParameters {
 
@@ -92,13 +92,13 @@ object StaticDomainParameters
     extends HasProtocolVersionedCompanion[StaticDomainParameters]
     with ProtocolVersionedCompanionDbHelpers[StaticDomainParameters] {
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(protoV0.StaticDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(#9800) Move to stable protocol version
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.dev,
       supportedProtoVersion(protoV1.StaticDomainParameters)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -212,7 +212,7 @@ object StaticDomainParameters
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(0)))
   }
 
   def fromProtoV1(
@@ -269,7 +269,7 @@ object StaticDomainParameters
       requiredHashAlgorithms,
       requiredCryptoKeyFormats,
       protocolVersion,
-    )(protocolVersionRepresentativeFor(ProtobufVersion(1)))
+    )(protocolVersionRepresentativeFor(ProtoVersion(1)))
   }
 }
 
@@ -501,13 +501,13 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
   )(representativeProtocolVersion)
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(protoV0.DynamicDomainParameters)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
     // TODO(#9800) Move to stable protocol version
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.dev,
       supportedProtoVersion(protoV1.DynamicDomainParameters)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -619,7 +619,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
         reconciliationInterval = StaticDomainParameters.defaultReconciliationInterval,
         mediatorDeduplicationTimeout = ledgerTimeRecordTimeTolerance * NonNegativeInt.tryCreate(2),
         maxRatePerParticipant = StaticDomainParameters.defaultMaxRatePerParticipant,
-      )(protocolVersionRepresentativeFor(ProtobufVersion(0)))
+      )(protocolVersionRepresentativeFor(ProtoVersion(0)))
     )
   }
 
@@ -682,7 +682,7 @@ object DynamicDomainParameters extends HasProtocolVersionedCompanion[DynamicDoma
           mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
           reconciliationInterval = reconciliationInterval,
           maxRatePerParticipant = maxRatePerParticipant,
-        )(protocolVersionRepresentativeFor(ProtobufVersion(1)))
+        )(protocolVersionRepresentativeFor(ProtoVersion(1)))
           .leftMap(_.toProtoDeserializationError)
     } yield domainParameters
   }

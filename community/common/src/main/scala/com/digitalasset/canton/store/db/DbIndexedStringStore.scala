@@ -21,8 +21,8 @@ class DbIndexedStringStore(
     extends IndexedStringStore
     with DbStore {
 
-  import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty._
-  import storage.api._
+  import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.*
+  import storage.api.*
 
   override def getOrCreateIndex(dbTyp: IndexedStringType, str: String300): Future[Int] =
     getIndexForStr(dbTyp.source, str).getOrElseF {

@@ -19,7 +19,7 @@ trait DbContractKeyJournalTest extends AsyncWordSpec with BaseTest with Contract
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO
         .seq(sqlu"truncate table contract_key_journal", sqlu"truncate table contract_key_pruning"),

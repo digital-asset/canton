@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.{
   CantonCommunityConfig,
@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.domain.config.CommunityDomainConfig
 import com.digitalasset.canton.participant.config.CommunityParticipantConfig
 import com.typesafe.config.{Config, ConfigValueFactory}
-import monocle.macros.syntax.lens._
+import monocle.macros.syntax.lens.*
 
 import scala.reflect.ClassTag
 import scala.util.Random

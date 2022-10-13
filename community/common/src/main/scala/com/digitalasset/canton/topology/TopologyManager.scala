@@ -4,17 +4,17 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
-import com.daml.error._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
+import com.daml.error.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPublicStoreError}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.now
 import com.digitalasset.canton.error.CantonErrorGroups.TopologyManagementErrorGroup.TopologyManagerErrorGroup
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, FlagCloseableAsync}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.DynamicDomainParameters
@@ -33,9 +33,9 @@ import com.digitalasset.canton.topology.store.{
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, _}
+import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, *}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -599,7 +599,7 @@ abstract class TopologyManager[E <: CantonError](
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, TopologyManagerError, TopologyTransaction[TopologyChangeOp]] = {
-    import TopologyChangeOp._
+    import TopologyChangeOp.*
     (op, mapping) match {
       case (Add, mapping: TopologyStateUpdateMapping) =>
         EitherT.rightT(TopologyStateUpdate.createAdd(mapping, protocolVersion))
@@ -628,7 +628,7 @@ abstract class TopologyManager[E <: CantonError](
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     Seq(
       sequentialQueue.asCloseable(
         "topology-manager-sequential-queue",

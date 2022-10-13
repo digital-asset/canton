@@ -16,7 +16,7 @@ trait DbSequencedEventStoreTest extends AsyncWordSpec with BaseTest with Sequenc
   this: DbTest =>
 
   def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     storage.update(
       DBIO.seq(

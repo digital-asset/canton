@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.client
+
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, DefaultProcessingTimeouts}
@@ -28,7 +29,7 @@ object EffectiveTimeTestHelpers {
 
 class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
 
-  import EffectiveTimeTestHelpers._
+  import EffectiveTimeTestHelpers.*
 
   private object Fixture {
 
@@ -91,7 +92,7 @@ class CachingDomainTopologyClientTest extends AsyncWordSpecLike with BaseTest {
   }
 
   "caching client" should {
-    import Fixture._
+    import Fixture.*
 
     "return correct snapshot" in {
 

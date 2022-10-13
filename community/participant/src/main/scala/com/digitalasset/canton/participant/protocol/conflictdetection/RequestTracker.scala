@@ -17,10 +17,10 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
-import scala.concurrent._
+import scala.concurrent.*
 import scala.util.Try
 
 /** The request tracker handles all the tasks around conflict detection that are difficult to parallelize.
@@ -143,7 +143,7 @@ import scala.util.Try
   * The activeness check succeeds if the activeness result is empty.
   */
 trait RequestTracker extends AutoCloseable with NamedLogging {
-  import RequestTracker._
+  import RequestTracker.*
 
   private[protocol] val taskScheduler: TaskScheduler[TimedTask]
 

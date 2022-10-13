@@ -2,17 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer.store
+
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.daml.nonempty.catsinstances._
+import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer._
+import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore.CheckpointDataAtCounter
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
@@ -24,11 +25,11 @@ import com.google.protobuf.ByteString
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import java.util.concurrent.{ConcurrentHashMap, ConcurrentSkipListMap}
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Thrown when a record that must be unique is inserted with a non-unique key.
   * Mirrors the type of exceptions that we would expect to see from a database.
@@ -150,7 +151,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
       fromTimestampO: Option[CantonTimestamp] = None,
       limit: Int = 100,
   )(implicit traceContext: TraceContext): Future[Seq[Sequenced[Payload]]] = Future.successful {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
 
     def isMemberRecipient(member: SequencerMemberId)(event: StoreEvent[_]): Boolean = event match {
       case DeliverStoreEvent(sender, messageId, recipients, payload, signingTimestampO, _trace) =>

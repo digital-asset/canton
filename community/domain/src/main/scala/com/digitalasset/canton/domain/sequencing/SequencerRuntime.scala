@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
@@ -29,14 +29,14 @@ import com.digitalasset.canton.domain.sequencing.authentication.{
   MemberAuthenticationService,
   MemberAuthenticationStore,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer._
+import com.digitalasset.canton.domain.sequencing.sequencer.*
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.RegisterMemberError.AlreadyRegisteredError
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
   OperationError,
   RegisterMemberError,
   SequencerWriteError,
 }
-import com.digitalasset.canton.domain.sequencing.service._
+import com.digitalasset.canton.domain.sequencing.service.*
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.domain.service.grpc.GrpcDomainService
 import com.digitalasset.canton.domain.topology.client.DomainInitializationObserver
@@ -46,7 +46,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, Traced
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.sequencing.client._
+import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,
   EnvelopeOpener,
@@ -65,7 +65,7 @@ import com.digitalasset.canton.time.{
   DomainTimeTrackerConfig,
   NonNegativeFiniteDuration,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -160,12 +160,12 @@ class SequencerRuntime(
       .ipsSnapshot
       .signingKey(sequencerId)
       .map { keyO =>
-        import TraceContext.Implicits.Empty._
+        import TraceContext.Implicits.Empty.*
         ErrorUtil.requireState(keyO.nonEmpty, "Missing sequencer keys.")
       }
 
   private val registerInitialMembers = withNewTraceContext { implicit traceContext =>
-    import cats.syntax.traverse._
+    import cats.syntax.traverse.*
 
     logger.debug("Registering initial sequencer members")
 
@@ -196,7 +196,7 @@ class SequencerRuntime(
     } yield err.leftMap(_.toString).map(_ => disc)
 
   private val clientDiscriminator = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     localNodeParameters.processingTimeouts.unbounded
       .await(s"Initialising sequencer runtime")(init()) match {
       case Right(value) => value
@@ -466,7 +466,7 @@ class SequencerRuntime(
   def registerPublicGrpcServices(
       register: ServerServiceDefinition => Unit
   )(implicit ec: ExecutionContext): Unit = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
 
     register(
       SequencerVersionServiceGrpc.bindService(

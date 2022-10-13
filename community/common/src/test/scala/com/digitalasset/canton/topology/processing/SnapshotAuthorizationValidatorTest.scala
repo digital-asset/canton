@@ -74,9 +74,9 @@ class SnapshotAuthorizationValidatorTest
   }
 
   "happy cases" should {
-    import factory._
+    import factory.*
     "simple root certificate" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, okm1bk5_k1)
         empty1 <- validator.authorizedBy(p1p2F_k2)
@@ -95,7 +95,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "several root certificates" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, okm1ak5_k2)
         chain <- validator.authorizedBy(okm1ak5_k2)
@@ -105,7 +105,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "root certificates with root delegations" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, ns1k3_k2, okm1ak5_k3)
         chain <- validator.authorizedBy(okm1bk5_k1)
@@ -117,7 +117,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "intermediate certificates" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, id1ak4_k2)
         chain <- validator.authorizedBy(okm1bk5_k4)
@@ -129,7 +129,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "to/from aggregation" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, ns6k6_k6)
         chain1 <- validator.authorizedBy(p1p2T_k6)
@@ -141,7 +141,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "both sides at once" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, ns1k3_k2, ns6k6_k6, ns6k3_k6)
         chain1 <- validator.authorizedBy(p1p2B_k3)
@@ -151,7 +151,7 @@ class SnapshotAuthorizationValidatorTest
     }
 
     "out of order chains" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k2_k1, ns1k1_k1)
         chain1 <- validator.authorizedBy(okm1ak5_k2)
@@ -163,9 +163,9 @@ class SnapshotAuthorizationValidatorTest
   }
 
   "unhappy cases" should {
-    import factory._
+    import factory.*
     "missing root cert" in { fix =>
-      import fix._
+      import fix.*
       for {
         empty1 <- validator.authorizedBy(okm1ak5_k2)
       } yield {
@@ -173,7 +173,7 @@ class SnapshotAuthorizationValidatorTest
       }
     }
     "missing namespace delegation" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k2_k1)
         empty1 <- validator.authorizedBy(okm1ak5_k2)
@@ -182,7 +182,7 @@ class SnapshotAuthorizationValidatorTest
       }
     }
     "missing intermediate certificate" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1)
         empty1 <- validator.authorizedBy(okm1bk5_k4)
@@ -191,7 +191,7 @@ class SnapshotAuthorizationValidatorTest
       }
     }
     "with intermediate but missing root delegation" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, id1ak4_k2)
         empty1 <- validator.authorizedBy(okm1bk5_k4)
@@ -200,7 +200,7 @@ class SnapshotAuthorizationValidatorTest
       }
     }
     "broken root delegation cert chain" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k3_k2)
         empty1 <- loggerFactory.assertLogs(
@@ -212,7 +212,7 @@ class SnapshotAuthorizationValidatorTest
       }
     }
     "missing side" in { fix =>
-      import fix._
+      import fix.*
       for {
         _ <- append(ns1k1_k1, ns1k2_k1, ns1k3_k2)
         empty1 <- validator.authorizedBy(p1p2B_k3)

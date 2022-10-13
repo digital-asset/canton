@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import org.scalatest._
+import org.scalatest.*
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
@@ -58,7 +58,7 @@ trait RepeatableTestSuiteTest extends RepeatableTest with TestSuite {
 trait RepeatableAsyncTestSuiteTest extends RepeatableTest with AsyncTestSuite {
 
   override def withFixture(test: NoArgAsyncTest): FutureOutcome = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     val repeat = RepeatableTest.repeats(test.tags)
     if (repeat > 1) logger.info(s"Repeating async test $repeat times")

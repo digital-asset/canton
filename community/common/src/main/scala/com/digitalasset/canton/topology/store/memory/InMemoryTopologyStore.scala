@@ -3,19 +3,19 @@
 
 package com.digitalasset.canton.topology.store.memory
 
-import cats.syntax.functorFilter._
+import cats.syntax.functorFilter.*
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.String255
 import com.digitalasset.canton.crypto.PublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, DomainStore}
-import com.digitalasset.canton.topology.store._
+import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Add, Positive, Remove}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -70,13 +70,15 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
       effectiveTimestamp: CantonTimestamp,
       submissionId: String255,
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    store.put(
-      partyId,
-      PartyMetadata(partyId, displayName, participantId)(
-        effectiveTimestamp = effectiveTimestamp,
-        submissionId = submissionId,
-      ),
-    )
+    store
+      .put(
+        partyId,
+        PartyMetadata(partyId, displayName, participantId)(
+          effectiveTimestamp = effectiveTimestamp,
+          submissionId = submissionId,
+        ),
+      )
+      .discard
     Future.unit
 
   }
@@ -91,14 +93,16 @@ class InMemoryPartyMetadataStore extends PartyMetadataStore {
   )(implicit traceContext: TraceContext): Future[Unit] = {
     store.get(metadata.partyId) match {
       case Some(cur) if cur.effectiveTimestamp == metadata.effectiveTimestamp =>
-        store.put(
-          metadata.partyId,
-          metadata.copy()(
-            effectiveTimestamp = metadata.effectiveTimestamp,
-            submissionId = metadata.submissionId,
-            notified = true,
-          ),
-        )
+        store
+          .put(
+            metadata.partyId,
+            metadata.copy()(
+              effectiveTimestamp = metadata.effectiveTimestamp,
+              submissionId = metadata.submissionId,
+              notified = true,
+            ),
+          )
+          .discard
       case _ => ()
     }
     Future.unit

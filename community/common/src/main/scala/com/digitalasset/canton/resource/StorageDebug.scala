@@ -9,7 +9,7 @@ import slick.jdbc.canton.SQLActionBuilder
 import java.io.{InputStream, Reader}
 import java.net.URL
 import java.sql
-import java.sql.{Array => _, _}
+import java.sql.{Array as _, *}
 import java.util.Calendar
 import java.util.concurrent.atomic.AtomicReference
 

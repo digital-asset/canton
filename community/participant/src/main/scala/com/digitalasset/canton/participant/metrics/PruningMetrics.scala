@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
+import com.daml.metrics.MetricHandle.Timer
 import com.daml.metrics.MetricName
-import com.digitalasset.canton.metrics.MetricHandle.TimerM
 import com.digitalasset.canton.metrics.{MetricDoc, MetricHandle}
 
 class PruningMetrics(override val prefix: MetricName, val registry: MetricRegistry)
@@ -21,7 +21,7 @@ class PruningMetrics(override val prefix: MetricName, val registry: MetricRegist
         |exposes the time spent on each computation. If the time to compute the metrics
         |starts to exceed the commitment intervals, this likely indicates a problem.""",
     )
-    val compute: TimerM = timer(prefix :+ "compute")
+    val compute: Timer = timer(prefix :+ "compute")
   }
 
   object prune {
@@ -32,7 +32,7 @@ class PruningMetrics(override val prefix: MetricName, val registry: MetricRegist
       description =
         """This timer exposes the duration of pruning requests from the Canton portion of the ledger.""",
     )
-    val overall: TimerM = timer(prefix)
+    val overall: Timer = timer(prefix)
 
   }
 }

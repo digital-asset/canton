@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol.transfer
 
-import cats.data._
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.data.*
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import cats.{Applicative, MonoidK}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
@@ -35,23 +35,23 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
 }
 import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.NoTransferData
-import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps._
-import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps._
+import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps.*
+import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.{
   ProtocolProcessor,
   SingleDomainCausalTracker,
   TransferOutUpdate,
 }
 import com.digitalasset.canton.participant.store.TransferStore.TransferCompleted
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
-import com.digitalasset.canton.serialization.DeserializationError
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.time.TimeProof
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
@@ -260,7 +260,7 @@ class TransferOutProcessingSteps(
       ) { bytes =>
         FullTransferOutTree
           .fromByteString(sourceSnapshot.pureCrypto)(bytes)
-          .leftMap(e => DeserializationError(e.toString))
+          .leftMap(e => DefaultDeserializationError(e.toString))
       }
       .map(WithRecipients(_, envelope.recipients))
   }
@@ -709,7 +709,7 @@ class TransferOutProcessingSteps(
 
 object TransferOutProcessingSteps {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   case class SubmissionParam(
       submittingParty: LfPartyId,

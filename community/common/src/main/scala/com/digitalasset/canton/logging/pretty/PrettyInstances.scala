@@ -42,7 +42,7 @@ import pprint.Tree
 import slick.util.{DumpInfo, Dumpable}
 
 import java.net.URI
-import java.time.{Duration => JDuration, Instant}
+import java.time.{Duration as JDuration, Instant}
 import java.util.UUID
 import scala.concurrent.duration.Duration
 
@@ -50,7 +50,7 @@ import scala.concurrent.duration.Duration
   */
 trait PrettyInstances {
 
-  import Pretty._
+  import Pretty.*
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   implicit def prettyPrettyPrinting[T <: PrettyPrinting]: Pretty[T] =

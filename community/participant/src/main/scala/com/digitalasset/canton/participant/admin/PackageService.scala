@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.definitions.{DamlError, PackageServiceError}
 import com.daml.lf.archive
-import com.daml.lf.archive.{DarParser, Decode, Error => LfArchiveError}
+import com.daml.lf.archive.{DarParser, Decode, Error as LfArchiveError}
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
 import com.daml.lf.language.Ast.Package
@@ -29,7 +29,7 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
   MainPackageInUse,
   PackageRemovalError,
 }
-import com.digitalasset.canton.participant.admin.PackageService._
+import com.digitalasset.canton.participant.admin.PackageService.*
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
@@ -42,11 +42,11 @@ import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
 
-import java.io._
+import java.io.*
 import java.nio.file.Paths
 import java.util.UUID
 import java.util.zip.ZipInputStream
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 

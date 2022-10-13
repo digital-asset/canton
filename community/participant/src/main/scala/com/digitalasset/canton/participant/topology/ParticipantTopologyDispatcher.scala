@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -35,7 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{DelayUtil, EitherTUtil, ErrorUtil, FutureUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -44,7 +44,7 @@ import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 sealed trait ParticipantIdentityDispatcherError

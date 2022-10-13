@@ -683,7 +683,7 @@ class SyncDomain(
     for {
       // Wait to see a timestamp >= now from the domain -- when we see such a timestamp, it means that the participant
       // has "caught up" on messages from the domain (and so should have seen all the transfer-ins)
-      //TODO(i9009): This assumes the participant and domain clocks are synchronized, which may not be the case
+      // TODO(i9009): This assumes the participant and domain clocks are synchronized, which may not be the case
       waitForReplay <- timeTracker
         .awaitTick(clock.now)
         .map(_.void)
@@ -739,9 +739,7 @@ class SyncDomain(
       TransferOutProcessingSteps.SubmissionResult,
     ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
       if (!ready)
-        EitherT.leftT[Future, TransferInProcessingSteps.SubmissionResult](
-          DomainNotReady(domainId, "Cannot submit transfer-out before recovery")
-        )
+        DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
       transferOutProcessor
         .submit(
           TransferOutProcessingSteps
@@ -764,9 +762,7 @@ class SyncDomain(
     ) {
 
       if (!ready)
-        EitherT.leftT[Future, TransferInProcessingSteps.SubmissionResult](
-          DomainNotReady(domainId, "Cannot submit transfer-out before recovery")
-        )
+        DomainNotReady(domainId, "Cannot submit transfer-out before recovery").discard
       transferInProcessor
         .submit(
           TransferInProcessingSteps

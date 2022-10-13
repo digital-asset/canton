@@ -48,7 +48,7 @@ object DbSequencerStoreTest {
   def cleanSequencerTables(
       storage: DbStorage
   )(implicit traceContext: TraceContext, closeContext: CloseContext): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     storage.update(
       DBIO.seq(

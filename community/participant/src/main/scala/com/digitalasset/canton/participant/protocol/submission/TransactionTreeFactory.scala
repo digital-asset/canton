@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.transaction.Transaction.KeyInputError
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{Salt, SaltSeed}
 import com.digitalasset.canton.data.{
   GenTransactionTree,
@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 }
 import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext

@@ -9,7 +9,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 case class TestCase(id: Int, name: String)
 

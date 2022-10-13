@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
@@ -33,7 +33,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Handle used in order to request approval of participant's topology transactions by the IDM and wait for the
   * responses by sending RegisterTopologyTransactionRequest's via the sequencer.
@@ -136,7 +136,7 @@ private[domain] class ParticipantDomainTopologyService(
       val promise = Promise[UnlessShutdown[
         RegisterTopologyTransactionResponse.Result
       ]]()
-      responsePromiseMap.put((request.participant, request.requestId), promise)
+      responsePromiseMap.put((request.participant, request.requestId), promise).discard
       FutureUtil.logOnFailure(
         promise.future.map { result =>
           result match {
@@ -157,8 +157,8 @@ private[domain] class ParticipantDomainTopologyService(
 
   private def requestDescription(request: RegisterTopologyTransactionRequest): String =
     s"on behalf of participant ${request.participant}${if (request.requestedBy != request.participant)
-      s" requested by ${request.requestedBy} "
-    else " "}with requestId = ${request.requestId}"
+        s" requested by ${request.requestedBy} "
+      else " "}with requestId = ${request.requestId}"
 
   private[domain] val processor: Traced[Seq[DefaultOpenEnvelope]] => HandlerResult = envs =>
     envs.withTraceContext { implicit traceContext => envs =>

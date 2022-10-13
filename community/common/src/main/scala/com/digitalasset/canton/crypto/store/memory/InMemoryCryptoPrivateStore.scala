@@ -4,8 +4,8 @@
 package com.digitalasset.canton.crypto.store.memory
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
 import com.digitalasset.canton.crypto.store.{
@@ -167,8 +167,8 @@ class InMemoryCryptoPrivateStore(
   private[crypto] def deletePrivateKey(
       keyId: Fingerprint
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPrivateStoreError, Unit] = {
-    storedSigningKeyMap.remove(keyId)
-    storedDecryptionKeyMap.remove(keyId)
+    storedSigningKeyMap.remove(keyId).discard
+    storedDecryptionKeyMap.remove(keyId).discard
     EitherT.rightT(())
   }
 

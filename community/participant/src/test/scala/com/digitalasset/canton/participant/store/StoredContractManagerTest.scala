@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,

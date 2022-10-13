@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.lifecycle.{
@@ -24,9 +24,9 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{v0, v1}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.WallClock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.version.RepresentativeProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.typesafe.config.ConfigFactory
@@ -34,7 +34,7 @@ import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 
 import scala.concurrent.Future
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecutionContext {
 
@@ -46,9 +46,9 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
   // Config to turn on Akka logging
   private lazy val akkaConfig = {
-    import scala.jdk.CollectionConverters._
+    import scala.jdk.CollectionConverters.*
     ConfigFactory.parseMap(
-      Map(
+      Map[String, Object](
         "akka.loglevel" -> "DEBUG",
         "akka.stdout-level" -> "OFF",
         "akka.loggers" -> List("akka.event.slf4j.Slf4jLogger").asJava,
@@ -155,7 +155,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
   "send" should {
     "correctly deliver event to each recipient" in { env =>
-      import env._
+      import env.*
 
       val messageId = MessageId.tryCreate("test-message")
       val message1 = new TestProtocolMessage("message1")

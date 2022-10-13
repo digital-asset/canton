@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.ViewPosition.ListIndex
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   DivergingKeyResolutionError,
@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
   TransactionTreeConversionError,
 }
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{LfTransactionUtil, MonadUtil}
@@ -297,7 +297,12 @@ final class TransactionTreeFactoryImplV2(
       state.resolvedKeysInView = resolvedKeysInView
 
       // Compute the result
-      TransactionView.tryCreate(cryptoOps)(viewCommonData, viewParticipantData, childViews)
+      TransactionView.tryCreate(cryptoOps)(
+        viewCommonData,
+        viewParticipantData,
+        childViews,
+        protocolVersion,
+      )
     }
   }
 }

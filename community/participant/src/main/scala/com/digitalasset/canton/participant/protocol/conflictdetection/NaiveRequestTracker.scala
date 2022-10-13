@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.{EitherT, NonEmptyChain}
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler, TaskSchedulerMetrics}
 import com.digitalasset.canton.lifecycle.{
@@ -27,7 +27,7 @@ import io.functionmeta.functionFullName
 import scala.annotation.nowarn
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
-import scala.concurrent._
+import scala.concurrent.*
 import scala.util.{Failure, Success, Try}
 
 /** The naive request tracker performs all its tasks (activeness check/timeout/finalization) sequentially.
@@ -50,8 +50,8 @@ private[participant] class NaiveRequestTracker(
     extends RequestTracker
     with NamedLogging
     with FlagCloseableAsync {
-  import NaiveRequestTracker._
-  import RequestTracker._
+  import NaiveRequestTracker.*
+  import RequestTracker.*
 
   override private[protocol] val taskScheduler =
     new TaskScheduler(
@@ -440,7 +440,7 @@ private[participant] class NaiveRequestTracker(
 }
 
 private[conflictdetection] object NaiveRequestTracker {
-  import RequestTracker._
+  import RequestTracker.*
 
   /** Abstract class for tasks that the [[data.TaskScheduler]] accumulates in its `taskQueue`
     *

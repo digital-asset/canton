@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.errors
 
 import com.daml.error.{Explanation, Resolution}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
@@ -51,5 +52,15 @@ object SequencerError extends SequencerErrorGroup {
           s"Pruning requests in block $blockHeight are unsafe: previous block's latest timestamp $blockLatestTimestamp, safe pruning timestamp $safePruningTimestamp, unsafe pruning timestamps: $invalidPruningRequests"
         )
         with CantonError
+  }
+
+  @Explanation(
+    """This error means that the request size has exceeded the configured value maxInboundMessageSize."""
+  )
+  @Resolution(
+    """Send smaller requests or increase the maxInboundMessageSize in the domain parameters"""
+  )
+  object MaxRequestSizeExceeded extends AlarmErrorCode("MAX_REQUEST_SIZE_EXCEEDED") {
+    case class Error(message: String, maxRequestSize: NonNegativeInt) extends Alarm(message)
   }
 }

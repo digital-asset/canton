@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.event
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, WithContractHash}

@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.store.db
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore, TransactionalStoreUpdate}
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStore}
@@ -32,13 +32,13 @@ class DbCursorPreheadStore[Discr](
     client: SequencerClientDiscriminator,
     override protected val storage: DbStorage,
     cursorTable: String,
-    processingTime: GaugeM[TimedLoadGauge, Double],
+    processingTime: Gauge[TimedLoadGauge, Double],
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
     extends CursorPreheadStore[Discr]
     with DbStore {
-  import storage.api._
+  import storage.api.*
 
   @nowarn("msg=match may not be exhaustive")
   override def prehead(implicit
@@ -47,7 +47,7 @@ class DbCursorPreheadStore[Discr](
     processingTime.metric.event {
       val preheadQuery =
         sql"""select prehead_counter, ts from #$cursorTable where client = $client order by prehead_counter desc #${storage
-          .limit(2)}"""
+            .limit(2)}"""
           .as[(Counter[Discr], CantonTimestamp)]
       storage.query(preheadQuery, functionFullName).map {
         case Seq() => None

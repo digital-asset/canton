@@ -38,7 +38,7 @@ class WellFormedTransactionMergeTest
   // Top-level lf transaction builder for "state-less" lf node creations.
   private implicit val tb = TransactionBuilder()
 
-  import TransactionBuilder.Implicits._
+  import TransactionBuilder.Implicits.*
 
   private val subTxTree0 = TxTree(tb.fetch(create(newLfContractId(), Iou.Iou.id, alice, bob)))
   private val subTxTree1 = TxTree(create(newLfContractId(), Iou.Iou.id, alice, bob))
@@ -250,14 +250,13 @@ class WellFormedTransactionMergeTest
     }
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
   private def transactionHelper[T](
       txTrees: TxTree*
   )(f: LfVersionedTransaction => T): T = {
     txBuilderContextFromEmpty { implicit ctx =>
       require(txTrees.nonEmpty)
       txTrees.dropRight(1).foreach(_.addToBuilder())
-      val lfTx = txTrees.last.lfTransaction
+      val lfTx = txTrees.lastOption.value.lfTransaction
       f(lfTx)
     }
   }
@@ -287,7 +286,6 @@ class WellFormedTransactionMergeTest
       txTrees: TxTree*
   ): LfVersionedTransaction = transactionHelper(txTrees: _*)(identity[LfVersionedTransaction])
 
-  @SuppressWarnings(Array("org.wartremover.warts.TraversableOps"))
   private def merge(
       transactions: WithRollbackScope[WellFormedTransaction[WithSuffixes]]*
   ) = {

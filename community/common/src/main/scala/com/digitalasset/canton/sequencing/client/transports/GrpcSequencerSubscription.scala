@@ -32,7 +32,7 @@ import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
-import scala.concurrent._
+import scala.concurrent.*
 import scala.util.Try
 
 /** Supply the grpc error that caused the subscription to fail */

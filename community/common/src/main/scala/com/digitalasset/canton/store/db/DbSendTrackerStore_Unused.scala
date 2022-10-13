@@ -4,10 +4,10 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -28,10 +28,10 @@ class DbSendTrackerStore_Unused(
 ) extends SendTrackerStore
     with DbStore {
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("send-tracker-store")
 
-  import storage.api._
+  import storage.api.*
 
   override def savePendingSend(messageId: MessageId, maxSequencingTime: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -42,7 +42,7 @@ class DbSendTrackerStore_Unused(
           storage.update(
             storage.profile match {
               case _: DbStorage.Profile.Oracle =>
-                sqlu"""insert 
+                sqlu"""insert
                        /*+  IGNORE_ROW_ON_DUPKEY_INDEX ( sequencer_client_pending_sends ( message_id, client ) ) */
                        into sequencer_client_pending_sends (client, message_id, max_sequencing_time)
                        values ($client, $messageId, $maxSequencingTime)"""

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.bifunctor._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.traverse.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.data.CantonTimestamp

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.daml.ledger.client.binding.{Contract, Primitive => P}
+import com.daml.ledger.client.binding.{Contract, Primitive as P}
 
 import scala.collection.mutable
 import scala.concurrent.Future

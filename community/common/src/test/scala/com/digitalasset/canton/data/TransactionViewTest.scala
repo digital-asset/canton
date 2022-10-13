@@ -5,9 +5,9 @@ package com.digitalasset.canton.data
 
 import com.daml.lf.value.Value
 import com.digitalasset.canton.crypto.{HashOps, Salt}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.util.LfTransactionBuilder
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -67,6 +67,7 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
           view.viewCommonData,
           view.viewParticipantData,
           Seq(view),
+          testedProtocolVersion,
         ) shouldEqual Left("The subview with index 0 has an equal viewCommonData.")
       }
     }

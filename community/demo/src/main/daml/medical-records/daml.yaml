@@ -1,4 +1,4 @@
-sdk-version: 2.5.0-snapshot.20221003.10705.0.a55ccc38
+sdk-version: 2.5.0-snapshot.20221010.10736.0.2f453a14
 name: medical-records
 exposed-modules: 
 - MedicalRecord

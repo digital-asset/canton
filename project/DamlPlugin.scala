@@ -1,14 +1,14 @@
 import java.io.{File, FileReader, FileWriter, IOException}
-import java.util.{Map => JMap}
+import java.util.{Map as JMap}
 
 import com.esotericsoftware.yamlbeans.{YamlReader, YamlWriter}
-import sbt.Keys._
+import sbt.Keys.*
 import sbt.util.CacheStoreFactory
 import sbt.util.FileFunction.UpdateFunction
-import sbt.{Def, _}
+import sbt.{Def, *}
 
 import scala.collection.mutable
-import scala.sys.process._
+import scala.sys.process.*
 import scala.util.{Failure, Success, Try}
 
 object DamlPlugin extends AutoPlugin {
@@ -195,7 +195,7 @@ object DamlPlugin extends AutoPlugin {
     )
   }
 
-  import autoImport._
+  import autoImport.*
 
   class BufferedLogger extends ProcessLogger {
     private val buffer = mutable.Buffer[String]()
@@ -316,7 +316,7 @@ object DamlPlugin extends AutoPlugin {
       url = url,
       artifactFilename =
         s"damlc-${damlVersion}-${if (System.getProperty("os.name").toLowerCase.startsWith("mac os x")) "macos"
-        else "linux"}.tar.gz",
+          else "linux"}.tar.gz",
       damlVersion = damlVersion,
       tarballPath = Seq("damlc", "damlc"),
     )

@@ -224,7 +224,7 @@ trait DbMediatorDeduplicationStoreTest extends MediatorDeduplicationStoreTest wi
   }
 
   override protected def cleanDb(storage: DbStorage): Future[_] = {
-    import storage.api._
+    import storage.api.*
     storage.update_(sqlu"truncate table mediator_deduplication_store", functionFullName)
   }
 

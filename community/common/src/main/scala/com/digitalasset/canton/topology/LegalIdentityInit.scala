@@ -4,9 +4,9 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
-import cats.instances.future._
-import cats.syntax.either._
-import com.digitalasset.canton.crypto._
+import cats.instances.future.*
+import cats.syntax.either.*
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}

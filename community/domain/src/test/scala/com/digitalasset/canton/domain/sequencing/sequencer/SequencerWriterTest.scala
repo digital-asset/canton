@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.{
@@ -112,7 +112,7 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
 
   "starting" should {
     "wait for online timestamp to be reached" in { env =>
-      import env._
+      import env.*
 
       // set our time to ts2 but the returned goOnline timestamp to ts4
       clock.advanceTo(ts(3))
@@ -136,7 +136,7 @@ class SequencerWriterTest extends FixtureAsyncWordSpec with BaseTest {
 
   "getting knocked offline" should {
     "run recovery and restart" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- valueOrFail(writer.start())("Starting writer")

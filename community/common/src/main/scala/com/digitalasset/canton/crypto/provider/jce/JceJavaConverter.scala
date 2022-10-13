@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.crypto.provider.jce
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.CryptoProvider
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.tink.TinkJavaConverter
 import com.google.crypto.tink.subtle.EllipticCurves
 import com.google.crypto.tink.subtle.EllipticCurves.CurveType
@@ -24,13 +24,13 @@ import java.security.{
   GeneralSecurityException,
   KeyFactory,
   NoSuchAlgorithmException,
-  PrivateKey => JPrivateKey,
-  PublicKey => JPublicKey,
+  PrivateKey as JPrivateKey,
+  PublicKey as JPublicKey,
 }
 
 class JceJavaConverter(hashAlgorithm: HashAlgorithm) extends JavaKeyConverter {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   private def ensureFormat(
       key: CryptoKey,

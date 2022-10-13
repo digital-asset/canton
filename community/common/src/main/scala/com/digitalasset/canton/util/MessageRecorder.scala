@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 
-import java.io._
+import java.io.*
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
@@ -34,7 +35,7 @@ class MessageRecorder(
       if (streamRef.get().isDefined) {
         stopRecording()
       }
-    }
+    }.discard
 
     val stream = new ObjectOutputStream(
       new BufferedOutputStream(new FileOutputStream(destination.toFile))

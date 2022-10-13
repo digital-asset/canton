@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client.transports
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -31,7 +31,7 @@ import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.collection.mutable
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 class HttpSequencerSubscriptionTest
@@ -55,7 +55,7 @@ class HttpSequencerSubscriptionTest
 
   "HttpSequencerSubscription" should {
     "continuously poll readNextEvent until an event is found" in { env =>
-      import env._
+      import env.*
 
       val finished = Promise[Unit]()
       val pollingResults = PollingResultsBuilder()
@@ -87,7 +87,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription with subscription error if readEvents returns error" in { env =>
-    import env._
+    import env.*
     val called = new AtomicBoolean(false)
 
     val error =
@@ -104,7 +104,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription if handler returns a failed future" in { env =>
-    import env._
+    import env.*
 
     val exception = new RuntimeException("handler exception")
     val pollingResults = PollingResultsBuilder().event(0).build
@@ -118,7 +118,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "fail subscription if the handler throws" in { env =>
-    import env._
+    import env.*
 
     val exception = new RuntimeException("handler exception")
     val pollingResults = PollingResultsBuilder().event(0).build
@@ -132,7 +132,7 @@ class HttpSequencerSubscriptionTest
   }
 
   "subscription doesn't set closeReason until handler is complete" in { env =>
-    import env._
+    import env.*
 
     val handlerInvoked = Promise[Unit]()
     val handlerCompleted = Promise[Either[String, Unit]]()

@@ -6,7 +6,7 @@ package com.digitalasset.canton.serialization
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.version.{
   HasProtocolVersionedSerializerCompanion,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -108,7 +108,7 @@ object MemoizedEvidenceSUT extends HasProtocolVersionedSerializerCompanion[Memoi
   val name: String = "MemoizedEvidenceSUT"
 
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       (),
       _ => throw new NotImplementedError("Serialization is not implemented"),

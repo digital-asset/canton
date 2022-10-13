@@ -4,12 +4,12 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.Semigroup
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.EventPerPartyCausalState
-import com.digitalasset.canton.participant.protocol._
-import com.digitalasset.canton.participant.store.memory.SingleDomainCausalTrackerTest._
+import com.digitalasset.canton.participant.protocol.*
+import com.digitalasset.canton.participant.store.memory.SingleDomainCausalTrackerTest.*
 import com.digitalasset.canton.protocol.TransferId
 import com.digitalasset.canton.protocol.messages.{CausalityMessage, VectorClock}
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}

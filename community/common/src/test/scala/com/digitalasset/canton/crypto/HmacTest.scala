@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.google.protobuf.ByteString

@@ -23,7 +23,7 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
   val domainIndex = 1
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table active_contracts",

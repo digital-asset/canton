@@ -3,15 +3,15 @@
 
 package com.digitalasset.canton.participant.protocol.submission.routing
 
-import cats.Order._
+import cats.Order.*
 import cats.data.{Chain, EitherT}
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.AutomaticTransferForTransactionFailure
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -25,7 +25,7 @@ private[routing] class DomainRankComputation(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   // Includes check that submitting party has a participant with submission rights on source and target domain
   def compute(
@@ -117,7 +117,7 @@ private[routing] final case class DomainRank(
 )
 
 private[routing] object DomainRank {
-  //The highest priority domain should be picked first, so negate the priority
+  // The highest priority domain should be picked first, so negate the priority
   implicit val domainRanking: Ordering[DomainRank] =
     Ordering.by(x => (x.transfers.size, -x.priority, x.domainId))
 }

@@ -14,13 +14,13 @@ import com.digitalasset.canton.domain.mediator.store.{
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil.sequentialTraverse_
 import com.digitalasset.canton.{BaseTest, SequencerCounter}

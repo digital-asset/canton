@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.protocol.transfer
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.engine.Error
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ViewType.TransferInViewType
 import com.digitalasset.canton.data.{CantonTimestamp, FullTransferInTree}
@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   SeedGenerator,
 }
-import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps._
+import com.digitalasset.canton.participant.protocol.transfer.TransferInProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferProcessingSteps.{
   NoSubmissionPermission,
   ReceivedMultipleRequests,
@@ -43,7 +43,7 @@ import com.digitalasset.canton.participant.store.TransferStoreTest.{
   contract,
   transactionId1,
 }
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
   MultiDomainEventLog,
   SyncDomainEphemeralState,
@@ -53,12 +53,12 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.submitterParticipant
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.protocol.messages._
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.messages.*
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.time.{DomainTimeTracker, TimeProofTestUtil}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -67,7 +67,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
 import scala.collection.immutable.Set
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future, Promise}
 
 class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
@@ -206,7 +206,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     "fail when a receiving party has no participant on the domain" in {
       val transferOutRequest = TransferOutRequest(
         party1,
-        Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+        Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
         Set.empty,
         coidAbs1,
         transferId.sourceDomain,
@@ -652,7 +652,7 @@ class TransferInProcessingStepsTest extends AsyncWordSpec with BaseTest {
     val transferId = TransferId(sourceDomain, CantonTimestamp.Epoch)
     val transferOutRequest = TransferOutRequest(
       party1,
-      Set(party1, party2), //Party 2 is a stakeholder and therefore a receiving party
+      Set(party1, party2), // Party 2 is a stakeholder and therefore a receiving party
       Set.empty,
       contractId,
       transferId.sourceDomain,

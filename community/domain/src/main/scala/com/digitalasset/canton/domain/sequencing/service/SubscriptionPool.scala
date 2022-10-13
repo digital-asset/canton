@@ -143,9 +143,11 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
 
       // if there's no more subscriptions remove the member from the pool (this won't error if they weren't there in the first place)
       // otherwise update the subscriptions buffer
-      updatedSubscriptions.fold(pool -= member) { subscriptions =>
-        pool += member -> subscriptions
-      }
+      updatedSubscriptions
+        .fold(pool -= member) { subscriptions =>
+          pool += member -> subscriptions
+        }
+        .discard
       updatePoolMetrics()
     }
   }

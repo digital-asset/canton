@@ -4,9 +4,9 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ContractKeyJournal
@@ -32,7 +32,7 @@ class InMemoryContractKeyJournal(override protected val loggerFactory: NamedLogg
     with NamedLogging
     with InMemoryPrunableByTime[ContractKeyJournalError] {
 
-  import InMemoryContractKeyJournal._
+  import InMemoryContractKeyJournal.*
 
   private val state: TrieMap[LfGlobalKey, KeyStatus] = new TrieMap[LfGlobalKey, KeyStatus]()
 

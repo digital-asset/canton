@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.NotUsed
-import akka.stream._
+import akka.stream.*
 import akka.stream.scaladsl.{BroadcastHub, Keep, Sink, Source, SourceQueueWithComplete}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
@@ -88,7 +88,7 @@ class LocalSequencerStateEventSignaller(
   }
 
   protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     Seq(
       SyncCloseable("queue.complete", queue.complete()),

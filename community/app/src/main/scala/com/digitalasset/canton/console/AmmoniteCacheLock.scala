@@ -4,7 +4,7 @@
 package com.digitalasset.canton.console
 
 import ammonite.runtime.Storage
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -30,7 +30,7 @@ object AmmoniteCacheLock {
   }
 
   def create(logger: TracedLogger, path: os.Path, isRepl: Boolean): AmmoniteCacheLock = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     def go(index: Int): Either[String, AmmoniteCacheLock] = {
       val newPath = path / s"$index"
       for {

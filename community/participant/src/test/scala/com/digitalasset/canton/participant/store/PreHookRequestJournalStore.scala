@@ -21,7 +21,7 @@ class PreHookRequestJournalStore(
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends RequestJournalStore
     with NamedLogging {
-  import PreHookRequestJournalStore._
+  import PreHookRequestJournalStore.*
 
   override private[store] implicit val ec: ExecutionContext = backing.ec
 

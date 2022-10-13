@@ -6,8 +6,8 @@ package com.digitalasset.canton.protocol.messages
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.protocol.TestDomainParameters
 import com.digitalasset.canton.serialization.HasCryptographicEvidenceTest
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.transaction.*
 import com.google.protobuf.ByteString
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AnyWordSpec

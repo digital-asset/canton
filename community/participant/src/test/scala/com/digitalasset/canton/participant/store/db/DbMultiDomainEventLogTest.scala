@@ -45,7 +45,7 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
   // then the second run would find the requests from the first run and fail.
   override protected def cleanUpEventLogs(): Unit = {
     val theStorage = storage
-    import theStorage.api._
+    import theStorage.api.*
 
     val cleanupF = theStorage.update(
       DBIO.seq(
@@ -65,8 +65,8 @@ trait DbMultiDomainEventLogTest extends MultiDomainEventLogTest with DbTest {
       events: Seq[(EventLogId, TimestampedEvent)]
   ): Future[Unit] = {
     val theStorage = storage
-    import theStorage.api._
-    import theStorage.converters._
+    import theStorage.api.*
+    import theStorage.converters.*
 
     @nowarn("cat=unused") implicit val setParameterTraceContext: SetParameter[TraceContext] =
       TraceContext.getVersionedSetParameter(testedProtocolVersion)

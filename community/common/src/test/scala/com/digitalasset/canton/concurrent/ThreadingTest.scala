@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.concurrent
 
-import cats.syntax.foldable._
+import cats.syntax.foldable.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.util.{LazyValWithContext, ResourceUtil}

@@ -18,7 +18,7 @@ import scala.concurrent.{ExecutionContext, Future}
 trait DbAcsCommitmentStoreTest extends AcsCommitmentStoreTest { this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table computed_acs_commitments",
@@ -47,7 +47,7 @@ trait DbAcsCommitmentStoreTest extends AcsCommitmentStoreTest { this: DbTest =>
 
 trait DbIncrementalCommitmentStoreTest extends IncrementalCommitmentStoreTest { this: DbTest =>
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table commitment_snapshot",
@@ -72,7 +72,7 @@ trait DbIncrementalCommitmentStoreTest extends IncrementalCommitmentStoreTest { 
 
 trait DbCommitmentQueueTest extends CommitmentQueueTest { this: DbTest =>
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table commitment_queue"

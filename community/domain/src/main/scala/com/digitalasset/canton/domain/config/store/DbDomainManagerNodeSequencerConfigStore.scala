@@ -25,8 +25,8 @@ class DbDomainManagerNodeSequencerConfigStore(
 )(implicit executionContext: ExecutionContext)
     extends DomainManagerNodeSequencerConfigStore
     with DbStore {
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
   implicit val getSequencerConnection: GetResult[SequencerConnection] = GetResult(r =>
     SequencerConnection

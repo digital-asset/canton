@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.transaction
 
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import slick.jdbc.SetParameter
 
 /** Unique path of a topology transaction

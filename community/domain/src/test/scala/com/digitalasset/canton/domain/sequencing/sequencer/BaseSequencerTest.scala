@@ -17,7 +17,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.errors.{
 }
 import com.digitalasset.canton.health.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.lifecycle.FlagCloseable
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   domainManager,

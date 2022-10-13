@@ -33,8 +33,8 @@ class DbParticipantSettingsStore(
 
   private val executionQueue = new SimpleExecutionQueue()
 
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
   private implicit val readSettings: GetResult[Settings] = GetResult { r =>
     val maxDirtyRequests = r.<<[Option[NonNegativeInt]]

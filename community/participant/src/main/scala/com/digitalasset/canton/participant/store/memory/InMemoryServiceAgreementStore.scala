@@ -20,7 +20,7 @@ class InMemoryServiceAgreementStore(protected val loggerFactory: NamedLoggerFact
 ) extends ServiceAgreementStore
     with NamedLogging {
 
-  import ServiceAgreementStore._
+  import ServiceAgreementStore.*
 
   private val agreements = TrieMap.empty[(DomainId, ServiceAgreementId), String256M]
   private val acceptedAgreements = new ConcurrentHashMap[DomainId, Set[ServiceAgreementId]]()

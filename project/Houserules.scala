@@ -1,6 +1,6 @@
-import sbt.Keys._
-import sbt._
-import wartremover.WartRemover.autoImport._
+import sbt.Keys.*
+import sbt.*
+import wartremover.WartRemover.autoImport.*
 import wartremover.contrib.ContribWart
 
 /** Settings for all JVM projects in this build. Contains compiler flags,
@@ -18,8 +18,8 @@ object JvmRulesPlugin extends AutoPlugin {
   }
   import de.heikoseeberger.sbtheader.{
     LineCommentCreator,
-    CommentStyle => HeaderCommentStyle,
-    FileType => HeaderFileType,
+    CommentStyle as HeaderCommentStyle,
+    FileType as HeaderFileType,
   }
 
   lazy val cantonRepoHeaderSettings = Seq(
@@ -83,7 +83,8 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Xlint:_,-unused",
             "-Xmacro-settings:materialize-derivations",
             "-Xfatal-warnings",
-            "-Wconf:cat=unused-imports:info", //reports unused-imports without counting them as warnings, and without causing -Werror to fail.
+            "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
+            "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
             "-Ywarn-dead-code",
             "-Ywarn-numeric-widen",
             "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
@@ -95,7 +96,10 @@ object JvmRulesPlugin extends AutoPlugin {
             "-Xsource:3",
           )
       },
-      Test / scalacOptions --= Seq("-Ywarn-value-discard"), // disable value discard check on tests
+      Test / scalacOptions --= Seq(
+        "-Ywarn-value-discard",
+        "-Wnonunit-statement",
+      ), // disable value discard and nonunit statement checks on tests
       addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.2" cross CrossVersion.full),
       Compile / compile / wartremoverErrors ++= {
         if (System.getProperty("canton-disable-warts") == "true") Seq()
@@ -112,7 +116,7 @@ object JvmRulesPlugin extends AutoPlugin {
             Wart.Product,
             Wart.Return,
             Wart.Serializable,
-            Wart.TraversableOps,
+            Wart.IterableOps,
             Wart.TryPartial,
             Wart.Var,
             Wart.While,
@@ -137,7 +141,7 @@ object JvmRulesPlugin extends AutoPlugin {
       },
       // Disable wart checks on generated code
       wartremoverExcluded += (Compile / sourceManaged).value,
-      //licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),
+      // licenses += ("Apache-2.0", new URL("https://www.apache.org/licenses/LICENSE-2.0.txt")),
       //
       // allow sbt to pull scaladoc from managed dependencies if referenced in our ScalaDoc links
       autoAPIMappings := true,

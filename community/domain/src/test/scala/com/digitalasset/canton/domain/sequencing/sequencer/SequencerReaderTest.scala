@@ -7,15 +7,15 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{Sink, SinkQueueWithCancel, Source}
 import akka.stream.{Materializer, OverflowStrategy, QueueOfferResult}
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils._
+import com.digitalasset.canton.domain.sequencing.sequencer.DomainSequencingTestUtils.*
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.CreateSubscriptionError
-import com.digitalasset.canton.domain.sequencing.sequencer.store._
+import com.digitalasset.canton.domain.sequencing.sequencer.store.*
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -52,7 +52,7 @@ import org.slf4j.event.Level
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable.SortedSet
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
@@ -230,7 +230,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
   "Reader" should {
     "read a stream of events" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
@@ -249,7 +249,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "read a stream of events from a non-zero offset" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
@@ -269,7 +269,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "read stream of events while new events are being added" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
@@ -304,7 +304,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "attempting to read an unregistered member returns error" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
@@ -315,7 +315,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     "attempting to read without having registered the topology client member returns error" in {
       env =>
-        import env._
+        import env.*
         for {
           // we haven't registered the topology client member
           _ <- store.registerMember(alice, ts0)
@@ -326,7 +326,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "attempting to read for a disabled member returns error" in { env =>
-      import env._
+      import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0)
@@ -337,7 +337,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     }
 
     "waits for a signal that new events are available" in { env =>
-      import env._
+      import env.*
 
       val waitP = Promise[Unit]()
 
@@ -371,7 +371,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     "reading all immediately available events" should {
       "use returned events before filtering based what has actually been requested" in { env =>
-        import env._
+        import env.*
 
         // disable auto signalling
         autoPushLatestTimestamps.set(false)
@@ -400,9 +400,9 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
     "counter checkpoint" should {
       "issue counter checkpoints occasionally" in { env =>
-        import env._
+        import env.*
 
-        import scala.jdk.CollectionConverters._
+        import scala.jdk.CollectionConverters.*
 
         def saveCounterCheckpointCallCount =
           Mockito
@@ -463,7 +463,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       "start subscriptions from the closest counter checkpoint if available" in { env =>
-        import env._
+        import env.*
 
         for {
           _ <- store.registerMember(topologyClientMember, ts0)
@@ -502,7 +502,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     "lower bound checks" should {
       "error if subscription would need to start before the lower bound due to no checkpoints" in {
         env =>
-          import env._
+          import env.*
 
           val expectedMessage =
             "Subscription for PAR::alice::default@0 would require reading data from 1970-01-01T00:00:00Z but our lower bound is 1970-01-01T00:00:10Z."
@@ -530,7 +530,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
 
       "error if subscription would need to start before the lower bound due to checkpoints" in {
         env =>
-          import env._
+          import env.*
 
           val expectedMessage =
             "Subscription for PAR::alice::default@9 would require reading data from 1970-01-01T00:00:00Z but our lower bound is 1970-01-01T00:00:10Z."
@@ -560,7 +560,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       "not error if there is a counter checkpoint above lower bound" in { env =>
-        import env._
+        import env.*
 
         for {
           _ <- store.registerMember(topologyClientMember, ts0)
@@ -582,7 +582,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
     "convert deliver events with too-old signing timestamps" when {
 
       def setup(env: Env) = {
-        import env._
+        import env.*
 
         for {
           domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
@@ -655,7 +655,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       "read by the sender into deliver errors" in { env =>
-        import env._
+        import env.*
         setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
             aliceEvents <- readAsSeq(alice, SequencerCounter(0), delivers.length)
@@ -703,7 +703,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       "read by another recipient into empty batches" in { env =>
-        import env._
+        import env.*
         setup(env).flatMap { case (signingTolerance, batch, delivers) =>
           for {
             bobEvents <- readAsSeq(bob, SequencerCounter(0), delivers.length)
@@ -749,7 +749,7 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
       }
 
       "do not update the topology client timestamp" in { env =>
-        import env._
+        import env.*
 
         for {
           domainParamsO <- cryptoD.headSnapshot.ipsSnapshot.findDynamicDomainParameters()
@@ -789,12 +789,13 @@ class SequencerReaderTest extends FixtureAsyncWordSpec with BaseTest {
           // take some events
           queue = readWithQueue(alice, SequencerCounter(0))
           // read a bunch of items
-          readEvents <- MonadUtil.sequentialTraverse(1L to 20L)(_ => pullFromQueue(queue))
+          readEvents <- MonadUtil.sequentialTraverse(1L to 40L)(_ => pullFromQueue(queue))
           // wait for a bit over the checkpoint interval (although I would expect because these actions are using the same scheduler the actions may be correctly ordered regardless)
-          _ <- waitFor(testConfig.checkpointInterval.toScala * 6)
+          _ <- waitFor(testConfig.checkpointInterval.toScala * 3)
           // close the queue before we make any assertions
           _ = queue.cancel()
           lastEventRead = readEvents.lastOption.value.value
+          _ = logger.debug(s"Fetching checkpoint for event with counter ${lastEventRead.counter}")
           checkpointForLastEventO <- store.fetchClosestCheckpointBefore(
             aliceId,
             lastEventRead.counter + 1,

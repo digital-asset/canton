@@ -17,7 +17,7 @@ import com.digitalasset.canton.topology.processing.{
   TopologyTransactionProcessingSubscriber,
   TopologyTransactionProcessor,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 

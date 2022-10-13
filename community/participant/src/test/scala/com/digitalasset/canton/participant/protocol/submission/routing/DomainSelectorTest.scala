@@ -5,14 +5,14 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import com.daml.lf.language.LanguageVersion
-import com.daml.lf.transaction.test.TransactionBuilder.Implicits._
+import com.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.Transactions.{
   ExerciseByInterface,
   ThreeExercises,
 }
-import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture._
+import com.digitalasset.canton.participant.protocol.submission.DomainSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker.{
   DomainNotSupportingMinimumProtocolVersion,
   UnknownPackage,
@@ -32,7 +32,7 @@ import com.digitalasset.canton.protocol.{
   LfVersionedTransaction,
   WithContractMetadata,
 }
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -68,9 +68,9 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       - one contract as input
    */
   "DomainSelector (simple exercise by interface)" should {
-    import DomainSelectorTest._
-    import DomainSelectorTest.ForSimpleTopology._
-    import SimpleTopology._
+    import DomainSelectorTest.*
+    import DomainSelectorTest.ForSimpleTopology.*
+    import SimpleTopology.*
 
     implicit val _loggerFactor = loggerFactory
 
@@ -270,12 +270,12 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
       - three contracts as input
    */
   "DomainSelector (simple transaction with three input contracts)" should {
-    import DomainSelectorTest._
-    import DomainSelectorTest.ForSimpleTopology._
-    import SimpleTopology._
+    import DomainSelectorTest.*
+    import DomainSelectorTest.ForSimpleTopology.*
+    import SimpleTopology.*
 
     "minimize the number of transfers" in {
-      import ThreeExercises._
+      import ThreeExercises.*
 
       val domains = NonEmpty.mk(Set, acme, da, repair)
 
@@ -334,7 +334,7 @@ private[routing] object DomainSelectorTest {
   val repair = createDomainId("repair")
 
   object ForSimpleTopology {
-    import SimpleTopology._
+    import SimpleTopology.*
 
     private val defaultDomainOfContracts: Seq[LfContractId] => Map[LfContractId, DomainId] =
       contracts => contracts.map(_ -> da).toMap
@@ -451,7 +451,7 @@ private[routing] object DomainSelectorTest {
         inputContractsMetadata: Set[WithContractMetadata[LfContractId]],
     )(implicit ec: ExecutionContext, traceContext: TraceContext) {
 
-      import SimpleTopology._
+      import SimpleTopology.*
 
       val inputContractIds: Set[LfContractId] = inputContractsMetadata.map(_.unwrap)
 

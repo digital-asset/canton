@@ -4,13 +4,13 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
-import cats.syntax.bifunctor._
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.option._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicat
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightBySequencingInfo
 import com.digitalasset.canton.participant.store.MultiDomainEventLog.{DeduplicationInfo, OnPublish}
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.sync.TimestampedEvent.TimelyRejectionEventId
 import com.digitalasset.canton.participant.{LedgerSyncEvent, LocalOffset}
@@ -28,7 +28,7 @@ import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import io.functionmeta.functionFullName
@@ -66,7 +66,7 @@ class InFlightSubmissionTracker(
 )(implicit val ec: ExecutionContext)
     extends FlagCloseable
     with NamedLogging {
-  import InFlightSubmissionTracker._
+  import InFlightSubmissionTracker.*
 
   /** Registers the given submission as being in flight and unsequenced
     * unless there already is an in-flight submission for the same change ID
@@ -206,7 +206,7 @@ class InFlightSubmissionTracker(
         skippedE.valueOr { skipped =>
           logger.info(
             show"Skipping publication of timely rejections with IDs ${skipped
-              .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped.map(_.localOffset)}"
+                .map(_.eventId.showValueOrNone)} as they are already there at offsets ${skipped.map(_.localOffset)}"
           )
         }
       }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.tracing
 
+import com.digitalasset.canton.DiscardOps
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
@@ -92,7 +93,7 @@ private object Autoconfigure {
   val isEnabled: Boolean = sys.props.contains("otel.traces.exporter")
   if (isEnabled) {
     // set default propagator, otherwise the ledger-api-client interceptor won't propagate any information
-    sys.props.getOrElseUpdate("otel.propagators", "tracecontext")
+    sys.props.getOrElseUpdate("otel.propagators", "tracecontext").discard
     AutoConfiguredOpenTelemetrySdk
       .builder()
       .addTracerProviderCustomizer { (t: SdkTracerProviderBuilder, u: ConfigProperties) =>

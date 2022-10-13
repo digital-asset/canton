@@ -17,7 +17,7 @@ import com.digitalasset.canton.{LfPartyId, RequestCounter}
 import scala.concurrent.Future
 
 trait TransferStore extends TransferLookup {
-  import TransferStore._
+  import TransferStore.*
 
   /** Adds the transfer to the store.
     *
@@ -160,7 +160,7 @@ object TransferStore {
 }
 
 trait TransferLookup {
-  import TransferStore._
+  import TransferStore.*
 
   /** Looks up the given in-flight transfer and returns the data associated with the transfer.
     * @return [[scala.Left$]]([[TransferStore.UnknownTransferId]]) if the transfer is unknown;

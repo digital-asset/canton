@@ -10,9 +10,9 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.memory.InMemoryPartyMetadataStore
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.{BaseTest, LedgerParticipantId}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -22,8 +22,8 @@ import scala.concurrent.Future
 
 class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
 
-  import com.digitalasset.canton.topology.DefaultTestIdentities._
-  import com.digitalasset.canton.topology.client.EffectiveTimeTestHelpers._
+  import com.digitalasset.canton.topology.DefaultTestIdentities.*
+  import com.digitalasset.canton.topology.client.EffectiveTimeTestHelpers.*
 
   private lazy val crypto =
     new TestingOwnerWithKeys(domainManager, loggerFactory, directExecutionContext)

@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.logging
 
-import cats.syntax.functorFilter._
+import cats.syntax.functorFilter.*
 import ch.qos.logback.classic
 import ch.qos.logback.classic.spi.{ILoggingEvent, IThrowableProxy, LoggerContextVO}
 import ch.qos.logback.core.spi.AppenderAttachable
 import ch.qos.logback.core.{Appender, AppenderBase}
+import com.digitalasset.canton.DiscardOps
 import org.slf4j.Marker
 
 import java.util
@@ -171,7 +172,7 @@ class RewritingAppender()
   override def detachAppender(appender: Appender[ILoggingEvent]): Boolean = {
     val index = appenders.indexOf(appender)
     if (index > -1) {
-      appenders.remove(index)
+      appenders.remove(index).discard
     }
     index != -1
   }

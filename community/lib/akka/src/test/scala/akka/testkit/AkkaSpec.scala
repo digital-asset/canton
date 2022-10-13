@@ -8,8 +8,6 @@ package akka.testkit
 
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.language.postfixOps
-
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 import org.scalactic.CanEqual

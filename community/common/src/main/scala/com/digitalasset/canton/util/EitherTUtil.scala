@@ -4,14 +4,14 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import cats.{Applicative, Functor}
+import com.daml.metrics.MetricHandle.Timer
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.metrics.MetricHandle.TimerM
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -129,7 +129,7 @@ object EitherTUtil {
   }
 
   /** Measure time of EitherT-based calls, inspired by upstream com.daml.metrics.Timed.future */
-  def timed[E, R](timerMetric: TimerM)(
+  def timed[E, R](timerMetric: Timer)(
       code: => EitherT[Future, E, R]
   )(implicit executionContext: ExecutionContext): EitherT[Future, E, R] = {
     val timerContext = timerMetric.metric.time()

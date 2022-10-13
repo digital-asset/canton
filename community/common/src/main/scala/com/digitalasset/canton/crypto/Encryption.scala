@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{DeserializationError, ProtoConverter}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedToByteString,
@@ -238,6 +238,7 @@ final case class SymmetricKey(
 ) extends CryptoKey
     with HasVersionedWrapper[VersionedMessage[SymmetricKey]]
     with NoCopy {
+
   protected def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SymmetricKey] =
     VersionedMessage(toProtoV0.toByteString, 0)
 
@@ -262,6 +263,7 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
 final case class EncryptionKeyPair(publicKey: EncryptionPublicKey, privateKey: EncryptionPrivateKey)
     extends CryptoKeyPair[EncryptionPublicKey, EncryptionPrivateKey]
     with NoCopy {
+
   def toProtoV0: v0.EncryptionKeyPair =
     v0.EncryptionKeyPair(Some(publicKey.toProtoV0), Some(privateKey.toProtoV0))
 

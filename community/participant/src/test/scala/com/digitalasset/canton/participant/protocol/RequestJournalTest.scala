@@ -321,7 +321,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
           _failure <- loggerFactory.assertInternalErrorAsync[IllegalStateException](
             rj.transit(initRc, CantonTimestamp.ofEpochSecond(1), Pending, Confirmed),
             _.getMessage shouldBe s"Request 0: Inconsistent timestamps for request.\nStored: ${CantonTimestamp.Epoch}\nExpected: ${CantonTimestamp
-              .ofEpochSecond(1)}",
+                .ofEpochSecond(1)}",
           )
         } yield succeed
       }

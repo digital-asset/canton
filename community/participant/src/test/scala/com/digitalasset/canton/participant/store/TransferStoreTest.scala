@@ -4,12 +4,12 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.participant.protocol.transfer.{TransferData, TransferOutRequest}
-import com.digitalasset.canton.participant.store.TransferStore._
+import com.digitalasset.canton.participant.store.TransferStore.*
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
@@ -17,11 +17,11 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   suffixedId,
   transactionId,
 }
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, TransferId}
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.TimeProofTestUtil
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.util.{Checked, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -29,13 +29,13 @@ import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter, SequencerCo
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.UUID
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 trait TransferStoreTest {
   this: AsyncWordSpec with BaseTest =>
 
-  import TransferStoreTest._
+  import TransferStoreTest.*
 
   def transferStore(mk: DomainId => TransferStore): Unit = {
     val transferData = FutureUtil.noisyAwaitResult(

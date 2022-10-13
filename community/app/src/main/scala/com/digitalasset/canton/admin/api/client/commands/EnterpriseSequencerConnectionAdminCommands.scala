@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.admin.api.client.commands
 
-import cats.syntax.either._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.admin.v0
 import com.digitalasset.canton.sequencing.SequencerConnection
 import com.google.protobuf.empty.Empty

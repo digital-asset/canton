@@ -13,7 +13,7 @@ final case class WithRecipients[+A](private val x: A, recipients: Recipients) {
 
 object WithRecipients {
   implicit def prettyWithRecipients[A: Pretty]: Pretty[WithRecipients[A]] = {
-    import Pretty._
+    import Pretty.*
     prettyOfClass(
       unnamedParam(_.x),
       param("recipients", _.recipients),

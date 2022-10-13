@@ -31,7 +31,7 @@ private[conflictdetection] object LockableStatus {
 
   implicit val activeContractStoreLockableStatus: LockableStatus[ActiveContractStore.Status] =
     new LockableStatus[ActiveContractStore.Status] {
-      import ActiveContractStore._
+      import ActiveContractStore.*
 
       override def kind: String = "contract"
 
@@ -50,7 +50,7 @@ private[conflictdetection] object LockableStatus {
 
   implicit val contractKeyJournalStateLockableStatus: LockableStatus[ContractKeyJournal.Status] =
     new LockableStatus[ContractKeyJournal.Status] {
-      import ContractKeyJournal._
+      import ContractKeyJournal.*
 
       override def kind: String = "key"
 

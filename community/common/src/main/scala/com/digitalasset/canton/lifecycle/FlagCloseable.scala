@@ -4,13 +4,13 @@
 package com.digitalasset.canton.lifecycle
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FlagCloseable.forceShutdownStr
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax._
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -229,7 +229,7 @@ trait FlagCloseable extends AutoCloseable {
     */
   @SuppressWarnings(Array("org.wartremover.warts.While", "org.wartremover.warts.Var"))
   final override def close(): Unit = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     /* Setting closingFlag to true first ensures that we can shut down cleanly, unless one of the
        readers takes longer to complete than the closing timeout. After the flag is set to true, the readerCount

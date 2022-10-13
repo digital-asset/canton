@@ -3,14 +3,14 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
-import cats.syntax.functor._
-import cats.syntax.traverse._
-import cats.syntax.traverseFilter._
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.data.ConfirmingParty
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
-import com.digitalasset.canton.protocol.messages.{Malformed, _}
+import com.digitalasset.canton.protocol.messages.{Malformed, *}
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, RequestId, ViewHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -28,7 +28,7 @@ class ConfirmationResponseFactory(
     protected val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   def createConfirmationResponses(
       requestId: RequestId,

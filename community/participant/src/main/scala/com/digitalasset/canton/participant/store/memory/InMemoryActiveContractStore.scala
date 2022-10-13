@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{Chain, EitherT}
 import cats.kernel.Order
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.functorFilter._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,13 +17,13 @@ import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveCo
 import com.digitalasset.canton.participant.store.ActiveContractStore.AcsError
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractStore}
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.store.memory.InMemoryPrunableByTime
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
-import com.digitalasset.canton.util._
+import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.*
 
 import java.util.ConcurrentModificationException
 import scala.Ordered.orderingToOrdered
@@ -40,8 +40,8 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
     with NamedLogging
     with InMemoryPrunableByTime[AcsError] {
 
-  import ActiveContractStore._
-  import InMemoryActiveContractStore._
+  import ActiveContractStore.*
+  import InMemoryActiveContractStore.*
 
   /** Invariant: Never maps to [[ContractStatus.Nonexistent]] */
   private[this] val table = TrieMap.empty[LfContractId, ContractStatus]
@@ -236,7 +236,7 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
 }
 
 object InMemoryActiveContractStore {
-  import ActiveContractStore._
+  import ActiveContractStore.*
 
   /** A contract status change consists of the actual [[ActivenessChange]] (timestamp, request counter, and kind)
     * and the details. The [[com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail]]

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.LfInterfaceId
 import com.digitalasset.canton.ProtoDeserializationError.ValueDeserializationError
 

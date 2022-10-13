@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
@@ -19,7 +19,7 @@ import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, DomainId, UniqueIdentifier}
-import io.grpc._
+import io.grpc.*
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.StreamObserver
 import org.scalatest.FutureOutcome
@@ -94,7 +94,7 @@ class SequencerClientAuthenticationTest extends FixtureAsyncWordSpec with BaseTe
   }
 
   "should refresh token after a failure" in { env =>
-    import env._
+    import env.*
 
     val request = v0.Hello.Request(msg = "")
     for {

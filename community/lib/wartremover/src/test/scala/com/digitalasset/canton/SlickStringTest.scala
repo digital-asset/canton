@@ -9,7 +9,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.wartremover.test.WartTestTraverser
 import slick.jdbc.PositionedParameters
-import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits._
+import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.*
 
 class SlickStringTest extends AnyWordSpec with Matchers {
 

@@ -2,7 +2,7 @@ import sbt.Keys.streams
 import sbt.internal.util.ManagedLogger
 import sbt.{IO, Setting, complete, inputKey}
 
-import cats.syntax.either._
+import cats.syntax.either.*
 
 object Release {
   private val SemVerDigitsRegex = """(0|[1-9]\d*)"""
@@ -198,7 +198,7 @@ object Release {
       inputKey[Unit]("Ensure release version and protocol version mappings are defined")
     Seq(
       fixReleaseVersions := {
-        import complete.DefaultParsers._
+        import complete.DefaultParsers.*
         implicit val log: ManagedLogger = streams.value.log
 
         val args: Seq[String] = spaceDelimited("<arg>").parsed

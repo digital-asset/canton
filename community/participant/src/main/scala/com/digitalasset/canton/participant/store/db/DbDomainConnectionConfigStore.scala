@@ -4,11 +4,11 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore.{
@@ -38,10 +38,10 @@ class DbDomainConnectionConfigStore private[store] (
 )(implicit ec: ExecutionContext)
     extends DomainConnectionConfigStore
     with DbStore {
-  import storage.api._
-  import storage.converters._
+  import storage.api.*
+  import storage.converters.*
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("domain-connection-config-store")
 
   // Eagerly maintained cache of domain config indexed by DomainAlias

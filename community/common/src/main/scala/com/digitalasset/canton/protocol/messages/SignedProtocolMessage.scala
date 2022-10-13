@@ -5,7 +5,7 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.Functor
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.crypto.{HashOps, Signature, SyncCryptoApi, SyncCryptoError}
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -19,7 +19,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -77,7 +77,7 @@ object SignedProtocolMessage
   override val name: String = "SignedProtocolMessage"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.SignedProtocolMessage)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -126,7 +126,7 @@ object SignedProtocolMessage
       hashOps: HashOps,
       signedMessageP: v0.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
-    import v0.SignedProtocolMessage.{SomeSignedProtocolMessage => Sm}
+    import v0.SignedProtocolMessage.{SomeSignedProtocolMessage as Sm}
     val v0.SignedProtocolMessage(maybeSignatureP, messageBytes) = signedMessageP
     for {
       message <- (messageBytes match {
@@ -145,7 +145,7 @@ object SignedProtocolMessage
       }): ParsingResult[SignedProtocolMessageContent]
       signature <- ProtoConverter.parseRequired(Signature.fromProtoV0, "signature", maybeSignatureP)
     } yield SignedProtocolMessage(message, signature)(
-      protocolVersionRepresentativeFor(ProtobufVersion(0))
+      protocolVersionRepresentativeFor(ProtoVersion(0))
     )
   }
 

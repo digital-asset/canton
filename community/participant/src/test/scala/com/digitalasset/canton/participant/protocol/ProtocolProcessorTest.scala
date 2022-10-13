@@ -13,7 +13,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, PeanoQueue}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor._
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.*
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.{Confirmed, Pending}
 import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
@@ -21,13 +21,13 @@ import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestProcessorError,
   TestViewType,
 }
-import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers._
+import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
 import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
   NoCommandDeduplicator,
 }
-import com.digitalasset.canton.participant.store.memory._
+import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{
   MultiDomainEventLog,
   ParticipantNodePersistentState,
@@ -38,7 +38,7 @@ import com.digitalasset.canton.participant.sync.{
   ParticipantEventPublisher,
   SyncDomainPersistentStateLookup,
 }
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{
   DynamicDomainParameters,
   RequestAndRootHashMessage,
@@ -54,11 +54,11 @@ import com.digitalasset.canton.sequencing.client.{
   SendType,
   SequencerClient,
 }
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.store.{CursorPrehead, IndexedDomain}
 import com.digitalasset.canton.time.{DomainTimeTracker, NonNegativeFiniteDuration, WallClock}
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.{
   BaseTest,
   DiscardOps,

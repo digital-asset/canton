@@ -4,9 +4,9 @@
 package com.digitalasset.canton.protocol
 
 import cats.data.{NonEmptyChain, Validated}
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functor._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
 import com.daml.nonempty.NonEmpty
@@ -15,7 +15,7 @@ import com.digitalasset.canton.data.ActionDescription
 import com.digitalasset.canton.protocol.RollbackContext.{RollbackScope, RollbackSibling}
 import com.digitalasset.canton.protocol.WellFormedTransaction.State
 import com.digitalasset.canton.topology.PartyId
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, LfTransactionUtil, MonadUtil}
 
 import scala.collection.immutable.HashMap
@@ -237,7 +237,7 @@ object WellFormedTransaction {
               referenceRbScope.startsWith(createdScope),
               (),
               s"Contract ${refId} created in rollback scope ${createdScope
-                .mkString(".")} referenced outside of visible rollback scope ${referenceRbScope.mkString(".")}",
+                  .mkString(".")} referenced outside of visible rollback scope ${referenceRbScope.mkString(".")}",
             )
           )
         } else Checked.unit
@@ -411,7 +411,7 @@ object WellFormedTransaction {
           if (missingInformees.isEmpty) Checked.unit
           else
             Checked.continue(s"signatory or maintainer not declared as informee: ${missingInformees
-              .mkString(", ")} at node ${nodeId.index}")
+                .mkString(", ")} at node ${nodeId.index}")
         case (_nodeId, _rn: LfNodeRollback) => Checked.unit
       }
     } yield ()

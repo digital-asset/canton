@@ -12,12 +12,12 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
 
-  import com.digitalasset.canton.topology.DefaultTestIdentities._
+  import com.digitalasset.canton.topology.DefaultTestIdentities.*
 
   private class Fixture {
 
     val factory = new TestingOwnerWithKeys(domainManager, loggerFactory, directExecutionContext)
-    import factory.SigningKeys._
+    import factory.SigningKeys.*
     val namespace = Namespace(key1.fingerprint)
 
     def mkGraph = new AuthorizationGraph(namespace, extraDebugInfo = true, loggerFactory)
@@ -44,8 +44,8 @@ class AuthorizationGraphTest extends AnyWordSpec with BaseTestWordSpec {
   }
 
   "authorization graph" should {
-    import fixture._
-    import fixture.factory.SigningKeys._
+    import fixture.*
+    import fixture.factory.SigningKeys.*
     "add simple" in {
       val graph = mkGraph
       graph.add(nsk1k1)

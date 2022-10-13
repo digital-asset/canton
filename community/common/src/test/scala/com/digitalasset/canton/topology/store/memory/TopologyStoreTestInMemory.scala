@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.topology.store.memory
+
 import com.digitalasset.canton.topology.store.{TopologyStoreId, TopologyStoreTest}
 
 class TopologyStoreTestInMemory extends TopologyStoreTest {

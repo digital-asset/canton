@@ -20,7 +20,7 @@ import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.store.CursorPrehead.RequestCounterCursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, HasFlushFuture, NoCopy}
-import com.digitalasset.canton.{RequestCounter, RequestCounterDiscriminator}
+import com.digitalasset.canton.{DiscardOps, RequestCounter, RequestCounterDiscriminator}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.ConcurrentModificationException
@@ -287,7 +287,7 @@ class RequestJournal(
         newState.visitCursor {
           case Pending => Some(pendingCursor.insert(rc, info))
           case Clean => Some(cleanCursor.insert(rc, info))
-        }
+        }.discard
 
         // Asynchronously drain the cursors and update the clean head
         addToFlushAndLogError(s"Update cursors for request $rc")(

@@ -1,4 +1,4 @@
-import cats.syntax.either._
+import cats.syntax.either.*
 import java.io.{File, FileNotFoundException}
 
 object NetRc {

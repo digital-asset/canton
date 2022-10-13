@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.version
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -44,11 +44,11 @@ object RepresentativeProtocolVersion {
 
 }
 
-final case class ProtobufVersion(v: Int) extends AnyVal
+final case class ProtoVersion(v: Int) extends AnyVal
 
-object ProtobufVersion {
-  implicit val protobufVersionOrdering: Ordering[ProtobufVersion] =
-    Ordering.by[ProtobufVersion, Int](_.v)
+object ProtoVersion {
+  implicit val protoVersionOrdering: Ordering[ProtoVersion] =
+    Ordering.by[ProtoVersion, Int](_.v)
 }
 
 /** Trait for classes that can be serialized by using ProtoBuf.
@@ -72,9 +72,9 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
   def isEquivalentTo(protocolVersion: ProtocolVersion): Boolean =
     companionObj.protocolVersionRepresentativeFor(protocolVersion) == representativeProtocolVersion
 
-  /** We have a correspondence {protobuf version} <-> {[protocol version]}: each proto version
+  /** We have a correspondence {Proto version} <-> {[protocol version]}: each proto version
     * correspond to a list of consecutive protocol versions. The representative is one instance
-    * of this list, usually the smallest value. In other words, the protobuf versions induce an
+    * of this list, usually the smallest value. In other words, the Proto versions induce an
     * equivalence relation on the list of protocol version, thus use of `representative`.
     *
     * The method `protocolVersionRepresentativeFor` below
@@ -82,11 +82,24 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
     */
   def representativeProtocolVersion: RepresentativeProtocolVersion[ValueClass]
 
+  private def serializeToHighestVersion: VersionedMessage[ValueClass] = {
+    VersionedMessage(
+      companionObj.supportedProtoVersions.higherConverter.serializer(self),
+      companionObj.supportedProtoVersions.higherProtoVersion.v,
+    )
+  }
+
   /** Yields the proto representation of the class inside an `UntypedVersionedMessage` wrapper.
     *
     * Subclasses should make this method public by default, as this supports composing proto serializations.
     * Keep it protected, if there are good reasons for it
     * (e.g. [[com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence]]).
+    *
+    * Be aware that if calling on a class that defines a LegacyProtoConverter, this method will still
+    * return a VersionedMessage. If the current protocol version maps to the
+    * legacy converter, deserialization will then fail (as it will try to deserialize to the raw protobuf instead of the
+    * VersionedMessage wrapper this was serialized to.
+    * Prefer using toByteString which handles this use case correctly.
     */
   def toProtoVersioned: VersionedMessage[ValueClass] =
     companionObj.supportedProtoVersions.converters
@@ -95,21 +108,27 @@ trait HasProtocolVersionedWrapper[ValueClass] extends HasRepresentativeProtocolV
             if representativeProtocolVersion.representative >= supportedVersion.fromInclusive.representative =>
           VersionedMessage(supportedVersion.serializer(self), protoVersion.v)
       }
-      .getOrElse {
-        VersionedMessage(
-          companionObj.supportedProtoVersions.higherConverter.serializer(self),
-          companionObj.supportedProtoVersions.higherProtoVersion.v,
-        )
-      }
+      .getOrElse(serializeToHighestVersion)
 
-  /** Yields the Protobuf version that this class will be serialized to
+  /** Yields the Proto version that this class will be serialized to
     */
-  def protobufVersion: ProtobufVersion =
-    companionObj.protobufVersionFor(representativeProtocolVersion)
+  def protoVersion: ProtoVersion =
+    companionObj.protoVersionFor(representativeProtocolVersion)
 
   /** Yields a byte string representation of the corresponding `UntypedVersionedMessage` wrapper of this instance.
     */
-  def toByteString: ByteString = toProtoVersioned.toByteString
+  def toByteString: ByteString = companionObj.supportedProtoVersions.converters
+    .collectFirst {
+      case (protoVersion, supportedVersion)
+          if representativeProtocolVersion.representative >= supportedVersion.fromInclusive.representative =>
+        supportedVersion match {
+          case versioned if versioned.isVersioned =>
+            VersionedMessage(supportedVersion.serializer(self), protoVersion.v).toByteString
+          case legacy =>
+            legacy.serializer(self)
+        }
+    }
+    .getOrElse(serializeToHighestVersion.toByteString)
 
   /** Yields a byte array representation of the corresponding `UntypedVersionedMessage` wrapper of this instance.
     */
@@ -138,26 +157,35 @@ trait HasSupportedProtoVersions[ValueClass] {
     supportedProtoVersions.protocolVersionRepresentativeFor(protocolVersion)
 
   def protocolVersionRepresentativeFor(
-      protoVersion: ProtobufVersion
+      protoVersion: ProtoVersion
   ): RepresentativeProtocolVersion[ValueClass] =
     supportedProtoVersions.protocolVersionRepresentativeFor(protoVersion)
 
-  /** Return the Protobuf version corresponding to the representative protocol version
+  /** Return the Proto version corresponding to the representative protocol version
     */
-  def protobufVersionFor(
+  def protoVersionFor(
       protocolVersion: RepresentativeProtocolVersion[ValueClass]
-  ): ProtobufVersion =
-    supportedProtoVersions.protobufVersionFor(protocolVersion)
+  ): ProtoVersion = supportedProtoVersions.protoVersionFor(protocolVersion)
 
-  /** Return the Protobuf version corresponding to the protocol version
+  /** Return the Proto version corresponding to the protocol version
     */
-  def protobufVersionFor(
-      protocolVersion: ProtocolVersion
-  ): ProtobufVersion =
-    supportedProtoVersions.protobufVersionFor(protocolVersionRepresentativeFor(protocolVersion))
+  def protoVersionFor(protocolVersion: ProtocolVersion): ProtoVersion =
+    supportedProtoVersions.protoVersionFor(protocolVersionRepresentativeFor(protocolVersion))
 
-  /** Supported protobuf version
-    * @param fromInclusive The protocol version when this protobuf version was introduced
+  /** Base class for (de)serializating from/to protobuf of ValueClass from a specific PV
+    */
+  sealed trait ProtoCodec {
+    def fromInclusive: RepresentativeProtocolVersion[ValueClass]
+    def deserializer: Deserializer
+    def serializer: Serializer
+    // Can't always rely on the subtype to differentiate between instances of ProtoCodec, because the type is erased
+    // at compile time when it is a dependent type of ValueClass (e.g in HasProtocolVersionedWrapper).
+    // Instead use this method to differentiate between versioned and un-versioned serialization
+    def isVersioned: Boolean
+  }
+
+  /** Supported Proto version
+    * @param fromInclusive The protocol version when this Proto version was introduced
     * @param deserializer Deserialization method
     * @param serializer Serialization method
     */
@@ -165,7 +193,9 @@ trait HasSupportedProtoVersions[ValueClass] {
       fromInclusive: RepresentativeProtocolVersion[ValueClass],
       deserializer: Deserializer,
       serializer: Serializer,
-  )
+  ) extends ProtoCodec {
+    override val isVersioned = true
+  }
 
   object VersionedProtoConverter {
     def apply(
@@ -179,15 +209,39 @@ trait HasSupportedProtoVersions[ValueClass] {
     )
   }
 
+  /** Used to (de)serialize classes which for legacy reasons where not wrapped in VersionedMessage
+    * Chances are this is NOT the class you want to use, use VersionedProtoConverter instead when adding serialization
+    * to a new class
+    */
+  case class LegacyProtoConverter(
+      fromInclusive: RepresentativeProtocolVersion[ValueClass],
+      deserializer: Deserializer,
+      serializer: Serializer,
+  ) extends ProtoCodec {
+    override val isVersioned = false
+  }
+
+  object LegacyProtoConverter {
+    def apply(
+        fromInclusive: ProtocolVersion,
+        deserializer: Deserializer,
+        serializer: Serializer,
+    ): LegacyProtoConverter = LegacyProtoConverter(
+      new RepresentativeProtocolVersion[ValueClass](fromInclusive) {},
+      deserializer,
+      serializer,
+    )
+  }
+
   case class SupportedProtoVersions private (
       // Sorted with descending order
-      converters: NonEmpty[immutable.SortedMap[ProtobufVersion, VersionedProtoConverter]]
+      converters: NonEmpty[immutable.SortedMap[ProtoVersion, ProtoCodec]]
   ) {
     val (higherProtoVersion, higherConverter) = converters.head1
 
-    def protobufVersionsCount: Int = converters.size
+    def protoVersionsCount: Int = converters.size
 
-    def converterFor(protocolVersion: ProtocolVersion): VersionedProtoConverter =
+    def converterFor(protocolVersion: ProtocolVersion): ProtoCodec =
       converters
         .collectFirst {
           case (_, converter) if protocolVersion >= converter.fromInclusive.representative =>
@@ -195,21 +249,21 @@ trait HasSupportedProtoVersions[ValueClass] {
         }
         .getOrElse(higherConverter)
 
-    def deserializerFor(protoVersion: ProtobufVersion): Deserializer =
+    def deserializerFor(protoVersion: ProtoVersion): Deserializer =
       converters.get(protoVersion).map(_.deserializer).getOrElse(higherConverter.deserializer)
 
-    def protobufVersionFor(
+    def protoVersionFor(
         protocolVersion: RepresentativeProtocolVersion[ValueClass]
-    ): ProtobufVersion = converters
+    ): ProtoVersion = converters
       .collectFirst {
-        case (protobufVersion, converter)
+        case (protoVersion, converter)
             if protocolVersion.representative >= converter.fromInclusive.representative =>
-          protobufVersion
+          protoVersion
       }
       .getOrElse(higherProtoVersion)
 
     def protocolVersionRepresentativeFor(
-        protoVersion: ProtobufVersion
+        protoVersion: ProtoVersion
     ): RepresentativeProtocolVersion[ValueClass] =
       converters
         .get(protoVersion)
@@ -223,19 +277,19 @@ trait HasSupportedProtoVersions[ValueClass] {
 
   object SupportedProtoVersions {
     def apply(
-        head: (ProtobufVersion, VersionedProtoConverter),
-        tail: (ProtobufVersion, VersionedProtoConverter)*
+        head: (ProtoVersion, ProtoCodec),
+        tail: (ProtoVersion, ProtoCodec)*
     ): SupportedProtoVersions = SupportedProtoVersions.fromNonEmpty(
       NonEmpty.mk(Seq, head, tail: _*)
     )
 
     def fromNonEmpty(
-        converters: NonEmpty[Seq[(ProtobufVersion, VersionedProtoConverter)]]
+        converters: NonEmpty[Seq[(ProtoVersion, ProtoCodec)]]
     ): SupportedProtoVersions = {
 
       val sortedConverters = checked(
         NonEmptyUtil.fromUnsafe(
-          immutable.SortedMap.from(converters)(implicitly[Ordering[ProtobufVersion]].reverse)
+          immutable.SortedMap.from(converters)(implicitly[Ordering[ProtoVersion]].reverse)
         )
       )
       val (_, lowestProtocolVersion) = sortedConverters.last1
@@ -267,6 +321,20 @@ sealed trait HasProtocolVersionedWrapperCompanion[
 
   // Deserializer: (Proto => ValueClass)
   type Deserializer
+
+  protected def deserializeForVersion(
+      rpv: RepresentativeProtocolVersion[ValueClass],
+      deserializeLegacyProto: Deserializer => ParsingResult[ValueClass],
+      deserializeVersionedProto: => ParsingResult[ValueClass],
+  ): ParsingResult[ValueClass] = {
+    val converter =
+      supportedProtoVersions.converterFor(rpv.representative)
+
+    converter match {
+      case LegacyProtoConverter(_, deserializer, _) => deserializeLegacyProto(deserializer)
+      case _: VersionedProtoConverter => deserializeVersionedProto
+    }
+  }
 }
 
 trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasRepresentativeProtocolVersion]
@@ -290,8 +358,23 @@ trait HasMemoizedProtocolVersionedWrapperCompanion[ValueClass <: HasRepresentati
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
     valueClass <- supportedProtoVersions
-      .deserializerFor(ProtobufVersion(proto.version))(bytes, data)
+      .deserializerFor(ProtoVersion(proto.version))(bytes, data)
   } yield valueClass
+
+  /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
+    * set the version to use for the deserialization.
+    * @param protoVersion Proto version of the bytes to be deserialized
+    * @param bytes data
+    */
+  def fromByteString(
+      protoVersion: ProtoVersion
+  )(bytes: OriginalByteString): ParsingResult[ValueClass] = {
+    deserializeForVersion(
+      protocolVersionRepresentativeFor(protoVersion),
+      _(bytes, bytes),
+      fromByteString(bytes),
+    )
+  }
 }
 
 trait HasMemoizedProtocolVersionedWithContextCompanion[
@@ -312,7 +395,7 @@ trait HasMemoizedProtocolVersionedWithContextCompanion[
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     data <- proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data"))
     valueClass <- supportedProtoVersions
-      .deserializerFor(ProtobufVersion(proto.version))(context, bytes, data)
+      .deserializerFor(ProtoVersion(proto.version))(context, bytes, data)
   } yield valueClass
 
   def fromByteArray(context: Context)(bytes: Array[Byte]): ParsingResult[ValueClass] =
@@ -338,13 +421,28 @@ trait HasProtocolVersionedCompanion[
 
   def fromProtoVersioned(proto: VersionedMessage[ValueClass]): ParsingResult[ValueClass] =
     proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data")).flatMap {
-      supportedProtoVersions.deserializerFor(ProtobufVersion(proto.version))
+      supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))
     }
 
   def fromByteString(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
     proto <- ProtoConverter.protoParser(UntypedVersionedMessage.parseFrom)(bytes)
     valueClass <- fromProtoVersioned(VersionedMessage(proto))
   } yield valueClass
+
+  /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
+    * set the version to use for the deserialization.
+    * @param protocolVersion protocol version of the bytes to be deserialized
+    * @param bytes data
+    */
+  def fromByteString(
+      protocolVersion: ProtocolVersion
+  )(bytes: OriginalByteString): ParsingResult[ValueClass] = {
+    deserializeForVersion(
+      protocolVersionRepresentativeFor(protocolVersion),
+      _(bytes),
+      fromByteString(bytes),
+    )
+  }
 
   def readFromFile(
       inputFile: String
@@ -397,7 +495,7 @@ trait HasProtocolVersionedWithContextCompanion[
       context: Context
   )(proto: VersionedMessage[ValueClass]): ParsingResult[ValueClass] =
     proto.wrapper.data.toRight(ProtoDeserializationError.FieldNotSet(s"$name: data")).flatMap {
-      supportedProtoVersions.deserializerFor(ProtobufVersion(proto.version))(context, _)
+      supportedProtoVersions.deserializerFor(ProtoVersion(proto.version))(context, _)
     }
 
   def fromByteString(context: Context)(bytes: OriginalByteString): ParsingResult[ValueClass] = for {
@@ -405,6 +503,35 @@ trait HasProtocolVersionedWithContextCompanion[
     valueClass <- fromProtoVersioned(context)(VersionedMessage(proto))
   } yield valueClass
 
+  /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
+    * set the Proto version to use for the deserialization.
+    * @param protoVersion Proto version of the bytes to be deserialized
+    * @param bytes data
+    */
+  def fromByteString(
+      protoVersion: ProtoVersion
+  )(context: Context)(bytes: OriginalByteString): ParsingResult[ValueClass] = {
+    deserializeForVersion(
+      protocolVersionRepresentativeFor(protoVersion),
+      _(context, bytes),
+      fromByteString(context)(bytes),
+    )
+  }
+
+  /** Use this method when deserializing bytes for classes that have a legacy proto converter to explicitly
+    * set the protocol version to use for the deserialization.
+    * @param protocolVersion protocol version of the bytes to be deserialized
+    * @param bytes data
+    */
+  def fromByteString(
+      protocolVersion: ProtocolVersion
+  )(context: Context)(bytes: OriginalByteString): ParsingResult[ValueClass] = {
+    deserializeForVersion(
+      protocolVersionRepresentativeFor(protocolVersion),
+      _(context, bytes),
+      fromByteString(context)(bytes),
+    )
+  }
 }
 
 trait HasProtocolVersionedSerializerCompanion[ValueClass <: HasRepresentativeProtocolVersion]

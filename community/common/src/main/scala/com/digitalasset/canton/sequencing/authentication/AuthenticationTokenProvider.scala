@@ -4,8 +4,8 @@
 package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -115,7 +115,7 @@ class AuthenticationTokenProvider(
           )
       }
   }
-  import cats.syntax.traverse._
+  import cats.syntax.traverse.*
   private def authenticate(
       authenticationClient: SequencerAuthenticationServiceStub,
       nonce: Nonce,

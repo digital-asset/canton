@@ -9,6 +9,7 @@ import com.digitalasset.canton.buildinfo.BuildInfo
 import scopt.OptionParser
 
 import java.io.File
+import scala.annotation.nowarn
 
 sealed trait LogFileAppender
 object LogFileAppender {
@@ -118,6 +119,7 @@ case class Cli(
 
 }
 
+@nowarn(raw"msg=unused value of type .* \(add `: Unit` to discard silently\)")
 object Cli {
   // The `additionalVersions` parameter allows the enterprise CLI to output the version of additional,
   // enterprise-only dependencies (see `CantonAppDriver`).
@@ -133,16 +135,18 @@ object Cli {
       head("Canton", s"v${BuildInfo.version}")
 
       help('h', "help").text("Print usage")
-      opt[Unit]("version").text("Print versions").action { (_, _) =>
-        (Map(
-          "Canton" -> BuildInfo.version,
-          "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
-          "Supported Canton protocol versions" -> BuildInfo.protocolVersions,
-        ) ++ additionalVersions) foreach { case (name, version) =>
-          Console.out.println(s"$name: $version")
+      opt[Unit]("version")
+        .text("Print versions")
+        .action { (_, _) =>
+          (Map(
+            "Canton" -> BuildInfo.version,
+            "Daml Libraries" -> BuildInfo.damlLibrariesVersion,
+            "Supported Canton protocol versions" -> BuildInfo.protocolVersions.toString(),
+          ) ++ additionalVersions) foreach { case (name, version) =>
+            Console.out.println(s"$name: $version")
+          }
+          sys.exit(0)
         }
-        sys.exit(0)
-      }
 
       opt[Seq[File]]('c', "config")
         .text(
@@ -224,7 +228,7 @@ object Cli {
 
       opt[String]("log-file-appender")
         .text("Type of log file appender")
-        .valueName("rolling(default)|flat|off>")
+        .valueName("rolling(default)|flat|off")
         .action((typ, cli) =>
           typ.toLowerCase match {
             case "rolling" => cli.copy(logFileAppender = LogFileAppender.Rolling)
@@ -312,6 +316,8 @@ object Cli {
             .text("the script to run")
             .action((script, cli) => cli.copy(command = Some(Command.RunScript(script))))
         )
+
+      note("") // Enforce a newline in the help text
 
       implicit val readTarget: scopt.Read[Command.Generate.Target] = scopt.Read.reads {
         case "remote-config" => Command.Generate.RemoteConfig

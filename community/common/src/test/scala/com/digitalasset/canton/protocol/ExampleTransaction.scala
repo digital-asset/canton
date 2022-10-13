@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.{HashOps, RandomOps}
-import com.digitalasset.canton.data._
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId}
 

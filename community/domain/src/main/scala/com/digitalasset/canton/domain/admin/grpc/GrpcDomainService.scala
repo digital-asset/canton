@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.domain.admin.grpc
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.domain.admin.v0.GetDomainParameters.Response.Parameters
-import com.digitalasset.canton.domain.admin.{v0 => adminproto}
+import com.digitalasset.canton.domain.admin.{v0 as adminproto}
 import com.digitalasset.canton.domain.service.ServiceAgreementManager
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.{StaticDomainParameters, v0}
@@ -40,13 +40,13 @@ class GrpcDomainService(
   override def getDomainParametersVersioned(
       request: adminproto.GetDomainParameters.Request
   ): Future[adminproto.GetDomainParameters.Response] = {
-    val response = staticDomainParameters.protobufVersion.v match {
+    val response = staticDomainParameters.protoVersion.v match {
       case 0 => Future.successful(Parameters.ParametersV0(staticDomainParameters.toProtoV0))
       case 1 => Future.successful(Parameters.ParametersV1(staticDomainParameters.toProtoV1))
       case unsupported =>
         Future.failed(
           new IllegalStateException(
-            s"Unsupported Protobuf version $unsupported for static domain parameters"
+            s"Unsupported Proto version $unsupported for static domain parameters"
           )
         )
     }

@@ -4,21 +4,21 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.functor._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String3
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging._
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
+import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.store._
-import com.digitalasset.canton.store.db.DbSequencedEventStore._
+import com.digitalasset.canton.store.*
+import com.digitalasset.canton.store.db.DbSequencedEventStore.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, Thereafter}
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage, VersionedMessage}
@@ -54,7 +54,7 @@ class DbSequencedEventStore(
       thereafter: Thereafter[F, Content],
       traceContext: TraceContext,
   ): F[A] = {
-    import Thereafter.syntax._
+    import Thereafter.syntax.*
     // Avoid unnecessary call to blocking, if a permit is available right away.
     if (!semaphore.tryAcquire()) {
       // This should only occur when the caller is ignoring events, so ok to log with info level.
@@ -68,11 +68,11 @@ class DbSequencedEventStore(
       : SetParameter[SequencerClientDiscriminator] =
     SequencerClientDiscriminator.setClientDiscriminatorParameter
 
-  import com.digitalasset.canton.store.SequencedEventStore._
-  import storage.api._
-  import storage.converters._
+  import com.digitalasset.canton.store.SequencedEventStore.*
+  import storage.api.*
+  import storage.converters.*
 
-  override protected val processingTime: GaugeM[TimedLoadGauge, Double] =
+  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("sequenced-event-store")
 
   implicit val getResultPossiblyIgnoredSequencedEvent: GetResult[PossiblyIgnoredSerializedEvent] =

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.topology
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -11,7 +11,7 @@ import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult
 import com.digitalasset.canton.protocol.messages.RegisterTopologyTransactionResponseResult.State
 import com.digitalasset.canton.time.WallClock
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
@@ -36,12 +36,12 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.collection.mutable.ListBuffer
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
 class ParticipantTopologyDispatcherTest extends AsyncWordSpec with BaseTest {
 
-  import DefaultTestIdentities._
+  import DefaultTestIdentities.*
 
   private val clock = new WallClock(timeouts, loggerFactory)
   private val crypto = TestingIdentityFactory(loggerFactory).newCrypto(participant1)

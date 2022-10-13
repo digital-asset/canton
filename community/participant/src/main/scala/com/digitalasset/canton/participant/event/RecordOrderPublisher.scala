@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.participant.event
 
-import cats.syntax.foldable._
-import cats.syntax.option._
-import cats.syntax.traverse._
+import cats.syntax.foldable.*
+import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -351,7 +351,7 @@ class RecordOrderPublisher(
         s"Causal update $update given clock $clock with dependencies ${clock.waitOn}"
       )
       _unit <- {
-        //Block until the event is causally publishable
+        // Block until the event is causally publishable
         singleDomainCausalTracker.globalCausalOrderer.waitPublishable(clock)
       }
     } yield clock

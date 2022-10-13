@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.participant.pruning
 
-import cats.syntax.functor._
+import cats.syntax.functor.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.store._
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.DomainId
@@ -19,7 +19,7 @@ import io.functionmeta.functionFullName
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.math.Ordering.Implicits._
+import scala.math.Ordering.Implicits.*
 
 private[participant] class PruneObserver(
     requestJournalStore: RequestJournalStore,

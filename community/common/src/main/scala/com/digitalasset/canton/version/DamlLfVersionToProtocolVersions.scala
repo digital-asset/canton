@@ -4,7 +4,7 @@
 package com.digitalasset.canton.version
 
 import com.daml.lf.transaction.TransactionVersion
-import com.daml.lf.transaction.TransactionVersion._
+import com.daml.lf.transaction.TransactionVersion.*
 
 import scala.collection.immutable.SortedMap
 import scala.math.Ordered.orderingToOrdered

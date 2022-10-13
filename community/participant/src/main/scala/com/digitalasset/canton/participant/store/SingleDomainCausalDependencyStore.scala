@@ -55,7 +55,7 @@ trait SingleDomainCausalDependencyStore {
       val next = perPartyDeps.map { case (partyId, delta) =>
         val before: Map[DomainId, CantonTimestamp] = state.getOrElse(partyId, TrieMap.empty).toMap
         val updated = SingleDomainCausalTracker.bound(List(before, delta))
-        state.put(partyId, updated)
+        state.put(partyId, updated).discard
         partyId -> updated
       }
 

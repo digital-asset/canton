@@ -5,7 +5,7 @@ package com.digitalasset.canton.config
 
 import com.google.common.annotations.VisibleForTesting
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 /** Configuration for internal await timeouts
   *

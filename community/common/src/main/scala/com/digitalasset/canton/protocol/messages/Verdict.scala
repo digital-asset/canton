@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.error.ErrorCategory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -13,14 +13,14 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   NotImplementedYet,
   ValueDeserializationError,
 }
-import com.digitalasset.canton.error._
+import com.digitalasset.canton.error.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v0.RejectionReason
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version._
+import com.digitalasset.canton.version.*
 import com.google.protobuf.empty
 import pprint.Tree
 
@@ -42,12 +42,12 @@ object Verdict
     with ProtocolVersionedCompanionDbHelpers[Verdict] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.Verdict)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersion(v1.Verdict)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -109,7 +109,7 @@ object Verdict
     ): ParsingResult[MediatorReject] = {
       val v0.MediatorRejection(codeP, reason) = value
 
-      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0))
+      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
 
       import v0.MediatorRejection.Code
       codeP match {
@@ -132,7 +132,7 @@ object Verdict
     }
 
     def fromProtoV1(mediatorRejectP: v1.MediatorReject): ParsingResult[MediatorReject] = {
-      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(1))
+      val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
 
       val v1.MediatorReject(cause, errorCodeP, errorCategoryP) = mediatorRejectP
       errorCodeP match {
@@ -217,7 +217,7 @@ object Verdict
           .from(reasons.toList)
           .toRight(InvariantViolation("Field reasons must not be empty!"))
       } yield ParticipantReject(reasonsNE)(
-        Verdict.protocolVersionRepresentativeFor(ProtobufVersion(0))
+        Verdict.protocolVersionRepresentativeFor(ProtoVersion(0))
       )
 
     def fromProtoV1(
@@ -232,9 +232,9 @@ object Verdict
 
   def fromProtoV0(verdictP: v0.Verdict): ParsingResult[Verdict] = {
     val v0.Verdict(someVerdictP) = verdictP
-    import v0.Verdict.{SomeVerdict => V}
+    import v0.Verdict.{SomeVerdict as V}
 
-    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(0))
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(0))
 
     someVerdictP match {
       case V.Approve(empty.Empty(_)) => Right(Approve(representativeProtocolVersion))
@@ -248,9 +248,9 @@ object Verdict
 
   def fromProtoV1(verdictP: v1.Verdict): ParsingResult[Verdict] = {
     val v1.Verdict(someVerdictP) = verdictP
-    import v1.Verdict.{SomeVerdict => V}
+    import v1.Verdict.{SomeVerdict as V}
 
-    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtobufVersion(1))
+    val representativeProtocolVersion = protocolVersionRepresentativeFor(ProtoVersion(1))
 
     someVerdictP match {
       case V.Approve(empty.Empty(_)) => Right(Approve(representativeProtocolVersion))

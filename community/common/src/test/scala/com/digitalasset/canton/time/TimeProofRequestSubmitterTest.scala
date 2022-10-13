@@ -4,7 +4,7 @@
 package com.digitalasset.canton.time
 
 import cats.data.EitherT
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.String73
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -101,7 +101,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
 
   "time request submitter" should {
     "avoid making concurrent calls when a request is in progress" in { env =>
-      import env._
+      import env.*
 
       val nextRequestP = waitForNextRequest()
       // should trigger a request
@@ -117,7 +117,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
 
     "retry request if an appropriate event is not witnessed within our custom max-sequencing-duration" in {
       env =>
-        import env._
+        import env.*
 
         val request1F = waitForNextRequest()
         timeRequestSubmitter.fetchTimeProof() // kicks off getting a time event
@@ -141,7 +141,7 @@ class TimeProofRequestSubmitterTest extends FixtureAsyncWordSpec with BaseTest {
 
     "avoid more than one pending request when a time event is witnessed and new request started during the max-sequencing duration" in {
       env =>
-        import env._
+        import env.*
 
         timeRequestSubmitter.fetchTimeProof()
         val callCountAtStart = callCount.get()

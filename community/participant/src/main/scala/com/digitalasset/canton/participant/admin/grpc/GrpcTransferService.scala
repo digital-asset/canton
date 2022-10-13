@@ -4,14 +4,14 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.TransferService
-import com.digitalasset.canton.participant.admin.v0._
+import com.digitalasset.canton.participant.admin.v0.*
 import com.digitalasset.canton.participant.protocol.transfer.TransferData
-import com.digitalasset.canton.protocol.ContractIdSyntax._
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, TransferId}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -23,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class GrpcTransferService(service: TransferService)(implicit ec: ExecutionContext)
     extends TransferServiceGrpc.TransferService {
 
-  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+  import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 
   override def transferOut(request: AdminTransferOutRequest): Future[AdminTransferOutResponse] =
     TraceContext.fromGrpcContext { implicit traceContext =>

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.authentication.grpc
 
 import cats.data.EitherT
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp

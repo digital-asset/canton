@@ -14,7 +14,7 @@ trait DbCryptoPrivateStoreTest extends AsyncWordSpec with CryptoPrivateStoreTest
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
 
     /* We delete all private keys that ARE NOT encrypted (wrapper_key_id == NULL).
     This conditional delete is to avoid conflicts with the encrypted crypto private store tests. */

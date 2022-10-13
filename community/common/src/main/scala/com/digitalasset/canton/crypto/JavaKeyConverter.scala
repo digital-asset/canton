@@ -4,8 +4,8 @@
 package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
-import cats.syntax.either._
-import cats.syntax.foldable._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.Password
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
@@ -18,16 +18,16 @@ import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers
 
 import java.security.{
-  KeyStore => JKeyStore,
+  KeyStore as JKeyStore,
   KeyStoreException,
-  PrivateKey => JPrivateKey,
-  PublicKey => JPublicKey,
+  PrivateKey as JPrivateKey,
+  PublicKey as JPublicKey,
 }
 import scala.concurrent.{ExecutionContext, Future}
 
 trait JavaKeyConverter {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   /** Convert to Java private key */
   def toJava(privateKey: PrivateKey): Either[JavaKeyConversionError, JPrivateKey]

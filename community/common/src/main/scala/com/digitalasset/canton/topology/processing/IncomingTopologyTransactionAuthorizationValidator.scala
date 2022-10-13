@@ -3,19 +3,19 @@
 
 package com.digitalasset.canton.topology.processing
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, Fingerprint}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction._
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.processing.AuthorizedTopologyTransaction.*
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
   TopologyTransactionRejection,
   ValidatedTopologyTransaction,
 }
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.annotation.nowarn

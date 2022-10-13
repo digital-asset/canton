@@ -15,7 +15,7 @@ trait DbDamlPackageStoreTest extends DamlPackageStoreTest {
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"delete from dar_packages",

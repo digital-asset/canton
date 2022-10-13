@@ -4,9 +4,9 @@
 package com.digitalasset.canton.domain.mediator
 
 import cats.kernel.Monoid
-import cats.syntax.alternative._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.syntax.alternative.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
@@ -15,9 +15,9 @@ import com.digitalasset.canton.domain.mediator.store.MediatorState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
-import com.digitalasset.canton.protocol.messages._
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.handlers.StripSignature
-import com.digitalasset.canton.sequencing.protocol._
+import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.{
   AsyncResult,
   HandlerResult,

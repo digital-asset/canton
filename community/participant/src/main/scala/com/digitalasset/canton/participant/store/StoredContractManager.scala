@@ -4,10 +4,10 @@
 package com.digitalasset.canton.participant.store
 
 import cats.Id
-import cats.data._
-import cats.syntax.foldable._
-import cats.syntax.functorFilter._
-import cats.syntax.traverse._
+import cats.data.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.{

@@ -4,13 +4,13 @@
 package com.digitalasset.canton.util
 
 import cats.data.StateT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.test.ValueGenerators
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.protocol._
-import com.digitalasset.canton.util.LfTransactionBuilder._
-import org.scalacheck.cats.implicits._
+import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.util.LfTransactionBuilder.*
+import org.scalacheck.cats.implicits.*
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks

@@ -13,10 +13,10 @@ import org.scalatest.concurrent.PatienceConfiguration.Timeout
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
-import java.time.{Clock => JClock, Instant}
+import java.time.{Clock as JClock, Instant}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))

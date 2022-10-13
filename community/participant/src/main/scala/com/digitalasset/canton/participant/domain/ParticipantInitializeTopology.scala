@@ -13,7 +13,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.participant.topology.DomainOnboardingOutbox
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.sequencing._
+import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.{SequencerClient, SequencerClientFactory}
 import com.digitalasset.canton.sequencing.handlers.{
   DiscardIgnoredEvents,

@@ -81,7 +81,7 @@ class RequireBlockingTest extends AnyWordSpec with Matchers {
     "fail to detect renamed synchronized" in {
       val result = WartTestTraverser(RequireBlocking) {
         val x = new Object()
-        import x.{synchronized => foo}
+        import x.{synchronized as foo}
         foo(19)
       }
       // TODO(Andreas) We currently don't detect renamed references to synchronized
@@ -107,7 +107,7 @@ class RequireBlockingTest extends AnyWordSpec with Matchers {
 
     "fail to forbid renamed Thread.sleep" in {
       val result = WartTestTraverser(RequireBlocking) {
-        import Thread.{sleep => foo}
+        import Thread.{sleep as foo}
         foo(1)
       }
       // TODO(Andreas) We currently don't detect renamed references to sleep

@@ -9,13 +9,13 @@ import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
 import org.scalactic.source
 import org.scalatest.Assertion
-import org.scalatest.Inspectors._
-import org.scalatest.matchers.should.Matchers._
+import org.scalatest.Inspectors.*
+import org.scalatest.matchers.should.Matchers.*
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Future, TimeUnit}
 import scala.concurrent.blocking
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Implementation of [[com.digitalasset.canton.console.ConsoleOutput]] for test purposes.
   * By default, it logs messages as errors to fail the build on unexpected output.

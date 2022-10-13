@@ -15,7 +15,7 @@ case class WithContractHash[+A](private val x: A, contractHash: LfHash) {
 object WithContractHash {
 
   implicit def prettyWithContractHash[A: Pretty]: Pretty[WithContractHash[A]] = {
-    import Pretty._
+    import Pretty.*
     prettyOfClass(
       unnamedParam(_.x),
       param("contract hash", _.contractHash),

@@ -39,7 +39,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
   val pureCryptoApi: CryptoPureApi = TestingIdentityFactory.pureCrypto()
 
   override def cleanDb(storage: DbStorage): Future[Unit] = {
-    import storage.api._
+    import storage.api.*
     storage.update(
       DBIO.seq(
         sqlu"truncate table party_metadata",
@@ -76,7 +76,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       loggerFactory,
       parallelExecutionContext,
     )
-    import owner.TestingTransactions._
+    import owner.TestingTransactions.*
     def ts(ms: Long) = CantonTimestamp.Epoch.plusMillis(ms)
     def validated(
         txs: SignedTopologyTransaction[TopologyChangeOp]*
@@ -127,7 +127,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
       _ <- append(ts(110).immediateSuccessor, ts(210).immediateSuccessor, validated(ps2))
       _ <- {
         // purge sequenced
-        import storage.api._
+        import storage.api.*
         storage.update_(sqlu"UPDATE topology_transactions SET sequenced = NULL", "testing")
       }
       // load transactions (triggers recomputation)
@@ -153,8 +153,8 @@ trait DbTopologyStoreTest extends TopologyStoreTest {
   "Storage implicits" should {
     "should be stack safe" in {
       val tmp = storage
-      import DbStorage.Implicits.BuilderChain._
-      import tmp.api._
+      import DbStorage.Implicits.BuilderChain.*
+      import tmp.api.*
       (1 to 100000).map(_ => sql" 1 == 1").toList.intercalate(sql" AND ").discard
       assert(true)
     }

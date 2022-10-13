@@ -3,25 +3,25 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.either._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.daml.lf.transaction.ContractStateMachine.{ActiveLedgerState, KeyMapping}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ActionDescription.{
   CreateActionDescription,
   ExerciseActionDescription,
   FetchActionDescription,
   LookupByKeyActionDescription,
 }
-import com.digitalasset.canton.data.TransactionView._
+import com.digitalasset.canton.data.TransactionView.InvalidView
 import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.data.ViewPosition.{ListIndex, MerklePathElement}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.protocol.ContractIdSyntax._
-import com.digitalasset.canton.protocol.{RollbackContext, v0, v2, _}
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
+import com.digitalasset.canton.protocol.{v0, v1, v2, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   ProtoConverter,
@@ -29,14 +29,7 @@ import com.digitalasset.canton.serialization.{
   SerializationCheckFailed,
 }
 import com.digitalasset.canton.util.{ErrorUtil, MapsUtil, NamedLoggingLazyVal}
-import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWithContextCompanion,
-  HasProtocolVersionedWrapper,
-  HasVersionedToByteString,
-  ProtobufVersion,
-  ProtocolVersion,
-  RepresentativeProtocolVersion,
-}
+import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   LfCommand,
   LfCreateCommand,
@@ -61,15 +54,19 @@ case class TransactionView private (
     viewCommonData: MerkleTree[ViewCommonData],
     viewParticipantData: MerkleTree[ViewParticipantData],
     subviews: Seq[MerkleTree[TransactionView]],
-)(hashOps: HashOps)
-    extends MerkleTreeInnerNode[TransactionView](hashOps)
-    with HasVersionedToByteString
+)(
+    hashOps: HashOps,
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+) extends MerkleTreeInnerNode[TransactionView](hashOps)
+    with HasProtocolVersionedWrapper[TransactionView]
     with HasLoggerName {
+
+  override val companionObj: HasProtocolVersionedWrapperCompanion[TransactionView] = TransactionView
 
   if (viewCommonData.unwrap.isRight) {
     subviews
       .find(_.unwrap.exists(_.viewCommonData == viewCommonData))
-      .map(subview => {
+      .foreach(subview => {
         throw InvalidView(
           s"The subview with index ${subviews.indexOf(subview)} has an equal viewCommonData."
         )
@@ -104,11 +101,12 @@ case class TransactionView private (
   override private[data] def withBlindedSubtrees(
       blindingCommandPerNode: PartialFunction[RootHash, MerkleTree.BlindingCommand]
   ): MerkleTree[TransactionView] =
-    TransactionView.tryCreate(hashOps)(
+    TransactionView.tryCreate(
       viewCommonData.doBlind(blindingCommandPerNode), // O(1)
       viewParticipantData.doBlind(blindingCommandPerNode), // O(1)
       subviews.map(_.doBlind(blindingCommandPerNode)), // O(#subviews)
-    )
+      representativeProtocolVersion,
+    )(hashOps)
 
   val viewHash: ViewHash = ViewHash.fromRootHash(rootHash)
 
@@ -143,7 +141,10 @@ case class TransactionView private (
       viewParticipantData: MerkleTree[ViewParticipantData] = this.viewParticipantData,
       subviews: Seq[MerkleTree[TransactionView]] = this.subviews,
   ) =
-    new TransactionView(viewCommonData, viewParticipantData, subviews)(hashOps)
+    new TransactionView(viewCommonData, viewParticipantData, subviews)(
+      hashOps,
+      representativeProtocolVersion,
+    )
 
   /** If the view with the given hash appears as a (possibly blinded) descendant of this view ,
     * replace it by the given view. Note that this view also counts as a descendant
@@ -166,8 +167,11 @@ case class TransactionView private (
     subviews = subviews.map(subview => MerkleTree.toBlindableNodeV0(subview)),
   )
 
-  // TODO(i9707): Remove non-versioned serialization
-  override def toByteString(version: ProtocolVersion): ByteString = toProtoV0.toByteString
+  protected def toProtoV1: v1.ViewNode = v1.ViewNode(
+    viewCommonData = Some(MerkleTree.toBlindableNodeV1(viewCommonData)),
+    viewParticipantData = Some(MerkleTree.toBlindableNodeV1(viewParticipantData)),
+    subviews = subviews.map(subview => MerkleTree.toBlindableNodeV1(subview)),
+  )
 
   /** The global key inputs that the [[com.daml.lf.transaction.ContractStateMachine]] computes
     * while interpreting the root action of the view, enriched with the maintainers of the key and the
@@ -404,7 +408,32 @@ case class TransactionView private (
   }
 }
 
-object TransactionView {
+object TransactionView extends HasProtocolVersionedWithContextCompanion[TransactionView, HashOps] {
+  override protected def name: String = "TransactionView"
+  override def supportedProtoVersions: SupportedProtoVersions =
+    SupportedProtoVersions(
+      ProtoVersion(0) -> LegacyProtoConverter(
+        ProtocolVersion.v2,
+        supportedProtoVersion(v0.ViewNode)(fromProtoV0),
+        _.toProtoV0.toByteString,
+      ),
+      ProtoVersion(1) -> VersionedProtoConverter(
+        ProtocolVersion.v4,
+        supportedProtoVersion(v1.ViewNode)(fromProtoV1),
+        _.toProtoV1.toByteString,
+      ),
+    )
+
+  private def tryCreate(
+      viewCommonData: MerkleTree[ViewCommonData],
+      viewParticipantData: MerkleTree[ViewParticipantData],
+      subviews: Seq[MerkleTree[TransactionView]],
+      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+  )(hashOps: HashOps): TransactionView =
+    new TransactionView(viewCommonData, viewParticipantData, subviews)(
+      hashOps,
+      representativeProtocolVersion,
+    )
 
   /** Creates a view.
     *
@@ -414,8 +443,31 @@ object TransactionView {
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: Seq[MerkleTree[TransactionView]],
+      protocolVersion: ProtocolVersion,
   ): TransactionView =
-    new TransactionView(viewCommonData, viewParticipantData, subviews)(hashOps)
+    tryCreate(
+      viewCommonData,
+      viewParticipantData,
+      subviews,
+      protocolVersionRepresentativeFor(protocolVersion),
+    )(hashOps)
+
+  private def createFromRepresentativePV(hashOps: HashOps)(
+      viewCommonData: MerkleTree[ViewCommonData],
+      viewParticipantData: MerkleTree[ViewParticipantData],
+      subviews: Seq[MerkleTree[TransactionView]],
+      representativeProtocolVersion: RepresentativeProtocolVersion[TransactionView],
+  ): Either[String, TransactionView] =
+    Either
+      .catchOnly[InvalidView](
+        TransactionView.tryCreate(
+          viewCommonData,
+          viewParticipantData,
+          subviews,
+          representativeProtocolVersion,
+        )(hashOps)
+      )
+      .leftMap(_.message)
 
   /** Creates a view.
     *
@@ -425,18 +477,18 @@ object TransactionView {
       viewCommonData: MerkleTree[ViewCommonData],
       viewParticipantData: MerkleTree[ViewParticipantData],
       subviews: Seq[MerkleTree[TransactionView]],
+      protocolVersion: ProtocolVersion,
   ): Either[String, TransactionView] =
     Either
       .catchOnly[InvalidView](
-        TransactionView.tryCreate(hashOps)(viewCommonData, viewParticipantData, subviews)
+        TransactionView.tryCreate(hashOps)(
+          viewCommonData,
+          viewParticipantData,
+          subviews,
+          protocolVersion,
+        )
       )
       .leftMap(_.message)
-
-  def fromByteString(hashOps: HashOps)(bytes: ByteString): ParsingResult[TransactionView] =
-    for {
-      protoView <- ProtoConverter.protoParser(v0.ViewNode.parseFrom)(bytes)
-      view <- fromProtoV0(hashOps, protoView)
-    } yield view
 
   private def fromProtoV0(
       hashOps: HashOps,
@@ -451,18 +503,61 @@ object TransactionView {
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(hashOps),
       )
-      subViews <- deserializeViews(hashOps)(protoView.subviews)
-      view <- create(hashOps)(commonData, participantData, subViews).leftMap(e =>
+      subViews <- deserializeViewsV0(hashOps)(protoView.subviews)
+      view <- createFromRepresentativePV(hashOps)(
+        commonData,
+        participantData,
+        subViews,
+        protocolVersionRepresentativeFor(ProtoVersion(0)),
+      ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )
     } yield view
   }
 
-  private[data] def deserializeViews(
+  private def fromProtoV1(
+      hashOps: HashOps,
+      protoView: v1.ViewNode,
+  ): ParsingResult[TransactionView] = {
+    for {
+      commonData <- MerkleTree.fromProtoOptionV1(
+        protoView.viewCommonData,
+        ViewCommonData.fromByteString(hashOps),
+      )
+      participantData <- MerkleTree.fromProtoOptionV1(
+        protoView.viewParticipantData,
+        ViewParticipantData.fromByteString(hashOps),
+      )
+      subViews <- deserializeViewsV1(hashOps)(protoView.subviews)
+      view <- createFromRepresentativePV(hashOps)(
+        commonData,
+        participantData,
+        subViews,
+        protocolVersionRepresentativeFor(ProtoVersion(1)),
+      ).leftMap(e =>
+        ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
+      )
+    } yield view
+  }
+
+  private[data] def deserializeViewsV0(
       hashOps: HashOps
   )(protoViews: Seq[v0.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
     protoViews.traverse(protoView =>
-      MerkleTree.fromProtoOptionV0(Some(protoView), fromByteString(hashOps))
+      MerkleTree.fromProtoOptionV0(
+        Some(protoView),
+        fromByteString(ProtoVersion(0))(hashOps),
+      )
+    )
+
+  private[data] def deserializeViewsV1(
+      hashOps: HashOps
+  )(protoViews: Seq[v1.BlindableNode]): ParsingResult[Seq[MerkleTree[TransactionView]]] =
+    protoViews.traverse(protoView =>
+      MerkleTree.fromProtoOptionV1(
+        Some(protoView),
+        fromByteString(ProtoVersion(1))(hashOps),
+      )
     )
 
   /** Indicates an attempt to create an invalid view. */
@@ -543,11 +638,9 @@ case class ViewCommonData private (informees: Set[Informee], threshold: NonNegat
       salt = Some(salt.toProtoV0),
     )
 
-  // TODO(i5768): remove `toByteString` from MemoizedEvidence so `super[HasVersionedWrapper]` is no longer required to avoid infinite recursion
   // When serializing the class to an anonymous binary format, we serialize it to an UntypedVersionedMessage version of the
   // corresponding Protobuf message
-  override protected[this] def toByteStringUnmemoized: ByteString =
-    super[HasProtocolVersionedWrapper].toByteString
+  override protected[this] def toByteStringUnmemoized: ByteString = toByteString
 
   override val hashPurpose: HashPurpose = HashPurpose.ViewCommonData
 
@@ -571,7 +664,7 @@ object ViewCommonData
   override val name: String = "ViewCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ViewCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -623,7 +716,7 @@ object ViewCommonData
       threshold <- NonNegativeInt.create(viewCommonDataP.threshold).leftMap(_.inField("threshold"))
     } yield new ViewCommonData(informees.toSet, threshold, salt)(
       hashOps,
-      protocolVersionRepresentativeFor(ProtobufVersion(0)),
+      protocolVersionRepresentativeFor(ProtoVersion(0)),
       Some(bytes),
     )
 
@@ -911,20 +1004,20 @@ object ViewParticipantData
   override val name: String = "ViewParticipantData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // Protobuf version 1 uses the same message format as version 0,
+    // Proto version 1 uses the same message format as version 0,
     // but interprets resolvedKeys differently. See ViewParticipantData's scaladoc for details
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v3,
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
     // TODO(#9910) migrate to stable
-    ProtobufVersion(2) -> VersionedProtoConverter(
+    ProtoVersion(2) -> VersionedProtoConverter(
       ProtocolVersion.dev,
       supportedProtoVersionMemoized(v2.ViewParticipantData)(fromProtoV2),
       _.toProtoV2.toByteString,
@@ -1018,12 +1111,12 @@ object ViewParticipantData
   private def fromProtoV0(hashOps: HashOps, dataP: v0.ViewParticipantData)(
       bytes: ByteString
   ): ParsingResult[ViewParticipantData] =
-    fromProtoV0V1(hashOps, dataP, ProtobufVersion(0))(bytes)
+    fromProtoV0V1(hashOps, dataP, ProtoVersion(0))(bytes)
 
   private def fromProtoV1(hashOps: HashOps, dataP: v0.ViewParticipantData)(
       bytes: ByteString
   ): ParsingResult[ViewParticipantData] =
-    fromProtoV0V1(hashOps, dataP, ProtobufVersion(1))(bytes)
+    fromProtoV0V1(hashOps, dataP, ProtoVersion(1))(bytes)
 
   private def fromProtoV2(hashOps: HashOps, dataP: v2.ViewParticipantData)(
       bytes: ByteString
@@ -1038,7 +1131,7 @@ object ViewParticipantData
       rbContextP,
     ) = dataP
 
-    fromProtoV0V1V2(hashOps, ProtobufVersion(2))(
+    fromProtoV0V1V2(hashOps, ProtoVersion(2))(
       saltP,
       coreInputsP,
       createdCoreP,
@@ -1052,7 +1145,7 @@ object ViewParticipantData
 
   private def fromProtoV0V1V2[ActionDescriptionProto](
       hashOps: HashOps,
-      protobufVersion: ProtobufVersion,
+      protoVersion: ProtoVersion,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v0.Salt],
       coreInputsP: Seq[v0.ViewParticipantData.InputContract],
@@ -1093,14 +1186,14 @@ object ViewParticipantData
         actionDescription = actionDescription,
         rollbackContext = rollbackContext,
         salt = salt,
-      )(hashOps, protocolVersionRepresentativeFor(protobufVersion), Some(bytes))
+      )(hashOps, protocolVersionRepresentativeFor(protoVersion), Some(bytes))
     ).leftMap(ProtoDeserializationError.OtherError)
   } yield viewParticipantData
 
   private def fromProtoV0V1(
       hashOps: HashOps,
       dataP: v0.ViewParticipantData,
-      protobufVersion: ProtobufVersion,
+      protoVersion: ProtoVersion,
   )(bytes: ByteString): ParsingResult[ViewParticipantData] = {
     val v0.ViewParticipantData(
       saltP,
@@ -1112,7 +1205,7 @@ object ViewParticipantData
       rbContextP,
     ) = dataP
 
-    fromProtoV0V1V2(hashOps, protobufVersion)(
+    fromProtoV0V1V2(hashOps, protoVersion)(
       saltP,
       coreInputsP,
       createdCoreP,

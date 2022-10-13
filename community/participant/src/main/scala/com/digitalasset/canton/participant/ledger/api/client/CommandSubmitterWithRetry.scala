@@ -13,7 +13,7 @@ import com.daml.ledger.client.services.commands.CommandSubmission
 import com.daml.util.Ctx
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error
-import com.digitalasset.canton.lifecycle._
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.{
@@ -49,7 +49,7 @@ class CommandSubmitterWithRetry(
       overflowStrategy = OverflowStrategy.dropNew,
     )
   private val ((queue, killSwitch), done) = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
 
     AkkaUtil.runSupervised(
       logger.error("Fatally failed to handle retry flow", _),
@@ -111,7 +111,7 @@ class CommandSubmitterWithRetry(
   }
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     List[AsyncOrSyncCloseable](
       SyncCloseable("queue.complete", queue.complete()),
       SyncCloseable("killSwitch.shutdown", killSwitch.shutdown()),
@@ -145,17 +145,17 @@ object CommandSubmitterWithRetry {
       overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
   ): Flow[Ctx[CommandsCtx, CommandSubmission], Ctx[CommandsCtx, CommandSubmission], NotUsed] =
     Flow.fromGraph(GraphDSL.create() { implicit b =>
-      import GraphDSL.Implicits._
+      import GraphDSL.Implicits.*
 
       val merge =
         b.add(MergePreferred[Ctx[CommandsCtx, CommandSubmission]](1, eagerComplete = true))
       val bcast = b.add(Broadcast[Ctx[CommandsCtx, CommandSubmission]](2))
 
-      merge ~> cmdTracker
+      (merge ~> cmdTracker
         .map(stopOrRetry(maxRetries, logger, overrideRetryable))
         .collect { case Some(ctx) =>
           ctx
-        } ~> bcast
+        } ~> bcast).discard
 
       bcast ~> merge.preferred // retry
 
@@ -167,7 +167,7 @@ object CommandSubmitterWithRetry {
       logger: TracedLogger,
       overrideRetryable: PartialFunction[Status, Boolean] = PartialFunction.empty,
   )(c: Ctx[CommandsCtx, Completion]): Option[Ctx[CommandsCtx, CommandSubmission]] = {
-    import TraceContext.Implicits.Empty._
+    import TraceContext.Implicits.Empty.*
     val statusO = c.value.status
     val result: Either[CommandResult, CommandsCtx] = statusO match {
       case None =>

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.crypto.provider.symbolic
 
 import cats.data.EitherT
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString

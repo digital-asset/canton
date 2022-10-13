@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
@@ -16,8 +16,8 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology._
-import com.digitalasset.canton.topology.admin.{v0 => topoV0}
+import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.{v0 as topoV0}
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.topology.processing.TransactionAuthorizationValidator.AuthorizationChain
 import com.digitalasset.canton.topology.processing.{
@@ -28,7 +28,7 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStoreFactory
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactory
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion

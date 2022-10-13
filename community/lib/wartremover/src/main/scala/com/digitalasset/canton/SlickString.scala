@@ -24,7 +24,7 @@ object SlickString extends WartTraverser {
     "The DB may truncate strings of unbounded length. Use a LengthLimitedString instead."
 
   def apply(u: WartUniverse): u.Traverser = {
-    import u.universe._
+    import u.universe.*
 
     val positionedParameterSymbol = typeOf[PositionedParameters]
     val positionedParameterTypeSymbol = positionedParameterSymbol.typeSymbol

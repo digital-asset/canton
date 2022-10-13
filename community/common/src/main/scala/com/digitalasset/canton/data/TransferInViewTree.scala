@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.bifunctor._
-import cats.syntax.traverse._
+import cats.syntax.bifunctor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{
   DeliveredTransferOutResult,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedToByteString,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
 }
@@ -163,12 +163,12 @@ object TransferInCommonData
   override val name: String = "TransferInCommonData"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferInCommonData)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferInCommonData)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -203,7 +203,7 @@ object TransferInCommonData
     } yield TransferInCommonData(salt, targetDomain, targetMediator, stakeholders.toSet, uuid)(
       hashOps,
       TargetProtocolVersion(
-        protocolVersionRepresentativeFor(ProtobufVersion(0)).representative
+        protocolVersionRepresentativeFor(ProtoVersion(0)).representative
       ),
       Some(bytes),
     )
@@ -299,12 +299,12 @@ object TransferInView
   override val name: String = "TransferInView"
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersionMemoized(v0.TransferInView)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    ProtobufVersion(1) -> VersionedProtoConverter(
+    ProtoVersion(1) -> VersionedProtoConverter(
       ProtocolVersion.v4,
       supportedProtoVersionMemoized(v1.TransferInView)(fromProtoV1),
       _.toProtoV1.toByteString,
@@ -355,7 +355,7 @@ object TransferInView
       transferOutResultEventP <- ProtoConverter
         .required("TransferInView.transferOutResultEvent", transferOutResultEventPO)
 
-      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtobufVersion(0))
+      protocolVersionRepresentative = protocolVersionRepresentativeFor(ProtoVersion(0))
       sourceDomainPV = protocolVersionRepresentative.representative
 
       envelopeDeserializer = (envelopeP: v0.Envelope) =>
@@ -434,7 +434,7 @@ object TransferInView
       creatingTransactionId,
       transferOutResultEvent,
       sourceProtocolVersion,
-    )(hashOps, protocolVersionRepresentativeFor(ProtobufVersion(1)), Some(bytes))
+    )(hashOps, protocolVersionRepresentativeFor(ProtoVersion(1)), Some(bytes))
   }
 }
 

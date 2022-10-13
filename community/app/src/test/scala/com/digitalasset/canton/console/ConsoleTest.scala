@@ -27,7 +27,7 @@ import com.digitalasset.canton.environment.{
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap
 import com.digitalasset.canton.{BaseTest, ConfigStubs}
 import io.grpc.stub.AbstractStub
-import org.mockito.ArgumentMatchers.{anyString, eq => isEq}
+import org.mockito.ArgumentMatchers.{anyString, eq as isEq}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 

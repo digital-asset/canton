@@ -1,23 +1,23 @@
-import DamlPlugin.autoImport._
-import Dependencies._
-import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
+import DamlPlugin.autoImport.*
+import Dependencies.*
+import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.headerSources
 import org.scalafmt.sbt.ScalafmtPlugin
-import sbt.Keys._
+import sbt.Keys.*
 import sbt.internal.util.ManagedLogger
-import sbt._
-import sbt.nio.Keys._
-import sbtassembly.AssemblyKeys._
+import sbt.*
+import sbt.nio.Keys.*
+import sbtassembly.AssemblyKeys.*
 import sbtassembly.AssemblyPlugin.autoImport.assembly
 import sbtassembly.MergeStrategy
 import sbtassembly.PathList
 import sbtbuildinfo.BuildInfoPlugin
-import sbtbuildinfo.BuildInfoPlugin.autoImport._
+import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtprotoc.ProtocPlugin.autoImport.PB
 import scalafix.sbt.ScalafixPlugin
-import scoverage.ScoverageKeys._
+import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
-import wartremover.WartRemover.autoImport._
+import wartremover.WartRemover.autoImport.*
 
 import scala.language.postfixOps
 
@@ -65,7 +65,7 @@ object BuildCommon {
       )
     )
 
-    import CommunityProjects._
+    import CommunityProjects.*
 
     val globalSettings = Seq(
       name := "canton",
@@ -101,7 +101,7 @@ object BuildCommon {
 
     val initDevSettings = Seq(
       initDev := {
-        import scala.sys.process._
+        import scala.sys.process.*
         "git config core.hooksPath .hooks" !
       }
     )
@@ -166,7 +166,7 @@ object BuildCommon {
     val output = processLogger.output()
     if (exitCode != 0) {
       val errorMsg = s"A problem occurred when executing command `$command` in `build.sbt`: ${System
-        .lineSeparator()} $output"
+          .lineSeparator()} $output"
       log.error(errorMsg)
       if (optError.isDefined) log.error(optError.getOrElse(""))
       throw new IllegalStateException(errorMsg)
@@ -203,7 +203,7 @@ object BuildCommon {
     val printTests =
       taskKey[Unit]("Print full class names of tests to the file `test-full-class-names.log`.")
     printTests := {
-      import java.io._
+      import java.io.*
       println("Appending full class names of tests to the file `test-full-class-names.log`.")
       val pw = new PrintWriter(new FileWriter(s"test-full-class-names.log", true))
       val tmp = (Test / definedTests).value
@@ -481,11 +481,11 @@ object BuildCommon {
           daml_lf_archive_reader,
           daml_lf_engine,
           daml_lf_value_java_proto % "protobuf", // needed for protobuf import
-          daml_lf_transaction, //needed for importing java classes
+          daml_lf_transaction, // needed for importing java classes
           daml_metrics,
           daml_error,
           daml_error_generator,
-          daml_participant_state, //needed for ReadService/Update classes by PrettyInstances
+          daml_participant_state, // needed for ReadService/Update classes by PrettyInstances
           daml_ledger_api_common,
           daml_ledger_api_client,
           daml_nonempty_cats,

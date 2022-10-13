@@ -6,7 +6,7 @@ package com.digitalasset.canton.util
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 
 /** Utility class that allows clients to keep track of a rate limit.
   * Clients need to tell an instance whenever they intend to start a new task.

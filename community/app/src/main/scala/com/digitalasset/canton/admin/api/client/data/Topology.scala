@@ -3,17 +3,17 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantDomains
-import com.digitalasset.canton.crypto._
-import com.digitalasset.canton.protocol.{DynamicDomainParameters => DynamicDomainParametersInternal}
+import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.protocol.{DynamicDomainParameters as DynamicDomainParametersInternal}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology._
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.ListDomainParametersChangesResult.Result.Parameters
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.google.protobuf.ByteString
 
 import java.time.Instant

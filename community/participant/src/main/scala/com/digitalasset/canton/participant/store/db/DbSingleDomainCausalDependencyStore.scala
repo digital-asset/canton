@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
-import com.digitalasset.canton.metrics.MetricHandle.GaugeM
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.protocol.SingleDomainCausalTracker.DomainPerPartyCausalState
 import com.digitalasset.canton.participant.store.SingleDomainCausalDependencyStore
@@ -16,7 +16,7 @@ import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{LfPartyId, RequestCounter}
+import com.digitalasset.canton.{DiscardOps, LfPartyId, RequestCounter}
 import io.functionmeta.functionFullName
 
 import scala.collection.concurrent.TrieMap
@@ -38,36 +38,35 @@ class DbSingleDomainCausalDependencyStore(
   override protected val initialized: Future[Unit] = initializedP.future
 
   def initialize(lastIncludedO: Option[RequestCounter])(implicit tc: TraceContext): Future[Unit] = {
-    import DbStorage.Implicits._
-    import storage.api._
+    import DbStorage.Implicits.*
+    import storage.api.*
 
-    lastIncludedO
-      .fold(Future.unit)({ lastIncluded =>
-        val query = sql"""select party_id, domain_id, max(domain_ts)
-                 from per_party_causal_dependencies
-                 where owning_domain_id = $domainId and request_counter <= $lastIncluded
-                 group by (owning_domain_id, request_counter, party_id, domain_id)
-                 """.as[(LfPartyId, DomainId, CantonTimestamp)]
+    def initialize(lastIncluded: RequestCounter): Future[Unit] = {
+      val query = sql"""select party_id, domain_id, max(domain_ts)
+         from per_party_causal_dependencies
+         where owning_domain_id = $domainId and request_counter <= $lastIncluded
+         group by (owning_domain_id, request_counter, party_id, domain_id)
+         """.as[(LfPartyId, DomainId, CantonTimestamp)]
 
-        for {
-          tuples <- storage.query(query, functionFullName)
-        } yield {
-          tuples.foreach { case ((party, domain, timestamp)) =>
-            val domainDependencies: Map[DomainId, CantonTimestamp] =
-              state.getOrElseUpdate(party, immutable.Map.empty)
-            val nextDependencies = domainDependencies.updated(domain, timestamp)
-            state.update(party, nextDependencies)
-          }
-          logger.info(s"${this.getClass} initialized from $lastIncluded")
+      for {
+        tuples <- storage.query(query, functionFullName)
+      } yield {
+        tuples.foreach { case ((party, domain, timestamp)) =>
+          val domainDependencies: Map[DomainId, CantonTimestamp] =
+            state.getOrElseUpdate(party, immutable.Map.empty)
+          val nextDependencies = domainDependencies.updated(domain, timestamp)
+          state.update(party, nextDependencies)
         }
-      })
-      .map { case () =>
-        initializedP.trySuccess(())
-        ()
+        logger.info(s"${this.getClass} initialized from $lastIncluded")
       }
+    }
+
+    lastIncludedO.fold(Future.unit)(initialize).map { case () =>
+      initializedP.trySuccess(()).discard
+    }
   }
 
-  private val processingTime: GaugeM[TimedLoadGauge, Double] =
+  private val processingTime: Gauge[TimedLoadGauge, Double] =
     storage.metrics.loadGaugeM("causal-dependency-store")
 
   override protected def persistentInsert(
@@ -109,7 +108,7 @@ object DbSingleDomainCausalDependencyStore {
       map.toSeq.map(domainTs => party -> domainTs)
     }
     val bulkInsert = DbStorage.bulkOperation_(insertStatement, toInsert, profile) { pp => pair =>
-      import DbStorage.Implicits._
+      import DbStorage.Implicits.*
       val (party, (otherDomain, ts)) = pair
       pp >> domainId
       pp >> ts

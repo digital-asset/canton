@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.environment.Environment
-import com.digitalasset.canton.participant.admin.workflows.{PingPong => M}
+import com.digitalasset.canton.participant.admin.workflows.{PingPong as M}
 import com.digitalasset.canton.topology.PartyId
 
 /** Adds the ability to run pingpong cycles to integration tests */

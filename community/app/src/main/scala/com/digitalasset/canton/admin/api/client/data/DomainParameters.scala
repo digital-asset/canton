@@ -3,26 +3,26 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmptyUtil
-import com.digitalasset.canton.admin.api.client.data.crypto._
+import com.digitalasset.canton.admin.api.client.data.crypto.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveDurationSeconds}
 import com.digitalasset.canton.protocol.DynamicDomainParameters.InvalidDomainParameters
 import com.digitalasset.canton.protocol.{
-  DynamicDomainParameters => DynamicDomainParametersInternal,
-  StaticDomainParameters => StaticDomainParametersInternal,
-  v0 => protocolV0,
-  v1 => protocolV1,
+  DynamicDomainParameters as DynamicDomainParametersInternal,
+  StaticDomainParameters as StaticDomainParametersInternal,
+  v0 as protocolV0,
+  v1 as protocolV1,
 }
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.admin.v0.DomainParametersChangeAuthorization
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{ProtoDeserializationError, crypto => DomainCrypto}
-import io.scalaland.chimney.dsl._
+import com.digitalasset.canton.{ProtoDeserializationError, crypto as DomainCrypto}
+import io.scalaland.chimney.dsl.*
 
-import scala.Ordering.Implicits._
+import scala.Ordering.Implicits.*
 
 /** Companion object [[com.digitalasset.canton.protocol.StaticDomainParameters]] indicates
   * when the different version were introduces.
@@ -106,9 +106,9 @@ object StaticDomainParameters {
   def apply(
       domain: StaticDomainParametersInternal
   ): Either[ProtoDeserializationError.VersionError, StaticDomainParameters] = {
-    val protobufVersion = domain.protobufVersion.v
+    val protoVersion = domain.protoVersion.v
 
-    if (protobufVersion == 0)
+    if (protoVersion == 0)
       Right(
         new StaticDomainParametersV0(
           reconciliationInterval = domain.reconciliationInterval.toConfig,
@@ -128,7 +128,7 @@ object StaticDomainParameters {
           protocolVersion = domain.protocolVersion,
         ) {}
       )
-    else if (protobufVersion == 1)
+    else if (protoVersion == 1)
       Right(
         new StaticDomainParametersV1(
           maxInboundMessageSize = domain.maxInboundMessageSize,
@@ -147,7 +147,7 @@ object StaticDomainParameters {
         ) {}
       )
     else
-      Left(ProtoDeserializationError.VersionError("StaticDomainParameters", protobufVersion))
+      Left(ProtoDeserializationError.VersionError("StaticDomainParameters", protoVersion))
   }
 
   def tryReadFromFile(inputFile: String): StaticDomainParameters = {
@@ -190,8 +190,8 @@ sealed trait DynamicDomainParameters {
       protocolVersion: ProtocolVersion
   ): Either[String, v0.DomainParametersChangeAuthorization.Parameters]
 
-  protected def protobufVersion(protocolVersion: ProtocolVersion): Int =
-    DynamicDomainParametersInternal.protobufVersionFor(protocolVersion).v
+  protected def protoVersion(protocolVersion: ProtocolVersion): Int =
+    DynamicDomainParametersInternal.protoVersionFor(protocolVersion).v
 
   def update(
       participantResponseTimeout: NonNegativeFiniteDuration = participantResponseTimeout,
@@ -231,7 +231,7 @@ final case class DynamicDomainParametersV0(
   override def toProto(
       protocolVersion: ProtocolVersion
   ): Either[String, DomainParametersChangeAuthorization.Parameters] =
-    if (protobufVersion(protocolVersion) == 0)
+    if (protoVersion(protocolVersion) == 0)
       Right(
         protocolV0.DynamicDomainParameters(
           participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
@@ -292,7 +292,7 @@ final case class DynamicDomainParametersV1(
   override def toProto(
       protocolVersion: ProtocolVersion
   ): Either[String, DomainParametersChangeAuthorization.Parameters] =
-    if (protobufVersion(protocolVersion) == 1)
+    if (protoVersion(protocolVersion) == 1)
       Right(
         protocolV1.DynamicDomainParameters(
           participantResponseTimeout = Some(participantResponseTimeout.toProtoPrimitive),
@@ -322,13 +322,13 @@ object DynamicDomainParameters {
   def apply(
       domain: DynamicDomainParametersInternal
   ): Either[ProtoDeserializationError.VersionError, DynamicDomainParameters] = {
-    val protobufVersion = domain.protobufVersion.v
+    val protoVersion = domain.protoVersion.v
 
-    if (protobufVersion == 0)
+    if (protoVersion == 0)
       Right(domain.transformInto[DynamicDomainParametersV0])
-    else if (protobufVersion == 1)
+    else if (protoVersion == 1)
       Right(domain.transformInto[DynamicDomainParametersV1])
     else
-      Left(ProtoDeserializationError.VersionError("DynamicDomainParameters", protobufVersion))
+      Left(ProtoDeserializationError.VersionError("DynamicDomainParameters", protoVersion))
   }
 }

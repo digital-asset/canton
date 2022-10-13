@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.either._
+import cats.syntax.either.*
 import cats.{Monad, Order}
-import com.daml.lf.data._
+import com.daml.lf.data.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.lf.value.Value
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfPartyId, LfValue, LfVersioned}
 
 import scala.annotation.nowarn

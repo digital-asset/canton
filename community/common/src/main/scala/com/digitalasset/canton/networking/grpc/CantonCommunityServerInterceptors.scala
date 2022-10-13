@@ -9,7 +9,7 @@ import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import io.grpc.ServerInterceptors.intercept
 import io.grpc.ServerServiceDefinition
 
-import scala.util.chaining._
+import scala.util.chaining.*
 
 trait CantonServerInterceptors {
   def addAllInterceptors(

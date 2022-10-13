@@ -10,7 +10,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUtil, StackTraceUtil}
 
-import java.util.concurrent._
+import java.util.concurrent.*
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -37,7 +37,7 @@ class ExecutionContextMonitor(
   private val reported = new AtomicBoolean(false)
   private val reports = new AtomicInteger(0)
 
-  import TraceContext.Implicits.Empty._
+  import TraceContext.Implicits.Empty.*
 
   def monitor(ec: ExecutionContextIdlenessExecutorService): Unit = {
     logger.debug(s"Monitoring ${ec.name}")

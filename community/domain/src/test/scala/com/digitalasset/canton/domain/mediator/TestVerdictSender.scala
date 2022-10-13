@@ -11,7 +11,7 @@ import com.digitalasset.canton.sequencing.protocol.Batch
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.Future
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 class TestVerdictSender extends VerdictSender {
 

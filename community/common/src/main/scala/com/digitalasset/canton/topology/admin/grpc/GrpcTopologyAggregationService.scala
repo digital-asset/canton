@@ -4,11 +4,11 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.traverse._
+import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil._
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.topology.admin.v0
 import com.digitalasset.canton.topology.client.{
   IdentityProvidingServiceClient,
@@ -16,11 +16,11 @@ import com.digitalasset.canton.topology.client.{
   StoreBasedTopologySnapshot,
 }
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
-import com.digitalasset.canton.topology.transaction._
+import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, OptionUtil}
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 
 import scala.concurrent.{ExecutionContext, Future}
 

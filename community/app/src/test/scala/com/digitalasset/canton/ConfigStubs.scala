@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{
   CommunityAdminServerConfig,

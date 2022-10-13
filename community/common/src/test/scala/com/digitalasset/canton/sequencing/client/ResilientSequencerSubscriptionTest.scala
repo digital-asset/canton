@@ -26,7 +26,7 @@ import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.collection.mutable
-import scala.concurrent.duration.{FiniteDuration, _}
+import scala.concurrent.duration.{FiniteDuration, *}
 import scala.concurrent.{Future, Promise}
 
 sealed trait TestSubscriptionError extends SubscriptionError

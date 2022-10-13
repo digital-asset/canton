@@ -5,7 +5,7 @@
 package com.digitalasset.canton
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.DiscardedFutureTest.{TraitWithFuture, WannabeFuture, assertErrors}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -111,7 +111,7 @@ object DiscardedFutureTest {
   @DoNotDiscardLikeFuture class WannabeFuture[A]
 
   def assertErrors(result: WartTestTraverser.Result, expectedErrors: Int): Assertion = {
-    import Matchers._
+    import Matchers.*
     result.errors.length shouldBe expectedErrors
     result.errors.foreach { _ should include(DiscardedFuture.message) }
     succeed

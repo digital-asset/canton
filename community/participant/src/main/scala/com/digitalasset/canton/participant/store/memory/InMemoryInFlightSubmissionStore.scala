@@ -4,13 +4,14 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.alternative._
-import cats.syntax.either._
-import cats.syntax.option._
+import cats.syntax.alternative.*
+import cats.syntax.either.*
+import cats.syntax.option.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.protocol.submission._
+import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.{
   InFlightBySequencingInfo,
@@ -20,7 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.MessageId
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MapsUtil
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.collection.concurrent
 import scala.collection.concurrent.TrieMap
@@ -100,26 +101,30 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
       messageId: MessageId,
       newSequencingInfo: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    MapsUtil.updateWithConcurrently(inFlight, changeIdHash) { submission =>
-      submission.sequencingInfo.asUnsequenced match {
-        case Some(unsequenced) =>
-          if (submission.submissionDomain != submissionDomain || submission.messageId != messageId)
-            submission
-          else if (unsequenced.timeout < newSequencingInfo.timeout) {
+    MapsUtil
+      .updateWithConcurrently(inFlight, changeIdHash) { submission =>
+        submission.sequencingInfo.asUnsequenced match {
+          case Some(unsequenced) =>
+            if (
+              submission.submissionDomain != submissionDomain || submission.messageId != messageId
+            )
+              submission
+            else if (unsequenced.timeout < newSequencingInfo.timeout) {
+              logger.warn(
+                show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionDomain) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: ${unsequenced}"
+              )
+              submission
+            } else {
+              submission.copy(sequencingInfo = newSequencingInfo)
+            }
+          case None =>
             logger.warn(
-              show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionDomain) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: ${unsequenced}"
+              show"Submission (change ID hash $changeIdHash, message Id $messageId) on $submissionDomain has already been sequenced. ${submission.sequencingInfo}"
             )
             submission
-          } else {
-            submission.copy(sequencingInfo = newSequencingInfo)
-          }
-        case None =>
-          logger.warn(
-            show"Submission (change ID hash $changeIdHash, message Id $messageId) on $submissionDomain has already been sequenced. ${submission.sequencingInfo}"
-          )
-          submission
+        }
       }
-    }
+      .discard
     Future.unit
   }
 

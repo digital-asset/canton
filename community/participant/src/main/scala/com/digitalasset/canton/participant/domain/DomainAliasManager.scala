@@ -19,7 +19,7 @@ import com.google.common.collect.{BiMap, HashBiMap}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 trait DomainAliasResolution extends AutoCloseable {
   def domainIdForAlias(alias: DomainAlias): Option[DomainId]

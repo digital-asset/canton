@@ -16,7 +16,7 @@ trait DbDomainParameterStoreTest extends AsyncWordSpec with BaseTest with Domain
   this: DbTest =>
 
   override def cleanDb(storage: DbStorage): Future[Int] = {
-    import storage.api._
+    import storage.api.*
     storage.update(sqlu"truncate table static_domain_parameters", functionFullName)
   }
 

@@ -5,10 +5,10 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.Monad
 import cats.data.NonEmptyChain
-import cats.syntax.either._
-import cats.syntax.foldable._
-import cats.syntax.functor._
-import cats.syntax.traverse._
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -22,7 +22,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTra
   RequestTrackerStoreError,
   TransferStoreError,
 }
-import com.digitalasset.canton.participant.store.ActiveContractStore._
+import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ContractKeyJournal.ContractKeyState
 import com.digitalasset.canton.participant.store.TransferStore.{
   TransferCompleted,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractK
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, LfGlobalKey, TransferId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{CheckedT, ErrorUtil, MonadUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
 
@@ -66,7 +66,7 @@ private[participant] class ConflictDetector(
     override protected val timeouts: ProcessingTimeout,
 ) extends NamedLogging
     with FlagCloseable {
-  import ConflictDetector._
+  import ConflictDetector.*
   import LockableStates.withRC
 
   /** Execution queue to ensure that there are no concurrent accesses to the states */
@@ -185,7 +185,7 @@ private[participant] class ConflictDetector(
     // Do not prefetch transfers. Might be worth implementing at some time.
     val pending =
       new PendingActivenessCheck(activenessSet.transferIds, contractHandle, keyHandle, statesReady)
-    pendingActivenessChecks.put(rc, pending)
+    pendingActivenessChecks.put(rc, pending).discard
 
     checkInvariant()
 
@@ -274,7 +274,7 @@ private[participant] class ConflictDetector(
       val (lockedContracts, contractsResult) = contractStates.checkAndLock(pending.contracts)
       val (lockedKeys, keysResult) = keyStates.checkAndLock(pending.keys)
       val lockedStates = LockedStates(pending.transferIds, lockedContracts, lockedKeys)
-      transfersAndLockedStates.put(rc, lockedStates)
+      transfersAndLockedStates.put(rc, lockedStates).discard
 
       checkInvariant()
       (contractsResult, keysResult, pending)
@@ -432,10 +432,12 @@ private[participant] class ConflictDetector(
         val pendingTransferWrites =
           transfersToComplete.toList.map(t => transferCache.completeTransfer(t.unwrap.unwrap, toc))
 
-        pendingEvictions.put(
-          rc,
-          PendingEvictions(locked, commitSet, pendingContractWrites.toSeq, pendingKeyWrites.toSeq),
-        )
+        pendingEvictions
+          .put(
+            rc,
+            PendingEvictions(locked, commitSet, pendingContractWrites.toSeq, pendingKeyWrites.toSeq),
+          )
+          .discard
 
         checkInvariant()
         // All in-memory states have been updated. Persist the changes asynchronously.
@@ -500,7 +502,7 @@ private[participant] class ConflictDetector(
             // Schedule evictions only if no shutdown is happening. (ecForCd is shut down before ecForAcs.)
             pendingContractWrites.foreach(contractStates.signalWriteAndTryEvict(rc, _))
             pendingKeyWrites.foreach(keyStates.signalWriteAndTryEvict(rc, _))
-            pendingEvictions.remove(rc)
+            pendingEvictions.remove(rc).discard
             checkInvariant()
             result
           }

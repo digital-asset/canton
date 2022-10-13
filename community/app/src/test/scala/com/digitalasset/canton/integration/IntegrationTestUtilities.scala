@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.admin.SyncStateInspection
 import com.digitalasset.canton.participant.sync.TimestampedEvent
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ShowUtil._
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{DomainAlias, LfTimestamp}
 import org.scalatest.exceptions.TestFailedException
 
@@ -20,7 +20,7 @@ import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 object IntegrationTestUtilities {
-  import com.digitalasset.canton.console.ConsoleEnvironment.Implicits._
+  import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 
   case class GrabbedCounts(pcsCount: Int, acceptedTransactionCount: Int) {
     def plus(other: GrabbedCounts): GrabbedCounts =

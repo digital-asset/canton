@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.daml.lf.data.Ref.PackageId
-import com.digitalasset.canton._
+import com.digitalasset.canton.*
 import com.digitalasset.canton.data.GenTransactionTree
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractLookupError,
@@ -16,7 +16,7 @@ import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFa
 }
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.defaultTestingIdentityFactory
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -79,6 +79,10 @@ class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
   }
 
   def transactionTreeFactory(version: ProtocolVersion): Unit = {
+    // Shadow default factory with the protocol version explicitly set
+    val factory: ExampleTransactionFactory = new ExampleTransactionFactory(
+      versionOverride = Some(version)
+    )()
 
     "A transaction tree factory" when {
 

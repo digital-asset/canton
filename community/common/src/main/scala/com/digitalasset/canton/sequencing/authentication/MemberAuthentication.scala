@@ -4,16 +4,16 @@
 package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.EitherT
-import cats.syntax.traverseFilter._
+import cats.syntax.traverseFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
-import com.digitalasset.canton.crypto._
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
   AuthenticationError,
   FailedToSign,
   NoKeysRegistered,
 }
-import com.digitalasset.canton.topology.{DomainId, _}
+import com.digitalasset.canton.topology.{DomainId, *}
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -90,7 +90,7 @@ object DomainEntityAuthentication extends MemberAuthentication {
 
 object MemberAuthentication {
 
-  import com.digitalasset.canton.util.ShowUtil._
+  import com.digitalasset.canton.util.ShowUtil.*
 
   def apply(member: Member): Either[AuthenticationError, MemberAuthentication] = member match {
     case _: ParticipantId => Right(ParticipantAuthentication)

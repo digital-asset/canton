@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.CompletionInfo
 import com.daml.ledger.participant.state.v2.Update.CommandRejected
 import com.daml.ledger.participant.state.v2.Update.CommandRejected.RejectionReasonTemplate
@@ -24,7 +24,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
   HasProtocolVersionedCompanion,
   HasProtocolVersionedWrapper,
-  ProtobufVersion,
+  ProtoVersion,
   ProtocolVersion,
   ProtocolVersionedCompanionDbHelpers,
   RepresentativeProtocolVersion,
@@ -68,7 +68,7 @@ object SubmissionTrackingData
     with ProtocolVersionedCompanionDbHelpers[SubmissionTrackingData] {
 
   val supportedProtoVersions = SupportedProtoVersions(
-    ProtobufVersion(0) -> VersionedProtoConverter(
+    ProtoVersion(0) -> VersionedProtoConverter(
       ProtocolVersion.v2,
       supportedProtoVersion(v0.SubmissionTrackingData)(fromProtoV0),
       _.toProtoV0.toByteString,
@@ -154,7 +154,7 @@ object TransactionSubmissionTrackingData {
       )
       cause <- ProtoConverter.parseRequired(RejectionCause.fromProtoV0, "rejection cause", causeP)
     } yield TransactionSubmissionTrackingData(completionInfo, cause)(
-      SubmissionTrackingData.protocolVersionRepresentativeFor(ProtobufVersion(0))
+      SubmissionTrackingData.protocolVersionRepresentativeFor(ProtoVersion(0))
     )
   }
 

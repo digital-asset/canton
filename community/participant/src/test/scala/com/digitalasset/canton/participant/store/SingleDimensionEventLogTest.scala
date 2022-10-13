@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.option._
+import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Time}
@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.sync.{
   TimestampedEventAndCausalChange,
 }
 import com.digitalasset.canton.participant.{LedgerSyncEvent, LedgerSyncRecordTime, LocalOffset}
-import com.digitalasset.canton.protocol._
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
@@ -38,7 +38,7 @@ import scala.concurrent.Future
 
 trait SingleDimensionEventLogTest extends BeforeAndAfterAll with BaseTest {
   this: AsyncWordSpec =>
-  import SingleDimensionEventLogTest._
+  import SingleDimensionEventLogTest.*
 
   lazy val id: EventLogId = DbEventLogTestResources.dbSingleDimensionEventLogEventLogId
 

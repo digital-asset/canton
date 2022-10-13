@@ -4,7 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.syntax.bifunctor._
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError}
 import com.google.protobuf.ByteString
-import com.google.protobuf.timestamp.{Timestamp => ProtoTimestamp}
+import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 import slick.jdbc.{GetResult, SetParameter}
 
 /** The root hash of a Merkle tree used as an identifier for requests.
@@ -97,7 +97,7 @@ object TransactionId {
   implicit val orderingTransactionId: Ordering[TransactionId] = orderTransactionId.toOrdering
 
   implicit val prettyTransactionId: Pretty[TransactionId] = {
-    import Pretty._
+    import Pretty.*
     prettyOfParam(_.unwrap)
   }
 

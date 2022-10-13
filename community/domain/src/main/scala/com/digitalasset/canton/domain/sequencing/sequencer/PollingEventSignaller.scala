@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.domain.sequencing.sequencer
+
 import akka.NotUsed
 import akka.stream.DelayOverflowStrategy
 import akka.stream.scaladsl.Source

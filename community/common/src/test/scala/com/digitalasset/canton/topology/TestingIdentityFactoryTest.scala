@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology
 
 import cats.data.EitherT
-import cats.syntax.either._
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{
   Hash,
   HashOps,
@@ -23,12 +23,12 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.concurrent.duration._
+import scala.concurrent.duration.*
 import scala.concurrent.{Await, Future}
 
 class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
-  import DefaultTestIdentities._
+  import DefaultTestIdentities.*
 
   private def getMyHash(hashOps: HashOps, message: String = "dummySignature"): Hash =
     hashOps.build(HashPurposeTest.testHashPurpose).addWithoutLengthPrefix(message).finish()

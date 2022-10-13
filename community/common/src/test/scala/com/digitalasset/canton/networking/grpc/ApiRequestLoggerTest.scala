@@ -10,7 +10,7 @@ import com.digitalasset.canton.logging.{NamedEventCapturingLogger, TracedLogger}
 import com.digitalasset.canton.sequencing.authentication.grpc.Constant
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
-import io.grpc._
+import io.grpc.*
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import org.scalactic.Equality
@@ -18,7 +18,7 @@ import org.scalatest.Assertion
 import org.scalatest.prop.{TableFor2, TableFor5}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
-import org.slf4j.event.Level._
+import org.slf4j.event.Level.*
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -274,7 +274,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     "intercepting a successful request" must {
       "log progress" in withEnv() { implicit env =>
-        import env._
+        import env.*
 
         when(service.hello(Request)).thenReturn(Future.successful(Response))
 
@@ -301,7 +301,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       case (status, trailers, expectedDescription, expectedLogLevel, expectedMessage) =>
         s"intercepting a failed request (${status.getCode})" must {
           "log the failure" in withEnv() { implicit env =>
-            import env._
+            import env.*
 
             when(service.hello(Request))
               .thenReturn(Future.failed(status.asRuntimeException(trailers)))
@@ -333,7 +333,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     ) { case (description, exception) =>
       s"intercepting an unexpected async $description" must {
         "log progress and the throwable" in withEnv() { implicit env =>
-          import env._
+          import env.*
 
           when(service.hello(Request)).thenAnswer(Future.failed(exception))
 
@@ -356,7 +356,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     throwableCases.forEvery { case (description, throwable) =>
       s"intercepting an unexpected sync $description" must {
         "log progress and the error" in withEnv() { implicit env =>
-          import env._
+          import env.*
 
           when(service.hello(Request)).thenThrow(throwable)
 
@@ -403,7 +403,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
           ) =>
         s"intercepting a cancellation and $description" must {
           "log the cancellation" in withEnv() { implicit env =>
-            import env._
+            import env.*
 
             val receivedRequestP = Promise[Unit]()
             val sendResponseP = Promise[Unit]()
@@ -453,7 +453,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
   def setupStreamedService(
       action: StreamObserver[Hello.Response] => Unit
   )(implicit env: Env): Unit = {
-    import env._
+    import env.*
     when(service.helloStreamed(refEq(Request), any[StreamObserver[Hello.Response]]))
       .thenAnswer[Hello.Request, StreamObserver[Hello.Response]] {
         case (_, observer: ServerCallStreamObserver[Hello.Response]) =>
@@ -475,7 +475,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
       clientCause: Throwable = null,
       checkResponses: Boolean = true,
   )(implicit env: Env): Assertion = {
-    import env._
+    import env.*
 
     val observer = new RecordingStreamObserver[Hello.Response]
     client.helloStreamed(Request, observer)
@@ -540,7 +540,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     "intercepting a successful request" must {
       "log progress" in withEnv() { implicit env =>
-        import env._
+        import env.*
 
         setupStreamedService(_.onCompleted())
 
@@ -635,7 +635,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
           ) =>
         s"intercepting a cancellation and $description" must {
           "log the cancellation" in withEnv() { implicit env =>
-            import env._
+            import env.*
 
             val receivedRequestP = Promise[Unit]()
             val sendSecondResponseP = Promise[Unit]()
@@ -709,7 +709,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     "intercepting a successful request" must {
       "not log any messages" in withEnv(logMessagePayloads = false) { implicit env =>
-        import env._
+        import env.*
 
         when(service.hello(Request)).thenReturn(Future.successful(Response))
 
@@ -739,7 +739,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     "intercepting a failure" must {
       "not log any metadata" in withEnv(logMessagePayloads = false) { implicit env =>
-        import env._
+        import env.*
 
         val status = InvalidArgumentStatus
         val expectedLogMessage = s"failed with INVALID_ARGUMENT/${status.getDescription}"
@@ -817,7 +817,7 @@ class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecutionCo
     "intercepting a successful request" must {
       "log a short version of messages" in withEnv(maxStringLength = 3, maxMetadataSize = 3) {
         implicit env =>
-          import env._
+          import env.*
 
           setupStreamedService(_.onCompleted())
 

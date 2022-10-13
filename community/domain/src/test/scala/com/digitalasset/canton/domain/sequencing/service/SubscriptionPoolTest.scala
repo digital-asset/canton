@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.service
 
-import cats.implicits._
+import cats.implicits.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.metrics.DomainTestMetrics

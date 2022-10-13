@@ -129,8 +129,8 @@ class StartableStoppableLedgerApiDependentServices(
           case Some((adminWorkflowServices, packageServiceGrpc, pingGrpcService)) =>
             logger.debug("Stopping Ledger API-dependent Canton services")(TraceContext.empty)
             servicesRef = None
-            registry.removeService(pingGrpcService)
-            registry.removeService(packageServiceGrpc)
+            registry.removeServiceU(pingGrpcService)
+            registry.removeServiceU(packageServiceGrpc)
             adminWorkflowServices.close()
           case None =>
             logger.debug("Ledger API-dependent Canton services already stopped")(TraceContext.empty)
