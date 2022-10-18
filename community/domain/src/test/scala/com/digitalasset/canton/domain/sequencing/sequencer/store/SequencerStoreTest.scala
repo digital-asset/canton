@@ -118,7 +118,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
         for {
           memberId <- lookupRegisteredMember(member)
           events <- store.readEvents(memberId, fromTimestampO, limit)
-        } yield events
+        } yield events.payloads
 
       def assertDeliverEvent(
           event: Sequenced[Payload],

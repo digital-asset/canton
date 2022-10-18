@@ -720,7 +720,9 @@ class DbSequencerStore(
       memberId: SequencerMemberId,
       fromTimestampO: Option[CantonTimestamp],
       limit: Int,
-  )(implicit traceContext: TraceContext): Future[Seq[Sequenced[Payload]]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): Future[ReadEvents] = {
 
     // fromTimestampO is an exclusive lower bound if set
     // to make inclusive we add a microsecond (the smallest unit)
@@ -728,7 +730,11 @@ class DbSequencerStore(
     val inclusiveFromTimestamp =
       fromTimestampO.map(_.immediateSuccessor).getOrElse(CantonTimestamp.MinValue)
 
-    def h2PostgresQuery(memberContainsBefore: String, memberContainsAfter: String) = sql"""
+    def h2PostgresQueryEvents(
+        memberContainsBefore: String,
+        memberContainsAfter: String,
+        safeWatermark: CantonTimestamp,
+    ) = sql"""
         select events.ts, events.node_index, events.event_type, events.message_id, events.sender, 
           events.recipients, payloads.id, payloads.content, events.signing_timestamp, 
           events.error_message, events.trace_context
@@ -741,23 +747,38 @@ class DbSequencerStore(
           and (
             -- inclusive timestamp bound that defaults to MinValue if unset
             events.ts >= $inclusiveFromTimestamp
-              -- only consider events within the min(watermark) of all online sequencers (if all are offline we'll fallback on true and let the offline condition below include the event if suitable)
-              and coalesce(events.ts <= (select min(watermark_ts) from sequencer_watermarks where sequencer_online = true), true)
+              -- only consider events within the safe watermark
+              and events.ts <= $safeWatermark
               -- if the sequencer that produced the event is offline, only consider up until its offline watermark
               and (watermarks.sequencer_online = true or events.ts <= watermarks.watermark_ts)
           )
         order by events.ts asc
         limit $limit"""
 
-    val query = {
-      profile match {
+    val querySafeWatermark = {
+      val query = profile match {
+        case _: H2 | _: Postgres =>
+          sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online = true"
+        case _: Oracle =>
+          sql"select min(watermark_ts) from sequencer_watermarks where sequencer_online <> 0"
+      }
+
+      // `min` may return null that is wrapped into None
+      query.as[Option[CantonTimestamp]].headOption.map(_.flatten)
+    }
+
+    def queryEvents(safeWatermarkO: Option[CantonTimestamp]) = {
+      // If we don't have a safe watermark of all online sequencers (if all are offline) we'll fallback on allowing all
+      // and letting the offline condition in the query include the event if suitable
+      val safeWatermark = safeWatermarkO.getOrElse(CantonTimestamp.MaxValue)
+      val query = profile match {
         case _: Postgres =>
-          h2PostgresQuery("", " = any(events.recipients)")
+          h2PostgresQueryEvents("", " = any(events.recipients)", safeWatermark)
 
         case _: H2 =>
-          h2PostgresQuery("array_contains(events.recipients, ", ")")
+          h2PostgresQueryEvents("array_contains(events.recipients, ", ")", safeWatermark)
 
-        case _: Oracle => {
+        case _: Oracle =>
           sql"""
           select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
             events.recipients, payloads.id, payloads.content, events.signing_timestamp,
@@ -772,20 +793,29 @@ class DbSequencerStore(
             and (
               -- inclusive timestamp bound that defaults to MinValue if unset
               events.ts >= $inclusiveFromTimestamp 
-                -- only consider events within the min(watermark) of all online sequencers (if all are offline we'll fallback on allowing all and letting the offline condition below include the event if suitable)
-                and events.ts <= (select coalesce(min(watermark_ts), ${CantonTimestamp.MaxValue.toEpochMilli}) from sequencer_watermarks where sequencer_online <> 0)
+                -- only consider events within the safe watermark
+                and events.ts <= $safeWatermark
                 -- if the sequencer that produced the event is offline, only consider up until its offline watermark
                 and (watermarks.sequencer_online <> 0 or events.ts <= watermarks.watermark_ts)
               )
           order by events.ts asc
           fetch next $limit rows only""".stripMargin
-        }
       }
+
+      query.as[Sequenced[Payload]]
     }
-    storage.query(
-      query.as[Sequenced[Payload]],
-      "readEvents",
-    )
+
+    val query = for {
+      safeWatermark <- querySafeWatermark
+      events <- queryEvents(safeWatermark)
+    } yield {
+      (events, safeWatermark)
+    }
+
+    storage.query(query.transactionally, functionFullName).map {
+      case (events, _) if events.nonEmpty => ReadEventPayloads(events)
+      case (_, watermark) => SafeWatermark(watermark)
+    }
   }
 
   override def deleteEventsPastWatermark(

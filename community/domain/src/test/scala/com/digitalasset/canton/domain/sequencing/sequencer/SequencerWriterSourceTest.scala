@@ -197,7 +197,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
           _.warningMessage shouldBe "The payload to event time bound [PT1M] has been been exceeded by payload time [1970-01-01T00:00:00.000001Z] and sequenced event time [1970-01-01T00:01:11Z]",
         )
         events <- store.readEvents(aliceId)
-      } yield events should have size (0)
+      } yield events.payloads should have size (0)
     }
   }
 
@@ -236,8 +236,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         )
         events <- store.readEvents(aliceId)
       } yield {
-        events should have size (1)
-        events.headOption.map(_.event).value should matchPattern {
+        events.payloads should have size (1)
+        events.payloads.headOption.map(_.event).value should matchPattern {
           case DeliverStoreEvent(_, `messageId2`, _, _, _, _) =>
         }
       }
@@ -277,8 +277,8 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         _ <- completeFlow()
         events <- store.readEvents(aliceId)
       } yield {
-        events should have size (2)
-        events.map(_.event)
+        events.payloads should have size (2)
+        events.payloads.map(_.event)
       }
     }
 
@@ -342,7 +342,7 @@ class SequencerWriterSourceTest extends AsyncWordSpec with BaseTest with HasExec
         _ <- eventuallyF(10.seconds) {
           for {
             events <- env.store.readEvents(aliceId)
-            error = events.collectFirst {
+            error = events.payloads.collectFirst {
               case Sequenced(
                     _,
                     deliverError @ DeliverErrorStoreEvent(`aliceId`, `messageId`, _, _),

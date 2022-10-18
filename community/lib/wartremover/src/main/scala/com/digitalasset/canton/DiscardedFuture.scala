@@ -14,7 +14,25 @@ import scala.concurrent.Future
   * discard [[scala.concurrent.Future]] because exceptions inside the future may not get logged.
   * Use `FutureUtil.doNotAwait` to log exceptions and discard the future where necessary.
   *
-  * Does not (yet) detect discarded `FutureUnlessShutdown` nor `EitherT[Future, _, _]` nor `OptionT[Future, _]`.
+  * Also detects discarded [[cats.data.EitherT]]`[`[[scala.concurrent.Future]]`, ..., ...]`
+  * and [[cats.data.OptionT]]`[`[[scala.concurrent.Future]]`, ...]` and arbitrary nestings of those.
+  * Custom type constructors can be registered to take the same role as [[scala.concurrent.Future]]
+  * by annotating the type definition with [[DoNotDiscardLikeFuture]].
+  *
+  * This wart is a special case of the `NonUnitStatements` wart and scalac's `-Wnonunit-statement` flag,
+  * in that it warns only if the return type of the statement is future-like.
+  * Additionally, this wart uses a different set of exceptions when no warning is issued.
+  * We keep this specialized wart for two reasons:
+  * 1. It is not practically feasible to use `-Wnonunit-statement` in scalatest
+  *    because it would flag many of the assertions of the form `x should be >= y` in statement positions.
+  *    Yet, it is important to check for discarded futures in tests because a discarded future may hide an exception.
+  * 2. In some production code, it is convenient to suppress the warnings coming from `-Wnonunit-statement`,
+  *    just due to how the code is written. In such places, we still want to benefit from the explicit checks
+  *    against discarded futures.
+  *
+  * This wart does not look at futures that are discarded at the end of a unit-type expression.
+  * These cases are caught by `-Ywarn-value-discard`. We do not implement a specialized version
+  * for future-like values because we do not expect to suppress the warnings coming from `-Ywarn-value-discard`.
   */
 object DiscardedFuture extends WartTraverser {
   val message = "Statements must not discard a Future"
@@ -31,7 +49,7 @@ object DiscardedFuture extends WartTraverser {
     // Allow Mockito `verify` calls because they do not produce a future but merely check that a mocked Future-returning
     // method has been called.
     //
-    // We do not check whether the receiver of the `verify` call is actually something that inherits org.mockito.MockitoSugar
+    // We do not check whether the receiver of the `verify` call is actually something that inherits from org.mockito.MockitoSugar
     // because `BaseTest` extends `MockitoSugar` and we'd therefore have to do some virtual method resolution.
     // As a result, we ignore all statements of the above form verify(...).someMethod(...)(...)
     @tailrec

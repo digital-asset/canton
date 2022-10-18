@@ -97,7 +97,9 @@ class LocalSequencerStateEventSignaller(
         queue.watchCompletion(),
         timeouts.shutdownShort.unwrap,
       ),
-      // TODO(#9883): double check if this step is necessary
+      // `watchCompletion` completes when the queue's contents have been consumed by the `conflate`,
+      // but `conflate` need not yet have passed the conflated element to the BroadcastHub.
+      // So we create a new subscription and wait until the completion signal has propagated.
       AsyncCloseable(
         "queue.completion",
         notificationsHubSource.runWith(Sink.ignore),
