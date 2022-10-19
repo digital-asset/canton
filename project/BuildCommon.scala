@@ -333,7 +333,7 @@ object BuildCommon {
             "Log4j2Plugins.dat",
           ) =>
         MergeStrategy.first
-      // TODO(#9883) remove when no longer needed
+      // TODO(#10617) remove when no longer needed
       case (PathList("akka", "stream", "scaladsl", broadcasthub, _*))
           if broadcasthub.startsWith("BroadcastHub") =>
         MergeStrategy.first
@@ -743,7 +743,7 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
-    // TODO(#9883) remove when no longer needed
+    // TODO(#10617) remove when no longer needed
     lazy val `akka-fork` = project
       .in(file("community/lib/akka"))
       .disablePlugins(ScalafixPlugin, ScalafmtPlugin, WartRemover)

@@ -1,4 +1,4 @@
-sdk-version: 2.5.0-snapshot.20221010.10736.0.2f453a14
+sdk-version: 2.5.0-snapshot.20221017.10775.0.61e85b19
 name: health-insurance
 exposed-modules: 
 - HealthInsurance

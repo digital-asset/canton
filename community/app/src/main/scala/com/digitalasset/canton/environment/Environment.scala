@@ -216,7 +216,8 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
       HealthServer(_, metricsFactory.health, timeouts, loggerFactory)(this)
     )
 
-  metricsFactory.forJvm.registerExecutionContextQueueSize(() => executionContext.queueSize).discard
+  private val envQueueSize =
+    metricsFactory.forEnv.registerExecutionContextQueueSize(() => executionContext.queueSize)
 
   lazy val domains =
     new DomainNodes(
@@ -391,6 +392,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
         futureSupervisor,
         loggerFactory,
         writeHealthDumpToFile,
+        envQueueSize,
       )
       .valueOr(err => throw new RuntimeException(s"Failed to create participant bootstrap: $err"))
   }

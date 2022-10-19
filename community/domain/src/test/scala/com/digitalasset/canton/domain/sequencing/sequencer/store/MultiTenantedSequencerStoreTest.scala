@@ -20,6 +20,7 @@ trait MultiTenantedSequencerStoreTest {
 
   def multiTenantedSequencerStore(mk: () => SequencerStore): Unit = {
     val alice: Member = ParticipantId("alice")
+    val bob: Member = ParticipantId("bob")
     val instanceDiscriminator = UUID.randomUUID()
     def mkInstanceStore(instanceIndex: Int, store: SequencerStore) =
       new SimpleSequencerWriterStore(instanceIndex, store)
@@ -53,9 +54,9 @@ trait MultiTenantedSequencerStoreTest {
 
     }
 
-    def assertTimestamps(events: Seq[Sequenced[Payload]])(epochSeconds: Int*): Assertion = {
-      events.length shouldBe epochSeconds.length
-      events.map(_.timestamp) should contain theSameElementsInOrderAs epochSeconds.map(ts)
+    def assertTimestamps(events: ReadEvents)(epochSeconds: Int*): Assertion = {
+      events.payloads.length shouldBe epochSeconds.length
+      events.payloads.map(_.timestamp) should contain theSameElementsInOrderAs epochSeconds.map(ts)
     }
 
     "checking sequencer liveness" should {
@@ -83,6 +84,34 @@ trait MultiTenantedSequencerStoreTest {
     }
 
     "reading events" should {
+      "return safe watermark when no events are found for member" in {
+        val store = mk()
+        val sequencer1 = mkInstanceStore(1, store)
+        val sequencer2 = mkInstanceStore(2, store)
+
+        for {
+          aliceId <- store.registerMember(alice, ts(0))
+          bobId <- store.registerMember(bob, ts(0))
+          _ <- writeDelivers(sequencer1, bobId)(1)
+          _ <- writeDelivers(sequencer2, aliceId)(2, 3, 4, 5)
+          _ <- sequencer1.saveWatermark(ts(4)).valueOrFail("saveWatermark1")
+          _ <- sequencer2.saveWatermark(ts(6)).valueOrFail("saveWatermark2")
+          aliceEvents <- store.readEvents(
+            aliceId,
+            fromTimestampO = ts(2).some,
+            10,
+          )
+          bobEvents <- store.readEvents(
+            bobId,
+            fromTimestampO = ts(2).some,
+            10,
+          )
+        } yield {
+          bobEvents shouldBe SafeWatermark(Some(ts(4)))
+          assertTimestamps(aliceEvents)(3, 4)
+        }
+      }
+
       "not include events from offline sequencers after they're knocked offline" in {
         val store = mk()
         val sequencer1 = mkInstanceStore(1, store)
@@ -97,12 +126,17 @@ trait MultiTenantedSequencerStoreTest {
           _ <- sequencer1.saveWatermark(ts(3)).valueOrFail("saveWatermark1")
           _ <- sequencer2.saveWatermark(ts(6)).valueOrFail("saveWatermark2")
           _ <- sequencer3.saveWatermark(ts(6)).valueOrFail("saveWatermark3")
-          eventsBefore <- store.readEvents(aliceId, fromTimestampO = ts(0).some, 10)
+          eventsBefore <- store.readEvents(
+            aliceId,
+            fromTimestampO = ts(0).some,
+            10,
+          )
           // so despite a bunch of later events because s1 is last has a watermark at ts(3) we won't see any later events
           _ = assertTimestamps(eventsBefore)(1, 2, 3)
           // mark s1 as offline
           _ <- store.markLaggingSequencersOffline(ts(3))
-          eventsAfter <- store.readEvents(aliceId, fromTimestampO = ts(0).some, 10)
+          eventsAfter <- store
+            .readEvents(aliceId, fromTimestampO = ts(0).some, 10)
         } yield {
           // should now read all events up until the min online sequencer which is ts(6)
           // however it should now include events from sequencers after they went offline (ts(4))
@@ -139,7 +173,9 @@ trait MultiTenantedSequencerStoreTest {
           _ <- sequencer2.saveWatermark(ts(9)).valueOrFail("saveWatermark4")
           _ <- sequencer3.saveWatermark(ts(9)).valueOrFail("saveWatermark5")
           events2 <- store.readEvents(aliceId, fromTimestampO = ts(0).some, 10)
-        } yield assertTimestamps(events2)(1, 2, 3, 5, 6, 7, 9)
+        } yield {
+          assertTimestamps(events2)(1, 2, 3, 5, 6, 7, 9)
+        }
       }
 
       "if sequencers go offline we only read events up until their watermark" in {
@@ -159,8 +195,10 @@ trait MultiTenantedSequencerStoreTest {
           _ <- sequencer3.saveWatermark(ts(3)).valueOrFail("saveWatermark3")
           // mark all sequencers as offline
           _ <- store.markLaggingSequencersOffline(ts(3))
-          events <- store.readEvents(aliceId, fromTimestampO = ts(0).some, 10)
-        } yield assertTimestamps(events)(1, 2, 3)
+          readEvents <- store.readEvents(aliceId, fromTimestampO = ts(0).some, 10)
+        } yield {
+          assertTimestamps(readEvents)(1, 2, 3)
+        }
       }
     }
 

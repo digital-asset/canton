@@ -1,8 +1,8 @@
 package akka.stream.scaladsl
 
 import akka.NotUsed
-import akka.stream.stage._
-import akka.stream._
+import akka.stream.stage.*
+import akka.stream.*
 
 import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
 import scala.annotation.tailrec
@@ -71,11 +71,6 @@ private[akka] class BroadcastHub[T](
   require(bufferSize > 0, "Buffer size must be positive")
   require(bufferSize < 4096, "Buffer size larger then 4095 is not allowed")
   require((bufferSize & bufferSize - 1) == 0, "Buffer size must be a power of two")
-
-  // INSTRUMENT BEGIN
-  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-  logger.debug(s"Creating instrumented $this")
-  // INSTRUMENT END
 
   private val Mask = bufferSize - 1
   private val WheelMask = (bufferSize * 2) - 1
@@ -152,19 +147,9 @@ private[akka] class BroadcastHub[T](
     private def onEvent(ev: HubEvent): Unit = {
       ev match {
         case RegistrationPending =>
-          // INSTRUMENT BEGIN
-          logger.debug(
-            s"${BroadcastHub.this}'s BroadcastSinkLogic: RegistrationPending at head=$head, state=${state.get()}"
-          )
-          // INSTRUMENT END
           state.getAndSet(noRegistrationsState).asInstanceOf[Open].registrations.foreach {
             consumer =>
               val startFrom = head
-              // INSTRUMENT BEGIN
-              logger.debug(
-                s"${BroadcastHub.this}'s BroadcastSinkLogic: registering consumer $consumer with startFrom=$startFrom at head=$head, state=${state.get()}"
-              )
-              // INSTRUMENT END
               activeConsumers += 1
               addConsumer(consumer, startFrom)
               // INSTRUMENT BEGIN
@@ -176,11 +161,6 @@ private[akka] class BroadcastHub[T](
               consumer.callback.invokeWithFeedback(Initialize(startFrom)).failed.foreach {
                 case _: StreamDetachedException =>
                   callbackPromise.future.foreach { callback =>
-                    // INSTRUMENT BEGIN
-                    logger.debug(
-                      s"${BroadcastHub.this}'s BroadcastSinkLogic: call back for unregistering consumer $consumer with startFrom=$startFrom at head=$head, state=${state.get()}"
-                    )
-                    // INSTRUMENT END
                     callback.invoke(UnRegister(consumer.id, startFrom, startFrom))
                   }
                 case _ => ()
@@ -188,19 +168,11 @@ private[akka] class BroadcastHub[T](
           }
 
         case UnRegister(id, previousOffset, finalOffset) =>
-          logger.debug(
-            s"${BroadcastHub.this}'s BroadcastSinkLogic: Unregister(id=$id, previousOffset=$previousOffset, finalOffset=$finalOffset) at head=$head, activeConsumers=$activeConsumers"
-          )
           if (findAndRemoveConsumer(id, previousOffset) != null)
             activeConsumers -= 1
           if (activeConsumers == 0) {
             if (isClosed(in)) completeStage()
             else if (head != finalOffset) {
-              // INSTRUMENT BEGIN
-              logger.debug(
-                s"${BroadcastHub.this}'s BroadcastSinkLogic: Unregister(id=$id, previousOffset=$previousOffset, finalOffset=$finalOffset) at head=$head, state=${state.get()} without active consumers"
-              )
-              // INSTRUMENT END
               // If our final consumer goes away, we roll forward the buffer so a subsequent consumer does not
               // see the already consumed elements. This feature is quite handy.
               while (head != finalOffset) {
@@ -208,11 +180,6 @@ private[akka] class BroadcastHub[T](
                 head += 1
               }
               head = finalOffset
-              // INSTRUMENT BEGIN
-              logger.debug(
-                s"${BroadcastHub.this}'s BroadcastSinkLogic: Finished Unregister(id=$id, previousOffset=$previousOffset, finalOffset=$finalOffset) in state=${state.get()}"
-              )
-              // INSTRUMENT END
               if (!hasBeenPulled(in)) pull(in)
             }
           } else checkUnblock(previousOffset)
@@ -264,7 +231,7 @@ private[akka] class BroadcastHub[T](
       // TODO: Try to eliminate modulo division somehow...
       val wheelSlot = offset & WheelMask
       var consumersInSlot = consumerWheel(wheelSlot)
-      //debug(s"consumers before removal $consumersInSlot")
+      // debug(s"consumers before removal $consumersInSlot")
       var remainingConsumersInSlot: List[Consumer] = Nil
       var removedConsumer: Consumer = null
 
@@ -463,11 +430,6 @@ private[akka] class BroadcastHub[T](
           }
 
           override def postStop(): Unit = {
-            // INSTRUMENT BEGIN
-            logger.debug(
-              s"${BroadcastHub.this}'s BroadcastSinkLogic's source $id: postStop with previouslyPublishedOffset=$previousPublishedOffset, offset=$offset, offsetInitialized=$offsetInitialized"
-            )
-            // INSTRUMENT END
             // FIXED BEGIN
             // This used to be
             // ```

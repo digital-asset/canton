@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.*
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
@@ -65,6 +66,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import scala.annotation.tailrec
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -575,7 +577,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
   }
 
   "changeTransport" should {
-
     "create second subscription from the same counter as the previous one when there are no events" in {
       val secondTransport = new MockTransport
       for {
@@ -647,7 +648,6 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         secondTransport.lastSend.get() should not be None
       }
     }
-
   }
 
   case class Subscriber[E](
@@ -718,7 +718,20 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
     override protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
     private val subscriberRef = new AtomicReference[Option[Subscriber[_]]](None)
-    def subscriber = subscriberRef.get()
+
+    // When using a parallel execution context, the order of asynchronous operations within the SequencerClient
+    // is not deterministic which can delay the subscription. This is why we add some retry policy to avoid flaky tests
+    def subscriber: Option[Subscriber[_]] = {
+      @tailrec def subscriber(retry: Int): Option[Subscriber[_]] =
+        subscriberRef.get() match {
+          case Some(value) => Some(value)
+          case None if retry >= 0 =>
+            Threading.sleep(1)
+            subscriber(retry - 1)
+          case None => None
+        }
+      subscriber(retry = 5)
+    }
 
     val lastSend = new AtomicReference[Option[SubmissionRequest]](None)
 

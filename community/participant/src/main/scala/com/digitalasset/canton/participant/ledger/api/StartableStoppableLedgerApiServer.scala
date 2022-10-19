@@ -16,6 +16,7 @@ import com.daml.ledger.participant.state.v2.metrics.{TimedReadService, TimedWrit
 import com.daml.ledger.resources.{Resource, ResourceContext}
 import com.daml.logging.LoggingContext
 import com.daml.platform.LedgerApiServer
+import com.daml.platform.apiserver.ratelimiting.{RateLimitingInterceptor, ThreadpoolCheck}
 import com.daml.platform.apiserver.{ApiServerConfig, ApiServiceOwner, LedgerFeatures}
 import com.daml.platform.configuration.{IndexServiceConfig as LedgerIndexServiceConfig, ServerRole}
 import com.daml.platform.index.IndexServiceOwner
@@ -24,11 +25,10 @@ import com.daml.platform.indexer.{
   IndexerServiceOwner,
   IndexerStartupMode,
 }
-import com.daml.platform.partymanagement.PersistentPartyRecordStore
+import com.daml.platform.localstore.{PersistentPartyRecordStore, PersistentUserManagementStore}
 import com.daml.platform.services.time.TimeProviderType
 import com.daml.platform.store.DbSupport
 import com.daml.platform.store.DbSupport.ParticipantDataSourceConfig
-import com.daml.platform.usermanagement.PersistentUserManagementStore
 import com.daml.ports.Port
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -280,7 +280,22 @@ class StartableStoppableLedgerApiServer(
             .builder(config.tracerProvider.openTelemetry)
             .build()
             .newServerInterceptor(),
-        ),
+        ) ::: config.serverConfig.rateLimit
+          .map(rateLimit =>
+            RateLimitingInterceptor(
+              metrics = config.metrics,
+              config = rateLimit,
+              additionalChecks = List(
+                ThreadpoolCheck(
+                  name = "Environment Execution Threadpool",
+                  prefix = config.envQueueSize.name,
+                  queueSize = () => config.envQueueSize.metric.getValue.toLong,
+                  limit = rateLimit.maxApiServicesQueueSize,
+                )
+              ),
+            )
+          )
+          .toList,
         engine = config.engine,
         servicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,

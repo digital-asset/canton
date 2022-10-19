@@ -339,6 +339,20 @@ private[store] case class SequencerStoreRecordCounts(
   )
 }
 
+trait ReadEvents {
+  def nextTimestamp: Option[CantonTimestamp]
+  def payloads: Seq[Sequenced[Payload]]
+}
+
+case class ReadEventPayloads(payloads: Seq[Sequenced[Payload]]) extends ReadEvents {
+  def nextTimestamp: Option[CantonTimestamp] = payloads.lastOption.map(_.timestamp)
+}
+
+/** No events found but may return the safe watermark across online sequencers to read from the next time */
+case class SafeWatermark(nextTimestamp: Option[CantonTimestamp]) extends ReadEvents {
+  def payloads: Seq[Sequenced[Payload]] = Seq.empty
+}
+
 /** Persistence for the Sequencer.
   * Writers are expected to create a [[SequencerWriterStore]] which may delegate to this underlying store
   * through an appropriately managed storage instance.
@@ -447,7 +461,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
   /** Read all events of which a member is a recipient from the provided timestamp but no greater than the earliest watermark. */
   def readEvents(memberId: SequencerMemberId, fromTimestampO: Option[CantonTimestamp], limit: Int)(
       implicit traceContext: TraceContext
-  ): Future[Seq[Sequenced[Payload]]]
+  ): Future[ReadEvents]
 
   /** Delete all events that are ahead of the watermark of this sequencer.
     * These events will not have been read and should be removed before returning the sequencer online.

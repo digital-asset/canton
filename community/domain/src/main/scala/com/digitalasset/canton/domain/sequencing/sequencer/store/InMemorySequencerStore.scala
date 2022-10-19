@@ -150,7 +150,9 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
       member: SequencerMemberId,
       fromTimestampO: Option[CantonTimestamp] = None,
       limit: Int = 100,
-  )(implicit traceContext: TraceContext): Future[Seq[Sequenced[Payload]]] = Future.successful {
+  )(implicit
+      traceContext: TraceContext
+  ): Future[ReadEvents] = Future.successful {
     import scala.jdk.CollectionConverters.*
 
     def isMemberRecipient(member: SequencerMemberId)(event: StoreEvent[_]): Boolean = event match {
@@ -169,19 +171,27 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
         Payload(payloadId, storedPayload.content)
       }
 
+    val watermarkO = watermark.get()
+
     // if there's no watermark, we can't return any events
-    watermark.get().fold(Seq.empty[Sequenced[Payload]]) { watermark =>
-      fromTimestampO
-        .fold(events.tailMap(CantonTimestamp.MinValue, true))(events.tailMap(_, false))
-        .entrySet()
-        .iterator()
-        .asScala
-        .takeWhile(e => e.getKey <= watermark)
-        .filter(e => isMemberRecipient(member)(e.getValue))
-        .take(limit)
-        .map(entry => Sequenced(entry.getKey, entry.getValue))
-        .map(lookupPayloadForDeliver)
-        .toList
+    watermarkO.fold[ReadEvents](SafeWatermark(watermarkO)) { watermark =>
+      val payloads =
+        fromTimestampO
+          .fold(events.tailMap(CantonTimestamp.MinValue, true))(events.tailMap(_, false))
+          .entrySet()
+          .iterator()
+          .asScala
+          .takeWhile(e => e.getKey <= watermark)
+          .filter(e => isMemberRecipient(member)(e.getValue))
+          .take(limit)
+          .map(entry => Sequenced(entry.getKey, entry.getValue))
+          .map(lookupPayloadForDeliver)
+          .toList
+
+      if (payloads.nonEmpty)
+        ReadEventPayloads(payloads)
+      else
+        SafeWatermark(Some(watermark))
     }
   }
 

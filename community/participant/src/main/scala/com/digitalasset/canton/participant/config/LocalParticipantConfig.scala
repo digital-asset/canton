@@ -7,7 +7,7 @@ import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.api.tls.{SecretsUrl, TlsConfiguration, TlsVersion}
 import com.daml.platform.apiserver.SeedService.Seeding
 import com.daml.platform.apiserver.configuration.RateLimitingConfig
-import com.daml.platform.apiserver.{ApiServerConfig as DamlApiServerConfig}
+import com.daml.platform.apiserver.ApiServerConfig as DamlApiServerConfig
 import com.daml.platform.configuration.{
   CommandConfiguration,
   IndexServiceConfig as DamlIndexServiceConfig,
@@ -18,11 +18,9 @@ import com.daml.platform.indexer.{
   IndexerStartupMode,
   PackageMetadataViewConfig,
 }
-import com.daml.platform.store.DbSupport.{DataSourceProperties as DamlDataSourceProperties}
-import com.daml.platform.store.backend.postgresql.{
-  PostgresDataSourceConfig as DamlPostgresDataSourceConfig
-}
-import com.daml.platform.usermanagement.UserManagementConfig
+import com.daml.platform.localstore.UserManagementConfig
+import com.daml.platform.store.DbSupport.DataSourceProperties as DamlDataSourceProperties
+import com.daml.platform.store.backend.postgresql.PostgresDataSourceConfig as DamlPostgresDataSourceConfig
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
@@ -42,7 +40,6 @@ import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.time.NonNegativeFiniteDuration.*
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import io.netty.handler.ssl.{ClientAuth, SslContext}

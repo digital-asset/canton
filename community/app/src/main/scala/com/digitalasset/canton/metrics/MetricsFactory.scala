@@ -129,7 +129,7 @@ case class MetricsFactory(
     )
   }
 
-  def forJvm: EnvMetrics = envMetrics
+  def forEnv: EnvMetrics = envMetrics
 
   def forDomain(name: String): DomainMetrics = {
     domains.getOrElseUpdate(

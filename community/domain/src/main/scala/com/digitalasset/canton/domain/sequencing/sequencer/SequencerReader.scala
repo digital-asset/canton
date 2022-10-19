@@ -397,7 +397,7 @@ class SequencerReader(
     ): Future[(ReadState, Seq[(SequencerCounter, Sequenced[Payload])])] = {
       logger.debug(s"Reading events from $readState...")
       for {
-        storedEvents <- store.readEvents(
+        readEvents <- store.readEvents(
           readState.memberId,
           readState.nextReadTimestamp.some,
           config.readBatchSize,
@@ -406,10 +406,10 @@ class SequencerReader(
         // we may be rebuilding counters from a checkpoint before what was actually requested
         // in which case don't return events that we don't need to serve
         val nextSequencerCounter = readState.nextCounterAccumulator
-        val eventsWithCounter = storedEvents.zipWithIndex.map { case (event, n) =>
+        val eventsWithCounter = readEvents.payloads.zipWithIndex.map { case (event, n) =>
           (nextSequencerCounter + n, event)
         }
-        val newReadState = readState.update(storedEvents, config.readBatchSize)
+        val newReadState = readState.update(readEvents, config.readBatchSize)
         logger.debug(s"New state is $newReadState.")
         (newReadState, eventsWithCounter)
       }
@@ -508,14 +508,18 @@ object SequencerReader {
   ) extends PrettyPrinting {
 
     /** Update the state after reading a new page of results */
-    def update(storedEvents: Seq[Sequenced[_]], batchSize: Int): ReadState = {
+    def update(
+        readEvents: ReadEvents,
+        batchSize: Int,
+    ): ReadState = {
       copy(
         // increment the counter by the number of events we've now processed
-        nextCounterAccumulator = nextCounterAccumulator + storedEvents.size.toLong,
-        // set the timestamp to the last record of the batch, or our current timestamp if we got no results
-        nextReadTimestamp = storedEvents.lastOption.map(_.timestamp).getOrElse(nextReadTimestamp),
+        nextCounterAccumulator = nextCounterAccumulator + readEvents.payloads.size.toLong,
+        // set the timestamp to next timestamp from the read events or keep the current timestamp if we got no results
+        nextReadTimestamp = readEvents.nextTimestamp
+          .getOrElse(nextReadTimestamp),
         // did we receive a full batch of events on this update
-        lastBatchWasFull = storedEvents.sizeCompare(batchSize) == 0,
+        lastBatchWasFull = readEvents.payloads.sizeCompare(batchSize) == 0,
       )
     }
 
