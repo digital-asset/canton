@@ -13,21 +13,21 @@ class MetricDocTest extends AnyWordSpec with BaseTest {
   lazy val tm = new metrics.Timer()
   class DocVar {
     @MetricDoc.Tag("varred summary", "varred desc")
-    val varred = Timer("varred", tm)
+    val varred = Timer.NoOpTimer("varred")
   }
 
   class DocItem {
     @MetricDoc.Tag("top summary", "top desc")
-    val top = Timer("top", tm)
-    val utop = Timer("utop", tm)
+    val top = Timer.NoOpTimer("top")
+    val utop = Timer.NoOpTimer("utop")
     object nested {
       @MetricDoc.Tag("nested.n1 summary", "n1 desc")
-      val n1 = Timer("nested.n1", tm)
-      val u1 = Timer("nested.u1", tm)
+      val n1 = Timer.NoOpTimer("nested.n1")
+      val u1 = Timer.NoOpTimer("nested.u1")
       object nested2 {
         @MetricDoc.Tag("nested.n2 summary", "n2 desc")
-        val n2 = Timer("nested.n2", tm)
-        val u2 = Timer("nested.u2", tm)
+        val n2 = Timer.NoOpTimer("nested.n2")
+        val u2 = Timer.NoOpTimer("nested.u2")
       }
     }
     val other = new DocVar()

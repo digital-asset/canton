@@ -288,8 +288,8 @@ class StartableStoppableLedgerApiServer(
               additionalChecks = List(
                 ThreadpoolCheck(
                   name = "Environment Execution Threadpool",
-                  prefix = config.envQueueSize.name,
-                  queueSize = () => config.envQueueSize.metric.getValue.toLong,
+                  prefix = config.envQueueName,
+                  queueSize = config.envQueueSize,
                   limit = rateLimit.maxApiServicesQueueSize,
                 )
               ),

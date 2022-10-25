@@ -366,7 +366,9 @@ class TransferOutProcessingSteps(
         fullTree.targetTimeProof,
       )
 
-      sourceDomainParameters <- EitherT.right(sourceIps.findDynamicDomainParametersOrDefault())
+      sourceDomainParameters <- EitherT.right(
+        sourceIps.findDynamicDomainParametersOrDefault(sourceDomainProtocolVersion.v)
+      )
 
       transferData = TransferData(
         sourceProtocolVersion = sourceDomainProtocolVersion,
@@ -1139,12 +1141,18 @@ object TransferOutProcessingSteps {
     for {
       targetIps <- transferCoordination.cryptoSnapshot(targetDomain, t0)
       targetSnapshot = targetIps.ipsSnapshot
-      targetDomainParameters <- EitherTUtil
-        .fromFuture(
-          targetSnapshot.findDynamicDomainParametersOrDefault(),
-          _ => UnknownDomain(targetDomain, "When fetching domain parameters"),
-        )
-        .leftWiden[TransferProcessorError]
+
+      /*
+        We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
+        because it makes no sense to progress if we don't manage to fetch domain parameters.
+        Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
+        that we don't have here.
+       */
+      targetDomainParameters <- EitherT(
+        targetSnapshot
+          .findDynamicDomainParameters()
+          .map(_.toRight(DomainNotReady(targetDomain, "Unable to fetch domain parameters")))
+      ).leftWiden[TransferProcessorError]
     } yield {
 
       if (targetDomainParameters.automaticTransferInEnabled)

@@ -85,11 +85,15 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
     new HasVersionedMessageWithContextCompanion[Batch[Env], v0.Envelope => ParsingResult[Env]] {
       override val name: String = s"Batch[$envelopeType]"
 
-      val supportedProtoVersions: Map[Int, Parser] = Map(
-        0 -> supportedProtoVersion(v0.CompressedBatch) { (deserializer, proto) =>
-          // TODO(i10428) Prevent zip bombing when decompressing the request
-          fromProtoV0(deserializer)(proto, maxRequestSize = MaxRequestSize.NoLimit)
-        }
+      val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+        ProtoVersion(0) -> ProtoCodec(
+          ProtocolVersion.v2,
+          supportedProtoVersion(v0.CompressedBatch) { (deserializer, proto) =>
+            // TODO(i10428) Prevent zip bombing when decompressing the request
+            fromProtoV0(deserializer)(proto, maxRequestSize = MaxRequestSize.NoLimit)
+          },
+          _.toProtoV0.toByteString,
+        )
       )
     }
 

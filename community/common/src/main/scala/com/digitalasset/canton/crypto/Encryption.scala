@@ -18,10 +18,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedToByteString,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
@@ -236,11 +237,9 @@ final case class SymmetricKey(
     protected[crypto] val key: ByteString,
     scheme: SymmetricKeyScheme,
 ) extends CryptoKey
-    with HasVersionedWrapper[VersionedMessage[SymmetricKey]]
+    with HasVersionedWrapper[SymmetricKey]
     with NoCopy {
-
-  protected def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SymmetricKey] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = SymmetricKey
 
   protected def toProtoV0: v0.SymmetricKey =
     v0.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
@@ -249,8 +248,12 @@ final case class SymmetricKey(
 object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
   override val name: String = "SymmetricKey"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SymmetricKey)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SymmetricKey)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   private def fromProtoV0(keyP: v0.SymmetricKey): ParsingResult[SymmetricKey] =
@@ -314,13 +317,13 @@ case class EncryptionPublicKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: EncryptionKeyScheme,
 ) extends PublicKey
-    with HasVersionedWrapper[VersionedMessage[EncryptionPublicKey]]
     with PrettyPrinting
+    with HasVersionedWrapper[EncryptionPublicKey]
     with NoCopy {
-  val purpose: KeyPurpose = KeyPurpose.Encryption
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPublicKey] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = EncryptionPublicKey
+
+  val purpose: KeyPurpose = KeyPurpose.Encryption
 
   def toProtoV0: v0.EncryptionPublicKey =
     v0.EncryptionPublicKey(
@@ -337,9 +340,15 @@ case class EncryptionPublicKey private[crypto] (
     prettyOfClass(param("id", _.id), param("format", _.format), param("scheme", _.scheme))
 }
 
-object EncryptionPublicKey extends HasVersionedMessageCompanion[EncryptionPublicKey] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0)
+object EncryptionPublicKey
+    extends HasVersionedMessageCompanion[EncryptionPublicKey]
+    with HasVersionedMessageCompanionDbHelpers[EncryptionPublicKey] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.EncryptionPublicKey)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "encryption public key"
@@ -384,13 +393,12 @@ final case class EncryptionPrivateKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: EncryptionKeyScheme,
 ) extends PrivateKey
-    with HasVersionedWrapper[VersionedMessage[EncryptionPrivateKey]]
+    with HasVersionedWrapper[EncryptionPrivateKey]
     with NoCopy {
 
-  override def purpose: KeyPurpose = KeyPurpose.Encryption
+  override protected def companionObj = EncryptionPrivateKey
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[EncryptionPrivateKey] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override def purpose: KeyPurpose = KeyPurpose.Encryption
 
   def toProtoV0: v0.EncryptionPrivateKey =
     v0.EncryptionPrivateKey(
@@ -405,8 +413,12 @@ final case class EncryptionPrivateKey private[crypto] (
 }
 
 object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.EncryptionPrivateKey)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "encryption private key"

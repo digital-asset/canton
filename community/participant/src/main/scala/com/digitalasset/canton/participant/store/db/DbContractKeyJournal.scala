@@ -8,7 +8,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -45,7 +44,7 @@ class DbContractKeyJournal(
   import DbStorage.Implicits.*
   import storage.api.*
 
-  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("contract-key-journal")
 
   override protected[this] def pruning_status_table: String = "contract_key_pruning"
@@ -55,7 +54,7 @@ class DbContractKeyJournal(
   )(implicit traceContext: TraceContext): Future[Map[LfGlobalKey, ContractKeyState]] =
     if (keys.isEmpty) Future.successful(Map.empty)
     else {
-      processingTime.metric.event {
+      processingTime.event {
         import DbStorage.Implicits.BuilderChain.*
         NonEmpty.from(keys.toSeq) match {
           case None => Future.successful(Map.empty)
@@ -111,7 +110,7 @@ class DbContractKeyJournal(
   override def addKeyStateUpdates(updates: Map[LfGlobalKey, Status], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ContractKeyJournalError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       import DbStorage.Implicits.BuilderChain.*
 
       // Keep trying to insert the updates until all updates are in the DB or an exception occurs or we've found an inconsistency.
@@ -220,7 +219,7 @@ class DbContractKeyJournal(
   override def doPrune(
       beforeAndIncluding: CantonTimestamp
   )(implicit traceContext: TraceContext): EitherT[Future, ContractKeyJournalError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       val query = storage.profile match {
         case _: DbStorage.Profile.H2 =>
           sqlu"""
@@ -283,7 +282,7 @@ class DbContractKeyJournal(
   override def deleteSince(
       inclusive: TimeOfChange
   )(implicit traceContext: TraceContext): EitherT[Future, ContractKeyJournalError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       EitherT.right(
         storage.update_(
           sqlu"""delete from contract_key_journal
@@ -294,7 +293,7 @@ class DbContractKeyJournal(
     }
 
   override def countUpdates(key: LfGlobalKey)(implicit traceContext: TraceContext): Future[Int] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           sql"select count(*) from contract_key_journal where domain_id = $domainId and contract_key_hash = $key"

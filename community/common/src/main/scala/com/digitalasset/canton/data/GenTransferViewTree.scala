@@ -12,7 +12,6 @@ import com.digitalasset.canton.protocol.{ViewHash, v0, v1}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
-  HasVersionedWrapper,
   ProtocolVersion,
   VersionedMessage,
 }
@@ -29,15 +28,21 @@ abstract class GenTransferViewTree[
     MediatorMessage,
 ] protected (commonData: MerkleTree[CommonData], participantData: MerkleTree[View])(
     hashOps: HashOps
-) extends MerkleTreeInnerNode[Tree](hashOps)
-    with HasVersionedWrapper[VersionedMessage[TransferViewTree]] { this: Tree =>
+) extends MerkleTreeInnerNode[Tree](hashOps) { this: Tree =>
 
   override def subtrees: Seq[MerkleTree[_]] = Seq(commonData, participantData)
 
-  // This method is visible because we need the non-deterministic serialization only when we encrypt the tree,
-  // but the message to the mediator is sent unencrypted.
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TransferViewTree] =
+  /*
+  This method is visible because we need the non-deterministic serialization only when we encrypt the tree,
+  but the message to the mediator is sent unencrypted.
+
+  The versioning does not play well with this parametrized class so we define the serialization
+  method explicitly.
+   */
+  def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TransferViewTree] =
     VersionedMessage(toProtoV0.toByteString, 0)
+
+  def toByteString(version: ProtocolVersion): ByteString = toProtoVersioned(version).toByteString
 
   def toProtoV0: v0.TransferViewTree =
     v0.TransferViewTree(

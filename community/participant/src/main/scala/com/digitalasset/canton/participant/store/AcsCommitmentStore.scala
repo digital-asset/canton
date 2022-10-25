@@ -132,7 +132,7 @@ trait AcsCommitmentLookup {
       counterParticipant: Option[ParticipantId],
   )(implicit traceContext: TraceContext): Future[Iterable[(CommitmentPeriod, ParticipantId)]]
 
-  /** Inspection: search computed commitments applicable to the specified period (start/end are inclusive) */
+  /** Inspection: search computed commitments applicable to the specified period (start is exclusive, end is inclusive) */
   def searchComputedBetween(
       start: CantonTimestamp,
       end: CantonTimestamp,
@@ -141,7 +141,7 @@ trait AcsCommitmentLookup {
       traceContext: TraceContext
   ): Future[Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.CommitmentType)]]
 
-  /** Inspection: search received commitments applicable to the specified period (start/end are inclusive) */
+  /** Inspection: search received commitments applicable to the specified period (start is exclusive, end is inclusive) */
   def searchReceivedBetween(
       start: CantonTimestamp,
       end: CantonTimestamp,

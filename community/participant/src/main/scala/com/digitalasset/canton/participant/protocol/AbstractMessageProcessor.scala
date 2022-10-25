@@ -97,7 +97,7 @@ abstract class AbstractMessageProcessor(
         domainParameters <- EitherT.right(
           crypto.ips
             .awaitSnapshot(requestId.unwrap)
-            .flatMap(_.findDynamicDomainParametersOrDefault())
+            .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
         )
         maxSequencingTime = requestId.unwrap.add(domainParameters.participantResponseTimeout.unwrap)
         _ <- sequencerClient.sendAsync(
@@ -120,7 +120,7 @@ abstract class AbstractMessageProcessor(
   )(implicit traceContext: TraceContext): Future[Unit] = {
     crypto.ips
       .awaitSnapshot(timestamp)
-      .flatMap(_.findDynamicDomainParametersOrDefault())
+      .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
       .flatMap { domainParameters =>
         val decisionTime = domainParameters.decisionTimeFor(timestamp)
 

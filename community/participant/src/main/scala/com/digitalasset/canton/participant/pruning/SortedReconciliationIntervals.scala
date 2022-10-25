@@ -48,7 +48,7 @@ final case class SortedReconciliationIntervals private (
     else
       intervals
         .collectFirst {
-          case interval if interval.isValidAt(ts.forgetSecond) =>
+          case interval if interval.isValidAt(ts.forgetRefinement) =>
             val secondsSinceEpoch = ts.getEpochSecond
             secondsSinceEpoch % interval.intervalLength.duration.getSeconds == 0
         }
@@ -78,7 +78,7 @@ final case class SortedReconciliationIntervals private (
 
             val tick = tickBeforeOrAtForIntervalLength(currentTs, interval.intervalLength)
 
-            if (interval.isValidAt(tick.forgetSecond)) Some(tick) else go(tail)
+            if (interval.isValidAt(tick.forgetRefinement)) Some(tick) else go(tail)
           } else go(tail)
 
         case Nil => None

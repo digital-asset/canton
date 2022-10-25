@@ -1,23 +1,23 @@
-import DamlPlugin.autoImport.*
-import Dependencies.*
-import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
+import DamlPlugin.autoImport._
+import Dependencies._
+import com.typesafe.sbt.SbtLicenseReport.autoImportImpl._
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.headerSources
 import org.scalafmt.sbt.ScalafmtPlugin
-import sbt.Keys.*
+import sbt.Keys._
 import sbt.internal.util.ManagedLogger
-import sbt.*
-import sbt.nio.Keys.*
-import sbtassembly.AssemblyKeys.*
+import sbt._
+import sbt.nio.Keys._
+import sbtassembly.AssemblyKeys._
 import sbtassembly.AssemblyPlugin.autoImport.assembly
 import sbtassembly.MergeStrategy
 import sbtassembly.PathList
 import sbtbuildinfo.BuildInfoPlugin
-import sbtbuildinfo.BuildInfoPlugin.autoImport.*
+import sbtbuildinfo.BuildInfoPlugin.autoImport._
 import sbtprotoc.ProtocPlugin.autoImport.PB
 import scalafix.sbt.ScalafixPlugin
-import scoverage.ScoverageKeys.*
+import scoverage.ScoverageKeys._
 import wartremover.WartRemover
-import wartremover.WartRemover.autoImport.*
+import wartremover.WartRemover.autoImport._
 
 import scala.language.postfixOps
 
@@ -65,7 +65,7 @@ object BuildCommon {
       )
     )
 
-    import CommunityProjects.*
+    import CommunityProjects._
 
     val globalSettings = Seq(
       name := "canton",
@@ -101,7 +101,7 @@ object BuildCommon {
 
     val initDevSettings = Seq(
       initDev := {
-        import scala.sys.process.*
+        import scala.sys.process._
         "git config core.hooksPath .hooks" !
       }
     )
@@ -203,7 +203,7 @@ object BuildCommon {
     val printTests =
       taskKey[Unit]("Print full class names of tests to the file `test-full-class-names.log`.")
     printTests := {
-      import java.io.*
+      import java.io._
       println("Appending full class names of tests to the file `test-full-class-names.log`.")
       val pw = new PrintWriter(new FileWriter(s"test-full-class-names.log", true))
       val tmp = (Test / definedTests).value
@@ -308,7 +308,8 @@ object BuildCommon {
       // build the canton fat-jar
       val assembleJar = assembly.value
       runCommand(
-        f"bash ./scripts/ci/create-bundle.sh ${assembleJar.toString} ${args.mkString(" ")}",
+        f"bash ./scripts/ci/create-bundle.sh ${assembleJar.toString} ${(assembly / mainClass).value.get} ${args
+            .mkString(" ")}",
         log,
       )
     }
@@ -366,7 +367,7 @@ object BuildCommon {
     coverageExcludedFiles := formatCoverageExcludes(
       """
         |<empty>
-        |.*sbt-buildinfo.BuildInfo        
+        |.*sbt-buildinfo.BuildInfo
         |.*daml-codegen.*
       """
     ),

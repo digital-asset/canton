@@ -616,13 +616,14 @@ class ExampleTransactionFactory(
     }
 
   def informeeTree(rootViews: MerkleTree[TransactionView]*): InformeeTree =
-    InformeeTree(
+    InformeeTree.tryCreate(
       GenTransactionTree(cryptoOps)(
         blinded(submitterMetadata),
         commonMetadata,
         blinded(participantMetadata),
         MerkleSeq.fromSeq(cryptoOps)(rootViews, protocolVersion),
-      )
+      ),
+      protocolVersion,
     )
 
   def rootTransactionViewTree(rootViews: MerkleTree[TransactionView]*): TransactionViewTree =

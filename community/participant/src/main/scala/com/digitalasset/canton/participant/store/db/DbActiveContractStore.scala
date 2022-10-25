@@ -8,7 +8,6 @@ import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
 import com.daml.lf.data.Ref.PackageId
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -112,13 +111,13 @@ class DbActiveContractStore(
 
   case class DbAcsError(reason: String) extends AcsError
 
-  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("active-contract-store")
 
   def createContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    processingTime.metric.checkedTEvent {
+    processingTime.checkedTEvent {
 
       for {
         _ <- bulkInsert(contractIds, toc, ChangeType.Activation, remoteDomain = None)
@@ -140,7 +139,7 @@ class DbActiveContractStore(
   def archiveContracts(contractIds: Seq[LfContractId], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    processingTime.metric.checkedTEvent {
+    processingTime.checkedTEvent {
       for {
         _ <- bulkInsert(contractIds, toc, ChangeType.Deactivation, remoteDomain = None)
         _ <-
@@ -171,7 +170,7 @@ class DbActiveContractStore(
   def transferInContracts(transferIns: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    processingTime.metric.checkedTEvent {
+    processingTime.checkedTEvent {
       for {
         bySourceDomainIndexed <- indexedDomains(transferIns).map(_.groupBy(_._2).toList)
         _ <- bySourceDomainIndexed.traverse_ { case (sourceDomain, contractIdsAndDomain) =>
@@ -189,7 +188,7 @@ class DbActiveContractStore(
   def transferOutContracts(transferOuts: Seq[(LfContractId, DomainId)], toc: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, AcsError, AcsWarning, Unit] =
-    processingTime.metric.checkedTEvent {
+    processingTime.checkedTEvent {
       for {
         byTargetIndexed <- indexedDomains(transferOuts).map(_.groupBy(_._2).toList)
         _ <- byTargetIndexed.traverse_ { case (targetDomain, contractIdsAndDomain) =>
@@ -308,7 +307,7 @@ class DbActiveContractStore(
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Either[AcsError, SortedMap[LfContractId, CantonTimestamp]]] =
-    processingTime.metric.event {
+    processingTime.event {
       logger.debug(s"Obtaining ACS snapshot at $timestamp")
       storage
         .query(snapshotQuery(timestamp, None), functionFullName)
@@ -318,7 +317,7 @@ class DbActiveContractStore(
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, AcsError, Map[LfContractId, CantonTimestamp]] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       if (contractIds.isEmpty) EitherT.pure(Map.empty)
       else
         EitherT
@@ -372,7 +371,7 @@ class DbActiveContractStore(
 
   override def doPrune(beforeAndIncluding: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, AcsError, Unit] = processingTime.metric.eitherTEvent {
+  ): EitherT[Future, AcsError, Unit] = processingTime.eitherTEvent {
 
     // For each contract select the last deactivation before or at the timestamp.
     // If such a deactivation exists then delete all acs records up to and including the deactivation
@@ -442,7 +441,7 @@ class DbActiveContractStore(
   }
 
   def deleteSince(criterion: RequestCounter)(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sqlu"delete from active_contracts where domain_id = $domainId and request_counter >= $criterion"
       storage
@@ -455,7 +454,7 @@ class DbActiveContractStore(
   override def changesBetween(fromExclusive: TimeOfChange, toInclusive: TimeOfChange)(implicit
       traceContext: TraceContext
   ): Future[LazyList[(TimeOfChange, ActiveContractIdsChange)]] =
-    processingTime.metric.event {
+    processingTime.event {
       ErrorUtil.requireArgument(
         fromExclusive <= toInclusive,
         s"Provided timestamps are in the wrong order: $fromExclusive and $toInclusive",

@@ -24,7 +24,7 @@ final case class CantonTimestampSecond private (underlying: LfTimestamp)
 
   require(microsOverSecond() == 0, s"Timestamp $underlying must be rounded to the second")
 
-  def forgetSecond: CantonTimestamp = CantonTimestamp(underlying)
+  def forgetRefinement: CantonTimestamp = CantonTimestamp(underlying)
 
   def plusSeconds(seconds: Long): CantonTimestampSecond =
     CantonTimestampSecond(underlying.add(Duration.ofSeconds(seconds)))
@@ -46,11 +46,11 @@ final case class CantonTimestampSecond private (underlying: LfTimestamp)
     underlying.add(Duration.ZERO.minus(duration.duration))
   )
 
-  def >(other: CantonTimestamp): Boolean = forgetSecond > other
-  def >=(other: CantonTimestamp): Boolean = forgetSecond >= other
+  def >(other: CantonTimestamp): Boolean = forgetRefinement > other
+  def >=(other: CantonTimestamp): Boolean = forgetRefinement >= other
 
-  def <(other: CantonTimestamp): Boolean = forgetSecond < other
-  def <=(other: CantonTimestamp): Boolean = forgetSecond <= other
+  def <(other: CantonTimestamp): Boolean = forgetRefinement < other
+  def <=(other: CantonTimestamp): Boolean = forgetRefinement <= other
 
 }
 

@@ -12,6 +12,7 @@ function adjust_startup_scripts() {
   REPLACE_REVISION=$(git rev-parse HEAD)
   REPLACE_JVM_OPTS="-XX:+CrashOnOutOfMemoryError"
   REPLACE_JAR="lib\/$JAR"
+  REPLACE_MAIN_CLASS="$MAIN_CLASS"
   REPLACE_MAC_ICON_FILE="lib\/canton.ico"
   for ff in "bin/canton" "bin/canton.bat"
   do
@@ -21,6 +22,7 @@ function adjust_startup_scripts() {
         sed -e "s/REPLACE_REVISION/${REPLACE_REVISION}/" |
         sed -e "s/REPLACE_JVM_OPTS/${REPLACE_JVM_OPTS}/" |
         sed -e "s/REPLACE_JAR/${REPLACE_JAR}/" |
+        sed -e "s/REPLACE_MAIN_CLASS/${REPLACE_MAIN_CLASS}/" |
         sed -e "s/REPLACE_MAC_ICON_FILE/${REPLACE_MAC_ICON_FILE}/" > $RELEASE_DIR/tmp.txt
       mv $RELEASE_DIR/tmp.txt $RELEASE_DIR/$ff
       chmod 755 $RELEASE_DIR/$ff
@@ -30,6 +32,8 @@ function adjust_startup_scripts() {
 set -e
 
 JARFILE=$1
+shift
+MAIN_CLASS=$1
 shift
 PACKS=$@
 

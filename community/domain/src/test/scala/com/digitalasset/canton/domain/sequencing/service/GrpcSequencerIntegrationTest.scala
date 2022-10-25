@@ -55,6 +55,7 @@ import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySn
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.AkkaUtil
 import com.digitalasset.canton.version.{
+  ProtocolVersion,
   ProtocolVersionCompatibility,
   ReleaseVersion,
   RepresentativeProtocolVersion,
@@ -91,7 +92,12 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val mockTopologySnapshot = mock[TopologySnapshot]
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
     .thenReturn(mockTopologySnapshot)
-  when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
+  when(
+    mockTopologySnapshot.findDynamicDomainParametersOrDefault(
+      any[ProtocolVersion],
+      anyBoolean,
+    )(any[TraceContext])
+  )
     .thenReturn(
       Future.successful(
         TestDomainParameters.defaultDynamic(maxRatePerParticipant = NonNegativeInt.tryCreate(100))

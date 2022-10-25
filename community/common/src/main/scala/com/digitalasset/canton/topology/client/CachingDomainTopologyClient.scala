@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration
@@ -170,6 +171,7 @@ object CachingDomainTopologyClient {
   def create(
       clock: Clock,
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       store: TopologyStore[TopologyStoreId.DomainStore],
       initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
       packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],
@@ -186,6 +188,7 @@ object CachingDomainTopologyClient {
       new StoreBasedDomainTopologyClient(
         clock,
         domainId,
+        protocolVersion,
         store,
         initKeys,
         packageDependencies,

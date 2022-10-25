@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.metrics.MetricHandle.{Gauge, VarGauge}
+import com.daml.metrics.MetricHandle.Counter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}
@@ -99,7 +99,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   private[this] val lock: Object = new Object
 
   // init metrics
-  metrics.taskQueue.metric.setReference(Some(() => taskQueue.size))
+  metrics.taskQueue.setReference(Some(() => taskQueue.size))
 
   /** Used to inspect the state of the sequencerCounterQueue, for testing purposes. */
   @VisibleForTesting
@@ -219,7 +219,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
             case _ =>
           }
           sequencerCounterQueue.insert(sequencerCounter, timestamp).discard
-          metrics.sequencerCounterQueue.metric.updateValue(_ + 1)
+          metrics.sequencerCounterQueue.inc()
         case BeforeHead =>
           if (timestamp > latestTime)
             ErrorUtil.internalError(
@@ -247,7 +247,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
   override def closeAsync() = {
     import TraceContext.Implicits.Empty.*
     Seq(
-      SyncCloseable("unregister-metrics", metrics.taskQueue.metric.setReference(None)),
+      SyncCloseable("unregister-metrics", metrics.taskQueue.setReference(None)),
       queue.asCloseable("TaskScheduler.flush", timeouts.shutdownShort.unwrap),
     )
   }
@@ -264,7 +264,7 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
       sequencerCounterQueue.poll() match {
         case None => ()
         case Some((sc, observedTime)) =>
-          metrics.sequencerCounterQueue.metric.updateValue(_ - 1)
+          metrics.sequencerCounterQueue.dec()
           val previousTime = latestPolledTimestamp.getAndSet(observedTime)
           if (observedTime <= previousTime) {
             // This should never happen
@@ -322,8 +322,8 @@ class TaskScheduler[Task <: TaskScheduler.TimedTask](
 }
 
 trait TaskSchedulerMetrics {
-  def sequencerCounterQueue: VarGauge[Int]
-  def taskQueue: Gauge[RefGauge[Int], Int]
+  def sequencerCounterQueue: Counter
+  def taskQueue: RefGauge[Int]
 }
 
 object TaskScheduler {

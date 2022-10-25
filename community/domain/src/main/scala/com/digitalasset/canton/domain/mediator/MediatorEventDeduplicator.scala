@@ -83,7 +83,7 @@ private[mediator] object MediatorEventDeduplicator {
       tracedRequestTime.withTraceContext { implicit traceContext => requestTime =>
         for {
           snapshot <- topologyClient.awaitSnapshot(requestTime)
-          domainParameters <- snapshot.findDynamicDomainParametersOrDefault()
+          domainParameters <- snapshot.findDynamicDomainParametersOrDefault(protocolVersion)
         } yield domainParameters
       }
 

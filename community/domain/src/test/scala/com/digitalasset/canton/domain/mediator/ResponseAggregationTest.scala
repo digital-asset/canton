@@ -103,13 +103,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
       def testReject() =
         LocalReject.ConsistencyRejections.LockedContracts.Reject(Seq())(testedProtocolVersion)
       val fullInformeeTree =
-        FullInformeeTree(
+        FullInformeeTree.tryCreate(
           GenTransactionTree(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
             MerkleSeq.fromSeq(hashOps)(view1 :: Nil, testedProtocolVersion),
-          )
+          ),
+          testedProtocolVersion,
         )
       val requestId = RequestId(CantonTimestamp.Epoch)
       val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
@@ -144,13 +145,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             Nil,
             testedProtocolVersion,
           )
-        val fullInformeeTreeThresholdTooLow = FullInformeeTree(
+        val fullInformeeTreeThresholdTooLow = FullInformeeTree.tryCreate(
           GenTransactionTree(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
             MerkleSeq.fromSeq(hashOps)(viewThresholdTooLow :: Nil, testedProtocolVersion),
-          )
+          ),
+          testedProtocolVersion,
         )
 
         val alarmMsg =
@@ -412,13 +414,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         TransactionView.tryCreate(hashOps)(viewCommonData1, b(8), Nil, testedProtocolVersion)
 
       val informeeMessage = InformeeMessage(
-        FullInformeeTree(
+        FullInformeeTree.tryCreate(
           GenTransactionTree(hashOps)(
             b(0),
             commonMetadataSignatory,
             b(2),
             MerkleSeq.fromSeq(hashOps)(view1 :: view2 :: Nil, testedProtocolVersion),
-          )
+          ),
+          testedProtocolVersion,
         )
       )(testedProtocolVersion)
 
@@ -517,15 +520,15 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
         new UUID(0L, 0L),
         testedProtocolVersion,
       )
-      val fullInformeeTree =
-        FullInformeeTree(
-          GenTransactionTree(hashOps)(
-            b(0),
-            commonMetadata,
-            b(2),
-            MerkleSeq.fromSeq(hashOps)(view1 :: Nil, testedProtocolVersion),
-          )
-        )
+      val fullInformeeTree = FullInformeeTree.tryCreate(
+        GenTransactionTree(hashOps)(
+          b(0),
+          commonMetadata,
+          b(2),
+          MerkleSeq.fromSeq(hashOps)(view1 :: Nil, testedProtocolVersion),
+        ),
+        testedProtocolVersion,
+      )
       val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)
       val rootHash = informeeMessage.rootHash
       val nonVip = ParticipantId("notAVip")

@@ -8,12 +8,10 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import com.codahale.metrics.Gauge
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
 import com.daml.lf.engine.Engine
-import com.daml.metrics.MetricHandle
 import com.daml.platform.apiserver.meteringreport.MeteringReportKey
 import com.daml.platform.apiserver.meteringreport.MeteringReportKey.CommunityKey
 import com.digitalasset.canton.LedgerParticipantId
@@ -115,7 +113,8 @@ class ParticipantNodeBootstrap(
     parentLogger: NamedLoggerFactory,
     writeHealthDumpToFile: HealthDumpFunction,
     meteringReportKey: MeteringReportKey,
-    envQueueSize: MetricHandle.Gauge[Gauge[Int], Int],
+    envQueueName: String,
+    envQueueSize: () => Long,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -217,6 +216,7 @@ class ParticipantNodeBootstrap(
             tracerProvider,
             metrics.ledgerApiServer,
             meteringReportKey,
+            envQueueName,
             envQueueSize,
           ),
           // start ledger API server iff participant replica is active
@@ -677,7 +677,8 @@ object ParticipantNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         writeHealthDumpToFile: HealthDumpFunction,
-        envQueueSize: MetricHandle.Gauge[Gauge[Int], Int],
+        envQueueName: String,
+        envQueueSize: () => Long,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -698,7 +699,8 @@ object ParticipantNodeBootstrap {
         futureSupervisor: FutureSupervisor,
         loggerFactory: NamedLoggerFactory,
         writeHealthDumpToFile: HealthDumpFunction,
-        envQueueSize: MetricHandle.Gauge[Gauge[Int], Int],
+        envQueueName: String,
+        envQueueSize: () => Long,
     )(implicit
         executionContext: ExecutionContextIdlenessExecutorService,
         scheduler: ScheduledExecutorService,
@@ -740,6 +742,7 @@ object ParticipantNodeBootstrap {
             loggerFactory,
             writeHealthDumpToFile,
             meteringReportKey = CommunityKey,
+            envQueueName,
             envQueueSize,
           )
         )

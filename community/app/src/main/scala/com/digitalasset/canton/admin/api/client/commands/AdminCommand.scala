@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultBoundedTimeout,
   TimeoutType,
@@ -13,11 +14,14 @@ import com.digitalasset.canton.config.{NonNegativeDuration, ProcessingTimeout}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.http.HttpClient
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc.ManagedChannel
-import io.grpc.stub.AbstractStub
+import io.grpc.stub.{AbstractStub, StreamObserver}
+import io.grpc.{Context, ManagedChannel, Status, StatusException, StatusRuntimeException}
 
 import java.net.URL
-import scala.concurrent.{ExecutionContext, Future}
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
 
 trait AdminCommand[Req, Res, Result] {
 
@@ -122,4 +126,72 @@ object GrpcAdminCommand {
   case object ServerEnforcedTimeout extends TimeoutType
   case object DefaultBoundedTimeout extends TimeoutType
   case object DefaultUnboundedTimeout extends TimeoutType
+
+  object GrpcErrorStatus {
+    def unapply(ex: Throwable): Option[Status] = ex match {
+      case e: StatusException => Some(e.getStatus)
+      case re: StatusRuntimeException => Some(re.getStatus)
+      case _ => None
+    }
+  }
+
+  private[digitalasset] def streamedResponse[Request, Response, Result](
+      service: (Request, StreamObserver[Response]) => Unit,
+      extract: Response => Seq[Result],
+      request: Request,
+      expected: Int,
+      timeout: FiniteDuration,
+      scheduler: ScheduledExecutorService,
+  ): Future[Seq[Result]] = {
+    val promise = Promise[Seq[Result]]()
+    val buffer = ListBuffer[Result]()
+    val context = Context.ROOT.withCancellation()
+
+    def success(): Unit = blocking(buffer.synchronized {
+      context.close()
+      promise.trySuccess(buffer.toList).discard[Boolean]
+    })
+
+    context.run(() =>
+      service(
+        request,
+        new StreamObserver[Response]() {
+          override def onNext(value: Response): Unit = {
+            val extracted = extract(value)
+            blocking(buffer.synchronized {
+              if (buffer.lengthCompare(expected) < 0) {
+                buffer ++= extracted
+                if (buffer.lengthCompare(expected) >= 0) {
+                  success()
+                }
+              }
+            })
+          }
+
+          override def onError(t: Throwable): Unit = {
+            t match {
+              case GrpcErrorStatus(status) if status.getCode == Status.CANCELLED.getCode =>
+                success()
+              case _ =>
+                val _ = promise.tryFailure(t)
+            }
+          }
+
+          override def onCompleted(): Unit = {
+            success()
+          }
+        },
+      )
+    )
+    scheduler.schedule(
+      new Runnable() {
+        override def run(): Unit = {
+          val _ = context.cancel(Status.CANCELLED.asException())
+        }
+      },
+      timeout.toMillis,
+      TimeUnit.MILLISECONDS,
+    )
+    promise.future
+  }
 }

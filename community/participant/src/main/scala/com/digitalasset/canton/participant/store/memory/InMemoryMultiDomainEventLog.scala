@@ -161,7 +161,7 @@ class InMemoryMultiDomainEventLog(
             )
             notifyOnPublish(Seq(publication))
 
-            metrics.updatesPublished.metric.mark(event.eventSize.toLong)
+            metrics.updatesPublished.mark(event.eventSize.toLong)
           } else {
             ErrorUtil.internalError(
               new IllegalArgumentException(

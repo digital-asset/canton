@@ -307,6 +307,7 @@ class DomainNodeBootstrap(
           TopologyTransactionProcessor.createProcessorAndClientForDomain(
             sequencedTopologyStore,
             domainId,
+            protocolVersion,
             crypto.pureCrypto,
             SigningPublicKey.collect(initialKeys),
             parameters,

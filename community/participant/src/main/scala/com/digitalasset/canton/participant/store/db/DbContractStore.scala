@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
@@ -53,7 +52,7 @@ class DbContractStore(
   private val profile = storage.profile
   private val domainId = domainIdIndexed.index
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("contract-store")
 
   override protected[store] def logger: TracedLogger = super.logger
@@ -153,7 +152,7 @@ class DbContractStore(
   private def lookupManyUncachedInternal(
       ids: NonEmpty[Seq[LfContractId]]
   )(implicit traceContext: TraceContext) = {
-    processingTime.metric.event {
+    processingTime.event {
       storage.sequentialQueryAndCombine(lookupQueries(ids), functionFullName)(
         traceContext,
         closeContext,
@@ -167,7 +166,7 @@ class DbContractStore(
       filterTemplate: Option[String],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[List[SerializableContract]] =
-    processingTime.metric.event {
+    processingTime.event {
 
       import DbStorage.Implicits.BuilderChain.*
 
@@ -207,7 +206,7 @@ class DbContractStore(
       transactionId: TransactionId,
       creations: Seq[SerializableContract],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storeElements(
         creations,
         StoredContract.fromCreatedContract(_, requestCounter, transactionId),
@@ -218,7 +217,7 @@ class DbContractStore(
       requestCounter: RequestCounter,
       divulgences: Seq[SerializableContract],
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storeElements(
         divulgences,
         StoredContract.fromDivulgedContract(_, requestCounter),
@@ -306,7 +305,7 @@ class DbContractStore(
   def deleteContract(
       id: LfContractId
   )(implicit traceContext: TraceContext): EitherT[Future, UnknownContract, Unit] =
-    processingTime.metric
+    processingTime
       .eitherTEvent {
         lookupE(id)
           .flatMap { _ =>
@@ -334,7 +333,7 @@ class DbContractStore(
             .map(value => sql"$value")
             .toSeq
             .intercalate(sql", ") ++ sql")"
-        processingTime.metric
+        processingTime
           .event {
             storage.update_(
               (sql"""delete from contracts where domain_id = $domainId and """ ++ inClause).asUpdate,
@@ -348,7 +347,7 @@ class DbContractStore(
   override def deleteDivulged(
       upTo: RequestCounter
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric
+    processingTime
       .event {
         val query = profile match {
           case _: DbStorage.Profile.Postgres | _: DbStorage.Profile.H2 =>
@@ -414,7 +413,7 @@ class DbContractStore(
   }
 
   override def contractCount()(implicit traceContext: TraceContext): Future[Int] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(sql"select count(*) from contracts".as[Int].head, functionFullName)
     }
 }

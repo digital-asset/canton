@@ -32,7 +32,7 @@ import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Success
+import scala.util.{Failure, Success}
 
 class DefaultMessageDispatcher(
     override protected val domainId: DomainId,
@@ -131,11 +131,13 @@ class DefaultMessageDispatcher(
               tickTrackers(sc, ts, triggerAcsChangePublication = true)
             case Deliver(sc, ts, _, _, _) =>
               processBatch(signedEvent.asInstanceOf[SignedContent[Deliver[DefaultOpenEnvelope]]])
-                .thereafter { result =>
-                  result.failed.foreach(ex => logger.error("event processing failed.", ex))
-                  // Make sure that the tick is not lost unless we're shutting down
-                  if (result != Success(UnlessShutdown.AbortedDueToShutdown))
-                    requestTracker.tick(sc, ts)
+                .thereafter {
+                  // Make sure that the tick is not lost unless we're shutting down or getting an exception
+                  case Success(outcome) =>
+                    if (outcome != UnlessShutdown.AbortedDueToShutdown)
+                      requestTracker.tick(sc, ts)
+                  case Failure(ex) =>
+                    logger.error("event processing failed.", ex)
                 }
             case error @ DeliverError(sc, ts, _, _, _) =>
               logger.debug(s"Received a deliver error at ${sc} / ${ts}")

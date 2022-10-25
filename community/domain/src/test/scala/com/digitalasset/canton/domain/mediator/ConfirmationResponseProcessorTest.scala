@@ -34,8 +34,9 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil.{sequentialTraverse, sequentialTraverse_}
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
-import org.mockito.ArgumentMatchers.{eq as eqMatch}
+import org.mockito.ArgumentMatchers.eq as eqMatch
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -250,7 +251,12 @@ class ConfirmationResponseProcessorTest extends AsyncWordSpec with BaseTest {
       val mockSignature = SymbolicCrypto.emptySignature
 
       val mockTopologySnapshot = mock[TopologySnapshot]
-      when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
+      when(
+        mockTopologySnapshot.findDynamicDomainParametersOrDefault(
+          any[ProtocolVersion],
+          anyBoolean,
+        )(any[TraceContext])
+      )
         .thenReturn(Future.successful(initialDomainParameters))
 
       when(mockSnapshot.verifySignature(any[Hash], any[KeyOwner], any[Signature]))

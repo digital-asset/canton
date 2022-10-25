@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.common.domain.{ServiceAgreement, ServiceAgreementId}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String256M
@@ -31,7 +30,7 @@ class DbServiceAgreementStore(
   import ServiceAgreementStore.*
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("service-agreement-store")
 
   private def getAgreementText(
@@ -83,14 +82,14 @@ class DbServiceAgreementStore(
 
   def containsAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
-  ): Future[Boolean] = processingTime.metric.event {
+  ): Future[Boolean] = processingTime.event {
     storage.querySingle(getAgreementText(domainId, agreementId), functionFullName).isDefined
   }
 
   def getAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ServiceAgreementStoreError, String256M] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       storage
         .querySingle(getAgreementText(domainId, agreementId), functionFullName)
         .toRight(UnknownServiceAgreement(domainId, agreementId))
@@ -103,7 +102,7 @@ class DbServiceAgreementStore(
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ServiceAgreementStoreError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       EitherT.right(
         storage.update_(insertAgreement(domainId, agreementId, agreementText), functionFullName)
       )
@@ -112,7 +111,7 @@ class DbServiceAgreementStore(
   def listAgreements(implicit
       traceContext: TraceContext
   ): Future[Seq[(DomainId, ServiceAgreement)]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"select domain_id, agreement_id, agreement_text from service_agreements"
           .as[(DomainId, ServiceAgreement)],
@@ -123,7 +122,7 @@ class DbServiceAgreementStore(
   def insertAcceptedAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ServiceAgreementStoreError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       for {
         contains <- EitherT.right(containsAgreement(domainId, agreementId))
         _ <- EitherT.cond[Future](contains, (), UnknownServiceAgreement(domainId, agreementId))
@@ -136,7 +135,7 @@ class DbServiceAgreementStore(
   def listAcceptedAgreements(
       domainId: DomainId
   )(implicit traceContext: TraceContext): Future[Seq[ServiceAgreementId]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"select agreement_id from accepted_agreements where domain_id = $domainId"
           .as[ServiceAgreementId],
@@ -146,7 +145,7 @@ class DbServiceAgreementStore(
 
   def containsAcceptedAgreement(domainId: DomainId, agreementId: ServiceAgreementId)(implicit
       traceContext: TraceContext
-  ): Future[Boolean] = processingTime.metric.event {
+  ): Future[Boolean] = processingTime.event {
     storage.querySingle(getAcceptedAgreement(domainId, agreementId), functionFullName).isDefined
   }
 }

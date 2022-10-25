@@ -1,6 +1,6 @@
-import sbt.Keys.*
-import sbt.*
-import wartremover.WartRemover.autoImport.*
+import sbt.Keys._
+import sbt._
+import wartremover.WartRemover.autoImport._
 import wartremover.contrib.ContribWart
 
 /** Settings for all JVM projects in this build. Contains compiler flags,
@@ -18,8 +18,8 @@ object JvmRulesPlugin extends AutoPlugin {
   }
   import de.heikoseeberger.sbtheader.{
     LineCommentCreator,
-    CommentStyle as HeaderCommentStyle,
-    FileType as HeaderFileType,
+    CommentStyle => HeaderCommentStyle,
+    FileType => HeaderFileType,
   }
 
   lazy val cantonRepoHeaderSettings = Seq(

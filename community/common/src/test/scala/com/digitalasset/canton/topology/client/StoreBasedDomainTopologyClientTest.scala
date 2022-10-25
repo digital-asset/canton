@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TrustLevel.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, BaseTestWordSpec, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -33,6 +34,8 @@ import scala.concurrent.{ExecutionContext, Future}
 class BaseDomainTopologyClientTest extends BaseTestWordSpec {
 
   private class TestClient() extends BaseDomainTopologyClient {
+
+    override def protocolVersion: ProtocolVersion = testedProtocolVersion
 
     override protected def futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
     override def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
@@ -133,6 +136,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
         new StoreBasedDomainTopologyClient(
           mock[Clock],
           domainId,
+          testedProtocolVersion,
           store,
           initialKeys,
           StoreBasedDomainTopologyClient.NoPackageDependencies,

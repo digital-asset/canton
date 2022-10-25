@@ -399,7 +399,11 @@ abstract class ProtocolProcessor[
     val removeF = for {
       domainParameters <- crypto.ips
         .awaitSnapshot(submissionTimestamp)
-        .flatMap(_.findDynamicDomainParametersOrDefault())
+        .flatMap(
+          _.findDynamicDomainParametersOrDefault(
+            sequencerClient.staticDomainParameters.protocolVersion
+          )
+        )
       decisionTime = domainParameters.decisionTimeFor(submissionTimestamp)
       _ = ephemeral.timeTracker.requestTick(decisionTime)
       _ <- ephemeral.requestTracker.awaitTimestamp(decisionTime).getOrElse(Future.unit).map { _ =>
@@ -457,7 +461,9 @@ abstract class ProtocolProcessor[
       val cleanReplay = isCleanReplay(rc)
       for {
         domainParameters <- EitherT.right(
-          snapshot.ipsSnapshot.findDynamicDomainParametersOrDefault()
+          snapshot.ipsSnapshot.findDynamicDomainParametersOrDefault(
+            sequencerClient.staticDomainParameters.protocolVersion
+          )
         )
 
         requestFuturesF <- EitherT
@@ -772,7 +778,11 @@ abstract class ProtocolProcessor[
         crypto.ips.awaitSnapshotSupervised(s"await crypto snapshot $resultTs")(resultTs)
       )
 
-      domainParameters <- EitherT.right(snapshot.findDynamicDomainParametersOrDefault())
+      domainParameters <- EitherT.right(
+        snapshot.findDynamicDomainParametersOrDefault(
+          sequencerClient.staticDomainParameters.protocolVersion
+        )
+      )
 
       _ <- condUnitET[Future](
         resultTs <= domainParameters.decisionTimeFor(requestId.unwrap), {
@@ -1139,7 +1149,6 @@ abstract class ProtocolProcessor[
       def publishEvent(): EitherT[Future, steps.ResultError, Unit] = {
         for {
           maybeEvent <- EitherT.fromEither[Future](timeoutEvent)
-          update = None
           _ <- EitherT.liftF(
             ephemeral.recordOrderPublisher
               .schedulePublication(
@@ -1147,7 +1156,7 @@ abstract class ProtocolProcessor[
                 requestCounter,
                 requestId.unwrap,
                 maybeEvent,
-                update,
+                updateO = None,
               )
           )
           requestTimestamp = requestId.unwrap

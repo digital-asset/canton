@@ -32,7 +32,7 @@ class SortedReconciliationIntervalsTest
     CantonTimestampSecond.assertFromInstant(Instant.parse(s"${date}T${s}Z"))
 
   implicit def forgetRounding(roundedTs: CantonTimestampSecond): CantonTimestamp =
-    roundedTs.forgetSecond
+    roundedTs.forgetRefinement
 
   private lazy val validUntil = toTs("18:00:00")
 

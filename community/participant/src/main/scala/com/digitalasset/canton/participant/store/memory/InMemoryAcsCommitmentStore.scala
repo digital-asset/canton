@@ -148,8 +148,8 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
 
     def containsTick(commitmentPeriod: CommitmentPeriod): Boolean = sortedReconciliationIntervals
       .containsTick(
-        commitmentPeriod.fromExclusive.forgetSecond,
-        commitmentPeriod.toInclusive.forgetSecond,
+        commitmentPeriod.fromExclusive.forgetRefinement,
+        commitmentPeriod.toInclusive.forgetRefinement,
       )
       .getOrElse {
         logger.warn(s"Unable to determine whether $commitmentPeriod contains a tick.")
@@ -207,9 +207,9 @@ class InMemoryAcsCommitmentStore(protected val loggerFactory: NamedLoggerFactory
     Future.successful {
       for {
         lastTs <- lastComputed.get
-        adjustedTs = lastTs.forgetSecond.min(beforeOrAt)
+        adjustedTs = lastTs.forgetRefinement.min(beforeOrAt)
         periods = _outstanding.get().map { case (period, _participants) =>
-          period.fromExclusive.forgetSecond -> period.toInclusive.forgetSecond
+          period.fromExclusive.forgetRefinement -> period.toInclusive.forgetRefinement
         }
         safe = AcsCommitmentStore.latestCleanPeriod(
           beforeOrAt = adjustedTs,

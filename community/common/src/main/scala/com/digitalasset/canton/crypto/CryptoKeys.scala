@@ -20,8 +20,8 @@ import com.digitalasset.canton.topology.SafeSimpleString
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import io.circe.Encoder
@@ -88,12 +88,14 @@ trait CryptoKeyPairKey extends CryptoKey {
 }
 
 trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
-    extends HasVersionedWrapper[VersionedMessage[CryptoKeyPair[PK, SK]]] {
+    extends HasVersionedWrapper[CryptoKeyPair[PublicKey, PrivateKey]] {
 
   require(
     publicKey.id == privateKey.id,
     "Public and private key of the same key pair must have the same ids.",
   )
+
+  override protected def companionObj = CryptoKeyPair
 
   def publicKey: PK
   def privateKey: SK
@@ -101,24 +103,21 @@ trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
   // The keypair is identified by the public key's id
   def id: Fingerprint = publicKey.id
 
-  override def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[CryptoKeyPair[PK, SK]] = {
-    VersionedMessage(toProtoCryptoKeyPairV0.toByteString, 0)
-  }
-
   protected def toProtoCryptoKeyPairPairV0: v0.CryptoKeyPair.Pair
 
   def toProtoCryptoKeyPairV0: v0.CryptoKeyPair = v0.CryptoKeyPair(toProtoCryptoKeyPairPairV0)
 }
 
-object CryptoKeyPair
-    extends HasVersionedMessageCompanion[CryptoKeyPair[_ <: PublicKey, _ <: PrivateKey]] {
+object CryptoKeyPair extends HasVersionedMessageCompanion[CryptoKeyPair[PublicKey, PrivateKey]] {
 
   override protected def name: String = "crypto key pair"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.CryptoKeyPair)(fromProtoCryptoKeyPairV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.CryptoKeyPair)(fromProtoCryptoKeyPairV0),
+      _.toProtoCryptoKeyPairV0.toByteString,
+    )
   )
 
   def fromProtoCryptoKeyPairV0(
@@ -144,7 +143,8 @@ object CryptoKeyPair
     } yield pair
 }
 
-trait PublicKey extends CryptoKeyPairKey with HasVersionedWrapper[VersionedMessage[PublicKey]] {
+trait PublicKey extends CryptoKeyPairKey {
+  def toByteString(version: ProtocolVersion): ByteString
 
   def fingerprint: Fingerprint = id
 
@@ -153,9 +153,6 @@ trait PublicKey extends CryptoKeyPairKey with HasVersionedWrapper[VersionedMessa
   def isSigning: Boolean = purpose == KeyPurpose.Signing
 
   override def isPublicKey: Boolean = true
-
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[PublicKey] =
-    VersionedMessage(toProtoPublicKeyV0.toByteString, 0)
 
   protected def toProtoPublicKeyKeyV0: v0.PublicKey.Key
 
@@ -167,7 +164,6 @@ trait PublicKey extends CryptoKeyPairKey with HasVersionedWrapper[VersionedMessa
 }
 
 object PublicKey {
-
   def fromProtoPublicKeyV0(publicKeyP: v0.PublicKey): ParsingResult[PublicKey] =
     publicKeyP.key match {
       case v0.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
@@ -192,13 +188,12 @@ object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
 trait PublicKeyWithName
     extends Product
     with Serializable
-    with HasVersionedWrapper[VersionedMessage[PublicKeyWithName]] {
+    with HasVersionedWrapper[PublicKeyWithName] {
   type K <: PublicKey
   def publicKey: K
   def name: Option[KeyName]
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[PublicKeyWithName] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = PublicKeyWithName
 
   def toProtoV0: v0.PublicKeyWithName =
     v0.PublicKeyWithName(
@@ -209,7 +204,17 @@ trait PublicKeyWithName
     )
 }
 
-object PublicKeyWithName {
+object PublicKeyWithName extends HasVersionedMessageCompanion[PublicKeyWithName] {
+
+  override protected def name: String = "PublicKeyWithName"
+
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.PublicKeyWithName)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
 
   def fromProtoV0(key: v0.PublicKeyWithName): ParsingResult[PublicKeyWithName] =
     for {

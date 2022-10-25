@@ -213,6 +213,7 @@ class SequencerReader(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
+              protocolVersion,
               warnIfApproximate = warnIfApproximate,
             )
             .map(None -> _)
@@ -275,6 +276,7 @@ class SequencerReader(
               signingTimestamp,
               sequencingTimestamp,
               topologyClientTimestampBefore,
+              protocolVersion,
               // This warning should only trigger on unauthenticated members,
               // but batches addressed to unauthenticated members must not specify a signing key timestamp.
               warnIfApproximate = protocolVersion != ProtocolVersion.v2,

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.api.v0
 import com.digitalasset.canton.domain.api.v0.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.domain.api.v0.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -28,6 +27,7 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil
@@ -116,7 +116,7 @@ class GrpcSequencerClientTransport(
 
     response.biflatMap(
       fromGrpcError(_, request.content.messageId).toEitherT,
-      fromResponse(_).toEitherT,
+      fromResponse(_, SendAsyncResponse.fromSendAsyncSignedResponseProto).toEitherT,
     )
   }
 
@@ -138,15 +138,18 @@ class GrpcSequencerClientTransport(
   ): EitherT[Future, SendAsyncClientError, Unit] =
     sendAsyncInternal(request, timeout, requiresAuthentication = false)
 
-  private def fromResponse(responseP: v0.SendAsyncResponse): Either[SendAsyncClientError, Unit] =
+  private def fromResponse[Proto](
+      p: Proto,
+      deserializer: Proto => ParsingResult[SendAsyncResponse],
+  ) = {
     for {
-      response <- SendAsyncResponse
-        .fromProtoV0(responseP)
+      response <- deserializer(p)
         .leftMap[SendAsyncClientError](err =>
           SendAsyncClientError.RequestFailed(s"Failed to deserialize response: $err")
         )
       _ <- response.error.toLeft(()).leftMap(SendAsyncClientError.RequestRefused)
     } yield ()
+  }
 
   private def fromGrpcError(error: GrpcError, messageId: MessageId)(implicit
       traceContext: TraceContext
@@ -187,7 +190,10 @@ class GrpcSequencerClientTransport(
         retryPolicy = retryPolicy(retryOnUnavailable = false),
       )
 
-    response.biflatMap(fromGrpcError(_, request.messageId).toEitherT, fromResponse(_).toEitherT)
+    response.biflatMap(
+      fromGrpcError(_, request.messageId).toEitherT,
+      fromResponse(_, SendAsyncResponse.fromSendAsyncResponseProto).toEitherT,
+    )
   }
 
   override def subscriptionRetryPolicy: SubscriptionErrorRetryPolicy =

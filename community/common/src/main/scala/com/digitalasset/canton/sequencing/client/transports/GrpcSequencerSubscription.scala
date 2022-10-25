@@ -126,7 +126,7 @@ class GrpcSequencerSubscription[E] private[transports] (
   @VisibleForTesting // so unit tests can call onNext, onError and onComplete
   private[transports] val observer = new StreamObserver[v0.SubscriptionResponse] {
     override def onNext(value: v0.SubscriptionResponse): Unit = {
-      metrics.load.metric.syncEvent {
+      metrics.load.syncEvent {
         // we take the unusual step of immediately trying to deserialize the trace-context
         // so it is available here for logging
         implicit val traceContext: TraceContext =

@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.store.db
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String300
 import com.digitalasset.canton.crypto.*
@@ -67,9 +66,9 @@ class DbCryptoPrivateStore(
 
   import storage.api.*
 
-  private val insertTime: Gauge[TimedLoadGauge, Double] =
+  private val insertTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("crypto-private-store-insert")
-  private val queryTime: Gauge[TimedLoadGauge, Double] =
+  private val queryTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("crypto-private-store-query")
 
   private def queryKeys(purpose: KeyPurpose): DbAction.ReadOnly[Set[StoredPrivateKey]] =
@@ -118,7 +117,7 @@ class DbCryptoPrivateStore(
       }
     }
 
-    insertTime.metric.eitherTEvent {
+    insertTime.eitherTEvent {
       for {
         inserted <- EitherT.right(
           storage.update(insertKeyUpdate(key), functionFullName)
@@ -170,12 +169,12 @@ class DbCryptoPrivateStore(
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     insertKey(key)
 
-  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     EitherTUtil
       .fromFuture(
-        queryTime.metric
+        queryTime
           .event(
             storage.query(queryKeys(purpose), functionFullName)
           )
@@ -187,19 +186,19 @@ class DbCryptoPrivateStore(
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     EitherTUtil.fromFuture(
-      insertTime.metric.event(
+      insertTime.event(
         storage
           .update_(sqlu"delete from crypto_private_keys where key_id = $keyId", functionFullName)
       ),
       err => CryptoPrivateStoreError.FailedToDeleteKey(keyId, err.toString),
     )
 
-  private[store] def getWrapperKeyId()(implicit
+  private[crypto] def getWrapperKeyId()(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[String300]] =
     EitherTUtil
       .fromFuture(
-        queryTime.metric
+        queryTime
           .event(
             storage
               .query(

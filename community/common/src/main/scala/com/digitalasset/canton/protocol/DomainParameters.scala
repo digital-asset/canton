@@ -313,6 +313,8 @@ object StaticDomainParameters
   * @param reconciliationInterval The size of the reconciliation interval (minimum duration between two ACS commitments).
   *                               Note: default to [[StaticDomainParameters.defaultReconciliationInterval]] for backward
   *                               compatibility.
+  *                               Should be significantly longer than the period of time it takes to compute the commitment and have it sequenced of the domain.
+  *                               Otherwise, ACS commitments will keep being exchanged continuously on an idle domain.
   * @param maxRatePerParticipant maximum number of messages sent per participant per second
   * @throws DynamicDomainParameters$.InvalidDomainParameters
   *   if `mediatorDeduplicationTimeout` is less than twice of `ledgerTimeRecordTimeTolerance`.

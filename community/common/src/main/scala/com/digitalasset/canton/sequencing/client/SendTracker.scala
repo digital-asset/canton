@@ -88,7 +88,7 @@ class SendTracker(
           )
         case _none => // we're good
       }
-      _ = metrics.submissions.inFlight.metric.increment()
+      _ = metrics.submissions.inFlight.inc()
     } yield ()
   }
 
@@ -164,7 +164,7 @@ class SendTracker(
     def recordSequencingTime(): Unit =
       pendingSend.startedAt foreach { startedAt =>
         val elapsed = java.time.Duration.between(startedAt, Instant.now())
-        metrics.submissions.sequencingTime.metric.update(elapsed)
+        metrics.submissions.sequencingTime.update(elapsed)
       }
 
     result match {
@@ -174,7 +174,7 @@ class SendTracker(
         recordSequencingTime()
       case SendResult.Timeout(_) =>
         // intentionally not updating sequencing time as this implies no event was sequenced from our request
-        metrics.submissions.dropped.metric.inc()
+        metrics.submissions.dropped.inc()
     }
   }
 
@@ -195,7 +195,7 @@ class SendTracker(
 
     for {
       _ <- store.removePendingSend(messageId)
-      _ = metrics.submissions.inFlight.metric.decrement()
+      _ = metrics.submissions.inFlight.dec()
     } yield ()
   }
 

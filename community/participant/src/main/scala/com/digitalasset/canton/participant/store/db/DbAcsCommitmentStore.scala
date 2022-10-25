@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.traverse.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String68
@@ -87,13 +86,13 @@ class DbAcsCommitmentStore(
       )
   )
 
-  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("acs-commitment-store")
 
   override def getComputed(period: CommitmentPeriod, counterParticipant: ParticipantId)(implicit
       traceContext: TraceContext
   ): Future[Iterable[(CommitmentPeriod, AcsCommitment.CommitmentType)]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query = sql"""
         select from_exclusive, to_inclusive, commitment from computed_acs_commitments
           where domain_id = $domainId
@@ -111,7 +110,7 @@ class DbAcsCommitmentStore(
       counterParticipant: ParticipantId,
       commitment: AcsCommitment.CommitmentType,
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
 
       val from = period.fromExclusive
       val to = period.toInclusive
@@ -163,7 +162,7 @@ class DbAcsCommitmentStore(
 
   override def markOutstanding(period: CommitmentPeriod, counterParticipants: Set[ParticipantId])(
       implicit traceContext: TraceContext
-  ): Future[Unit] = processingTime.metric.event {
+  ): Future[Unit] = processingTime.event {
     logger.debug(
       s"Marking $period as outstanding for ${counterParticipants.size} remote participants"
     )
@@ -204,7 +203,7 @@ class DbAcsCommitmentStore(
   override def markComputedAndSent(
       period: CommitmentPeriod
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val timestamp = period.toInclusive
       val upsertQuery = storage.profile match {
         case _: DbStorage.Profile.H2 =>
@@ -236,7 +235,7 @@ class DbAcsCommitmentStore(
       end: CantonTimestamp,
       counterParticipant: Option[ParticipantId],
   )(implicit traceContext: TraceContext): Future[Iterable[(CommitmentPeriod, ParticipantId)]] =
-    processingTime.metric.event {
+    processingTime.event {
       val participantFilter =
         counterParticipant.fold(sql"")(p => sql" and counter_participant = $p")
       import DbStorage.Implicits.BuilderChain.*
@@ -255,7 +254,7 @@ class DbAcsCommitmentStore(
 
   override def storeReceived(
       commitment: SignedProtocolMessage[AcsCommitment]
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     val sender = commitment.message.sender
     val from = commitment.message.period.fromExclusive
     val to = commitment.message.period.toInclusive
@@ -364,14 +363,14 @@ class DbAcsCommitmentStore(
       sortedReconciliationIntervalsProvider: SortedReconciliationIntervalsProvider,
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = processingTime.metric.event {
+  ): Future[Unit] = processingTime.event {
     def dbQueries(
         sortedReconciliationIntervals: SortedReconciliationIntervals
     ): DBIOAction[Unit, NoStream, Effect.All] = {
       def containsTick(commitmentPeriod: CommitmentPeriod): Boolean = sortedReconciliationIntervals
         .containsTick(
-          commitmentPeriod.fromExclusive.forgetSecond,
-          commitmentPeriod.toInclusive.forgetSecond,
+          commitmentPeriod.fromExclusive.forgetRefinement,
+          commitmentPeriod.toInclusive.forgetRefinement,
         )
         .getOrElse {
           logger.warn(s"Unable to determine whether $commitmentPeriod contains a tick.")
@@ -453,7 +452,7 @@ class DbAcsCommitmentStore(
   override def doPrune(
       before: CantonTimestamp
   )(implicit traceContext: TraceContext): EitherT[Future, AcsCommitmentStoreError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       EitherT.right(
         storage.update_(
           for {
@@ -470,7 +469,7 @@ class DbAcsCommitmentStore(
   override def lastComputedAndSent(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestampSecond]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"select ts from last_computed_acs_commitments where domain_id = $domainId"
           .as[CantonTimestampSecond]
@@ -481,10 +480,10 @@ class DbAcsCommitmentStore(
 
   override def noOutstandingCommitments(beforeOrAt: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Option[CantonTimestamp]] = processingTime.metric.event {
+  ): Future[Option[CantonTimestamp]] = processingTime.event {
     for {
       computed <- lastComputedAndSent
-      adjustedTsOpt = computed.map(_.forgetSecond.min(beforeOrAt))
+      adjustedTsOpt = computed.map(_.forgetRefinement.min(beforeOrAt))
       outstandingOpt <- adjustedTsOpt.traverse { ts =>
         storage.query(
           sql"select from_exclusive, to_inclusive from outstanding_acs_commitments where domain_id=$domainId and from_exclusive < $ts"
@@ -508,7 +507,7 @@ class DbAcsCommitmentStore(
   )(implicit
       traceContext: TraceContext
   ): Future[Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.CommitmentType)]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query = counterParticipant match {
         case Some(p) =>
           sql"""select from_exclusive, to_inclusive, counter_participant, commitment
@@ -531,7 +530,7 @@ class DbAcsCommitmentStore(
       end: CantonTimestamp,
       counterParticipant: Option[ParticipantId],
   )(implicit traceContext: TraceContext): Future[Iterable[SignedProtocolMessage[AcsCommitment]]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query = counterParticipant match {
         case Some(p) =>
           sql"""select signed_commitment
@@ -578,7 +577,7 @@ class DbIncrementalCommitmentStore(
   import storage.api.*
   import storage.converters.*
 
-  protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("acs-snapshot-store")
 
   private implicit val setParameterStoredParties: SetParameter[StoredParties] =
@@ -587,7 +586,7 @@ class DbIncrementalCommitmentStore(
   override def get()(implicit
       traceContext: TraceContext
   ): Future[(RecordTime, Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType])] =
-    processingTime.metric.event {
+    processingTime.event {
       for {
         res <- storage.query(
           (for {
@@ -615,7 +614,7 @@ class DbIncrementalCommitmentStore(
     }
 
   override def watermark(implicit traceContext: TraceContext): Future[RecordTime] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sql"""select ts, tie_breaker from commitment_snapshot_time where domain_id=$domainId"""
           .as[(CantonTimestamp, Long)]
@@ -741,7 +740,7 @@ class DbCommitmentQueue(
   private implicit val acsCommitmentReader =
     AcsCommitment.getAcsCommitmentResultReader(domainId.item, protocolVersion)
 
-  protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("acs-commitment-queue")
 
   override def enqueue(
@@ -762,7 +761,7 @@ class DbCommitmentQueue(
                on conflict do nothing"""
     }
 
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(insertAction, operationName = "enqueue commitment")
     }
   }
@@ -773,7 +772,7 @@ class DbCommitmentQueue(
     */
   override def peekThrough(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[List[AcsCommitment]] = processingTime.metric.event {
+  ): Future[List[AcsCommitment]] = processingTime.event {
     storage
       .query(
         sql"""select sender, counter_participant, from_exclusive, to_inclusive, commitment
@@ -789,7 +788,7 @@ class DbCommitmentQueue(
   override def deleteThrough(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"delete from commitment_queue where domain_id = $domainId and to_inclusive <= $timestamp",
         operationName = "delete queued commitments",

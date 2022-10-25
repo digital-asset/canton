@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -35,12 +34,12 @@ class DbRegisteredDomainsStore(
   import DomainId.*
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("registered-domains-store")
 
   override def addMapping(alias: DomainAlias, domainId: DomainId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, Error, Unit] = processingTime.metric.eitherTEvent {
+  ): EitherT[Future, Error, Unit] = processingTime.eitherTEvent {
     EitherT {
       val insert = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
@@ -107,7 +106,7 @@ class DbRegisteredDomainsStore(
   override def aliasToDomainIdMap(implicit
       traceContext: TraceContext
   ): Future[Map[DomainAlias, DomainId]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           sql"select alias, domain_id from participant_domains"

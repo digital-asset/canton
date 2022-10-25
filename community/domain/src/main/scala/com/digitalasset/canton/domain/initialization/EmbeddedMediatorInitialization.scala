@@ -82,6 +82,7 @@ object EmbeddedMediatorInitialization {
         TopologyTransactionProcessor.createProcessorAndClientForDomain(
           mediatorTopologyStore,
           id,
+          protocolVersion,
           crypto.pureCrypto,
           Map(),
           cantonParameterConfig,

@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.data.MerkleTree.RevealIfNeedBe
+import com.digitalasset.canton.data.{RichFullInformeeTree, RichInformeeTree}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.{Recipients, RecipientsTree}
 import com.digitalasset.canton.topology.transaction.{
@@ -51,7 +52,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           }
       }
 
-      val fullInformeeTree = transactionTree.fullInformeeTree
+      val fullInformeeTree = transactionTree.tryFullInformeeTree(testedProtocolVersion)
 
       val expectedInformeesAndThresholdByView = example.viewWithSubviews.map { case (view, _) =>
         val viewCommonData = view.viewCommonData.tryUnwrap
@@ -70,9 +71,10 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       "compute the full informee tree" in {
         fullInformeeTree should equal(example.fullInformeeTree)
 
-        fullInformeeTree.informeeTreeUnblindedFor(example.allInformees) should equal(
-          example.fullInformeeTree.toInformeeTree
-        )
+        fullInformeeTree.informeeTreeUnblindedFor(
+          example.allInformees,
+          testedProtocolVersion,
+        ) should equal(example.fullInformeeTree.toInformeeTree)
 
         fullInformeeTree.informeesAndThresholdByView shouldEqual expectedInformeesAndThresholdByView
       }
@@ -80,7 +82,9 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
       "compute a partially blinded informee tree" in {
         val (parties, expectedInformeeTree) = example.informeeTreeBlindedFor
 
-        fullInformeeTree.informeeTreeUnblindedFor(parties) should equal(expectedInformeeTree)
+        fullInformeeTree.informeeTreeUnblindedFor(parties, testedProtocolVersion) should equal(
+          expectedInformeeTree
+        )
 
         val expectedInformeesByView = expectedInformeesAndThresholdByView
           .map { case (viewHash, (informees, _)) => viewHash -> informees }
@@ -93,16 +97,14 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 
       "be serialized and deserialized" in {
         val fullInformeeTree = example.fullInformeeTree
-        FullInformeeTree
-          .fromByteString(factory.cryptoOps)(
-            fullInformeeTree.toByteString(testedProtocolVersion)
-          ) shouldEqual Right(fullInformeeTree)
+        FullInformeeTree.fromByteString(factory.cryptoOps)(
+          fullInformeeTree.toByteString
+        ) shouldEqual Right(fullInformeeTree)
 
         val (_, informeeTree) = example.informeeTreeBlindedFor
-        InformeeTree
-          .fromByteString(factory.cryptoOps)(
-            informeeTree.toByteString(testedProtocolVersion)
-          ) shouldEqual Right(informeeTree)
+        InformeeTree.fromByteString(factory.cryptoOps)(informeeTree.toByteString) shouldEqual Right(
+          informeeTree
+        )
 
         forAll(example.transactionTree.allLightTransactionViewTrees) { lt =>
           LightTransactionViewTree.fromByteString(example.cryptoOps)(
@@ -358,13 +360,15 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
         val globalMetadataIncorrectlyBlinded1 =
           corruptGlobalMetadataBlinding(example.informeeTreeBlindedFor._2.tree)
         InformeeTree.create(
-          globalMetadataIncorrectlyBlinded1
+          globalMetadataIncorrectlyBlinded1,
+          testedProtocolVersion,
         ) shouldEqual corruptedGlobalMetadataMessage
 
         val globalMetadataIncorrectlyBlinded2 =
           corruptGlobalMetadataBlinding(example.fullInformeeTree.tree)
         FullInformeeTree.create(
-          globalMetadataIncorrectlyBlinded2
+          globalMetadataIncorrectlyBlinded2,
+          testedProtocolVersion,
         ) shouldEqual corruptedGlobalMetadataMessage
       }
     }
@@ -389,12 +393,12 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           "The view participant data in an informee tree must be blinded\\. Found .*\\."
 
         InformeeTree
-          .create(treeWithViewMetadataUnblinded)
+          .create(treeWithViewMetadataUnblinded, testedProtocolVersion)
           .left
           .value should fullyMatch regex corruptedViewMetadataMessage
 
         FullInformeeTree
-          .create(treeWithViewMetadataUnblinded)
+          .create(treeWithViewMetadataUnblinded, testedProtocolVersion)
           .left
           .value should fullyMatch regex corruptedViewMetadataMessage
       }
@@ -407,10 +411,11 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 
     "a view is blinded" should {
       "reject creation" in {
-        val allBlinded = example.fullInformeeTree.informeeTreeUnblindedFor(Set.empty).tree
+        val allBlinded =
+          example.fullInformeeTree.informeeTreeUnblindedFor(Set.empty, testedProtocolVersion).tree
 
         FullInformeeTree
-          .create(allBlinded)
+          .create(allBlinded, testedProtocolVersion)
           .left
           .value should fullyMatch regex "(?s)All views in a full informee tree must be unblinded\\. Found .*\\."
       }
@@ -435,7 +440,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
           )(factory.cryptoOps)
 
         FullInformeeTree
-          .create(viewCommonDataBlinded)
+          .create(viewCommonDataBlinded, testedProtocolVersion)
           .left
           .value should fullyMatch regex "(?s)The view common data in a full informee tree must be unblinded\\. Found .*\\.\n" +
           "The view common data in a full informee tree must be unblinded\\. Found .*\\."
@@ -514,7 +519,7 @@ class GenTransactionTreeTest extends AnyWordSpec with BaseTest with HasExecution
 }
 
 object GenTransactionTreeTest {
-  def party(i: Int): LfPartyId = LfPartyId.assertFromString(s"party$i::1")
-  def informee(i: Int): Informee = PlainInformee(party(i))
-  def participant(i: Int): ParticipantId = ParticipantId(s"participant$i")
+  private[data] def party(i: Int): LfPartyId = LfPartyId.assertFromString(s"party$i::1")
+  private[data] def informee(i: Int): Informee = PlainInformee(party(i))
+  private[data] def participant(i: Int): ParticipantId = ParticipantId(s"participant$i")
 }

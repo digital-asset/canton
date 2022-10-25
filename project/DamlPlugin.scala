@@ -1,14 +1,14 @@
 import java.io.{File, FileReader, FileWriter, IOException}
-import java.util.{Map as JMap}
+import java.util.{Map => JMap}
 
 import com.esotericsoftware.yamlbeans.{YamlReader, YamlWriter}
-import sbt.Keys.*
+import sbt.Keys._
 import sbt.util.CacheStoreFactory
 import sbt.util.FileFunction.UpdateFunction
-import sbt.{Def, *}
+import sbt.{Def, _}
 
 import scala.collection.mutable
-import scala.sys.process.*
+import scala.sys.process._
 import scala.util.{Failure, Success, Try}
 
 object DamlPlugin extends AutoPlugin {
@@ -195,7 +195,7 @@ object DamlPlugin extends AutoPlugin {
     )
   }
 
-  import autoImport.*
+  import autoImport._
 
   class BufferedLogger extends ProcessLogger {
     private val buffer = mutable.Buffer[String]()

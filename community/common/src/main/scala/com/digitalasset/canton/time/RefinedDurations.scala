@@ -198,6 +198,11 @@ final case class PositiveSeconds(duration: Duration) extends RefinedDuration wit
   override def pretty: Pretty[PositiveSeconds.this.type] = prettyOfParam(_.duration)
 
   def toConfig: ConfigPositiveSeconds = checked(ConfigPositiveSeconds.tryFromJavaDuration(duration))
+
+  def add(i: NonNegativeSeconds): PositiveSeconds = {
+    val newDuration = duration.plus(i.duration)
+    checked(PositiveSeconds(newDuration))
+  }
 }
 
 object PositiveSeconds extends RefinedDurationCompanion[PositiveSeconds] {

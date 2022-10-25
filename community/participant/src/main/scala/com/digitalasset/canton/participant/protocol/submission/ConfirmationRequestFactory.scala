@@ -119,7 +119,7 @@ class ConfirmationRequestFactory(
         )
       }
       ConfirmationRequest(
-        InformeeMessage(transactionTree.fullInformeeTree)(protocolVersion),
+        InformeeMessage(transactionTree.tryFullInformeeTree(protocolVersion))(protocolVersion),
         transactionViewEnvelopes,
         protocolVersion,
       )

@@ -28,6 +28,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.ConcurrentModificationException
 import java.util.concurrent.atomic.AtomicReference
@@ -187,6 +188,7 @@ object SequencedEventValidator extends HasLoggerName {
       signingTimestamp: CantonTimestamp,
       sequencingTimestamp: CantonTimestamp,
       latestTopologyClientTimestamp: Option[CantonTimestamp],
+      protocolVersion: ProtocolVersion,
       warnIfApproximate: Boolean,
       optimistic: Boolean = false,
   )(implicit
@@ -199,6 +201,7 @@ object SequencedEventValidator extends HasLoggerName {
       syncCryptoApi,
       signingTimestamp,
       latestTopologyClientTimestamp,
+      protocolVersion,
       warnIfApproximate,
     )
 
@@ -319,6 +322,7 @@ class SequencedEventValidatorImpl(
     optimistic: Boolean,
     domainId: DomainId,
     sequencerId: SequencerId,
+    protocolVersion: ProtocolVersion,
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -379,7 +383,7 @@ class SequencedEventValidatorImpl(
       // Otherwise, this is a fresh subscription and we will get the topology state with the first transaction
       // TODO(#4933) Upon a fresh subscription, retrieve the keys via the topology API and validate immediately or
       //  validate the signature after processing the initial event
-      _ <- verifySignature(priorEventO, event)
+      _ <- verifySignature(priorEventO, event, protocolVersion)
     } yield updatePriorEvent(priorEventO, event)
   }
 
@@ -445,7 +449,7 @@ class SequencedEventValidatorImpl(
           checkFork,
         ).sequence_
       )
-      _ <- verifySignature(Some(priorEvent), reconnectEvent)
+      _ <- verifySignature(Some(priorEvent), reconnectEvent, protocolVersion)
     } yield ()
     // do not update the priorEvent because if it was ignored, then it was ignored for a reason.
   }
@@ -458,6 +462,7 @@ class SequencedEventValidatorImpl(
   private def verifySignature(
       priorEventO: Option[PossiblyIgnoredSerializedEvent],
       event: OrdinarySerializedEvent,
+      protocolVersion: ProtocolVersion,
   ): EitherT[Future, SequencedEventValidationError, Unit] = {
     implicit val traceContext: TraceContext = event.traceContext
     if (unauthenticated) {
@@ -487,6 +492,7 @@ class SequencedEventValidatorImpl(
               signingTs,
               event.timestamp,
               lastTopologyClientTimestamp(priorEventO),
+              protocolVersion,
               warnIfApproximate = true,
               optimistic,
             )

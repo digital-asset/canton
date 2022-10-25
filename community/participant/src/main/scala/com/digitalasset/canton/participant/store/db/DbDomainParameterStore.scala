@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.TimedLoadGauge
@@ -29,7 +28,7 @@ class DbDomainParameterStore(
   import storage.api.*
   import storage.converters.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("domain-parameter-store")
 
   private implicit val setParameterStaticDomainParameters: SetParameter[StaticDomainParameters] =
@@ -38,7 +37,7 @@ class DbDomainParameterStore(
   def setParameters(
       newParameters: StaticDomainParameters
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    processingTime.metric.event {
+    processingTime.event {
       // We do not check equality of the parameters on the serialized format in the DB query because serialization may
       // be different even though the parameters are the same
       val query = storage.profile match {
@@ -78,7 +77,7 @@ class DbDomainParameterStore(
   def lastParameters(implicit
       traceContext: TraceContext
   ): Future[Option[StaticDomainParameters]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           sql"select params from static_domain_parameters where domain_id=$domainId"

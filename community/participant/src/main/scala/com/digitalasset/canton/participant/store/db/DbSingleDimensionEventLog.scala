@@ -7,7 +7,6 @@ import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -45,7 +44,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   import storage.api.*
   import storage.converters.*
 
-  protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("single-dimension-event-log")
 
   private def log_id: Int = id.index
@@ -80,7 +79,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   private def idempotentInserts(
       events: Seq[TimestampedEventAndCausalChange]
   )(implicit traceContext: TraceContext): Future[List[Either[TimestampedEvent, Unit]]] =
-    processingTime.metric.event {
+    processingTime.event {
       for {
         rowCounts <- rawInserts(events)
         _ = ErrorUtil.requireState(
@@ -149,7 +148,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       }
     }
     eventsWithAssociatedDomainIdF.flatMap { eventsWithAssociatedDomainId =>
-      processingTime.metric.event {
+      processingTime.event {
         val dbio = storage.profile match {
           case _: DbStorage.Profile.Oracle =>
             val query =
@@ -218,7 +217,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   override def prune(
       beforeAndIncluding: LocalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"""delete from event_log where log_id = $log_id and local_offset <= $beforeAndIncluding""",
         functionFullName,
@@ -235,7 +234,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       traceContext: TraceContext
   ): Future[SortedMap[LocalOffset, TimestampedEventAndCausalChange]] = {
 
-    processingTime.metric.event {
+    processingTime.event {
       DbSingleDimensionEventLog.lookupEventRange(
         storage,
         id,
@@ -255,7 +254,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       CausalityUpdate.hasVersionedWrapperGetResultO
     import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
 
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       storage
         .querySingle(
           sql"""select /*+ INDEX (event_log pk_event_log) */ 
@@ -271,7 +270,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   }
 
   override def lastOffset(implicit traceContext: TraceContext): OptionT[Future, LocalOffset] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       storage.querySingle(
         sql"""select local_offset from event_log where log_id = $log_id order by local_offset desc #${storage
             .limit(1)}"""
@@ -288,7 +287,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       CausalityUpdate.hasVersionedWrapperGetResultO
     import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
 
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       storage
         .querySingle(
           sql"""select local_offset, request_sequencer_counter, event_id, content, trace_context, causality_update
@@ -304,7 +303,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   override def existsBetween(
       timestampInclusive: CantonTimestamp,
       localOffsetInclusive: LocalOffset,
-  )(implicit traceContext: TraceContext): Future[Boolean] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Boolean] = processingTime.event {
     val query =
       sql"""
         select 1 from event_log where log_id = $log_id and local_offset <= $localOffsetInclusive and ts >= $timestampInclusive
@@ -318,7 +317,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
   override def deleteSince(
       inclusive: LocalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"""delete from event_log where log_id = $log_id and local_offset >= $inclusive""",
         functionFullName,

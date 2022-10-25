@@ -4,8 +4,7 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.codahale.{metrics as codahale}
-import com.daml.metrics.MetricHandle.{Gauge, Meter, VarGauge}
+import com.daml.metrics.MetricHandle.{DropwizardGauge, Gauge, Meter}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.metrics.{
   DbStorageMetrics,
@@ -26,7 +25,7 @@ class SequencerMetrics(parent: MetricName, val registry: MetricRegistry)
       """This metric indicates the number of active subscriptions currently open and actively
         |served subscriptions at the sequencer.""",
   )
-  val subscriptionsGauge: VarGauge[Int] = varGauge(MetricName(prefix :+ "subscriptions"), 0)
+  val subscriptionsGauge: Gauge[Int] = gauge[Int](MetricName(prefix :+ "subscriptions"), 0)
   @MetricDoc.Tag(
     summary = "Number of messages processed by the sequencer",
     description = """This metric measures the number of successfully validated messages processed
@@ -61,22 +60,19 @@ object SequencerMetrics {
 class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Factory {
   override def prefix: MetricName = MetricName("env")
 
-  private val executionContextQueueSizeName = prefix :+ "execution-context" :+ "queue-size"
+  val executionContextQueueSizeName: MetricName = prefix :+ "execution-context" :+ "queue-size"
   @MetricDoc.Tag(
     summary = "Gives the number size of the global execution context queue",
     description = """This execution context is shared across all nodes running on the JVM""",
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  private val executionContextQueueSizeDoc: Gauge[codahale.Gauge[Int], Int] = // For docs only
-    Gauge(executionContextQueueSizeName, null)
+  private val executionContextQueueSizeDoc: Gauge[Long] = // For docs only
+    DropwizardGauge(executionContextQueueSizeName, null)
 
-  def registerExecutionContextQueueSize(f: () => Int): Gauge[codahale.Gauge[Int], Int] = {
+  def registerExecutionContextQueueSize(f: () => Long): Unit = {
     gaugeWithSupplier(
       executionContextQueueSizeName,
-      () =>
-        new codahale.Gauge[Int] {
-          override def getValue: Int = f()
-        },
+      () => f,
     )
   }
 
@@ -113,7 +109,7 @@ class MediatorMetrics(basePrefix: MetricName, override val registry: MetricRegis
     description = """This metric provides the number of currently open requests registered
                     |with the mediator.""",
   )
-  val outstanding: VarGauge[Int] = this.varGauge(prefix :+ "outstanding-requests", 0)
+  val outstanding: Gauge[Int] = this.gauge(prefix :+ "outstanding-requests", 0)
 
   @MetricDoc.Tag(
     summary = "Number of totally processed requests",

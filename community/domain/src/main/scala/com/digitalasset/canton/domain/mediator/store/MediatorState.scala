@@ -52,7 +52,7 @@ private[mediator] class MediatorState(
   private val evictionQueueCount = new AtomicInteger(0)
   private val MAX_FINISHED_REQUESTS = 1000
 
-  private def updateNumRequests(num: Int): Unit = metrics.outstanding.metric.updateValue(_ + num)
+  private def updateNumRequests(num: Int): Unit = metrics.outstanding.updateValue(_ + num)
 
   /** Adds an incoming ResponseAggregation */
   def add(
@@ -66,7 +66,7 @@ private[mediator] class MediatorState(
         s"Unexpected pre-existing request for $requestId",
       )
 
-      metrics.requests.metric.mark()
+      metrics.requests.mark()
       updateNumRequests(1)
       Future.unit
     } else

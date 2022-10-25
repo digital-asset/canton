@@ -16,7 +16,6 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -67,8 +66,7 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]]
 
-  @VisibleForTesting
-  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]]
 

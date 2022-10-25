@@ -12,9 +12,10 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.digitalasset.canton.{LfPartyId, LfVersioned, checked}
 
@@ -28,7 +29,7 @@ case class ContractMetadata private (
     signatories: Set[LfPartyId],
     stakeholders: Set[LfPartyId],
     maybeKeyWithMaintainersVersioned: Option[LfVersioned[LfGlobalKeyWithMaintainers]],
-) extends HasVersionedWrapper[VersionedMessage[ContractMetadata]]
+) extends HasVersionedWrapper[ContractMetadata]
     with PrettyPrinting {
 
   {
@@ -42,6 +43,8 @@ case class ContractMetadata private (
       )
   }
 
+  override protected def companionObj = ContractMetadata
+
   def maybeKeyWithMaintainers: Option[LfGlobalKeyWithMaintainers] =
     maybeKeyWithMaintainersVersioned.map(_.unversioned)
 
@@ -49,9 +52,6 @@ case class ContractMetadata private (
 
   def maintainers: Set[LfPartyId] =
     maybeKeyWithMaintainers.fold(Set.empty[LfPartyId])(_.maintainers)
-
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[ContractMetadata] =
-    VersionedMessage(toProtoV0.toByteString, 0)
 
   def toProtoV0: v0.SerializableContract.Metadata = {
     v0.SerializableContract.Metadata(
@@ -74,9 +74,15 @@ case class ContractMetadata private (
   )
 }
 
-object ContractMetadata extends HasVersionedMessageCompanion[ContractMetadata] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SerializableContract.Metadata)(fromProtoV0)
+object ContractMetadata
+    extends HasVersionedMessageCompanion[ContractMetadata]
+    with HasVersionedMessageCompanionDbHelpers[ContractMetadata] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SerializableContract.Metadata)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "contract metadata"

@@ -144,7 +144,7 @@ class InMemoryCryptoPrivateStore(
     } yield res
   }
 
-  private[store] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     (purpose match {

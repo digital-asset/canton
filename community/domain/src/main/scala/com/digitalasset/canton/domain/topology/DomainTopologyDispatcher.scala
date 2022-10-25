@@ -90,6 +90,7 @@ import scala.util.{Failure, Success}
   */
 private[domain] class DomainTopologyDispatcher(
     domainId: DomainId,
+    protocolVersion: ProtocolVersion,
     authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
     processor: TopologyTransactionProcessor,
     initialKeys: Map[KeyOwner, Seq[PublicKey]],
@@ -114,6 +115,7 @@ private[domain] class DomainTopologyDispatcher(
     new StoreBasedDomainTopologyClient(
       clock,
       domainId,
+      protocolVersion,
       authorizedStore,
       SigningPublicKey.collect(initialKeys),
       StoreBasedDomainTopologyClient.NoPackageDependencies,
@@ -542,6 +544,7 @@ private[domain] object DomainTopologyDispatcher {
 
     val dispatcher = new DomainTopologyDispatcher(
       domainId,
+      domainTopologyManager.protocolVersion,
       domainTopologyManager.store,
       processor,
       initialKeys,

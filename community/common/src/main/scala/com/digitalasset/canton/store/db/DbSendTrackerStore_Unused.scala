@@ -4,7 +4,6 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -28,7 +27,7 @@ class DbSendTrackerStore_Unused(
 ) extends SendTrackerStore
     with DbStore {
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("send-tracker-store")
 
   import storage.api.*
@@ -36,7 +35,7 @@ class DbSendTrackerStore_Unused(
   override def savePendingSend(messageId: MessageId, maxSequencingTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SavePendingSendError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       for {
         rowsUpdated <- EitherT.right(
           storage.update(
@@ -81,7 +80,7 @@ class DbSendTrackerStore_Unused(
   override def fetchPendingSends(implicit
       traceContext: TraceContext
   ): Future[Map[MessageId, CantonTimestamp]] =
-    processingTime.metric.event {
+    processingTime.event {
       for {
         items <- storage.query(
           sql"select message_id, max_sequencing_time from sequencer_client_pending_sends where client = $client"
@@ -94,7 +93,7 @@ class DbSendTrackerStore_Unused(
   override def removePendingSend(
       messageId: MessageId
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"delete from sequencer_client_pending_sends where client = $client and message_id = $messageId",
         functionFullName,

@@ -58,13 +58,14 @@ class MediatorStateTest extends AsyncWordSpec with BaseTest {
         new UUID(0, 0),
         testedProtocolVersion,
       )
-      FullInformeeTree(
+      FullInformeeTree.tryCreate(
         GenTransactionTree(hashOps)(
           BlindedNode(rh(11)),
           commonMetadata,
           BlindedNode(rh(12)),
           MerkleSeq.fromSeq(hashOps)(view :: Nil, testedProtocolVersion),
-        )
+        ),
+        testedProtocolVersion,
       )
     }
     val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)

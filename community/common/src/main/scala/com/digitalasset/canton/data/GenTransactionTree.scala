@@ -43,13 +43,13 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.version.{
   HasMemoizedProtocolVersionedWithContextCompanion,
+  HasProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   HasVersionedMessageWithContextCompanion,
   HasVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 
@@ -113,7 +113,7 @@ case class GenTransactionTree(
   /** Yields the full informee tree corresponding to this transaction tree.
     * The resulting informee tree is full, only if every view common data is unblinded.
     */
-  def fullInformeeTree: FullInformeeTree = {
+  def tryFullInformeeTree(protocolVersion: ProtocolVersion): FullInformeeTree = {
     val tree = blind({
       case _: GenTransactionTree => RevealIfNeedBe
       case _: SubmitterMetadata => BlindSubtree
@@ -123,7 +123,7 @@ case class GenTransactionTree(
       case _: ViewCommonData => RevealSubtree
       case _: ViewParticipantData => BlindSubtree
     }).tryUnwrap
-    FullInformeeTree(tree)
+    FullInformeeTree.tryCreate(tree, protocolVersion)
   }
 
   /** Yields the transaction view tree corresponding to a given view.
@@ -403,14 +403,6 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
     tree.rootViews.unblindedElementsWithIndex
   )
 
-  lazy val participantView: ParticipantTransactionView = ParticipantTransactionView
-    .create(view)
-    .valueOr(e =>
-      throw new IllegalStateException(
-        s"Transaction view tree doesn't contain a participant view: $e"
-      )
-    )
-
   lazy val flatten: Seq[ParticipantTransactionView] = view.flatten.map(sv =>
     ParticipantTransactionView
       .create(sv)
@@ -422,9 +414,6 @@ case class TransactionViewTree(tree: GenTransactionTree) extends ViewTree with P
   )
 
   override val viewHash: ViewHash = ViewHash.fromRootHash(view.rootHash)
-
-  /** The direct proper subviews of [[view]] */
-  val subviewsOfView: Seq[TransactionView] = view.subviews.map(_.tryUnwrap)
 
   /** Determines whether `view` is top-level. */
   val isTopLevel: Boolean = viewPosition.position.sizeCompare(1) == 0
@@ -495,12 +484,14 @@ object TransactionViewTree {
   *
   * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
-case class InformeeTree(tree: GenTransactionTree)
-    extends HasVersionedWrapper[VersionedMessage[InformeeTree]] {
+case class InformeeTree private (tree: GenTransactionTree)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree]
+) extends HasProtocolVersionedWrapper[InformeeTree] {
 
   InformeeTree.checkGlobalMetadata(tree)
-
   InformeeTree.checkViews(tree.rootViews, assertFull = false)
+
+  override protected def companionObj = InformeeTree
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
@@ -515,38 +506,50 @@ case class InformeeTree(tree: GenTransactionTree)
 
   def mediatorId: MediatorId = commonMetadata.mediatorId
 
-  /** @throws InformeeTree$.InvalidInformeeTree if this is not a full informee tree (i.e. the wrong nodes are blinded)
-    */
-  lazy val tryToFullInformeeTree: FullInformeeTree = FullInformeeTree(tree)
+  def toProtoV0: v0.InformeeTree = v0.InformeeTree(tree = Some(tree.toProtoV0))
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[InformeeTree] = {
-    if (version >= ProtocolVersion.v4) {
-      VersionedMessage(toProtoV1.toByteString, 1)
-    } else {
-      VersionedMessage(toProtoV0.toByteString, 0)
-    }
-  }
-
-  def toProtoV0: v0.InformeeTree =
-    v0.InformeeTree(tree = Some(tree.toProtoV0))
-
-  def toProtoV1: v1.InformeeTree =
-    v1.InformeeTree(tree = Some(tree.toProtoV1))
+  def toProtoV1: v1.InformeeTree = v1.InformeeTree(tree = Some(tree.toProtoV1))
 }
 
-object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree, HashOps] {
+object InformeeTree extends HasProtocolVersionedWithContextCompanion[InformeeTree, HashOps] {
   override val name: String = "InformeeTree"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.InformeeTree)(fromProtoV0),
-    1 -> supportedProtoVersion(v1.InformeeTree)(fromProtoV1),
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.InformeeTree)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    ProtoVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.InformeeTree)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
+
+  def tryCreate(
+      tree: GenTransactionTree,
+      protocolVersion: ProtocolVersion,
+  ): InformeeTree = InformeeTree(tree)(protocolVersionRepresentativeFor(protocolVersion))
 
   /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
     * Yields `Left(...)` if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
     */
-  def create(tree: GenTransactionTree): Either[String, InformeeTree] =
-    Either.catchOnly[InvalidInformeeTree](InformeeTree(tree)).leftMap(_.message)
+  private[data] def create(
+      tree: GenTransactionTree,
+      representativeProtocolVersion: RepresentativeProtocolVersion[InformeeTree],
+  ): Either[String, InformeeTree] =
+    Either
+      .catchOnly[InvalidInformeeTree](InformeeTree(tree)(representativeProtocolVersion))
+      .leftMap(_.message)
+
+  /** Creates an [[InformeeTree]] from a [[GenTransactionTree]].
+    * Yields `Left(...)` if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
+    */
+  private[data] def create(
+      tree: GenTransactionTree,
+      protocolVersion: ProtocolVersion,
+  ): Either[String, InformeeTree] = create(tree, protocolVersionRepresentativeFor(protocolVersion))
 
   private[data] def checkGlobalMetadata(tree: GenTransactionTree): Unit = {
     val errors = Seq.newBuilder[String]
@@ -614,7 +617,7 @@ object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
       informeeTree <- InformeeTree
-        .create(tree)
+        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(0)))
         .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
     } yield informeeTree
 
@@ -626,7 +629,7 @@ object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
       informeeTree <- InformeeTree
-        .create(tree)
+        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(1)))
         .leftMap(e => ProtoDeserializationError.OtherError(s"Unable to create informee tree: $e"))
     } yield informeeTree
 }
@@ -635,13 +638,16 @@ object InformeeTree extends HasVersionedMessageWithContextCompanion[InformeeTree
   *
   * @throws InformeeTree$.InvalidInformeeTree if `tree` is not a valid informee tree (i.e. the wrong nodes are blinded)
   */
-case class FullInformeeTree(tree: GenTransactionTree)
-    extends HasVersionedWrapper[VersionedMessage[FullInformeeTree]]
+case class FullInformeeTree private (tree: GenTransactionTree)(
+    val representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree]
+) extends HasProtocolVersionedWrapper[FullInformeeTree]
     with PrettyPrinting {
 
   InformeeTree.checkGlobalMetadata(tree)
 
   InformeeTree.checkViews(tree.rootViews, assertFull = true)
+
+  override protected def companionObj = FullInformeeTree
 
   lazy val transactionId: TransactionId = TransactionId.fromRootHash(tree.rootHash)
 
@@ -652,7 +658,10 @@ case class FullInformeeTree(tree: GenTransactionTree)
   /** Yields the informee tree unblinded for a defined set of parties.
     * If a view common data is already blinded, then it remains blinded even if one of the given parties is a stakeholder.
     */
-  def informeeTreeUnblindedFor(parties: collection.Set[LfPartyId]): InformeeTree = {
+  def informeeTreeUnblindedFor(
+      parties: collection.Set[LfPartyId],
+      protocolVersion: ProtocolVersion,
+  ): InformeeTree = {
     val rawResult = tree
       .blind({
         case _: GenTransactionTree => RevealIfNeedBe
@@ -668,10 +677,8 @@ case class FullInformeeTree(tree: GenTransactionTree)
         case _: ViewParticipantData => BlindSubtree
       })
       .tryUnwrap
-    InformeeTree(rawResult)
+    InformeeTree.tryCreate(rawResult, protocolVersion)
   }
-
-  lazy val toInformeeTree: InformeeTree = InformeeTree(tree)
 
   lazy val informeesAndThresholdByView: Map[ViewHash, (Set[Informee], NonNegativeInt)] =
     InformeeTree.viewCommonDataByView(tree).map { case (hash, viewCommonData) =>
@@ -690,14 +697,6 @@ case class FullInformeeTree(tree: GenTransactionTree)
     tree.commonMetadata.tryUnwrap
   ).confirmationPolicy
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[FullInformeeTree] = {
-    if (version >= ProtocolVersion.v4) {
-      VersionedMessage(toProtoV1.toByteString, 1)
-    } else {
-      VersionedMessage(toProtoV0.toByteString, 0)
-    }
-  }
-
   def toProtoV0: v0.FullInformeeTree =
     v0.FullInformeeTree(tree = Some(tree.toProtoV0))
 
@@ -707,16 +706,39 @@ case class FullInformeeTree(tree: GenTransactionTree)
   override def pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 }
 
-object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInformeeTree, HashOps] {
+object FullInformeeTree
+    extends HasProtocolVersionedWithContextCompanion[FullInformeeTree, HashOps] {
   override val name: String = "FullInformeeTree"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.FullInformeeTree)(fromProtoV0),
-    1 -> supportedProtoVersion(v1.FullInformeeTree)(fromProtoV1),
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> VersionedProtoConverter(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.FullInformeeTree)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    ProtoVersion(1) -> VersionedProtoConverter(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.FullInformeeTree)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
-  def create(tree: GenTransactionTree): Either[String, FullInformeeTree] =
-    Either.catchOnly[InvalidInformeeTree](FullInformeeTree(tree)).leftMap(_.message)
+  def tryCreate(tree: GenTransactionTree, protocolVersion: ProtocolVersion): FullInformeeTree =
+    FullInformeeTree(tree)(protocolVersionRepresentativeFor(protocolVersion))
+
+  private[data] def create(
+      tree: GenTransactionTree,
+      representativeProtocolVersion: RepresentativeProtocolVersion[FullInformeeTree],
+  ): Either[String, FullInformeeTree] =
+    Either
+      .catchOnly[InvalidInformeeTree](FullInformeeTree(tree)(representativeProtocolVersion))
+      .leftMap(_.message)
+
+  private[data] def create(
+      tree: GenTransactionTree,
+      protocolVersion: ProtocolVersion,
+  ): Either[String, FullInformeeTree] =
+    create(tree, protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV0(
       hashOps: HashOps,
@@ -726,7 +748,7 @@ object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInfo
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV0(hashOps, protoTree)
       fullInformeeTree <- FullInformeeTree
-        .create(tree)
+        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(0)))
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
         )
@@ -740,7 +762,7 @@ object FullInformeeTree extends HasVersionedMessageWithContextCompanion[FullInfo
       protoTree <- ProtoConverter.required("tree", protoInformeeTree.tree)
       tree <- GenTransactionTree.fromProtoV1(hashOps, protoTree)
       fullInformeeTree <- FullInformeeTree
-        .create(tree)
+        .create(tree, protocolVersionRepresentativeFor(ProtoVersion(1)))
         .leftMap(e =>
           ProtoDeserializationError.OtherError(s"Unable to create full informee tree: $e")
         )
@@ -1111,8 +1133,10 @@ object ParticipantMetadata
   */
 case class LightTransactionViewTree(tree: GenTransactionTree)
     extends ViewTree
-    with HasVersionedWrapper[VersionedMessage[LightTransactionViewTree]]
+    with HasVersionedWrapper[LightTransactionViewTree]
     with PrettyPrinting {
+
+  override protected def companionObj = LightTransactionViewTree
 
   private def findTheView(views: Seq[MerkleTree[TransactionView]]): TransactionView = {
     val lightUnblindedViews = views.mapFilter { view =>
@@ -1176,16 +1200,6 @@ case class LightTransactionViewTree(tree: GenTransactionTree)
 
   lazy val viewParticipantData: ViewParticipantData = view.viewParticipantData.tryUnwrap
 
-  override def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[LightTransactionViewTree] = {
-    if (version >= ProtocolVersion.v4) {
-      VersionedMessage(toProtoV1.toByteString, 1)
-    } else {
-      VersionedMessage(toProtoV0.toByteString, 0)
-    }
-  }
-
   def toProtoV0: v0.LightTransactionViewTree =
     v0.LightTransactionViewTree(tree = Some(tree.toProtoV0))
 
@@ -1206,9 +1220,17 @@ object LightTransactionViewTree
     extends HasVersionedMessageWithContextCompanion[LightTransactionViewTree, HashOps] {
   override val name: String = "LightTransactionViewTree"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.LightTransactionViewTree)(fromProtoV0),
-    1 -> supportedProtoVersion(v1.LightTransactionViewTree)(fromProtoV1),
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.LightTransactionViewTree)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    ProtoVersion(1) -> ProtoCodec(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.LightTransactionViewTree)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   case class InvalidLightTransactionViewTree(message: String) extends RuntimeException(message)

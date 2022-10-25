@@ -135,7 +135,7 @@ class ReplayingSendsSequencerClientTransport(
           logger.warn(
             s"Sequencer is overloaded and rejected our send. Please tune the sequencer to handle more concurrent requests."
           )
-          metrics.submissions.overloaded.metric.inc()
+          metrics.submissions.overloaded.inc()
 
         case Left(error) =>
           // log, increase error counter, then ignore
@@ -143,9 +143,9 @@ class ReplayingSendsSequencerClientTransport(
 
         case Right(_) =>
           // we've successfully sent the send request
-          metrics.submissions.inFlight.metric.increment()
+          metrics.submissions.inFlight.inc()
           val sentAt = CantonTimestamp.now()
-          metrics.submissions.sends.metric
+          metrics.submissions.sends
             .update(java.time.Duration.between(startedAt.toInstant, sentAt.toInstant))
       }
 
@@ -315,8 +315,8 @@ class ReplayingSendsSequencerClientTransport(
 
       messageIdO.flatMap(pendingSends.remove) foreach { sentAt =>
         val latency = java.time.Duration.between(sentAt.toInstant, Instant.now())
-        metrics.submissions.inFlight.metric.decrement()
-        metrics.submissions.sequencingTime.metric.update(latency)
+        metrics.submissions.inFlight.dec()
+        metrics.submissions.sequencingTime.update(latency)
         lastReceivedEvent.set(Some(CantonTimestamp.now()))
       }
     }

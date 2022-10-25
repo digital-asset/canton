@@ -163,7 +163,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
     }
   }
 
-  private def updatePoolMetrics(): Unit = subscribersGauge.metric.updateValue(pool.size)
+  private def updatePoolMetrics(): Unit = subscribersGauge.updateValue(pool.size)
 
   private def poolDescription: String =
     pool

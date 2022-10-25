@@ -42,7 +42,6 @@ class AsyncExecutorWithMetrics(
     val logger: Logger,
 ) extends AsyncExecutor {
 
-  metrics.queue.metric.setValue(0)
   @volatile private[this] lazy val mbeanName = new ObjectName(
     s"slick:type=AsyncExecutor,name=$name"
   );
@@ -159,15 +158,15 @@ class AsyncExecutorWithMetrics(
     case class QueryInfo(callsite: String, added: Long, scheduled: Option[Long]) {
 
       def created(): QueryInfo = {
-        metrics.queue.metric.increment()
+        metrics.queue.inc()
         this
       }
 
       def updateScheduled(): QueryInfo = {
-        metrics.queue.metric.decrement()
-        metrics.running.metric.increment()
+        metrics.queue.dec()
+        metrics.running.inc()
         val tm = System.nanoTime()
-        metrics.waitTimer.metric.update(tm - added, TimeUnit.NANOSECONDS)
+        metrics.waitTimer.update(tm - added, TimeUnit.NANOSECONDS)
         QueryInfo(callsite, added, Some(tm))
       }
 
@@ -175,7 +174,7 @@ class AsyncExecutorWithMetrics(
         val tm = System.nanoTime()
         scheduled match {
           case Some(st) =>
-            metrics.running.metric.decrement()
+            metrics.running.dec()
             QueryCostTracker.track(callsite, tm - st)
           case None =>
             QueryCostTracker.track(s"$callsite - missing start time", tm - added)

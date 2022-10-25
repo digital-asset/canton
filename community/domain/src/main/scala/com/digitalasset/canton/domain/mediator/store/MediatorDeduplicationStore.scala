@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -239,12 +238,12 @@ private[mediator] class DbMediatorDeduplicationStore(
   import Member.DbStorageImplicits.*
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("mediator-deduplication-store")
 
   override protected def doInitialize(
       deleteFromInclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     for {
       _ <- storage.update_(
         sqlu"""delete from mediator_deduplication_store
@@ -276,7 +275,7 @@ private[mediator] class DbMediatorDeduplicationStore(
 
         override def executeBatch(items: NonEmpty[Seq[Traced[DeduplicationData]]])(implicit
             traceContext: TraceContext
-        ): Future[Seq[Unit]] = processingTime.metric.event {
+        ): Future[Seq[Unit]] = processingTime.event {
           // The query does not have to be idempotent, because the stores don't have unique indices and
           // the data gets deduplicated on the read path.
           val action = DbStorage.bulkOperation_(
@@ -306,7 +305,7 @@ private[mediator] class DbMediatorDeduplicationStore(
 
   override protected def prunePersistentData(upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = processingTime.metric.event {
+  ): Future[Unit] = processingTime.event {
     storage.update_(
       sqlu"""delete from mediator_deduplication_store 
           where mediator_id = $mediatorId and expire_after <= $upToInclusive""",

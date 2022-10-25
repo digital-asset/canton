@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.implicits.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -41,7 +40,7 @@ class DbDomainConnectionConfigStore private[store] (
   import storage.api.*
   import storage.converters.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("domain-connection-config-store")
 
   // Eagerly maintained cache of domain config indexed by DomainAlias
@@ -66,7 +65,7 @@ class DbDomainConnectionConfigStore private[store] (
     MissingConfigForAlias,
     StoredDomainConnectionConfig,
   ] = {
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       EitherT {
         storage
           .query(
@@ -84,7 +83,7 @@ class DbDomainConnectionConfigStore private[store] (
   private def getAllInternal(implicit
       traceContext: TraceContext
   ): Future[Seq[StoredDomainConnectionConfig]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"""select config, status from participant_domain_connection_configs"""
           .as[(DomainConnectionConfig, DomainConnectionConfigStore.Status)]
@@ -120,7 +119,7 @@ class DbDomainConnectionConfigStore private[store] (
 
     for {
       nrRows <- EitherT.right(
-        processingTime.metric.event(storage.update(insertAction, functionFullName))
+        processingTime.event(storage.update(insertAction, functionFullName))
       )
       _ <- nrRows match {
         case 1 => EitherTUtil.unit[AlreadyAddedForAlias]
@@ -160,7 +159,7 @@ class DbDomainConnectionConfigStore private[store] (
     for {
       _ <- getInternal(domainAlias) // Make sure an existing config exists for the alias
       _ <- EitherT.right(
-        processingTime.metric.event(storage.update_(updateAction, functionFullName))
+        processingTime.event(storage.update_(updateAction, functionFullName))
       )
     } yield {
       // Eagerly update cache
@@ -187,7 +186,7 @@ class DbDomainConnectionConfigStore private[store] (
     for {
       _ <- getInternal(source) // Make sure an existing config exists for the alias
       _ <- EitherT.right(
-        processingTime.metric.event(storage.update_(updateAction, functionFullName))
+        processingTime.event(storage.update_(updateAction, functionFullName))
       )
     } yield {
       // Eagerly update cache

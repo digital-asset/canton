@@ -9,27 +9,31 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 
 import scala.collection.immutable.SortedSet
 
 // TODO(#3256) get rid of, or at least simplify this; using an array would also allow us to remove the stakeholders_hash column in the commitment_snapshot table
-case class StoredParties(parties: SortedSet[LfPartyId])
-    extends HasVersionedWrapper[VersionedMessage[StoredParties]] {
+case class StoredParties(parties: SortedSet[LfPartyId]) extends HasVersionedWrapper[StoredParties] {
+
+  override protected def companionObj = StoredParties
 
   protected def toProtoV0: v0.StoredParties = v0.StoredParties(parties.toList)
-  protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[StoredParties] =
-    VersionedMessage(toProtoV0.toByteString, 0)
 }
 
-object StoredParties extends HasVersionedMessageCompanion[StoredParties] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.StoredParties)(fromProtoV0)
+object StoredParties
+    extends HasVersionedMessageCompanion[StoredParties]
+    with HasVersionedMessageCompanionDbHelpers[StoredParties] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.StoredParties)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   def fromIterable(parties: Iterable[LfPartyId]): StoredParties = StoredParties(

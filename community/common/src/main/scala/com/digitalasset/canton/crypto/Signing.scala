@@ -20,9 +20,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
@@ -123,12 +124,11 @@ case class Signature private[crypto] (
     format: SignatureFormat,
     private val signature: ByteString,
     signedBy: Fingerprint,
-) extends HasVersionedWrapper[VersionedMessage[Signature]]
+) extends HasVersionedWrapper[Signature]
     with PrettyPrinting
     with NoCopy {
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[Signature] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = Signature
 
   def toProtoV0: v0.Signature =
     v0.Signature(
@@ -144,7 +144,9 @@ case class Signature private[crypto] (
   private[crypto] def unwrap: ByteString = signature
 }
 
-object Signature extends HasVersionedMessageCompanion[Signature] {
+object Signature
+    extends HasVersionedMessageCompanion[Signature]
+    with HasVersionedMessageCompanionDbHelpers[Signature] {
   val noSignature =
     new Signature(
       SignatureFormat.Raw,
@@ -152,8 +154,12 @@ object Signature extends HasVersionedMessageCompanion[Signature] {
       Fingerprint.tryCreate("no-fingerprint"),
     )
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.Signature)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.Signature)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "signature"
@@ -304,13 +310,12 @@ case class SigningPublicKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: SigningKeyScheme,
 ) extends PublicKey
-    with HasVersionedWrapper[VersionedMessage[SigningPublicKey]]
     with PrettyPrinting
-    with NoCopy {
+    with NoCopy
+    with HasVersionedWrapper[SigningPublicKey] {
   override val purpose: KeyPurpose = KeyPurpose.Signing
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPublicKey] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = SigningPublicKey
 
   def toProtoV0: v0.SigningPublicKey =
     v0.SigningPublicKey(
@@ -327,12 +332,18 @@ case class SigningPublicKey private[crypto] (
     prettyOfClass(param("id", _.id), param("format", _.format), param("scheme", _.scheme))
 }
 
-object SigningPublicKey extends HasVersionedMessageCompanion[SigningPublicKey] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SigningPublicKey)(fromProtoV0)
-  )
-
+object SigningPublicKey
+    extends HasVersionedMessageCompanion[SigningPublicKey]
+    with HasVersionedMessageCompanionDbHelpers[SigningPublicKey] {
   override protected def name: String = "signing public key"
+
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SigningPublicKey)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
+  )
 
   private[this] def apply(
       id: Fingerprint,
@@ -379,11 +390,10 @@ final case class SigningPrivateKey private[crypto] (
     protected[crypto] val key: ByteString,
     scheme: SigningKeyScheme,
 ) extends PrivateKey
-    with HasVersionedWrapper[VersionedMessage[SigningPrivateKey]]
+    with HasVersionedWrapper[SigningPrivateKey]
     with NoCopy {
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SigningPrivateKey] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = SigningPrivateKey
 
   def toProtoV0: v0.SigningPrivateKey =
     v0.SigningPrivateKey(
@@ -400,8 +410,12 @@ final case class SigningPrivateKey private[crypto] (
 }
 
 object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SigningPrivateKey)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SigningPrivateKey)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "signing private key"

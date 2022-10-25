@@ -90,17 +90,30 @@ trait MessageDispatcher { this: NamedLogging =>
 
   private def processAcsCommitmentEnvelope(
       envelopes: List[DefaultOpenEnvelope],
+      sc: SequencerCounter,
       ts: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProcessingResult] = {
     val acsCommitments = envelopes.mapFilter(select[SignedProtocolMessage[AcsCommitment]])
-    if (acsCommitments.nonEmpty)
+    if (acsCommitments.nonEmpty) {
+      // When a participant receives an ACS commitment from a counter-participant, the counter-participant
+      // expects to receive the corresponding commitment from the local participant.
+      // However, the local participant may not have seen neither an ACS change nor a time proof
+      // since the commitment's interval end. So we signal an empty ACS change to the ACS commitment processor
+      // at the commitment sequencing time (which is after the interval end for an honest counter-participant)
+      // so that this triggers an ACS commitment computation on the local participant if necessary.
+      //
+      // This ACS commitment may be bundled with a request that may lead to a non-empty ACS change at this timestamp.
+      // It is nevertheless OK to schedule the empty ACS change
+      // because we use a different tie breaker for the empty ACS commitment.
+      // This is also why we must not tick the record order publisher here.
+      recordOrderPublisher.scheduleEmptyAcsChangePublication(sc, ts)
       doProcess(
         AcsCommitment, {
           logger.debug(s"Processing ACS commitments for timestamp $ts")
           acsCommitmentProcessor(ts, Traced(acsCommitments))
         },
       )
-    else FutureUnlessShutdown.pure(processingResultMonoid.empty)
+    } else FutureUnlessShutdown.pure(processingResultMonoid.empty)
   }
 
   private def tryProtocolProcessor(
@@ -188,7 +201,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
       identityResult <- processTopologyTransactions(sc, ts, envelopesWithCorrectDomainId)
       causalityProcessed <- processCausalityMessages(envelopesWithCorrectDomainId)
-      acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, ts)
+      acsCommitmentResult <- processAcsCommitmentEnvelope(envelopesWithCorrectDomainId, sc, ts)
       transactionTransferResult <- processTransactionAndTransferMessages(
         event,
         sc,

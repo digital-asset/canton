@@ -26,6 +26,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -93,6 +94,7 @@ private[mediator] class MediatorEventsProcessor(
         Seq[Traced[MediatorEvent]],
         TraceContext,
     ) => HandlerResult,
+    protocolVersion: ProtocolVersion,
     deduplicator: MediatorEventDeduplicator,
     readyCheck: MediatorReadyCheck,
     protected val loggerFactory: NamedLoggerFactory,
@@ -187,7 +189,7 @@ private[mediator] class MediatorEventsProcessor(
     ): Future[Boolean] =
       crypto.ips
         .awaitSnapshot(pendingRequestId.unwrap)
-        .flatMap(_.findDynamicDomainParametersOrDefault())
+        .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
         .map { domainParameters =>
           val requestTimeout =
             pendingRequestId.unwrap.plus(domainParameters.participantResponseTimeout.unwrap)
@@ -323,6 +325,7 @@ private[mediator] object MediatorEventsProcessor {
       identityClientEventHandler: UnsignedProtocolEventHandler,
       confirmationResponseProcessor: ConfirmationResponseProcessor,
       mediatorEventDeduplicator: MediatorEventDeduplicator,
+      protocolVersion: ProtocolVersion,
       readyCheck: MediatorReadyCheck,
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): MediatorEventsProcessor = {
@@ -331,6 +334,7 @@ private[mediator] object MediatorEventsProcessor {
       crypto,
       identityClientEventHandler,
       confirmationResponseProcessor.handleRequestEvents,
+      protocolVersion,
       mediatorEventDeduplicator,
       readyCheck,
       loggerFactory,

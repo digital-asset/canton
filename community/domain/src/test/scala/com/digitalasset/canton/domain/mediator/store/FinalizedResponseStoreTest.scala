@@ -62,13 +62,14 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
       new UUID(0L, 0L),
       testedProtocolVersion,
     )
-    FullInformeeTree(
+    FullInformeeTree.tryCreate(
       GenTransactionTree(hashOps)(
         BlindedNode(rh(11)),
         commonMetadata,
         BlindedNode(rh(12)),
         MerkleSeq.fromSeq(hashOps)(view :: Nil, testedProtocolVersion),
-      )
+      ),
+      testedProtocolVersion,
     )
   }
   val informeeMessage = InformeeMessage(fullInformeeTree)(testedProtocolVersion)

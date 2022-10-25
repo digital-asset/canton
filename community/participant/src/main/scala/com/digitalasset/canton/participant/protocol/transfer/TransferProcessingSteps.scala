@@ -256,9 +256,6 @@ object TransferProcessingSteps {
   case class ReceivedMultipleRequests[T](transferIds: NonEmpty[Seq[T]])
       extends TransferProcessorError
 
-  case class ReceivedWrongRootHash(transferOutRootHash: RootHash, rootHashMessageHash: RootHash)
-      extends TransferProcessorError
-
   case class NoSubmissionPermission(
       transferId: Option[TransferId],
       party: LfPartyId,

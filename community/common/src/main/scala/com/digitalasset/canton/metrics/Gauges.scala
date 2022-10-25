@@ -4,7 +4,8 @@
 package com.digitalasset.canton.metrics
 
 import cats.data.{EitherT, OptionT}
-import com.codahale.metrics.{Gauge, Timer}
+import com.codahale.metrics.Gauge
+import com.daml.metrics.MetricHandle.Timer
 import com.daml.metrics.Timed
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -122,6 +123,7 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
       load.toDouble / intervalNanos
     })
   }
+
 }
 
 class RefGauge[T](empty: T) extends Gauge[T] {
@@ -130,16 +132,4 @@ class RefGauge[T](empty: T) extends Gauge[T] {
     ref.set(inspect)
   }
   override def getValue: T = ref.get().map(_()).getOrElse(empty)
-}
-
-class IntGauge(initial: Integer) extends Gauge[Integer] {
-  private val ref = new AtomicInteger(initial)
-
-  def incrementAndGet(): Integer = ref.incrementAndGet()
-  def increment(): Unit = incrementAndGet().discard
-  def decrementAndGet(): Integer = ref.decrementAndGet()
-  def decrement(): Unit = decrementAndGet().discard
-  def setValue(value: Int): Unit = ref.set(value)
-
-  override def getValue: Integer = ref.get()
 }

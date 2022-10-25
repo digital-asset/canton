@@ -124,6 +124,7 @@ object SyncCryptoClient {
       client: SyncCryptoClient[SyncCryptoApi],
       desiredTimestamp: CantonTimestamp,
       previousTimestampO: Option[CantonTimestamp],
+      protocolVersion: ProtocolVersion,
       warnIfApproximate: Boolean = true,
   )(implicit
       executionContext: ExecutionContext,
@@ -157,7 +158,10 @@ object SyncCryptoClient {
                 s"searching for topology change delay at $previousTimestamp for desired timestamp $desiredTimestamp and known until $knownUntil"
               )(previousTimestamp)
               previousDomainParams <- previousSnapshot.ipsSnapshot
-                .findDynamicDomainParametersOrDefault(warnOnUsingDefault = false)
+                .findDynamicDomainParametersOrDefault(
+                  protocolVersion = protocolVersion,
+                  warnOnUsingDefault = false,
+                )
 
               delay = previousDomainParams.topologyChangeDelay
               diff = desiredTimestamp - previousTimestamp

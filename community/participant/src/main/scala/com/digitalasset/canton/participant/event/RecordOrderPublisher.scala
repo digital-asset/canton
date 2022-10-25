@@ -189,6 +189,7 @@ class RecordOrderPublisher(
   }
 
   /** Signals the progression of time to the record order publisher
+    * Does not notify the ACS commitment processor.
     *
     * @see TaskScheduler.addTick for the behaviour.
     */
