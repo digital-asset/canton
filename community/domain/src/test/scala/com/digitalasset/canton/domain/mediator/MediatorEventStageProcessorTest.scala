@@ -91,6 +91,7 @@ class MediatorEventStageProcessorTest extends AsyncWordSpec with BaseTest {
         receivedEvents.append((requestId, events))
         HandlerResult.done
       },
+      testedProtocolVersion,
       noopDeduplicator,
       alwaysReadyCheck,
       loggerFactory,

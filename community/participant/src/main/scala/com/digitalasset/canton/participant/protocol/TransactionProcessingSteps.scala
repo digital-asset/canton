@@ -23,6 +23,7 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.participant.LedgerSyncEvent
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
@@ -244,9 +245,10 @@ class TransactionProcessingSteps(
     override def submissionId: Option[LedgerSubmissionId] = submitterInfo.submissionId
 
     override def maxSequencingTimeO: OptionT[Future, CantonTimestamp] = OptionT.liftF(
-      recentSnapshot.ipsSnapshot.findDynamicDomainParametersOrDefault().map { domainParameters =>
-        CantonTimestamp(transactionMeta.ledgerEffectiveTime)
-          .add(domainParameters.ledgerTimeRecordTimeTolerance.unwrap)
+      recentSnapshot.ipsSnapshot.findDynamicDomainParametersOrDefault(protocolVersion).map {
+        domainParameters =>
+          CantonTimestamp(transactionMeta.ledgerEffectiveTime)
+            .add(domainParameters.ledgerTimeRecordTimeTolerance.unwrap)
       }
     )
 
@@ -346,7 +348,7 @@ class TransactionProcessingSteps(
       } yield {
         val batch = request.asBatch
         val batchSize = batch.toProtoVersioned.serializedSize
-        metrics.protocolMessages.confirmationRequestSize.metric.update(batchSize)
+        metrics.protocolMessages.confirmationRequestSize.update(batchSize)
 
         new PreparedTransactionBatch(
           batch,
@@ -719,7 +721,7 @@ class TransactionProcessingSteps(
           ledgerTime,
         )
 
-        domainParameters <- ipsSnapshot.findDynamicDomainParametersOrDefault()
+        domainParameters <- ipsSnapshot.findDynamicDomainParametersOrDefault(protocolVersion)
 
         // `tryCommonData` should never throw here because all views have the same root hash
         // which already commits to the ParticipantMetadata and CommonMetadata
@@ -1204,7 +1206,7 @@ class TransactionProcessingSteps(
       domainParameters <- EitherT.right[TransactionProcessorError](
         crypto.ips
           .awaitSnapshot(pendingRequestData.requestTime)
-          .flatMap(_.findDynamicDomainParametersOrDefault())
+          .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion))
       )
       maxDecisionTime = domainParameters.decisionTimeFor(pendingRequestData.requestTime)
       _ <-

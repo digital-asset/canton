@@ -51,6 +51,7 @@ class SortedReconciliationIntervalsProviderFactory(
       val topologyClient = new StoreBasedDomainTopologyClient(
         clock = clock,
         domainId = domainId,
+        protocolVersion = staticDomainParameters.protocolVersion,
         store = topologyStoreFactory.forId(TopologyStoreId.DomainStore(domainId)),
         initKeys = Map.empty,
         packageDependencies = StoreBasedDomainTopologyClient.NoPackageDependencies,

@@ -20,8 +20,8 @@ import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import io.grpc.netty.NettyChannelBuilder
@@ -39,10 +39,10 @@ import java.util.concurrent.Executor
 sealed trait SequencerConnection
     extends Product
     with Serializable
-    with HasVersionedWrapper[VersionedMessage[SequencerConnection]]
+    with HasVersionedWrapper[SequencerConnection]
     with PrettyPrinting {
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SequencerConnection] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+
+  override protected def companionObj = SequencerConnection
 
   def toProtoV0: v0.SequencerConnection
 
@@ -171,8 +171,12 @@ object GrpcSequencerConnection {
 }
 
 object SequencerConnection extends HasVersionedMessageCompanion[SequencerConnection] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SequencerConnection)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SequencerConnection)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "sequencer connection"

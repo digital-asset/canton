@@ -160,4 +160,10 @@ object SubmissionRequest
       bytes,
     )
   }
+
+  def usingSignedSubmissionRequest(protocolVersion: ProtocolVersion): Boolean = {
+    // TODO(#10047) migrate to stable
+    val sigCheckSupportSince = ProtocolVersion.dev
+    protocolVersion >= sigCheckSupportSince
+  }
 }

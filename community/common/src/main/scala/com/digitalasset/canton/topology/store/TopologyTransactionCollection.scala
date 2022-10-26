@@ -29,8 +29,10 @@ import scala.concurrent.{ExecutionContext, Future}
 
 final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
     result: Seq[StoredTopologyTransaction[Op]]
-) extends HasVersionedWrapper[VersionedMessage[StoredTopologyTransactions[Op]]]
+) extends HasVersionedWrapper[StoredTopologyTransactions[TopologyChangeOp]]
     with PrettyPrinting {
+
+  override protected def companionObj = StoredTopologyTransactions
 
   override def pretty: Pretty[StoredTopologyTransactions.this.type] = prettyOfParam(
     _.result
@@ -139,11 +141,6 @@ final case class StoredTopologyTransactions[+Op <: TopologyChangeOp](
       .maxOption
     timestamp.map(_.minus(epsilon.duration))
   }
-
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[StoredTopologyTransactions[Op]] =
-    VersionedMessage(toProtoV0.toByteString, 0)
 }
 
 object StoredTopologyTransactions
@@ -151,8 +148,12 @@ object StoredTopologyTransactions
       StoredTopologyTransactions[TopologyChangeOp],
     ] {
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0)
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.TopologyTransactions)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   def fromProtoV0(

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -66,7 +65,7 @@ class DbSingleDomainCausalDependencyStore(
     }
   }
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("causal-dependency-store")
 
   override protected def persistentInsert(
@@ -76,7 +75,7 @@ class DbSingleDomainCausalDependencyStore(
       transferOutId: Option[TransferId],
   )(implicit tc: TraceContext): Future[Unit] = {
 
-    processingTime.metric.event {
+    processingTime.event {
       DbSingleDomainCausalDependencyStore.persistentInsert(storage)(
         Some(rc),
         ts,

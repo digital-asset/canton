@@ -50,6 +50,7 @@ class SequencedEventValidatorTest extends AsyncWordSpec with BaseTest with HasEx
       optimistic = false,
       defaultDomainId,
       sequencerId,
+      testedProtocolVersion,
       syncCryptoApi,
       loggerFactory,
     )(executorService)

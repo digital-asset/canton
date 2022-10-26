@@ -587,12 +587,27 @@ private[transfer] class TransferInProcessingSteps(
           exclusivityBaseline = transferData.transferOutRequest.targetTimeProof.timestamp
 
           // TODO(M40): Check that transferData.transferOutRequest.targetTimeProof.timestamp is in the past
-          domainParameters <- transferCoordination
+          cryptoSnapshot <- transferCoordination
             .cryptoSnapshot(
               transferData.targetDomain,
               transferData.transferOutRequest.targetTimeProof.timestamp,
             )
-            .semiflatMap(_.ipsSnapshot.findDynamicDomainParametersOrDefault())
+
+          /*
+            We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
+            because it makes no sense to progress if we don't manage to fetch domain parameters.
+            Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
+            that we don't have here.
+           */
+          domainParameters <- EitherT(
+            cryptoSnapshot.ipsSnapshot
+              .findDynamicDomainParameters()
+              .map(
+                _.toRight(
+                  DomainNotReady(transferData.targetDomain, "Unable to fetch domain parameters")
+                )
+              )
+          )
 
           exclusivityLimit = domainParameters.transferExclusivityLimitFor(exclusivityBaseline)
 

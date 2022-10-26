@@ -189,6 +189,7 @@ class DomainTopologyDispatcherTest
 
     def mkDispatcher = new DomainTopologyDispatcher(
       domainId,
+      testedProtocolVersion,
       sourceStore,
       processor,
       Map(),

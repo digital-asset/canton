@@ -221,10 +221,19 @@ object TransferCoordination {
             crypto <- EitherT.fromEither[FutureUnlessShutdown](
               syncCryptoApi.forDomain(domain).toRight(DomainParametersNotAvailable)
             )
-            parameters <- EitherT.right[TimeProofSourceError](
-              FutureUnlessShutdown.outcomeF(
-                crypto.ips.currentSnapshotApproximation.findDynamicDomainParametersOrDefault()
-              )
+
+            /*
+              We use `findDynamicDomainParameters` rather than `findDynamicDomainParametersOrDefault`
+              because it makes no sense to progress if we don't manage to fetch domain parameters.
+              Also, the `findDynamicDomainParametersOrDefault` method expected protocol version
+              that we don't have here.
+             */
+            parameters <- EitherT(
+              FutureUnlessShutdown
+                .outcomeF(
+                  crypto.ips.currentSnapshotApproximation.findDynamicDomainParameters()
+                )
+                .map(_.toRight(DomainParametersNotAvailable))
             )
 
             exclusivityTimeout = parameters.transferExclusivityTimeout

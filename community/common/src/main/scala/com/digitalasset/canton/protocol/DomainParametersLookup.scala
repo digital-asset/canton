@@ -72,6 +72,7 @@ class StaticDomainParametersLookup[P](parameters: P) extends DomainParametersLoo
 class DynamicDomainParametersLookup[P](
     projector: DynamicDomainParameters => P,
     topologyClient: DomainTopologyClient,
+    protocolVersion: ProtocolVersion,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -83,14 +84,14 @@ class DynamicDomainParametersLookup[P](
     .supervised(s"Querying for domain parameters valid at $validAt") {
       topologyClient.awaitSnapshot(validAt)
     }
-    .flatMap(_.findDynamicDomainParametersOrDefault(warnOnUsingDefaults))
+    .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults))
     .map(projector)
 
   def getApproximate(implicit
       traceContext: TraceContext
   ): Future[P] = {
     topologyClient.currentSnapshotApproximation
-      .findDynamicDomainParametersOrDefault()
+      .findDynamicDomainParametersOrDefault(protocolVersion)
       .map(projector)
   }
 
@@ -123,6 +124,7 @@ object DomainParametersLookup {
       new DynamicDomainParametersLookup(
         _.reconciliationInterval,
         topologyClient,
+        staticDomainParameters.protocolVersion,
         futureSupervisor,
         loggerFactory,
       )
@@ -141,6 +143,7 @@ object DomainParametersLookup {
       new DynamicDomainParametersLookup(
         _.maxRatePerParticipant,
         topologyClient,
+        staticDomainParameters.protocolVersion,
         futureSupervisor,
         loggerFactory,
       )

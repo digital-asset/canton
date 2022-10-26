@@ -11,7 +11,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.traverseFilter.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
@@ -112,7 +111,7 @@ class DbMultiDomainEventLog private[db] (
   import storage.converters.*
   import ParticipantStorageImplicits.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
 
   private val dispatcher: Dispatcher[GlobalOffset] =
@@ -276,7 +275,7 @@ class DbMultiDomainEventLog private[db] (
             logger.debug(
               show"Published event from event log $id with local offset ${event.localOffset} with publication time $publicationTime."
             )(data.traceContext)
-            metrics.updatesPublished.metric.mark(event.eventSize.toLong)
+            metrics.updatesPublished.mark(event.eventSize.toLong)
           }
 
         case None =>
@@ -328,7 +327,7 @@ class DbMultiDomainEventLog private[db] (
   private def insert(events: Seq[PublicationData], publicationTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val insertStatement = storage.profile match {
         case _: DbStorage.Profile.Oracle =>
           """merge /*+ INDEX ( linearized_event_log ( local_offset, log_id ) ) */ 
@@ -367,7 +366,7 @@ class DbMultiDomainEventLog private[db] (
     val upToInclusive = upToInclusiveO.getOrElse(Long.MaxValue)
     logger.info(s"Fetch unpublished from $id up to ${upToInclusiveO}")
 
-    processingTime.metric.event {
+    processingTime.event {
       for {
         unpublishedLocalOffsets <- DbSingleDimensionEventLog.lookupEventRange(
           storage = storage,
@@ -407,7 +406,7 @@ class DbMultiDomainEventLog private[db] (
   override def prune(
       upToInclusive: GlobalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"delete from linearized_event_log where global_offset <= $upToInclusive",
         functionFullName,
@@ -444,7 +443,7 @@ class DbMultiDomainEventLog private[db] (
       CausalityUpdate.hasVersionedWrapperGetResultO
     import TimestampedEventAndCausalChange.getResultTimestampedEventAndCausalChange
 
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           sql"""select global_offset, el.local_offset, request_sequencer_counter, el.event_id, content, trace_context, causality_update
@@ -500,7 +499,7 @@ class DbMultiDomainEventLog private[db] (
 
   override def lookupTransactionDomain(transactionId: LedgerTransactionId)(implicit
       traceContext: TraceContext
-  ): OptionT[Future, DomainId] = processingTime.metric.optionTEvent {
+  ): OptionT[Future, DomainId] = processingTime.optionTEvent {
     storage
       .querySingle(
         sql"""select log_id from event_log where event_id = ${TransactionEventId(transactionId)}"""
@@ -517,7 +516,7 @@ class DbMultiDomainEventLog private[db] (
       upToInclusive: GlobalOffset,
       timestampInclusive: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Option[LocalOffset]] =
-    processingTime.metric.event {
+    processingTime.event {
       // Note for idempotent retries, we don't require that the global offset has an actual ledger entry reference
       val query =
         sql"""select lel.local_offset
@@ -532,7 +531,7 @@ class DbMultiDomainEventLog private[db] (
   override def locateOffset(
       deltaFromBeginning: GlobalOffset
   )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       // The following query performs a table scan which can in theory become a problem if deltaFromBeginning is large.
       // We cannot simply perform a lookup as big/serial columns can have gaps.
       // However as we are planning to prune in batches, deltaFromBeginning will be limited by the batch size and be
@@ -548,7 +547,7 @@ class DbMultiDomainEventLog private[db] (
   override def lookupOffset(globalOffset: GlobalOffset)(implicit
       traceContext: TraceContext
   ): OptionT[Future, (EventLogId, LocalOffset, CantonTimestamp)] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       storage
         .querySingle(
           sql"select log_id, local_offset, publication_time from linearized_event_log where global_offset = $globalOffset"
@@ -566,7 +565,7 @@ class DbMultiDomainEventLog private[db] (
   override def globalOffsetFor(eventLogId: EventLogId, localOffset: LocalOffset)(implicit
       traceContext: TraceContext
   ): Future[Option[(GlobalOffset, CantonTimestamp)]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"""
       select lel.global_offset, lel.publication_time
@@ -581,7 +580,7 @@ class DbMultiDomainEventLog private[db] (
   override def getOffsetByTimeUpTo(
       upToInclusive: CantonTimestamp
   )(implicit traceContext: TraceContext): OptionT[Future, GlobalOffset] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       // The publication time increases with the global offset,
       // so we order first by the publication time so that the same index `idx_linearized_event_log_publication_time`
       // can be used for the where clause and the ordering
@@ -599,7 +598,7 @@ class DbMultiDomainEventLog private[db] (
   override def getOffsetByTimeAtOrAfter(
       fromInclusive: CantonTimestamp
   )(implicit traceContext: TraceContext): OptionT[Future, (GlobalOffset, EventLogId, LocalOffset)] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       // The publication time increases with the global offset,
       // so we order first by the publication time so that the same index `idx_linearized_event_log_publication_time`
       // can be used for the where clause and the ordering
@@ -621,7 +620,7 @@ class DbMultiDomainEventLog private[db] (
   override def lastLocalOffset(
       id: EventLogId
   )(implicit traceContext: TraceContext): Future[Option[LocalOffset]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           sql"""select local_offset from linearized_event_log where log_id = ${id.index} order by local_offset desc #${storage

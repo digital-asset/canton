@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DiscardOps, SequencerCounter}
 import io.functionmeta.functionFullName
 
@@ -117,6 +118,8 @@ abstract class BaseDomainTopologyClient
     extends DomainTopologyClientWithInit
     with TopologyAwaiter
     with TimeAwaiter {
+
+  def protocolVersion: ProtocolVersion
 
   private val pendingChanges = new AtomicInteger(0)
 
@@ -232,7 +235,7 @@ abstract class BaseDomainTopologyClient
         for {
           snapshotAtTs <- awaitSnapshotUS(timestamp)
           parametersAtTs <- performUnlessClosingF(functionFullName)(
-            snapshotAtTs.findDynamicDomainParametersOrDefault()
+            snapshotAtTs.findDynamicDomainParametersOrDefault(protocolVersion)
           )
           epsilonAtTs = parametersAtTs.topologyChangeDelay
           // then, wait for t+e
@@ -252,7 +255,7 @@ abstract class BaseDomainTopologyClient
       // first, let's wait until we can determine the epsilon for the given timestamp
       for {
         snapshotAtTs <- awaitSnapshot(timestamp)
-        parametersAtTs <- snapshotAtTs.findDynamicDomainParametersOrDefault()
+        parametersAtTs <- snapshotAtTs.findDynamicDomainParametersOrDefault(protocolVersion)
         epsilonAtTs = parametersAtTs.topologyChangeDelay
         // then, wait for t+e
         _ <- awaitKnownTimestamp(timestamp.plus(epsilonAtTs.unwrap)).getOrElse(Future.unit)
@@ -278,6 +281,7 @@ abstract class BaseDomainTopologyClient
 class StoreBasedDomainTopologyClient(
     val clock: Clock,
     val domainId: DomainId,
+    val protocolVersion: ProtocolVersion,
     store: TopologyStore[TopologyStoreId],
     initKeys: Map[KeyOwner, Seq[SigningPublicKey]],
     packageDependencies: PackageId => EitherT[Future, PackageId, Set[PackageId]],

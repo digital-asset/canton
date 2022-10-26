@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String36
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -30,13 +29,13 @@ class DbParticipantPruningStore(
 
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("participant-pruning-store")
 
   override def markPruningStarted(
       upToInclusive: GlobalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val upsertQuery = storage.profile match {
         case _: Postgres =>
           sqlu"""insert into pruning_operation as po (name, started_up_to_inclusive, completed_up_to_inclusive)
@@ -67,7 +66,7 @@ class DbParticipantPruningStore(
   override def markPruningDone(
       upToInclusive: GlobalOffset
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"""update pruning_operation set completed_up_to_inclusive = $upToInclusive 
                        where name = $name and (completed_up_to_inclusive is null or completed_up_to_inclusive < $upToInclusive)""",
@@ -85,7 +84,7 @@ class DbParticipantPruningStore(
   override def pruningStatus()(implicit
       traceContext: TraceContext
   ): Future[ParticipantPruningStatus] =
-    processingTime.metric.event {
+    processingTime.event {
       for {
         statusO <- storage.query(
           sql"""select started_up_to_inclusive, completed_up_to_inclusive from pruning_operation

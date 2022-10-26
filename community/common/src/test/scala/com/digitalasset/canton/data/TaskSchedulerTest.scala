@@ -5,7 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Gauge, VarGauge}
+import com.daml.metrics
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.metrics.{MetricHandle, RefGauge}
@@ -364,8 +364,8 @@ object TaskSchedulerTest {
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics with MetricHandle.Factory {
     override val registry: MetricRegistry = new MetricRegistry()
     override val prefix: MetricName = MetricName("test")
-    override val sequencerCounterQueue: VarGauge[Int] = varGauge(prefix :+ "counter", 0)
-    override val taskQueue: Gauge[RefGauge[Int], Int] = refGauge(prefix :+ "queue", 0)
+    override val sequencerCounterQueue: metrics.MetricHandle.Counter = counter(prefix :+ "counter")
+    override val taskQueue: RefGauge[Int] = refGauge(prefix :+ "queue", 0)
   }
 
   val Finalization: Int = 0

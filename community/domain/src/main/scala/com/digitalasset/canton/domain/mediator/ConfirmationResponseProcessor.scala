@@ -59,7 +59,9 @@ private[mediator] class ConfirmationResponseProcessor(
   ): HandlerResult = {
     val future = for {
       snapshot <- crypto.ips.awaitSnapshot(requestId.unwrap)(callerTraceContext)
-      domainParameters <- snapshot.findDynamicDomainParametersOrDefault()(callerTraceContext)
+      domainParameters <- snapshot.findDynamicDomainParametersOrDefault(protocolVersion)(
+        callerTraceContext
+      )
       participantResponseDeadline =
         domainParameters.participantResponseDeadlineFor(requestId.unwrap)
       decisionTime = domainParameters.decisionTimeFor(requestId.unwrap)

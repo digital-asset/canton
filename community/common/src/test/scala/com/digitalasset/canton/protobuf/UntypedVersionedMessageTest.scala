@@ -11,8 +11,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -68,17 +68,20 @@ object UntypedVersionedMessageTest {
       .flatMap(fromProtoVersioned)
   }
 
-  case class Message(content: String) extends HasVersionedWrapper[VersionedMessage[Message]] {
-    override def toProtoVersioned(
-        version: ProtocolVersion
-    ): VersionedMessage[Message] = VersionedMessage(toProtoV0.toByteString, 0)
+  case class Message(content: String) extends HasVersionedWrapper[Message] {
+
+    override protected def companionObj = Message
 
     def toProtoV0: DummyMessage = DummyMessage(content)
   }
 
   object Message extends HasVersionedMessageCompanion[Message] {
-    val supportedProtoVersions: Map[Int, Parser] = Map(
-      0 -> supportedProtoVersion(DummyMessage)(fromProtoV0)
+    val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+      ProtoVersion(0) -> ProtoCodec(
+        ProtocolVersion.v2,
+        supportedProtoVersion(DummyMessage)(fromProtoV0),
+        _.toProtoV0.toByteString,
+      )
     )
 
     val name: String = "Message"

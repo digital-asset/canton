@@ -6,8 +6,14 @@ package com.digitalasset.canton.participant.metrics
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.DomainAlias
+import io.opentelemetry.sdk.metrics.SdkMeterProvider
 
-object ParticipantTestMetrics extends ParticipantMetrics(MetricName("test"), new MetricRegistry()) {
+object ParticipantTestMetrics
+    extends ParticipantMetrics(
+      MetricName("test"),
+      new MetricRegistry(),
+      SdkMeterProvider.builder().build().meterBuilder("test").build(),
+    ) {
 
   val domain: SyncDomainMetrics = this.domainMetrics(DomainAlias.tryCreate("test"))
 

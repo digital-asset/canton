@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.OptionT
+import com.daml.metrics.MetricHandle
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Counter,
@@ -94,7 +95,7 @@ class RequestJournal(
     * reset the request journal.
     */
   def numberOfDirtyRequests: Int = numDirtyRequestsM.getCount.toInt
-  private def numDirtyRequestsM: com.codahale.metrics.Counter = metrics.numDirtyRequests.metric
+  private def numDirtyRequestsM: MetricHandle.Counter = metrics.numDirtyRequests
 
   /** Insert a new request into the request journal.
     * The insertion will become visible immediately.

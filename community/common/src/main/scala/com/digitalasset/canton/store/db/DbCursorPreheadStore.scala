@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.store.db
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -32,7 +31,7 @@ class DbCursorPreheadStore[Discr](
     client: SequencerClientDiscriminator,
     override protected val storage: DbStorage,
     cursorTable: String,
-    processingTime: Gauge[TimedLoadGauge, Double],
+    processingTime: TimedLoadGauge,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(override private[store] implicit val ec: ExecutionContext)
@@ -44,7 +43,7 @@ class DbCursorPreheadStore[Discr](
   override def prehead(implicit
       traceContext: TraceContext
   ): Future[Option[CursorPrehead[Discr]]] =
-    processingTime.metric.event {
+    processingTime.event {
       val preheadQuery =
         sql"""select prehead_counter, ts from #$cursorTable where client = $client order by prehead_counter desc #${storage
             .limit(2)}"""
@@ -63,7 +62,7 @@ class DbCursorPreheadStore[Discr](
   @VisibleForTesting
   override private[canton] def overridePreheadUnsafe(
       newPrehead: Option[CursorPrehead[Discr]]
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     logger.info(s"Override prehead counter in $cursorTable to $newPrehead")
     newPrehead match {
       case None => delete()
@@ -135,7 +134,7 @@ class DbCursorPreheadStore[Discr](
     new TransactionalStoreUpdate.DbTransactionalStoreUpdate(
       query,
       storage,
-      Some(processingTime.metric),
+      Some(processingTime),
       loggerFactory,
     )
   }
@@ -157,7 +156,7 @@ class DbCursorPreheadStore[Discr](
   }
 
   private[this] def delete()(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(sqlu"""delete from #$cursorTable where client = $client""", functionFullName)
     }
 }

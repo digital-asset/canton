@@ -6,11 +6,9 @@ package com.digitalasset.canton.participant.ledger.api
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.implicits.*
-import com.codahale.metrics as codahale
 import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.metrics.Metrics
 import com.daml.platform.apiserver.*
 import com.daml.platform.apiserver.meteringreport.MeteringReportKey
@@ -73,7 +71,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     * @param loggerFactory         canton logger factory
     * @param tracerProvider        tracer provider for open telemetry grpc injection
     * @param metrics               upstream metrics module
-    * @param envQueueSize          the gauge associated with the environment execution context queue size
+    * @param envQueueSize          method to read the environment execution context queue size
     */
   case class Config(
       serverConfig: LedgerApiServerConfig,
@@ -91,7 +89,8 @@ object CantonLedgerApiServerWrapper extends NoTracing {
       tracerProvider: TracerProvider,
       metrics: Metrics,
       meteringReportKey: MeteringReportKey,
-      envQueueSize: Gauge[codahale.Gauge[Int], Int],
+      envQueueName: String,
+      envQueueSize: () => Long,
   ) extends NamedLogging {
     override def logger: TracedLogger = super.logger
 

@@ -34,8 +34,9 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwner, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import io.functionmeta.functionFullName
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -647,6 +648,7 @@ object TopologyTransactionProcessor {
   def createProcessorAndClientForDomain(
       topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       domainId: DomainId,
+      protocolVersion: ProtocolVersion,
       pureCrypto: CryptoPureApi,
       initKeys: Map[KeyOwner, Seq[PublicKey]],
       parameters: LocalNodeParameters,
@@ -672,6 +674,7 @@ object TopologyTransactionProcessor {
         .create(
           clock,
           domainId,
+          protocolVersion,
           topologyStore,
           SigningPublicKey.collect(initKeys),
           StoreBasedDomainTopologyClient.NoPackageDependencies,

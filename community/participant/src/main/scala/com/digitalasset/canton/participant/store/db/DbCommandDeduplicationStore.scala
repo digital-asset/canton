@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import cats.syntax.option.*
 import com.daml.ledger.participant.state.v2.ChangeId
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -42,7 +41,7 @@ class DbCommandDeduplicationStore(
   import storage.api.*
   import storage.converters.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("command-deduplication-store")
 
   private implicit val setParameterStoredParties: SetParameter[StoredParties] =
@@ -55,7 +54,7 @@ class DbCommandDeduplicationStore(
   override def lookup(
       changeIdHash: ChangeIdHash
   )(implicit traceContext: TraceContext): OptionT[Future, CommandDeduplicationData] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       val query =
         sql"""
         select application_id, command_id, act_as, 
@@ -70,7 +69,7 @@ class DbCommandDeduplicationStore(
   override def storeDefiniteAnswers(
       answers: Seq[(ChangeId, DefiniteAnswerEvent, Boolean)]
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val update = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
           """
@@ -318,7 +317,7 @@ class DbCommandDeduplicationStore(
   override def prune(upToInclusive: GlobalOffset, prunedPublicationTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val updatePruneOffset = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
           sqlu"""
@@ -350,7 +349,7 @@ class DbCommandDeduplicationStore(
   override def latestPruning()(implicit
       traceContext: TraceContext
   ): OptionT[Future, CommandDeduplicationStore.OffsetAndPublicationTime] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       val query =
         sql"""
         select pruning_offset, publication_time

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.option.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -56,7 +55,7 @@ class DbRequestJournalStore(
   import DbStorage.Implicits.*
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("request-journal-store")
 
   private[store] override val cleanPreheadStore: CursorPreheadStore[RequestCounterDiscriminator] =
@@ -176,7 +175,7 @@ class DbRequestJournalStore(
   override def query(
       rc: RequestCounter
   )(implicit traceContext: TraceContext): OptionT[Future, RequestData] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       val query =
         sql"""select request_counter, request_state_index, request_timestamp, commit_time, repair_context
               from journal_requests where request_counter = $rc and domain_id = $domainId"""
@@ -197,7 +196,7 @@ class DbRequestJournalStore(
 
   override def firstRequestWithCommitTimeAfter(commitTimeExclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Option[RequestData]] = processingTime.metric.event {
+  ): Future[Option[RequestData]] = processingTime.event {
     storage.query(
       sql"""
             select request_counter, request_state_index, request_timestamp, commit_time, repair_context
@@ -325,7 +324,7 @@ class DbRequestJournalStore(
 
   override def size(start: CantonTimestamp, end: Option[CantonTimestamp])(implicit
       traceContext: TraceContext
-  ): Future[Int] = processingTime.metric.event {
+  ): Future[Int] = processingTime.event {
     storage
       .query(
         {

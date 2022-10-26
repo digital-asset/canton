@@ -94,7 +94,7 @@ class ReplayingEventsSequencerClientTransport(
           s"Replaying event with sequencer counter ${e.counter} and timestamp ${e.timestamp}"
         )(e.traceContext)
         for {
-          unitOrErr <- metrics.load.metric.event(handler(e))
+          unitOrErr <- metrics.load.event(handler(e))
         } yield unitOrErr match {
           case Left(err) =>
             logger.error(s"The sequencer handler returned an error: $err")

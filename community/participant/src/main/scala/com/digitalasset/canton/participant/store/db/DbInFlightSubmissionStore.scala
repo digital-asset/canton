@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import cats.syntax.option.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
@@ -56,7 +55,7 @@ class DbInFlightSubmissionStore(
   import storage.api.*
   import storage.converters.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("in-flight-submission-store")
 
   private implicit val setParameterSubmissionTrackingData: SetParameter[SubmissionTrackingData] =
@@ -65,7 +64,7 @@ class DbInFlightSubmissionStore(
   override def lookup(changeIdHash: ChangeIdHash)(implicit
       traceContext: TraceContext
   ): OptionT[Future, InFlightSubmission[SubmissionSequencingInfo]] =
-    OptionT(processingTime.metric.event {
+    OptionT(processingTime.event {
       storage.query(lookupQuery(changeIdHash), "lookup in-flight submission")
     })
 
@@ -73,7 +72,7 @@ class DbInFlightSubmissionStore(
       domainId: DomainId,
       observedSequencingTime: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Seq[InFlightSubmission[UnsequencedSubmission]]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sql"""
         select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, tracking_data, trace_context
@@ -86,7 +85,7 @@ class DbInFlightSubmissionStore(
       domainId: DomainId,
       sequencingTimeInclusive: CantonTimestamp,
   )(implicit traceContext: TraceContext): Future[Seq[InFlightSubmission[SequencedSubmission]]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sql"""
         select change_id_hash, submission_id, submission_domain, message_id, sequencer_counter, sequencing_time, trace_context
@@ -98,7 +97,7 @@ class DbInFlightSubmissionStore(
   override def lookupSomeMessageId(domainId: DomainId, messageId: MessageId)(implicit
       traceContext: TraceContext
   ): Future[Option[InFlightSubmission[SubmissionSequencingInfo]]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sql"""
         select change_id_hash, submission_id, submission_domain, message_id, sequencing_timeout, sequencer_counter, sequencing_time, tracking_data, trace_context
@@ -111,7 +110,7 @@ class DbInFlightSubmissionStore(
   override def lookupEarliest(
       domainId: DomainId
   )(implicit traceContext: TraceContext): Future[Option[CantonTimestamp]] =
-    processingTime.metric.event {
+    processingTime.event {
       val query =
         sql"""
         select min(sequencing_time), min(sequencing_timeout)
@@ -153,7 +152,7 @@ class DbInFlightSubmissionStore(
   override def observeSequencing(
       domainId: DomainId,
       submissions: Map[MessageId, SequencedSubmission],
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     val updateQuery =
       """update in_flight_submission
          set sequencing_timeout = null, tracking_data = null, sequencer_counter = ?, sequencing_time = ?
@@ -175,7 +174,7 @@ class DbInFlightSubmissionStore(
   override def delete(
       submissions: Seq[InFlightReference]
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val (byId, bySequencing) = submissions.toList.map(_.toEither).separate
 
       val byIdQuery =
@@ -215,7 +214,7 @@ class DbInFlightSubmissionStore(
       messageId: MessageId,
       newSequencingInfo: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val updateQuery =
         sqlu"""
           update in_flight_submission

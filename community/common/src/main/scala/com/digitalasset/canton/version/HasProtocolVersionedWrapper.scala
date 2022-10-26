@@ -10,7 +10,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.{ProtoDeserializationError, checked}
+import com.digitalasset.canton.{DiscardOps, ProtoDeserializationError, checked}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
@@ -283,9 +283,32 @@ trait HasSupportedProtoVersions[ValueClass] {
       NonEmpty.mk(Seq, head, tail: _*)
     )
 
-    def fromNonEmpty(
+    /*
+     Throws an error if a protocol version is used twice.
+     This indicates an error in the converters list since one protocol version
+     cannot correspond to two proto versions.
+     */
+    private def ensureNoDuplicates(converters: NonEmpty[Seq[(ProtoVersion, ProtoCodec)]]): Unit =
+      NonEmpty
+        .from {
+          converters.forgetNE
+            .groupMap { case (_, codec) => codec.fromInclusive.representative } {
+              case (protoVersion, _) => protoVersion
+            }
+            .filter { case (_, protoVersions) => protoVersions.lengthCompare(1) > 0 }
+            .toList
+        }
+        .foreach { duplicates =>
+          throw new IllegalArgumentException(
+            s"Some protocol versions appear several times in `$name`: $duplicates "
+          )
+        }
+        .discard
+
+    private def fromNonEmpty(
         converters: NonEmpty[Seq[(ProtoVersion, ProtoCodec)]]
     ): SupportedProtoVersions = {
+      ensureNoDuplicates(converters)
 
       val sortedConverters = checked(
         NonEmptyUtil.fromUnsafe(

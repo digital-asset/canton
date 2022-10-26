@@ -5,7 +5,7 @@ package com.digitalasset.canton.tracing
 
 import cats.Show.Shown
 import com.daml.nonempty.NonEmpty
-import com.daml.{telemetry as damlTelemetry}
+import com.daml.telemetry as damlTelemetry
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -14,24 +14,27 @@ import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.v0
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.{Span, Tracer}
-import io.opentelemetry.context.{Context as OpenTelemetryContext}
+import io.opentelemetry.context.Context as OpenTelemetryContext
 
 import scala.collection.immutable
 
 /** Container for values tracing operations through canton.
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
-    extends HasVersionedWrapper[VersionedMessage[TraceContext]]
+    extends HasVersionedWrapper[TraceContext]
     with Equals
     with Serializable
     with NoCopy
     with PrettyPrinting {
+
+  override protected def companionObj = TraceContext
 
   lazy val asW3CTraceContext: Option[W3CTraceContext] =
     W3CTraceContext.fromOpenTelemetryContext(context)
@@ -63,9 +66,6 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   private def writeReplace(): Object =
     new TraceContext.JavaSerializedTraceContext(asW3CTraceContext)
 
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[TraceContext] =
-    VersionedMessage(toProtoV0.toByteString, 0)
-
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
   override def canEqual(that: Any): Boolean = that.isInstanceOf[TraceContext]
   override def equals(that: Any): Boolean = that match {
@@ -84,9 +84,15 @@ class TraceContext private[tracing] (val context: OpenTelemetryContext)
   def showTraceId: Shown = Shown(s"tid:${traceId.getOrElse("")}")
 }
 
-object TraceContext extends HasVersionedMessageCompanion[TraceContext] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.TraceContext)(fromProtoV0)
+object TraceContext
+    extends HasVersionedMessageCompanion[TraceContext]
+    with HasVersionedMessageCompanionDbHelpers[TraceContext] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.TraceContext)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   /** The name of the class as used for pretty-printing */

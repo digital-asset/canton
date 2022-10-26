@@ -14,9 +14,10 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 
 /** Represents a serializable contract.
@@ -39,24 +40,12 @@ case class SerializableContract(
 )
 // The class implements `HasVersionedWrapper` because we serialize it to an anonymous binary format (ByteString/Array[Byte]) when
 // writing to the TransferStore and thus need to encode the version of the serialized Protobuf message
-    extends HasVersionedWrapper[VersionedMessage[SerializableContract]]
+    extends HasVersionedWrapper[SerializableContract]
     // Even if implementing HasVersionedWrapper, we should still implement HasProtoV0
     with PrettyPrinting {
   def contractInstance: LfContractInst = rawContractInstance.contractInstance
 
-  override def toByteArray(version: ProtocolVersion): Array[Byte] = super.toByteArray(version)
-
-  /*
-  A `toProtoVersioned` method for a class which only has a single version of the corresponding Protobuf message
-  typically ignores the version-argument.
-  If there are multiple versions of the corresponding Protobuf message (e.g. v0.DomainTopologyTransaction and
-  v1.DomainTopologyTransaction), it needs to pattern-match on the versions to decide which version it should embed
-  within the UntypedVersionedMessage wrapper. Note: `VersionedMessage[SerializableContract]` is an alias
-  for UntypedVersionedMessage.
-   */
-
-  override def toProtoVersioned(version: ProtocolVersion): VersionedMessage[SerializableContract] =
-    VersionedMessage(toProtoV0.toByteString, 0)
+  override protected def companionObj = SerializableContract
 
   def toProtoV0: v0.SerializableContract =
     v0.SerializableContract(
@@ -90,9 +79,15 @@ case class SerializableContractWithWitnesses(
     witnesses: Set[PartyId],
 )
 
-object SerializableContract extends HasVersionedMessageCompanion[SerializableContract] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.SerializableContract)(fromProtoV0)
+object SerializableContract
+    extends HasVersionedMessageCompanion[SerializableContract]
+    with HasVersionedMessageCompanionDbHelpers[SerializableContract] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.SerializableContract)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
 
   override protected def name: String = "serializable contract"

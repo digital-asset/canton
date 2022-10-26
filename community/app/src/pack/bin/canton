@@ -146,6 +146,7 @@ eval exec "\"$JAVACMD\"" \
      -Dprog.home="'${PROG_HOME}'" \
      -Dprog.version="${PROG_VERSION}" \
      -Dprog.revision="${PROG_REVISION}" \
-     -jar \"${PROG_HOME}/REPLACE_JAR\" \
+     -cp \"${PROG_HOME}/REPLACE_JAR\" \
+     REPLACE_MAIN_CLASS \
       \"\$@\"
 exit $?

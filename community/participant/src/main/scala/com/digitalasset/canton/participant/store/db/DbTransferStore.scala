@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -52,7 +51,7 @@ class DbTransferStore(
   import storage.api.*
   import storage.converters.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("transfer-store")
 
   implicit val getResultFullTransferOutTree: GetResult[FullTransferOutTree] = GetResult(r =>
@@ -122,7 +121,7 @@ class DbTransferStore(
   override def addTransfer(
       transferData: TransferData
   )(implicit traceContext: TraceContext): EitherT[Future, TransferStoreError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       ErrorUtil.requireArgument(
         transferData.targetDomain == domain,
         s"Domain ${domain.unwrap}: Transfer store cannot store transfer for domain ${transferData.targetDomain.unwrap}",
@@ -183,7 +182,7 @@ class DbTransferStore(
   override def lookup(transferId: TransferId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, TransferStore.TransferLookupError, TransferData] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       EitherT(storage.query(entryExists(transferId), functionFullName).map {
         case None => Left(UnknownTransferId(transferId))
         case Some(TransferEntry(_, Some(timeOfCompletion))) =>
@@ -201,7 +200,7 @@ class DbTransferStore(
   override def addTransferOutResult(
       transferOutResult: DeliveredTransferOutResult
   )(implicit traceContext: TraceContext): EitherT[Future, TransferStoreError, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       val transferId = transferOutResult.transferId
 
       val existsRaw: DbAction.ReadOnly[Option[Option[RawDeliveredTransferOutResult]]] = sql"""
@@ -239,7 +238,7 @@ class DbTransferStore(
   override def completeTransfer(transferId: TransferId, timeOfCompletion: TimeOfChange)(implicit
       traceContext: TraceContext
   ): CheckedT[Future, Nothing, TransferStoreError, Unit] =
-    processingTime.metric.checkedTEvent[Nothing, TransferStoreError, Unit] {
+    processingTime.checkedTEvent[Nothing, TransferStoreError, Unit] {
 
       val updateSameOrUnset = sqlu"""
               update transfers
@@ -273,7 +272,7 @@ class DbTransferStore(
   override def deleteTransfer(
       transferId: TransferId
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"""delete from transfers
                 where target_domain=$domain and origin_domain=${transferId.sourceDomain} and request_timestamp=${transferId.requestTimestamp}""",
@@ -283,7 +282,7 @@ class DbTransferStore(
 
   override def deleteCompletionsSince(
       criterionInclusive: RequestCounter
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     val query = sqlu"""
        update transfers
          set time_of_completion_request_counter=null, time_of_completion_timestamp=null
@@ -305,7 +304,7 @@ class DbTransferStore(
       filterSubmitter: Option[LfPartyId],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         {
           import DbStorage.Implicits.BuilderChain.*
@@ -327,7 +326,7 @@ class DbTransferStore(
       requestAfter: Option[(CantonTimestamp, DomainId)],
       limit: Int,
   )(implicit traceContext: TraceContext): Future[Seq[TransferData]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         {
           import DbStorage.Implicits.BuilderChain.*

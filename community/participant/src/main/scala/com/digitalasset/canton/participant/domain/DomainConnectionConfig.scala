@@ -23,9 +23,10 @@ import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
+  HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
+  ProtoVersion,
   ProtocolVersion,
-  VersionedMessage,
 }
 import com.google.protobuf.ByteString
 
@@ -58,8 +59,10 @@ case class DomainConnectionConfig(
     initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
     maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
     timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
-) extends HasVersionedWrapper[VersionedMessage[DomainConnectionConfig]]
+) extends HasVersionedWrapper[DomainConnectionConfig]
     with PrettyPrinting {
+
+  override protected def companionObj = DomainConnectionConfig
 
   /** Helper methods to avoid having to use NonEmpty[Seq in the console */
   def addConnection(connection: String, additionalConnections: String*): DomainConnectionConfig =
@@ -100,11 +103,6 @@ case class DomainConnectionConfig(
       param("maxRetryDelay", _.maxRetryDelay),
     )
 
-  override protected def toProtoVersioned(
-      version: ProtocolVersion
-  ): VersionedMessage[DomainConnectionConfig] =
-    VersionedMessage(toProtoV0.toByteString, 0)
-
   def toProtoV0: v0.DomainConnectionConfig =
     v0.DomainConnectionConfig(
       domainAlias = domain.unwrap,
@@ -118,9 +116,15 @@ case class DomainConnectionConfig(
     )
 }
 
-object DomainConnectionConfig extends HasVersionedMessageCompanion[DomainConnectionConfig] {
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.DomainConnectionConfig)(fromProtoV0)
+object DomainConnectionConfig
+    extends HasVersionedMessageCompanion[DomainConnectionConfig]
+    with HasVersionedMessageCompanionDbHelpers[DomainConnectionConfig] {
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.DomainConnectionConfig)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    )
   )
   override protected def name: String = "domain connection config"
 

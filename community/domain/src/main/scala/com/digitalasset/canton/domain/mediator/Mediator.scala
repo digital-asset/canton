@@ -71,7 +71,7 @@ private[mediator] class Mediator(
       clock,
       logger,
       parameters.delayLoggingThreshold,
-      metrics.sequencerClient.delay.metric,
+      metrics.sequencerClient.delay,
     )
 
   val timeTracker = DomainTimeTracker(timeTrackerConfig, clock, sequencerClient, loggerFactory)
@@ -104,6 +104,7 @@ private[mediator] class Mediator(
     topologyTransactionProcessor.createHandler(domain),
     processor,
     deduplicator,
+    protocolVersion,
     readyCheck,
     loggerFactory,
   )

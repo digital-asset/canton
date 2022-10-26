@@ -50,7 +50,7 @@ class DbParticipantSettingsStore(
 
   override def refreshCache()(implicit traceContext: TraceContext): Future[Unit] =
     executionQueue.execute(
-      processingTime.metric.event {
+      processingTime.event {
         for {
           settingsO <- storage.query(
             sql"select max_dirty_requests, max_rate, max_deduplication_duration, unique_contract_keys from participant_settings"
@@ -89,7 +89,7 @@ class DbParticipantSettingsStore(
   override def writeResourceLimits(
       resourceLimits: ResourceLimits
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    processingTime.metric.event {
+    processingTime.event {
       // Put the new value into the cache right away so that changes become effective immediately.
       // This also ensures that value meets the object invariant of Settings.
       cache.updateAndGet(_.map(_.copy(resourceLimits = resourceLimits)))
@@ -124,7 +124,7 @@ class DbParticipantSettingsStore(
 
   private def insertOrUpdateIfNull[A: SetParameter](columnName: String, newValue: A)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = processingTime.metric.event {
+  ): Future[Unit] = processingTime.event {
     val query = storage.profile match {
       case _: DbStorage.Profile.Postgres =>
         sqlu"""insert into participant_settings(#$columnName, client) values ($newValue, $client)

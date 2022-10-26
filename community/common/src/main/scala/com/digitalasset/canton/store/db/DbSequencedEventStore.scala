@@ -6,7 +6,6 @@ package com.digitalasset.canton.store.db
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.String3
@@ -72,7 +71,7 @@ class DbSequencedEventStore(
   import storage.api.*
   import storage.converters.*
 
-  override protected val processingTime: Gauge[TimedLoadGauge, Double] =
+  override protected val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("sequenced-event-store")
 
   implicit val getResultPossiblyIgnoredSequencedEvent: GetResult[PossiblyIgnoredSerializedEvent] =
@@ -115,7 +114,7 @@ class DbSequencedEventStore(
   )(implicit traceContext: TraceContext): Future[Unit] =
     if (events.isEmpty) Future.unit
     else
-      processingTime.metric.event {
+      processingTime.event {
         withLock(
           storage.queryAndUpdate(bulkInsertQuery(events), functionFullName).void,
           functionFullName,
@@ -155,7 +154,7 @@ class DbSequencedEventStore(
   override def find(criterion: SequencedEventStore.SearchCriterion)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventNotFoundError, PossiblyIgnoredSerializedEvent] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       val query = criterion match {
         case ByTimestamp(timestamp) =>
           // The implementation assumes that we timestamps on sequenced events increases monotonically with the sequencer counter
@@ -175,7 +174,7 @@ class DbSequencedEventStore(
   override def findRange(criterion: SequencedEventStore.RangeCriterion, limit: Option[Int])(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencedEventRangeOverlapsWithPruning, Seq[PossiblyIgnoredSerializedEvent]] =
-    EitherT(processingTime.metric.event {
+    EitherT(processingTime.event {
       criterion match {
         case ByTimestampRange(lowerInclusive, upperInclusive) =>
           for {
@@ -201,7 +200,7 @@ class DbSequencedEventStore(
   override def sequencedEvents(
       limit: Option[Int] = None
   )(implicit traceContext: TraceContext): Future[Seq[PossiblyIgnoredSerializedEvent]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.query(
         sql"""select type, sequencer_counter, ts, sequenced_event, trace_context, ignore from sequenced_events
               where client = $partitionKey
@@ -214,7 +213,7 @@ class DbSequencedEventStore(
   override protected[canton] def doPrune(
       beforeAndIncluding: CantonTimestamp
   )(implicit traceContext: TraceContext): EitherT[Future, Nothing, Unit] =
-    processingTime.metric.eitherTEvent[Nothing, Unit] {
+    processingTime.eitherTEvent[Nothing, Unit] {
       val query =
         sqlu"delete from sequenced_events where client = $partitionKey and ts <= $beforeAndIncluding"
 
@@ -245,7 +244,7 @@ class DbSequencedEventStore(
   private def appendEmptyIgnoredEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ChangeWouldResultInGap, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       for {
         lastSequencerCounterAndTimestampO <- EitherT.right(
           storage.query(
@@ -280,7 +279,7 @@ class DbSequencedEventStore(
 
   private def setIgnoreStatus(from: SequencerCounter, to: SequencerCounter, ignore: Boolean)(
       implicit traceContext: TraceContext
-  ): Future[Unit] = processingTime.metric.event {
+  ): Future[Unit] = processingTime.event {
     storage.update_(
       sqlu"update sequenced_events set ignore = $ignore where client = $partitionKey and $from <= sequencer_counter and sequencer_counter <= $to",
       functionFullName,
@@ -303,7 +302,7 @@ class DbSequencedEventStore(
   private def deleteEmptyIgnoredEvents(from: SequencerCounter, to: SequencerCounter)(implicit
       traceContext: TraceContext
   ): EitherT[Future, ChangeWouldResultInGap, Unit] =
-    processingTime.metric.eitherTEvent {
+    processingTime.eitherTEvent {
       for {
         lastNonEmptyEventSequencerCounter <- EitherT.right(
           storage.query(
@@ -348,7 +347,7 @@ class DbSequencedEventStore(
   private[canton] override def delete(
       from: SequencerCounter
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       storage.update_(
         sqlu"delete from sequenced_events where client = $partitionKey and sequencer_counter >= $from",
         functionFullName,

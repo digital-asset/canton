@@ -433,7 +433,9 @@ class AcsCommitmentProcessor(
     val future = for {
       _ <- initFuture
       _ <- batch.traverse_ { envelope =>
-        getReconciliationIntervals(envelope.protocolMessage.message.period.toInclusive.forgetSecond)
+        getReconciliationIntervals(
+          envelope.protocolMessage.message.period.toInclusive.forgetRefinement
+        )
           .map { reconciliationIntervals =>
             validateEnvelope(timestamp, envelope, reconciliationIntervals) match {
               case Right(()) =>
@@ -531,7 +533,7 @@ class AcsCommitmentProcessor(
     endOfLastProcessedPeriod = Some(period.toInclusive)
     for {
       // delete the processed buffered commitments (safe to do at any point after `processBuffered` completes)
-      _ <- store.queue.deleteThrough(period.toInclusive.forgetSecond)
+      _ <- store.queue.deleteThrough(period.toInclusive.forgetRefinement)
       // mark that we're done with processing this period; safe to do at any point after the commitment has been sent
       // and the outstanding commitments stored
       _ <- store.markComputedAndSent(period)
@@ -572,7 +574,9 @@ class AcsCommitmentProcessor(
       message: SignedProtocolMessage[AcsCommitment]
   )(implicit traceContext: TraceContext): Future[Boolean] =
     for {
-      cryptoSnapshot <- domainCrypto.awaitSnapshot(message.message.period.toInclusive.forgetSecond)
+      cryptoSnapshot <- domainCrypto.awaitSnapshot(
+        message.message.period.toInclusive.forgetRefinement
+      )
       pureCrypto = domainCrypto.pureCrypto
       msgHash = pureCrypto.digest(
         HashPurpose.AcsCommitment,
@@ -620,7 +624,7 @@ class AcsCommitmentProcessor(
       timestamp: CantonTimestampSecond
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
-      toProcess <- store.queue.peekThrough(timestamp.forgetSecond)
+      toProcess <- store.queue.peekThrough(timestamp.forgetRefinement)
       _ <- checkMatchAndMarkSafe(toProcess)
     } yield {
       logger.debug(
@@ -636,7 +640,7 @@ class AcsCommitmentProcessor(
       lastPruningTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): Boolean = {
     if (local.isEmpty) {
-      if (lastPruningTime.forall(_ < remote.period.toInclusive.forgetSecond)) {
+      if (lastPruningTime.forall(_ < remote.period.toInclusive.forgetRefinement)) {
         Errors.MismatchError.NoSharedContracts.Mismatch(domainId, remote).report()
       } else
         logger.info(s"Ignoring incoming commitment for a pruned period: $remote")
@@ -705,7 +709,7 @@ class AcsCommitmentProcessor(
       s"Computing commitments for $period, number of stakeholder sets: ${commitmentSnapshot.keySet.size}"
     )
     for {
-      crypto <- domainCrypto.awaitSnapshot(period.toInclusive.forgetSecond)
+      crypto <- domainCrypto.awaitSnapshot(period.toInclusive.forgetRefinement)
       cmts <- commitments(
         participantId,
         commitmentSnapshot,
@@ -879,10 +883,10 @@ object AcsCommitmentProcessor extends HasLoggerName {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
-    val commitmentTimer = pruningMetrics.map(_.commitments.compute.metric.time())
+    val commitmentTimer = pruningMetrics.map(_.commitments.compute.startAsync())
 
     for {
-      ipsSnapshot <- domainCrypto.ipsSnapshot(timestamp.forgetSecond)
+      ipsSnapshot <- domainCrypto.ipsSnapshot(timestamp.forgetRefinement)
       // Important: use the keys of the timestamp
       isActiveParticipant <- ipsSnapshot.isParticipantActive(participantId)
 
@@ -913,7 +917,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         hashes.foreach(h => sumHash.add(h.toByteArray))
         sumHash.getByteString()
       }
-      commitmentTimer.foreach(_.stop())
+      commitmentTimer.foreach(_())
       res
     }
   }
@@ -969,7 +973,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       // so look for the most recent such tick before latestTickBeforeOrAt if any.
       tsSafeToPruneUpTo <- commitmentsPruningBound match {
         case CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF) =>
-          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetSecond).flatMap(
+          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetRefinement).flatMap(
             _.traverse(getTickBeforeOrAt)
           )
         case CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF) =>
@@ -1038,7 +1042,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         CommitmentsPruningBound.Outstanding(acsCommitmentStore.noOutstandingCommitments(_))
       else
         CommitmentsPruningBound.LastComputedAndSent(
-          acsCommitmentStore.lastComputedAndSent.map(_.map(_.forgetSecond))
+          acsCommitmentStore.lastComputedAndSent.map(_.map(_.forgetRefinement))
         )
 
     val earliestInFlightF = inFlightSubmissionStore.lookupEarliest(domainId)

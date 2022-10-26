@@ -7,7 +7,6 @@ import cats.instances.future.*
 import cats.instances.list.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{
@@ -62,13 +61,13 @@ class DbTopologyStoreFactory(
 
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("domain-identity-store-factory")
 
   override def allNonDiscriminated(implicit
       traceContext: TraceContext
   ): Future[Seq[TopologyStore[TopologyStoreId]]] =
-    processingTime.metric.event {
+    processingTime.event {
       def filterStateStores(str: String): Boolean = {
         // state stores (and discriminated stores) are prefixed with an <something>::, but we don't want
         // to prevent people from using domains named <something>:: ...
@@ -109,13 +108,13 @@ class DbPartyMetadataStore(
   import DbStorage.Implicits.BuilderChain.*
   import storage.api.*
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("party-metadata-store")
 
   override def metadataForParty(
       partyId: PartyId
   )(implicit traceContext: TraceContext): Future[Option[PartyMetadata]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           metadataForPartyQuery(sql"party_id = $partyId #${storage.limit(1)}"),
@@ -162,7 +161,7 @@ class DbPartyMetadataStore(
       effectiveTimestamp: CantonTimestamp,
       submissionId: String255,
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       val participantS = dbValue(participantId)
       val query = storage.profile match {
         case _: DbStorage.Profile.Postgres =>
@@ -201,7 +200,7 @@ class DbPartyMetadataStore(
   /** mark the given metadata has having been successfully forwarded to the domain */
   override def markNotified(
       metadata: PartyMetadata
-  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.metric.event {
+  )(implicit traceContext: TraceContext): Future[Unit] = processingTime.event {
     val partyId = metadata.partyId
     val effectiveAt = metadata.effectiveTimestamp
     val query =
@@ -211,7 +210,7 @@ class DbPartyMetadataStore(
 
   /** fetch the current set of party data which still needs to be notified */
   override def fetchNotNotified()(implicit traceContext: TraceContext): Future[Seq[PartyMetadata]] =
-    processingTime.metric.event {
+    processingTime.event {
       storage
         .query(
           metadataForPartyQuery(sql"notified = ${false}"),
@@ -245,9 +244,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     case _ => false
   }
 
-  private val updatingTime: Gauge[TimedLoadGauge, Double] =
+  private val updatingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("topology-store-update")
-  private val readTime: Gauge[TimedLoadGauge, Double] =
+  private val readTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("topology-store-read")
 
   private def buildTransactionStoreNames(
@@ -359,7 +358,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
           sql") SELECT * FROM UPDATES").asUpdate
     }
 
-    updatingTime.metric.event {
+    updatingTime.event {
       storage.update_(
         dbioSeq(Seq((updateSeq.nonEmpty, updateAction), (add.nonEmpty, insertAction))),
         operationName = "append-topology-transactions",
@@ -384,7 +383,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     val query =
       sql"SELECT id, instance, sequenced, valid_from, valid_until FROM topology_transactions WHERE store_id = $store" ++
         subQuery ++ sql" AND ignore_reason IS NULL #${orderBy} #${limit}"
-    readTime.metric.event {
+    readTime.event {
       storage
         .query(
           query.as[
@@ -580,7 +579,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
              OR (transaction_type = $pdsm AND identifier LIKE $filterPartyIdentifier AND namespace LIKE $filterPartyNamespace
                  AND identifier LIKE $filterParticipantIdentifier AND namespace LIKE $filterParticipantNamespace)
             ) AND ignore_reason IS NULL GROUP BY (identifier, namespace) #${limitS}"""
-    readTime.metric.event {
+    readTime.event {
       storage
         .query(
           query.as[
@@ -911,7 +910,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       sql"SELECT watermark_ts FROM topology_dispatching WHERE store_id =$transactionStoreIdName"
         .as[CantonTimestamp]
         .headOption
-    readTime.metric.event {
+    readTime.event {
       storage.query(query, functionFullName)
     }
   }
@@ -939,7 +938,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
                     values ($transactionStoreIdName, $timestamp)
                  """
     }
-    updatingTime.metric.event {
+    updatingTime.event {
       storage.update_(query, functionFullName)
     }
   }

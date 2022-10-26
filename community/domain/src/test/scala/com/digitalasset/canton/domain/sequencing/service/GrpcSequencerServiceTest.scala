@@ -28,7 +28,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.version.UntypedVersionedMessage
+import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code.*
@@ -104,7 +104,11 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     private val mockTopologySnapshot = mock[TopologySnapshot]
     when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
       .thenReturn(mockTopologySnapshot)
-    when(mockTopologySnapshot.findDynamicDomainParametersOrDefault(anyBoolean)(any[TraceContext]))
+    when(
+      mockTopologySnapshot.findDynamicDomainParametersOrDefault(any[ProtocolVersion], anyBoolean)(
+        any[TraceContext]
+      )
+    )
       .thenReturn(
         Future.successful(
           TestDomainParameters.defaultDynamic(maxRatePerParticipant = maxRatePerParticipant)
@@ -184,14 +188,17 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           None,
         )
 
-      def sendAndSucceed(requestP: v0.SubmissionRequest)(implicit
+      def sendAndCheckSucceed(requestP: v0.SubmissionRequest)(implicit
           env: Environment
       ): Future[Assertion] = {
-        (if (useSignedSend)
-           env.service.sendAsyncSigned(signedContent(requestP))
-         else env.service.sendAsync(requestP)).map { responseP =>
-          val response = SendAsyncResponse.fromProtoV0(responseP)
-          response.value.error shouldBe None
+        (if (useSignedSend) {
+           val response = env.service.sendAsyncSigned(signedContent(requestP))
+           response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
+         } else {
+           val response = env.service.sendAsync(requestP)
+           response.map(SendAsyncResponse.fromSendAsyncResponseProto)
+         }).map { responseP =>
+          responseP.value.error shouldBe None
         }
       }
 
@@ -200,12 +207,17 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           assertion: PartialFunction[SendAsyncError, Assertion],
           authenticated: Boolean = true,
       )(implicit env: Environment): Future[Assertion] = {
-        (if (!authenticated) env.service.sendAsyncUnauthenticated(requestP)
-         else if (useSignedSend)
-           env.service.sendAsyncSigned(signedContent(requestP))
-         else env.service.sendAsync(requestP)).map { responseP =>
-          val response = SendAsyncResponse.fromProtoV0(responseP).value
-          assertion(response.error.value)
+        (if (!authenticated) {
+           val response = env.service.sendAsyncUnauthenticated(requestP)
+           response.map(SendAsyncResponse.fromSendAsyncResponseProto)
+         } else if (useSignedSend) {
+           val response = env.service.sendAsyncSigned(signedContent(requestP))
+           response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
+         } else {
+           val response = env.service.sendAsync(requestP)
+           response.map(SendAsyncResponse.fromSendAsyncResponseProto)
+         }).map { responseP =>
+          assertion(responseP.value.error.value)
         }
       }
 
@@ -384,7 +396,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             )
           )
         val domEnvironment = new Environment(DefaultTestIdentities.domainManager)
-        sendAndSucceed(request.toProtoV0)(domEnvironment)
+        sendAndCheckSucceed(request.toProtoV0)(domEnvironment)
       }
 
       "reject unauthenticated member sending message to non domain manager member" in { _ =>
@@ -423,14 +435,14 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         new Environment(unauthenticatedMember).service
           .sendAsyncUnauthenticated(request.toProtoV0)
           .map { responseP =>
-            val response = SendAsyncResponse.fromProtoV0(responseP)
+            val response = SendAsyncResponse.fromSendAsyncResponseProto(responseP)
             response.value.error shouldBe None
           }
       }
 
       "reject on rate excess" in { implicit env =>
         def expectSuccess(): Future[Assertion] = {
-          sendAndSucceed(defaultRequest.toProtoV0)
+          sendAndCheckSucceed(defaultRequest.toProtoV0)
         }
 
         def expectOverloaded(): Future[Assertion] = {
@@ -523,7 +535,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
           _ <- goodRequests.zipWithIndex.traverse_ { case ((goodRequest, sender), index) =>
             withClue(s"good request #$index") {
               val senderEnv = new Environment(sender)
-              sendAndSucceed(goodRequest.toProtoV0)(senderEnv)
+              sendAndCheckSucceed(goodRequest.toProtoV0)(senderEnv)
             }
           }
         } yield succeed

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -143,13 +142,13 @@ private[mediator] class DbFinalizedResponseStore(
     (r: MediatorRequest, pp: PositionedParameters) =>
       pp >> EnvelopeContent(r, protocolVersion).toByteArray
 
-  private val processingTime: Gauge[TimedLoadGauge, Double] =
+  private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("finalized-response-store")
 
   override def store(
       request: ResponseAggregation
   )(implicit traceContext: TraceContext): Future[Unit] =
-    processingTime.metric.event {
+    processingTime.event {
       request.state match {
         case Left(verdict) =>
           val insert = storage.profile match {
@@ -176,7 +175,7 @@ private[mediator] class DbFinalizedResponseStore(
   override def fetch(requestId: RequestId)(implicit
       traceContext: TraceContext
   ): OptionT[Future, ResponseAggregation] =
-    processingTime.metric.optionTEvent {
+    processingTime.optionTEvent {
       storage.querySingle(
         sql"""select request_id, mediator_request, version, verdict, request_trace_context 
               from response_aggregations where request_id=${requestId.unwrap}

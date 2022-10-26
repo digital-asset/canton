@@ -56,6 +56,7 @@ import com.digitalasset.canton.sequencing.handlers.{
   StoreSequencedEvent,
 }
 import com.digitalasset.canton.sequencing.handshake.SequencerHandshake
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequest.usingSignedSubmissionRequest
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.CursorPrehead.SequencerCounterCursorPrehead
 import com.digitalasset.canton.store.SequencedEventStore.{
@@ -377,9 +378,7 @@ class SequencerClient(
       .timed(metrics.submissions.sends) {
         val timeout = timeouts.network.duration
         if (requiresAuthentication) {
-          val sigCheckSupportSince = ProtocolVersion.dev
-          val sigCheckSupported = protocolVersion >= sigCheckSupportSince
-          if (sigCheckSupported) for {
+          if (usingSignedSubmissionRequest(protocolVersion)) for {
             signedContent <- signSubmission(traceContext)(request)
               .leftMap { err =>
                 val message = s"Error signing submission request $err"
@@ -409,7 +408,7 @@ class SequencerClient(
         // increment appropriate error metrics
         err match {
           case SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded(_)) =>
-            metrics.submissions.overloaded.metric.inc()
+            metrics.submissions.overloaded.inc()
           case _ =>
         }
 
@@ -879,7 +878,7 @@ class SequencerClient(
           val asyncResultFT =
             Try(
               Timed
-                .future(metrics.applicationHandle.metric, eventHandler(Traced(eventBatch)).unwrap)
+                .future(metrics.applicationHandle, eventHandler(Traced(eventBatch)).unwrap)
             )
 
           def putApplicationHandlerFailure(
@@ -1189,6 +1188,7 @@ object SequencerClient {
                   config.optimisticSequencedEventValidation,
                   domainId,
                   sequencerId,
+                  domainParameters.protocolVersion,
                   syncCryptoApi,
                   loggerFactory,
                 )

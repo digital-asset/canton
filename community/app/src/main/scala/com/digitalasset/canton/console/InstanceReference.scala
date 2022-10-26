@@ -163,7 +163,7 @@ trait LocalInstanceReference extends InstanceReference with NoTracing {
 
   protected def startInstance(): Either[StartupError, Unit] = nodes.start(name).map(_ => ())
   protected def stopInstance(): Either[ShutdownError, Unit] = nodes.stop(name)
-  protected def crypto: Crypto
+  protected[canton] def crypto: Crypto
 
   protected def runCommandIfRunning[Result](
       runner: => ConsoleCommandResult[Result]

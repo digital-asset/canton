@@ -17,11 +17,15 @@ import com.digitalasset.canton.metrics.MetricsConfig.MetricsFilterConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.typesafe.scalalogging.LazyLogging
+import io.opentelemetry.api.metrics.Meter
+import io.opentelemetry.exporter.prometheus.PrometheusCollector
+import io.opentelemetry.sdk.metrics.{SdkMeterProvider, SdkMeterProviderBuilder}
 import io.prometheus.client.dropwizard.DropwizardExports
 
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 
 case class MetricsConfig(
@@ -93,6 +97,7 @@ case class MetricsFactory(
     reporters: Seq[metrics.Reporter],
     registry: metrics.MetricRegistry,
     reportJVMMetrics: Boolean,
+    meter: Meter,
 ) extends AutoCloseable {
 
   private val envMetrics = new EnvMetrics(registry)
@@ -124,7 +129,7 @@ case class MetricsFactory(
     participants.getOrElseUpdate(
       name, {
         val metricName = deduplicateName(name, "participant", participants)
-        new ParticipantMetrics(MetricsFactory.prefix, newRegistry(metricName))
+        new ParticipantMetrics(MetricsFactory.prefix, newRegistry(metricName), meter)
       },
     )
   }
@@ -205,13 +210,22 @@ object MetricsFactory extends LazyLogging {
 
   def forConfig(config: MetricsConfig): MetricsFactory = {
     val registry = new metrics.MetricRegistry()
-    val reporter = registerReporter(config, registry)
-    new MetricsFactory(reporter, registry, config.reportJvmMetrics)
+    val meterProviderBuilder = SdkMeterProvider.builder()
+    val reporter = registerReporter(config, registry, meterProviderBuilder)
+    val meterProvider = meterProviderBuilder.build()
+    new MetricsFactory(
+      reporter,
+      registry,
+      config.reportJvmMetrics,
+      meterProvider.meterBuilder("daml").build(),
+    )
   }
 
+  @nowarn("msg=deprecated")
   private def registerReporter(
       config: MetricsConfig,
       registry: metrics.MetricRegistry,
+      meterProviderBuilder: SdkMeterProviderBuilder,
   ): Seq[metrics.Reporter] = {
     config.reporters.map {
 
@@ -247,6 +261,7 @@ object MetricsFactory extends LazyLogging {
 
       case Prometheus(hostname, port) =>
         logger.debug(s"Exposing metrics for Prometheus on port $hostname:$port")
+        meterProviderBuilder.registerMetricReader(PrometheusCollector.create())
         new DropwizardExports(registry).register[DropwizardExports]()
         val reporter = new Reporters.Prometheus(hostname, port)
         reporter

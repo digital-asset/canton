@@ -54,7 +54,7 @@ case class InformeeMessage(fullInformeeTree: FullInformeeTree)(protocolVersion: 
     TransactionResultMessage(
       requestId,
       verdict,
-      fullInformeeTree.informeeTreeUnblindedFor(recipientParties),
+      fullInformeeTree.informeeTreeUnblindedFor(recipientParties, protocolVersion),
       protocolVersion,
     )
 

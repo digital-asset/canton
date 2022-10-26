@@ -4,7 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Counter, Gauge, Timer}
+import com.daml.metrics.MetricHandle.{Counter, DropwizardGauge, DropwizardTimer, Gauge, Timer}
 import com.daml.metrics.MetricName
 
 import scala.concurrent.duration.*
@@ -13,9 +13,9 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
     extends MetricHandle.Factory {
   override val prefix: MetricName = basePrefix :+ "db-storage"
 
-  def loadGaugeM(name: String): Gauge[TimedLoadGauge, Double] = {
+  def loadGaugeM(name: String): TimedLoadGauge = {
     val timerM = timer(prefix :+ name)
-    loadGauge(prefix :+ name :+ "load", 1.second, timerM.metric)
+    loadGauge(prefix :+ name :+ "load", 1.second, timerM)
   }
 
   @MetricDoc.Tag(
@@ -23,7 +23,7 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
     description = """Covers both read from and writes to the storage.""",
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  val timerExampleForDocs: Timer = Timer(prefix :+ "<storage>", null)
+  val timerExampleForDocs: Timer = DropwizardTimer(prefix :+ "<storage>", null)
 
   @MetricDoc.Tag(
     summary = "The load on the given storage",
@@ -32,8 +32,8 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
           |has been spent reading from or writing to the storage.""",
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  val loadExampleForDocs: Gauge[TimedLoadGauge, Double] =
-    Gauge(prefix :+ "<storage>" :+ "load", null)
+  val loadExampleForDocs: Gauge[Double] =
+    DropwizardGauge(prefix :+ "<storage>" :+ "load", null)
 
   object alerts extends DbAlertMetrics(prefix, registry)
 
@@ -58,14 +58,14 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |Note that the queue has a maximum size. Tasks that do not fit into the queue
         |will be retried, but won't show up in this metric.""",
   )
-  val queue = intGauge(prefix :+ "queued", 0)
+  val queue = counter(prefix :+ "queued")
 
   @MetricDoc.Tag(
     summary = "Number of database access tasks currently running",
     description = """Database access tasks run on an async executor. This metric shows
         |the current number of tasks running in parallel.""",
   )
-  val running = intGauge(prefix :+ "running", 0)
+  val running = counter(prefix :+ "running")
 
   @MetricDoc.Tag(
     summary = "Scheduling time metric for database tasks",

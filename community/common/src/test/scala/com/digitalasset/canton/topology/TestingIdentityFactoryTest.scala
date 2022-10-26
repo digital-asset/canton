@@ -133,7 +133,10 @@ class TestingIdentityFactoryTest extends AnyWordSpec with BaseTest with HasExecu
 
       "serve domain parameters corresponding to correct timestamp" in {
         def getParameters(ts: CantonTimestamp): DynamicDomainParameters =
-          p1.ips.awaitSnapshot(ts).flatMap(_.findDynamicDomainParametersOrDefault()).futureValue
+          p1.ips
+            .awaitSnapshot(ts)
+            .flatMap(_.findDynamicDomainParametersOrDefault(testedProtocolVersion))
+            .futureValue
 
         val transitionTs = domainParameters1.validUntil.value
 

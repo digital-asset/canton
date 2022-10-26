@@ -101,7 +101,7 @@ private[participant] class PruneObserver(
     if (oldTs < localTs) {
       // Clean unused entries from the ACS
       val acsF = EitherTUtil
-        .logOnError(acs.prune(pruneTs.forgetSecond), s"Periodic ACS prune at $pruneTs:")
+        .logOnError(acs.prune(pruneTs.forgetRefinement), s"Periodic ACS prune at $pruneTs:")
         .value
         // Discard the result of this prune, as it's not needed
         .void
@@ -109,7 +109,7 @@ private[participant] class PruneObserver(
       val journalF =
         EitherTUtil
           .logOnError(
-            keyJournal.prune(pruneTs.forgetSecond),
+            keyJournal.prune(pruneTs.forgetRefinement),
             s"Periodic contract key journal prune at $pruneTs: ",
           )
           .value

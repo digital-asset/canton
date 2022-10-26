@@ -157,6 +157,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           CachingDomainTopologyClient.create(
             clock,
             domainId,
+            staticDomainParameters.protocolVersion,
             targetDomainStore,
             Map(),
             packageDependencies,

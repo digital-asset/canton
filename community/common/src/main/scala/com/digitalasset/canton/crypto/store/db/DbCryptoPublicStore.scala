@@ -5,7 +5,6 @@ package com.digitalasset.canton.crypto.store.db
 
 import cats.data.{EitherT, OptionT}
 import cats.syntax.bifunctor.*
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.*
@@ -33,9 +32,9 @@ class DbCryptoPublicStore(
   import storage.api.*
   import storage.converters.*
 
-  private val insertTime: Gauge[TimedLoadGauge, Double] =
+  private val insertTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("crypto-public-store-insert")
-  private val queryTime: Gauge[TimedLoadGauge, Double] =
+  private val queryTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("crypto-public-store-query")
 
   private implicit val setParameterEncryptionPublicKey: SetParameter[EncryptionPublicKey] =
@@ -76,7 +75,7 @@ class DbCryptoPublicStore(
       key: K,
       name: Option[KeyName],
   )(implicit traceContext: TraceContext): EitherT[Future, CryptoPublicStoreError, Unit] =
-    insertTime.metric.eitherTEvent {
+    insertTime.eitherTEvent {
       for {
         inserted <- EitherT.right(storage.update(insertKeyUpdate(key, name), functionFullName))
         res <-
@@ -140,7 +139,7 @@ class DbCryptoPublicStore(
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Set[SigningPublicKeyWithName]] =
     EitherTUtil.fromFuture(
-      queryTime.metric.event(
+      queryTime.event(
         storage.query(queryKeys[SigningPublicKeyWithName](KeyPurpose.Signing), functionFullName)
       ),
       err => CryptoPublicStoreError.FailedToListKeys(err.toString),
@@ -151,7 +150,7 @@ class DbCryptoPublicStore(
   ): EitherT[Future, CryptoPublicStoreError, Set[EncryptionPublicKeyWithName]] =
     EitherTUtil
       .fromFuture(
-        queryTime.metric.event(
+        queryTime.event(
           storage
             .query(queryKeys[EncryptionPublicKeyWithName](KeyPurpose.Encryption), functionFullName)
         ),
@@ -184,7 +183,7 @@ class DbCryptoPublicStore(
 
     for {
       nrRows <- EitherTUtil.fromFuture(
-        insertTime.metric.event(storage.update(insertCertAction, functionFullName)),
+        insertTime.event(storage.update(insertCertAction, functionFullName)),
         err => CryptoPublicStoreError.FailedToInsertCertificate(cert.id, err.toString),
       )
       _ <- nrRows match {
@@ -219,7 +218,7 @@ class DbCryptoPublicStore(
       traceContext: TraceContext
   ): EitherT[Future, CryptoPublicStoreError, Set[X509Certificate]] =
     EitherTUtil.fromFuture(
-      queryTime.metric.event(
+      queryTime.event(
         storage.query(
           sql"select data from crypto_certs".as[X509Certificate].map(_.toSet),
           functionFullName,

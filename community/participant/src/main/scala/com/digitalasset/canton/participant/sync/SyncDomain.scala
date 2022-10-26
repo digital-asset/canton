@@ -415,7 +415,12 @@ class SyncDomain(
       // now, compute epsilon at resubscriptionTs
       topologyClient
         .awaitSnapshot(resubscriptionTs)
-        .flatMap(_.findDynamicDomainParametersOrDefault(warnOnUsingDefault = false))
+        .flatMap(
+          _.findDynamicDomainParametersOrDefault(
+            staticDomainParameters.protocolVersion,
+            warnOnUsingDefault = false,
+          )
+        )
         .map(_.topologyChangeDelay)
         .map { topologyChangeDelay =>
           // update client
@@ -517,7 +522,7 @@ class SyncDomain(
         clock,
         logger,
         parameters.delayLoggingThreshold,
-        metrics.sequencerClient.delay.metric,
+        metrics.sequencerClient.delay,
       )
 
     def firstUnpersistedEventScF: Future[SequencerCounter] =
@@ -689,7 +694,9 @@ class SyncDomain(
         .map(_.void)
         .getOrElse(Future.unit)
 
-      params <- topologyClient.currentSnapshotApproximation.findDynamicDomainParametersOrDefault()
+      params <- topologyClient.currentSnapshotApproximation.findDynamicDomainParametersOrDefault(
+        staticDomainParameters.protocolVersion
+      )
 
       _bool <- Monad[Future].tailRecM(None: Option[(CantonTimestamp, DomainId)])(ts =>
         completeTransfers(ts)

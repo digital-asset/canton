@@ -4,7 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Counter, Gauge, Timer, VarGauge}
+import com.daml.metrics.MetricHandle.{Counter, Gauge, Timer}
 import com.daml.metrics.MetricName
 
 import scala.concurrent.duration.*
@@ -34,8 +34,8 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
     description = """The event subscription processor is a sequential process. The load is a factor between
                     |0 and 1 describing how much of an existing interval has been spent in the event handler.""",
   )
-  val load: Gauge[TimedLoadGauge, Double] =
-    loadGauge(prefix :+ "load", 1.second, processingTime.metric)
+  val load: TimedLoadGauge =
+    loadGauge(prefix :+ "load", 1.second, processingTime)
 
   @MetricDoc.Tag(
     summary = "The delay on the event processing",
@@ -51,7 +51,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         |sequencer a while ago. This can happen after having been offline for a while or if the node is
         |too slow to keep up with the messaging load.""",
   )
-  val delay: VarGauge[Long] = varGauge(prefix :+ "delay", 0L)
+  val delay: Gauge[Long] = gauge(prefix :+ "delay", 0L)
 
   object submissions {
     val prefix: MetricName = SequencerClientMetrics.this.prefix :+ "submissions"
@@ -62,7 +62,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
       description = """Incremented on every successful send to the sequencer.
           |Decremented when the event or an error is sequenced, or when the max-sequencing-time has elapsed.""",
     )
-    val inFlight: Gauge[IntGauge, Integer] = intGauge(prefix :+ "in-flight", initial = 0)
+    val inFlight: Counter = counter(prefix :+ "in-flight")
 
     @MetricDoc.Tag(
       summary = "Rate and timings of send requests to the sequencer",

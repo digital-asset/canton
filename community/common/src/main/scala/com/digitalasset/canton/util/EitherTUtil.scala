@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.{Applicative, Functor}
 import com.daml.metrics.MetricHandle.Timer
-import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -132,9 +131,9 @@ object EitherTUtil {
   def timed[E, R](timerMetric: Timer)(
       code: => EitherT[Future, E, R]
   )(implicit executionContext: ExecutionContext): EitherT[Future, E, R] = {
-    val timerContext = timerMetric.metric.time()
+    val timerStop = timerMetric.startAsync()
     code.thereafter { _ =>
-      timerContext.stop().discard[Long]
+      timerStop()
     }
   }
 

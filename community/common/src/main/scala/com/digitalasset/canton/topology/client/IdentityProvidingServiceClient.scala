@@ -335,7 +335,8 @@ trait DomainGovernanceSnapshotClient {
   this: BaseTopologySnapshotClient with NamedLogging =>
 
   def findDynamicDomainParametersOrDefault(
-      warnOnUsingDefault: Boolean = true
+      protocolVersion: ProtocolVersion,
+      warnOnUsingDefault: Boolean = true,
   )(implicit traceContext: TraceContext): Future[DynamicDomainParameters] =
     findDynamicDomainParameters().map {
       case Some(value) => value
@@ -349,8 +350,7 @@ trait DomainGovernanceSnapshotClient {
           // however, once the domain has published the initial set of domain parameters, the zero time will be
           // adjusted.
           topologyChangeDelay = DynamicDomainParameters.topologyChangeDelayIfAbsent,
-          protocolVersion =
-            ProtocolVersion.latest, // TODO(#9900) remove this hardcoded representative protocol version
+          protocolVersion = protocolVersion,
         )
     }
 

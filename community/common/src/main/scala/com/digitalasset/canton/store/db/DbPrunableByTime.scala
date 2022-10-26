@@ -4,7 +4,6 @@
 package com.digitalasset.canton.store.db
 
 import cats.data.EitherT
-import com.daml.metrics.MetricHandle.Gauge
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
@@ -45,12 +44,12 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
 
   import storage.api.*
 
-  protected val processingTime: Gauge[TimedLoadGauge, Double]
+  protected val processingTime: TimedLoadGauge
 
   override def pruningStatus(implicit
       traceContext: TraceContext
   ): EitherT[Future, E, Option[PruningStatus]] =
-    EitherT.right[E](processingTime.metric.event {
+    EitherT.right[E](processingTime.event {
       val query = sql"""
         select phase, ts from #$pruning_status_table
         where #$partitionColumn = $partitionKey
@@ -60,7 +59,7 @@ trait DbPrunableByTime[PartitionKey, E] extends PrunableByTime[E] {
 
   protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): EitherT[Future, E, Unit] = processingTime.metric.eitherTEvent {
+  ): EitherT[Future, E, Unit] = processingTime.eitherTEvent {
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sqlu"""

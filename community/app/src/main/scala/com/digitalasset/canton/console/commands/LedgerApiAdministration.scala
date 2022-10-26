@@ -6,7 +6,7 @@ package com.digitalasset.canton.console.commands
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.codahale.metrics.{Histogram, Meter, MetricRegistry}
+import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.admin.package_management_service.PackageDetails
 import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails
@@ -18,6 +18,7 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
+import com.daml.metrics.MetricHandle.{Histogram, Meter}
 import com.daml.metrics.MetricName
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
@@ -69,7 +70,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
   this: LedgerApiCommandRunner with NamedLogging with FeatureFlagFilter =>
   implicit protected val consoleEnvironment: ConsoleEnvironment
-  protected implicit val executionContext: ExecutionContext =
+  protected implicit lazy val executionContext: ExecutionContext =
     consoleEnvironment.environment.executionContext
   protected val name: String
 
@@ -261,9 +262,9 @@ trait BaseLedgerApiAdministration extends NoTracing {
             override def registry: MetricRegistry =
               consoleEnvironment.environment.metricsFactory.registry
 
-            val metric: Meter = meter(metricName).metric
-            val nodeCount: Histogram = histogram(metricName :+ "tx-node-count").metric
-            val transactionSize: Histogram = histogram(metricName :+ "tx-size").metric
+            val metric: Meter = meter(metricName)
+            val nodeCount: Histogram = histogram(metricName :+ "tx-node-count")
+            val transactionSize: Histogram = histogram(metricName :+ "tx-size")
 
             override def onNext(tree: TransactionTree): Unit = {
               val s = tree.rootEventIds.size.toLong

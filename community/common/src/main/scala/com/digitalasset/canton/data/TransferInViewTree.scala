@@ -74,9 +74,17 @@ object TransferInViewTree
     extends HasVersionedMessageWithContextCompanion[TransferInViewTree, HashOps] {
   override val name: String = "TransferInViewTree"
 
-  val supportedProtoVersions: Map[Int, Parser] = Map(
-    0 -> supportedProtoVersion(v0.TransferViewTree)(fromProtoV0),
-    1 -> supportedProtoVersion(v1.TransferViewTree)(fromProtoV1),
+  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
+    ProtoVersion(0) -> ProtoCodec(
+      ProtocolVersion.v2,
+      supportedProtoVersion(v0.TransferViewTree)(fromProtoV0),
+      _.toProtoV0.toByteString,
+    ),
+    ProtoVersion(1) -> ProtoCodec(
+      ProtocolVersion.v4,
+      supportedProtoVersion(v1.TransferViewTree)(fromProtoV1),
+      _.toProtoV1.toByteString,
+    ),
   )
 
   def fromProtoV0(

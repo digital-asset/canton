@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.util
 
-import com.daml.metrics.MetricHandle.Gauge
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.BatchAggregatorConfig
@@ -49,7 +48,7 @@ object BatchAggregator {
   def apply[A, B](
       processor: Processor[A, B],
       config: BatchAggregatorConfig,
-      processingTime: Option[Gauge[TimedLoadGauge, Double]] = None,
+      processingTime: Option[TimedLoadGauge] = None,
   ): BatchAggregator[A, B] = config match {
     case BatchAggregatorConfig.Batching(maximumInFlight, maximumBatchSize) =>
       new BatchAggregatorImpl[A, B](
@@ -119,7 +118,7 @@ class BatchAggregatorImpl[A, B](
     processor: BatchAggregator.Processor[A, B],
     private val maximumInFlight: Int,
     private val maximumBatchSize: Int,
-    processingTime: Option[Gauge[TimedLoadGauge, Double]],
+    processingTime: Option[TimedLoadGauge],
 ) extends BatchAggregator[A, B] {
 
   private val inFlight = new AtomicInteger(0)
@@ -145,7 +144,7 @@ class BatchAggregatorImpl[A, B](
   private def maybeMeasureTime(f: => Future[B])(implicit
       ec: ExecutionContext
   ): Future[B] =
-    processingTime.map(_.metric.event(f)).getOrElse(f)
+    processingTime.map(_.event(f)).getOrElse(f)
 
   private def runSingleWithoutIncrement(
       item: A

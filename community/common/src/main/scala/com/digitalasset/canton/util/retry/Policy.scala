@@ -101,7 +101,8 @@ abstract class RetryWithDelay(
 
   /** A [[com.digitalasset.canton.util.retry.Success]] criteria is supplied
     * to determine whether the future-based task has succeeded, or if it should perhaps be retried. Retries are not
-    * performed after the [[com.digitalasset.canton.lifecycle.FlagCloseable]] has been closed.
+    * performed after the [[com.digitalasset.canton.lifecycle.FlagCloseable]] has been closed. In that case, the
+    * Future is completed with the last result (even if it is an outcome that doesn't satisfy the `success` predicate).
     */
   override def apply[T](
       task: => Future[T],
@@ -119,6 +120,15 @@ abstract class RetryWithDelay(
         Failure(failure)
     }(directExecutionContext)
 
+  /** In contrast to [[com.digitalasset.canton.util.retry.RetryWithDelay.apply]], this Policy completes the returned
+    * future with `AbortedDueToShutdown` if the retry is aborted due to the corresponding
+    * [[com.digitalasset.canton.lifecycle.FlagCloseable]] being closed or if the task itself reports a shutdown (and
+    * not with the last result).
+    *
+    * Unless your task does already naturally return a `FutureUnlessShutdown[T]`, using
+    * [[com.digitalasset.canton.util.retry.RetryWithDelay.apply]] is likely sufficient to make it robust against
+    * shutdowns.
+    */
   override def unlessShutdown[T](
       task: => FutureUnlessShutdown[T],
       retryable: ExceptionRetryable,
@@ -431,6 +441,8 @@ case class Pause(
   *  For more information about the algorithms, see the following article:
   *
   *  [[https://www.awsarchitectureblog.com/2015/03/backoff.html]]
+  *
+  *  If the retry is not successful after `maxRetries`, the future is completed with its last result.
   */
 case class Backoff(
     logger: TracedLogger,

@@ -100,7 +100,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def ts(i: Int): CantonTimestampSecond = CantonTimestampSecond.ofEpochSecond(i.longValue)
 
   protected def toc(timestamp: Int, requestCounter: Int = 0): TimeOfChange =
-    TimeOfChange(RequestCounter(requestCounter), ts(timestamp).forgetSecond)
+    TimeOfChange(RequestCounter(requestCounter), ts(timestamp).forgetRefinement)
 
   protected def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
 
@@ -246,7 +246,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def withTestHash[A] = WithContractHash[A](_, testHash)
 
   protected def rt(timestamp: Int, tieBreaker: Int) =
-    RecordTime(ts(timestamp).forgetSecond, tieBreaker.toLong)
+    RecordTime(ts(timestamp).forgetRefinement, tieBreaker.toLong)
 
   val coid = (txId, discriminator) => ExampleTransactionFactory.suffixedId(txId, discriminator)
 }
@@ -275,7 +275,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
     val cmt = commitment(cids)
     val snapshotF = crypto.snapshot(CantonTimestamp.Epoch)
     val period =
-      CommitmentPeriod.create(fromExclusive.forgetSecond, toInclusive.forgetSecond, interval).value
+      CommitmentPeriod
+        .create(fromExclusive.forgetRefinement, toInclusive.forgetRefinement, interval)
+        .value
     val payload =
       AcsCommitment.create(domainId, remote, localId, period, cmt, testedProtocolVersion)
 
@@ -371,7 +373,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       }
 
       val acsF = acsSetup(contractSetup.fmap { case (_, createdAt, archivedAt) =>
-        (createdAt.forgetSecond, archivedAt.forgetSecond)
+        (createdAt.forgetRefinement, archivedAt.forgetRefinement)
       })
 
       def commitments(
@@ -379,7 +381,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           at: CantonTimestampSecond,
       ): Future[Map[ParticipantId, AcsCommitment.CommitmentType]] =
         for {
-          snapshotOrErr <- acs.snapshot(at.forgetSecond)
+          snapshotOrErr <- acs.snapshot(at.forgetRefinement)
           snapshot <- snapshotOrErr.fold(
             _ => Future.failed(new RuntimeException(s"Failed to get snapshot at timestamp $at")),
             sn => Future.successful(sn.map { case (cid, _ts) => cid -> stakeholderLookup(cid) }),
@@ -510,7 +512,9 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         )
         // First ask for the remote commitments to be processed, and then compute locally
         _ <- delivered
-          .traverse_ { case (ts, batch) => processor.processBatchInternal(ts.forgetSecond, batch) }
+          .traverse_ { case (ts, batch) =>
+            processor.processBatchInternal(ts.forgetRefinement, batch)
+          }
           .onShutdown(fail())
         _ = changes.foreach { case (ts, tb, change) =>
           processor.publish(RecordTime(ts, tb.v), change)
@@ -597,7 +601,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           // First ask for the remote commitments to be processed, and then compute locally
           _ <- delivered
             .traverse_ { case (ts, batch) =>
-              processor.processBatchInternal(ts.forgetSecond, batch)
+              processor.processBatchInternal(ts.forgetRefinement, batch)
             }
             .onShutdown(fail())
 
