@@ -94,7 +94,9 @@ private[mediator] class InMemoryFinalizedResponseStore(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Future[Unit] =
     Future.successful {
-      finalizedRequests.keys.filterNot(_.isAfter(timestamp)).foreach(finalizedRequests.remove)
+      finalizedRequests.keys
+        .filterNot(_.isAfter(timestamp))
+        .foreach(finalizedRequests.remove(_).discard[Option[ResponseAggregation]])
     }
 
   override def count()(implicit traceContext: TraceContext): Future[Long] =

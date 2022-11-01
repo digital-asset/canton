@@ -25,7 +25,7 @@ object Blake2xb {
     val nrChunks = outputBytes / MAX_2B_BYTES
     val lastChunkLen = outputBytes % MAX_2B_BYTES
     for (i <- 0.until(nrChunks)) {
-      b2(outputBytes, i, MAX_2B_BYTES, h0).copyToArray(out, i * MAX_2B_BYTES)
+      b2(outputBytes, i, MAX_2B_BYTES, h0).copyToArray(out, i * MAX_2B_BYTES).discard[Int]
     }
     b2(outputBytes, nrChunks, lastChunkLen, h0).copyToArray(out, nrChunks * MAX_2B_BYTES).discard
     out

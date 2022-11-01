@@ -73,7 +73,7 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         CreateActionDescription(unsuffixedId, seed, dummyVersion)(representativePV),
         tryCreateExerciseActionDescription(
           Some(LfTransactionBuilder.defaultInterfaceId),
-          ProtocolVersion.dev, // TODO(#9910) migrate to stable
+          ProtocolVersion.v4,
         ),
         fetchAction,
         LookupByKeyActionDescription.tryCreate(globalKey, dummyVersion, representativePV),
@@ -98,12 +98,11 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
         val v2 = ProtocolVersion.v2
         create(v3) shouldBe Left(
           InvalidActionDescription(
-            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.dev}"
+            s"Protocol version is equivalent to $v2 but interface id is supported since protocol version ${ProtocolVersion.v4}"
           )
         )
 
-        // TODO(#9910) migrate to stable
-        create(ProtocolVersion.dev).value shouldBe a[ExerciseActionDescription]
+        create(ProtocolVersion.v4).value shouldBe a[ExerciseActionDescription]
       }
 
       "the choice argument cannot be serialized" in {

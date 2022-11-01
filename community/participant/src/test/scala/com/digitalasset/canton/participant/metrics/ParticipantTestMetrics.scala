@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.DomainAlias
 import io.opentelemetry.sdk.metrics.SdkMeterProvider
 

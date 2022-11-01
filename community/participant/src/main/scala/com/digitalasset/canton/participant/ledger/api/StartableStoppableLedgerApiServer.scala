@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 import io.functionmeta.functionFullName
+import io.grpc.BindableService
 import io.opentelemetry.instrumentation.grpc.v1_6.GrpcTracing
 
 import java.util.concurrent.atomic.AtomicReference
@@ -51,12 +52,17 @@ import scala.jdk.DurationConverters.*
   * @param config ledger api server configuration
   * @param participantDataSourceConfig configuration for the data source (e.g., jdbc url)
   * @param dbConfig the Index DB config
+  * @param createExternalServices A factory to create additional gRPC BindableService-s,
+  *                               which will be bound to the Ledger API gRPC endpoint.
+  *                               All the BindableService-s, which implement java.lang.AutoCloseable,
+  *                               will be also closed upon Ledger API service teardown.
   * @param executionContext the execution context
   */
 class StartableStoppableLedgerApiServer(
     config: CantonLedgerApiServerWrapper.Config,
     participantDataSourceConfig: ParticipantDataSourceConfig,
     dbConfig: DbSupport.DbConfig,
+    createExternalServices: () => List[BindableService] = () => Nil,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     actorSystem: ActorSystem,
@@ -325,6 +331,7 @@ class StartableStoppableLedgerApiServer(
         jwtTimestampLeeway =
           config.cantonParameterConfig.ledgerApiServerParameters.jwtTimestampLeeway,
         meteringReportKey = config.meteringReportKey,
+        createExternalServices = createExternalServices,
       )
     } yield ()
   }

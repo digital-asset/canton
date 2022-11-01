@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -58,8 +58,8 @@ import com.digitalasset.canton.time.{
   MockTimeRequestSubmitter,
   SimClock,
 }
+import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
-import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -735,7 +735,7 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
 
     val lastSend = new AtomicReference[Option[SubmissionRequest]](None)
 
-    override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+    override def acknowledge(request: AcknowledgeRequest)(implicit
         traceContext: TraceContext
     ): Future[Unit] =
       Future.unit

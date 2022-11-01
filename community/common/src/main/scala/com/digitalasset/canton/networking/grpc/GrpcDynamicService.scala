@@ -4,6 +4,7 @@
 package com.digitalasset.canton.networking.grpc
 
 import cats.syntax.either.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.*
@@ -46,7 +47,9 @@ class GrpcDynamicService(
     val builder = ServerServiceDefinition.builder(descriptor)
 
     descriptor.getMethods.asScala.foreach { method =>
-      builder.addMethod(ServerMethodDefinition.create(method, mkCall(method)))
+      builder
+        .addMethod(ServerMethodDefinition.create(method, mkCall(method)))
+        .discard[ServerServiceDefinition.Builder]
     }
 
     builder.build()

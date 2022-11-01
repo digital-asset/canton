@@ -82,7 +82,8 @@ import io.functionmeta.functionFullName
 import io.opentelemetry.api.trace.Tracer
 import org.slf4j.event.Level
 
-import java.time.{Duration as JDuration}
+import java.time.Duration as JDuration
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
@@ -163,11 +164,23 @@ class CantonSyncService(
   )
 
   private val excludedPackageIds = if (parameters.excludeInfrastructureTransactions) {
-    Set(workflows.PackageID.PingPong, workflows.PackageID.DarDistribution)
+    Set(
+      workflows.PackageID.PingPong,
+      workflows.PackageID.DarDistribution,
+      workflows.PackageID.PingPongVacuum,
+    )
       .map(Ref.PackageId.assertFromString)
   } else {
     Set.empty[Ref.PackageId]
   }
+
+  type ConnectionListener = DomainAlias => Unit
+
+  // Listeners to domain connections
+  private val connectionListeners = new AtomicReference[List[ConnectionListener]](List.empty)
+
+  def subscribeToConnections(subscriber: ConnectionListener): Unit =
+    connectionListeners.updateAndGet(subscriber :: _).discard
 
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -879,7 +892,7 @@ class CantonSyncService(
         NonEmpty.from(failed) match {
           case None => Right(())
           case Some(lst) =>
-            domains.foreach(performDomainDisconnect)
+            domains.foreach(performDomainDisconnect(_).discard[Either[SyncServiceError, Unit]])
             Left(SyncServiceError.SyncServiceStartupError(lst))
         }
       })
@@ -1207,7 +1220,9 @@ class CantonSyncService(
           outcome: UnlessShutdown[Either[SyncServiceError, Unit]]
       ): UnlessShutdown[Either[SyncServiceError, Unit]] =
         outcome match {
-          case x @ UnlessShutdown.Outcome(Right(())) => x
+          case x @ UnlessShutdown.Outcome(Right(())) =>
+            connectionListeners.get().foreach(_(domainAlias))
+            x
           case UnlessShutdown.AbortedDueToShutdown =>
             disconnectOn("shutdown")
             UnlessShutdown.AbortedDueToShutdown

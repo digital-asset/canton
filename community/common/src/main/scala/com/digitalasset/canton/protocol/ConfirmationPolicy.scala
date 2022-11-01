@@ -4,8 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import cats.Order
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.{ConfirmingParty, Informee, PlainInformee}
@@ -17,6 +16,7 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, TrustLevel}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.LfTransactionUtil
 import com.google.protobuf.ByteString
 
@@ -68,7 +68,7 @@ object ConfirmationPolicy {
     ): Future[(Set[Informee], NonNegativeInt)] = {
       val stateVerifiers = LfTransactionUtil.stateKnownTo(node)
       val confirmingPartiesF = stateVerifiers.toList
-        .traverseFilter { partyId =>
+        .parTraverseFilter { partyId =>
           topologySnapshot
             .activeParticipantsOf(partyId)
             .map(participants => participants.values.find(havingVip).map(_ => partyId))
@@ -162,7 +162,7 @@ object ConfirmationPolicy {
     // TODO(i4930) - potentially batch this lookup
     val activeParticipantsF =
       allParties.toList
-        .traverse(partyId =>
+        .parTraverse(partyId =>
           topologySnapshot.activeParticipantsOf(partyId).map { res =>
             (partyId, (res.values.exists(havingVip), res.values.exists(havingConfirmer)))
           }

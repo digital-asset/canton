@@ -4,11 +4,10 @@
 
 package com.digitalasset.canton
 
-import cats.data.{EitherT, OptionT}
 import org.wartremover.{WartTraverser, WartUniverse}
 
 import scala.annotation.{StaticAnnotation, tailrec}
-import scala.concurrent.Future
+import scala.collection.IterableOnceOps
 
 /** Flags statements that return a [[scala.concurrent.Future]]. Typically, we should not
   * discard [[scala.concurrent.Future]] because exceptions inside the future may not get logged.
@@ -19,14 +18,18 @@ import scala.concurrent.Future
   * Custom type constructors can be registered to take the same role as [[scala.concurrent.Future]]
   * by annotating the type definition with [[DoNotDiscardLikeFuture]].
   *
-  * This wart is a special case of the `NonUnitStatements` wart and scalac's `-Wnonunit-statement` flag,
-  * in that it warns only if the return type of the statement is future-like.
+  * Also flags usages of [[scala.collection.IterableOnceOps.foreach]] and [[scala.collection.IterableOnceOps.tapEach]]
+  * where the function returns a future-like type.
+  *
+  * This wart is a special case of the warts `NonUnitStatements` and [[NonUnitForEach]]
+  * and scalac's `-Wnonunit-statement` flag,
+  * in that it warns only if the return type is future-like.
   * Additionally, this wart uses a different set of exceptions when no warning is issued.
   * We keep this specialized wart for two reasons:
-  * 1. It is not practically feasible to use `-Wnonunit-statement` in scalatest
+  * 1. It is not practically feasible to use `-Wnonunit-statement` and [[NonUnitForEach]] in scalatest
   *    because it would flag many of the assertions of the form `x should be >= y` in statement positions.
   *    Yet, it is important to check for discarded futures in tests because a discarded future may hide an exception.
-  * 2. In some production code, it is convenient to suppress the warnings coming from `-Wnonunit-statement`,
+  * 2. In some production code, it is convenient to suppress the warnings coming from `-Wnonunit-statement` and [[NonUnitForEach]],
   *    just due to how the code is written. In such places, we still want to benefit from the explicit checks
   *    against discarded futures.
   *
@@ -40,11 +43,15 @@ object DiscardedFuture extends WartTraverser {
   override def apply(u: WartUniverse): u.Traverser = {
     import u.universe.*
 
-    val futureTypeConstructor = typeOf[Future[Unit]].typeConstructor
-    val eitherTTypeConstructor = typeOf[EitherT[Future, Unit, Unit]].typeConstructor
-    val optionTTypeConstructor = typeOf[OptionT[Future, Unit]].typeConstructor
     val verifyMethodName: TermName = TermName("verify")
     val futureLikeType = typeOf[DoNotDiscardLikeFuture]
+    val isFutureLike = FutureLikeTester.tester(u)(futureLikeType)
+
+    val iterableOnceOpsTypeSymbol =
+      typeOf[IterableOnceOps[Unit, Iterable, Unit]].typeConstructor.typeSymbol
+    require(iterableOnceOpsTypeSymbol != NoSymbol)
+    val foreachMethodName: TermName = TermName("foreach")
+    val tapEachMethodName: TermName = TermName("tapEach")
 
     // Allow Mockito `verify` calls because they do not produce a future but merely check that a mocked Future-returning
     // method has been called.
@@ -70,26 +77,6 @@ object DiscardedFuture extends WartTraverser {
     }
 
     new u.Traverser {
-      @tailrec
-      def isFutureLike(typ: Type): Boolean = {
-        if (typ.typeConstructor =:= futureTypeConstructor) true
-        else if (typ.typeConstructor =:= eitherTTypeConstructor) {
-          val args = typ.typeArgs
-          args.nonEmpty && isFutureLike(args(0))
-        } else if (typ.typeConstructor =:= optionTTypeConstructor) {
-          val args = typ.typeArgs
-          args.nonEmpty && isFutureLike(args(0))
-        } else if (typ.typeConstructor.typeSymbol.annotations.exists(_.tree.tpe =:= futureLikeType))
-          true
-        else {
-          // Strip off type functions and just look at their body
-          typ match {
-            case PolyType(_binds, body) => isFutureLike(body)
-            case _ => false
-          }
-        }
-      }
-
       def checkForDiscardedFutures(statements: List[Tree]): Unit = {
         statements.foreach {
           case Block((statements0, _)) =>
@@ -101,6 +88,12 @@ object DiscardedFuture extends WartTraverser {
             }
         }
       }
+
+      def isSubtypeOfIterableOnce(typ: Type): Boolean =
+        typ.typeConstructor
+          .baseType(iterableOnceOpsTypeSymbol)
+          .typeConstructor
+          .typeSymbol == iterableOnceOpsTypeSymbol
 
       override def traverse(tree: Tree): Unit = {
         tree match {
@@ -116,6 +109,12 @@ object DiscardedFuture extends WartTraverser {
           case ModuleDef(_, _, Template((_, _, statements))) =>
             checkForDiscardedFutures(statements)
             super.traverse(tree)
+          case TypeApply(Select(receiver, method), tyArgs)
+              if (method == foreachMethodName || method == tapEachMethodName) &&
+                receiver.tpe != null && isSubtypeOfIterableOnce(receiver.tpe) &&
+                tyArgs.nonEmpty && isFutureLike(tyArgs(0).tpe) =>
+            error(u)(tree.pos, message)
+
           case _ => super.traverse(tree)
         }
       }

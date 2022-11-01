@@ -707,7 +707,7 @@ class DemoUI(script: BaseScript, val loggerFactory: NamedLoggerFactory)
           new ParticipantTab(party, participant, isClosing, loggerFactory.append("party", party))
         script.subscriptions().get(party).foreach(offset => pt.reStart(Some(offset)))
         tabPane.getTabs.add(pt.tab)
-        participantTabs.put(party, pt)
+        participantTabs.put(party, pt).discard[Option[ParticipantTab]]
       case _ => ()
     }
   }

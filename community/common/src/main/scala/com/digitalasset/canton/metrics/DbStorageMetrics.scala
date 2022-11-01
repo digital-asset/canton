@@ -4,8 +4,10 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Counter, DropwizardGauge, DropwizardTimer, Gauge, Timer}
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Timer}
+import com.daml.metrics.api.dropwizard.{DropwizardGauge, DropwizardTimer}
+import com.daml.metrics.api.{MetricDoc, MetricName}
 
 import scala.concurrent.duration.*
 
@@ -21,6 +23,7 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
   @MetricDoc.Tag(
     summary = "Timer monitoring duration and rate of accessing the given storage",
     description = """Covers both read from and writes to the storage.""",
+    qualification = Debug,
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   val timerExampleForDocs: Timer = DropwizardTimer(prefix :+ "<storage>", null)
@@ -30,6 +33,7 @@ class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegi
     description =
       """The load is a factor between 0 and 1 describing how much of an existing interval
           |has been spent reading from or writing to the storage.""",
+    qualification = Debug,
   )
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   val loadExampleForDocs: Gauge[Double] =
@@ -57,6 +61,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |not able to deal with the large number of requests.
         |Note that the queue has a maximum size. Tasks that do not fit into the queue
         |will be retried, but won't show up in this metric.""",
+    qualification = Debug,
   )
   val queue = counter(prefix :+ "queued")
 
@@ -64,6 +69,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
     summary = "Number of database access tasks currently running",
     description = """Database access tasks run on an async executor. This metric shows
         |the current number of tasks running in parallel.""",
+    qualification = Debug,
   )
   val running = counter(prefix :+ "running")
 
@@ -71,6 +77,7 @@ class DbQueueMetrics(basePrefix: MetricName, override val registry: MetricRegist
     summary = "Scheduling time metric for database tasks",
     description = """Every database query is scheduled using an asynchronous executor with a queue.
         |The time a task is waiting in this queue is monitored using this metric.""",
+    qualification = Debug,
   )
   val waitTimer = timer(prefix :+ "waittime")
 
@@ -89,6 +96,7 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |participant event log, an operation might need to be reissued. If this counter is larger than zero, check the
         |canton log for errors for details.
         |""",
+    qualification = Debug,
   )
   val failedEventLogWrites: Counter = counter(prefix :+ "single-dimension-event-log")
 
@@ -101,6 +109,7 @@ class DbAlertMetrics(basePrefix: MetricName, override val registry: MetricRegist
         |participant event log, an operation might need to be reissued. If this counter is larger than zero, check the
         |canton log for errors for details.
         |""",
+    qualification = Debug,
   )
   val failedMultiDomainEventLogWrites: Counter = counter(prefix :+ "multi-domain-event-log")
 

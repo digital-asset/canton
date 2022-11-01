@@ -27,6 +27,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TrieMapUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -144,7 +145,8 @@ class InMemoryCryptoPrivateStore(
     } yield res
   }
 
-  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  @VisibleForTesting
+  private[canton] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     (purpose match {

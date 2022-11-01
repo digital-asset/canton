@@ -5,8 +5,9 @@ package com.digitalasset.canton.metrics
 
 import cats.data.{EitherT, OptionT}
 import com.codahale.metrics.Gauge
-import com.daml.metrics.MetricHandle.Timer
 import com.daml.metrics.Timed
+import com.daml.metrics.api.MetricHandle
+import com.daml.metrics.api.MetricHandle.Timer
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.util.CheckedT
@@ -18,7 +19,8 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, blocking}
 
-class TimedLoadGauge(interval: FiniteDuration, timer: Timer) extends LoadGauge(interval) {
+class TimedLoadGauge(name: String, interval: FiniteDuration, timer: Timer)
+    extends LoadGauge(name, interval) {
 
   override def event[T](fut: => Future[T])(implicit ec: ExecutionContext): Future[T] =
     Timed.future(timer, super.event(fut))
@@ -47,7 +49,11 @@ class TimedLoadGauge(interval: FiniteDuration, timer: Timer) extends LoadGauge(i
     OptionT(event(optionT.value))
 }
 
-class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extends Gauge[Double] {
+class LoadGauge(val name: String, interval: FiniteDuration, now: => Long = System.nanoTime)
+    extends Gauge[Double]
+    with MetricHandle {
+
+  override def metricType: String = "Gauge"
 
   private val intervalNanos = interval.toNanos
   private val measure = mutable.ListBuffer[(Boolean, Long)]()
@@ -126,7 +132,10 @@ class LoadGauge(interval: FiniteDuration, now: => Long = System.nanoTime) extend
 
 }
 
-class RefGauge[T](empty: T) extends Gauge[T] {
+class RefGauge[T](val name: String, empty: T) extends Gauge[T] with MetricHandle {
+
+  override def metricType: String = "Gauge"
+
   private val ref = new AtomicReference[Option[() => T]]()
   def setReference(inspect: Option[() => T]): Unit = {
     ref.set(inspect)

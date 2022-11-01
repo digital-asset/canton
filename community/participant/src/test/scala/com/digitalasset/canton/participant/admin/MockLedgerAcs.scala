@@ -4,15 +4,16 @@
 package com.digitalasset.canton.participant.admin
 
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.daml.ledger.api.v1.commands.{Command as ScalaCommand}
+import com.daml.ledger.api.v1.commands.Command as ScalaCommand
 import com.daml.ledger.api.v1.completion.Completion
+import com.daml.ledger.api.v1.event.CreatedEvent
+import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
+import com.daml.ledger.api.v1.transaction_filter.TransactionFilter
+import com.daml.ledger.client.binding.Primitive
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.lifecycle.AsyncOrSyncCloseable
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.participant.ledger.api.client.{
-  CommandSubmitterWithRetry,
-  LedgerSubmit,
-}
+import com.digitalasset.canton.participant.ledger.api.client.{CommandSubmitterWithRetry, LedgerAcs}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -20,7 +21,8 @@ import scala.concurrent.{Future, Promise}
 
 /** Mock for capturing a single submitted command.
   */
-class MockLedgerSubmit(override val logger: TracedLogger) extends LedgerSubmit {
+class MockLedgerAcs(override val logger: TracedLogger, override val sender: Primitive.Party)
+    extends LedgerAcs {
   private val lastCommandPromise = Promise[ScalaCommand]()
   val lastCommand: Future[ScalaCommand] = lastCommandPromise.future
   override val timeouts = DefaultProcessingTimeouts.testing
@@ -44,4 +46,9 @@ class MockLedgerSubmit(override val logger: TracedLogger) extends LedgerSubmit {
     throw new IllegalArgumentException("Method not defined")
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = List.empty
+
+  override def activeContracts(
+      filter: TransactionFilter
+  ): Future[(Seq[CreatedEvent], LedgerOffset)] =
+    Future.successful((Seq(), LedgerOffset(value = LedgerOffset.Value.Empty)))
 }

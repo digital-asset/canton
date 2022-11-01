@@ -98,9 +98,8 @@ trait PeanoQueueTest extends BaseTest { this: AnyWordSpec =>
           expVals foreach { v =>
             assert(pq.poll() === Some((initHead + polls, v)), "return the values polled")
             polls = polls + 1
-            if (
-              Long.MaxValue - polls >= initHead
-            ) // we have not yet reached Long.MaxValue and polled everything
+            if (Long.MaxValue - polls >= initHead)
+              // we have not yet reached Long.MaxValue and polled everything
               assert(pq.head === initHead + polls, "increment the head")
           }
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import io.grpc.*
@@ -52,9 +53,9 @@ object StaticGrpcServices {
     val builder = ServerServiceDefinition.builder(descriptor)
 
     descriptor.getMethods.asScala.foreach { method =>
-      builder.addMethod(
-        ServerMethodDefinition.create(method, mkClosingCallHandler(method, handler))
-      )
+      builder
+        .addMethod(ServerMethodDefinition.create(method, mkClosingCallHandler(method, handler)))
+        .discard[ServerServiceDefinition.Builder]
     }
 
     builder.build()

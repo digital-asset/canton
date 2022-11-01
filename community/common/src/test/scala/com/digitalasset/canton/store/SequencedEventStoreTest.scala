@@ -4,8 +4,7 @@
 package com.digitalasset.canton.store
 
 import cats.data.Validated.Valid
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, Signature, TestHash}
@@ -16,6 +15,7 @@ import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, SequencerTes
 import com.digitalasset.canton.store.SequencedEventStore.*
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
@@ -193,7 +193,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
       val store = mk()
       val criteria = List(ByTimestamp(CantonTimestamp.Epoch), LatestUpto(CantonTimestamp.MaxValue))
       criteria
-        .traverse_ { criterion =>
+        .parTraverse_ { criterion =>
           store
             .find(criterion)
             .value
@@ -218,7 +218,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
 
       for {
         _stored <- store.store(events)
-        found <- criteria.traverse(store.find).toValidatedNec
+        found <- criteria.parTraverse(store.find).toValidatedNec
       } yield {
         assert(found.isValid, "finding deliver events succeeds")
         assert(found.map(_.toSeq) == Valid(events), "found the right deliver events")
@@ -261,7 +261,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
       for {
         _ <- store.store(events)
         found <- (1L to 200L).toList
-          .traverse { i =>
+          .parTraverse { i =>
             store.find(ByTimestamp(CantonTimestamp.ofEpochMilli(i))).value
           }
       } yield {
@@ -615,7 +615,7 @@ trait SequencedEventStoreTest extends PrunableByTimeTest {
 
       for {
         _stored <- store.store(events)
-        found <- criteria.traverse(store.find).toValidatedNec
+        found <- criteria.parTraverse(store.find).toValidatedNec
       } yield {
         assert(found.isValid, "finding deliver events succeeds")
         assert(found.map(_.toSeq) == Valid(events), "found the right deliver events")

@@ -93,6 +93,10 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       .thenReturn(EitherT.rightT[Future, SendAsyncError](()))
     when(sequencer.sendAsyncSigned(any[SignedContent[SubmissionRequest]])(anyTraceContext))
       .thenReturn(EitherT.rightT[Future, SendAsyncError](()))
+    when(sequencer.acknowledge(any[Member], any[CantonTimestamp])(anyTraceContext))
+      .thenReturn(Future.unit)
+    when(sequencer.acknowledgeSigned(any[SignedContent[AcknowledgeRequest]])(anyTraceContext))
+      .thenReturn(Future.unit)
     val cryptoApi: DomainSyncCryptoClient =
       TestingIdentityFactory(loggerFactory).forOwnerAndDomain(member)
     val subscriptionPool: SubscriptionPool[Subscription] =
@@ -164,6 +168,18 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     )
   }
 
+  def signedContent(bytes: ByteString): protocolV0.SignedContent =
+    protocolV0.SignedContent(
+      Some(
+        UntypedVersionedMessage(
+          UntypedVersionedMessage.Wrapper.Data(bytes),
+          0,
+        ).toByteString
+      ),
+      Some(Signature.noSignature.toProtoV0),
+      None,
+    )
+
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>
     name should {
       val content = ByteString.copyFromUtf8("123")
@@ -176,23 +192,14 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         )
       }
 
-      def signedContent(requestP: v0.SubmissionRequest): protocolV0.SignedContent =
-        protocolV0.SignedContent(
-          Some(
-            UntypedVersionedMessage(
-              UntypedVersionedMessage.Wrapper.Data(requestP.toByteString),
-              0,
-            ).toByteString
-          ),
-          Some(Signature.noSignature.toProtoV0),
-          None,
-        )
+      def signedSubmissionReq(requestP: v0.SubmissionRequest): protocolV0.SignedContent =
+        signedContent(requestP.toByteString)
 
       def sendAndCheckSucceed(requestP: v0.SubmissionRequest)(implicit
           env: Environment
       ): Future[Assertion] = {
         (if (useSignedSend) {
-           val response = env.service.sendAsyncSigned(signedContent(requestP))
+           val response = env.service.sendAsyncSigned(signedSubmissionReq(requestP))
            response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
          } else {
            val response = env.service.sendAsync(requestP)
@@ -211,7 +218,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
            val response = env.service.sendAsyncUnauthenticated(requestP)
            response.map(SendAsyncResponse.fromSendAsyncResponseProto)
          } else if (useSignedSend) {
-           val response = env.service.sendAsyncSigned(signedContent(requestP))
+           val response = env.service.sendAsyncSigned(signedSubmissionReq(requestP))
            response.map(SendAsyncResponse.fromSendAsyncSignedResponseProto)
          } else {
            val response = env.service.sendAsync(requestP)
@@ -695,6 +702,39 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
 
       observer.items.toSeq should matchPattern {
         case Seq(StreamError(err: StatusException)) if err.getStatus.getCode == PERMISSION_DENIED =>
+      }
+    }
+  }
+
+  Seq(("acknowledge", false), ("acknowledgeSigned", true)).foreach { case (name, useSignedAck) =>
+    def performAcknowledgeRequest(env: Environment)(request: AcknowledgeRequest) = if (
+      useSignedAck
+    ) {
+      env.service.acknowledgeSigned(signedAcknowledgeReq(request.toProtoV0))
+    } else
+      env.service.acknowledge(request.toProtoV0)
+
+    def signedAcknowledgeReq(requestP: v0.AcknowledgeRequest): protocolV0.SignedContent =
+      signedContent(requestP.toByteString)
+
+    name should {
+      "reject unauthorized authenticated participant" in { implicit env =>
+        val unauthorizedParticipant = DefaultTestIdentities.participant2
+        val req =
+          AcknowledgeRequest(unauthorizedParticipant, CantonTimestamp.Epoch, testedProtocolVersion)
+
+        loggerFactory.assertLogs(
+          performAcknowledgeRequest(env)(req).failed.map(error =>
+            error.getMessage should include("PERMISSION_DENIED")
+          ),
+          _.warningMessage should (include("Authentication check failed:")
+            and include("just tried to use sequencer on behalf of")),
+        )
+      }
+
+      "succeed with correct participant" in { implicit env =>
+        val req = AcknowledgeRequest(participant, CantonTimestamp.Epoch, testedProtocolVersion)
+        performAcknowledgeRequest(env)(req).map(_ => succeed)
       }
     }
   }

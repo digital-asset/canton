@@ -4,30 +4,33 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
-import com.daml.metrics.MetricHandle.Timer
+import com.daml.metrics.api.MetricDoc
+import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.noop.NoOpTimer
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.metrics.MetricDoc.getItems
 import org.scalatest.wordspec.AnyWordSpec
 
 class MetricDocTest extends AnyWordSpec with BaseTest {
 
   lazy val tm = new metrics.Timer()
   class DocVar {
-    @MetricDoc.Tag("varred summary", "varred desc")
-    val varred = Timer.NoOpTimer("varred")
+    @MetricDoc.Tag("varred summary", "varred desc", Debug)
+    val varred = NoOpTimer("varred")
   }
 
   class DocItem {
-    @MetricDoc.Tag("top summary", "top desc")
-    val top = Timer.NoOpTimer("top")
-    val utop = Timer.NoOpTimer("utop")
+    @MetricDoc.Tag("top summary", "top desc", Debug)
+    val top = NoOpTimer("top")
+    val utop = NoOpTimer("utop")
     object nested {
-      @MetricDoc.Tag("nested.n1 summary", "n1 desc")
-      val n1 = Timer.NoOpTimer("nested.n1")
-      val u1 = Timer.NoOpTimer("nested.u1")
+      @MetricDoc.Tag("nested.n1 summary", "n1 desc", Debug)
+      val n1 = NoOpTimer("nested.n1")
+      val u1 = NoOpTimer("nested.u1")
       object nested2 {
-        @MetricDoc.Tag("nested.n2 summary", "n2 desc")
-        val n2 = Timer.NoOpTimer("nested.n2")
-        val u2 = Timer.NoOpTimer("nested.u2")
+        @MetricDoc.Tag("nested.n2 summary", "n2 desc", Debug)
+        val n2 = NoOpTimer("nested.n2")
+        val u2 = NoOpTimer("nested.u2")
       }
     }
     val other = new DocVar()
@@ -38,7 +41,7 @@ class MetricDocTest extends AnyWordSpec with BaseTest {
     "find nested items" in {
 
       val itm = new DocItem()
-      val items = MetricDoc.getItems(itm)
+      val items = getItems(itm)
 
       val expected =
         Seq("varred", "nested.n1", "nested.n2", "top").map(nm => (nm, s"${nm} summary")).toSet

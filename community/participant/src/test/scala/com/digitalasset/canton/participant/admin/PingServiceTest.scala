@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.admin
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.client.binding.{Contract, Primitive as P}
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.participant.admin.workflows.{PingPong as M}
+import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.participant.admin.workflows.PingPong as M
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
-import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
@@ -35,19 +36,23 @@ class PingServiceTest
   "PingServiceTest" should {
 
     val clock = new SimClock(loggerFactory = loggerFactory)
-    val alice = Converters.toParty(UniqueIdentifier.tryFromProtoPrimitive("alice::default"))
+    val alicePartId = ParticipantId("alice")
+    val aliceId = alicePartId.adminParty
+    val alice = aliceId.toPrim
     val bobId = "bob::default"
     val charlieId = "Charlie::default"
 
     def setupTest(recipients: Set[String], pingTimeoutMs: Long, gracePeriod: Long) = {
-      val submitter = new MockLedgerSubmit(logger)
+      val submitter = new MockLedgerAcs(logger, alice)
       scheduler = Threading.singleThreadScheduledExecutor("ping-service-tests", logger)
       service = new PingService(
         submitter,
-        alice,
+        aliceId,
         maxLevelSupported = 10,
+        DefaultProcessingTimeouts.testing,
         pingDeduplicationTime = NonNegativeFiniteDuration.ofMinutes(5),
         isActive = true,
+        None,
         loggerFactory,
         clock,
       )(parallelExecutionContext, scheduler)

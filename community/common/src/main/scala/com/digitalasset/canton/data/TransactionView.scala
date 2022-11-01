@@ -1016,9 +1016,8 @@ object ViewParticipantData
       supportedProtoVersionMemoized(v0.ViewParticipantData)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
-    // TODO(#9910) migrate to stable
     ProtoVersion(2) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersionMemoized(v2.ViewParticipantData)(fromProtoV2),
       _.toProtoV2.toByteString,
     ),

@@ -5,8 +5,7 @@ package com.digitalasset.canton.topology
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.error.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
@@ -35,6 +34,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, *}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -138,6 +138,10 @@ abstract class TopologyManager[E <: CantonError](
     } yield ()
   }
 
+  // TODO(#10692) Do not discard the future
+  @SuppressWarnings(
+    Array("com.digitalasset.canton.DiscardedFuture", "com.digitalasset.canton.NonUnitForEach")
+  )
   protected def keyRevocationDelegationIsNotDangerous(
       transaction: SignedTopologyTransaction[TopologyChangeOp],
       namespace: Namespace,
@@ -196,7 +200,7 @@ abstract class TopologyManager[E <: CantonError](
             )
 
             // step5: check if these transactions are still valid
-            _ <- txs.combine.result.traverse { txToCheck =>
+            _ <- txs.combine.result.parTraverse { txToCheck =>
               EitherT(
                 validatorSnap
                   .authorizedBy(txToCheck.transaction)
@@ -400,7 +404,7 @@ abstract class TopologyManager[E <: CantonError](
       keys: Seq[Fingerprint]
   )(implicit traceContext: TraceContext): EitherT[Future, TopologyManagerError, Fingerprint] =
     keys.reverse.toList
-      .filterA(fingerprint =>
+      .parFilterA(fingerprint =>
         crypto.cryptoPrivateStore
           .existsSigningKey(fingerprint)
       )
@@ -545,7 +549,7 @@ abstract class TopologyManager[E <: CantonError](
             )
           )
           .toList
-          .traverse(x =>
+          .parTraverse(x =>
             build(
               x.transaction.reverse,
               None,

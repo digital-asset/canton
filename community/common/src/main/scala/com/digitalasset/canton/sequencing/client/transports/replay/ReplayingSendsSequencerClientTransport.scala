@@ -8,6 +8,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.EitherT
 import com.codahale.metrics.{ConsoleReporter, MetricFilter}
+import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
@@ -39,6 +40,7 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{Duration, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.DurationConverters.*
+import scala.util.chaining.*
 
 /** Replays previously recorded sends against the configured sequencer and using a real sequencer client transport.
   * Records the latencies/rates to complete the send itself, and latencies/rates for an event that was caused by the send to be witnessed.
@@ -129,28 +131,27 @@ class ReplayingSendsSequencerClientTransport(
 
     def handleSendResult(
         result: Either[SendAsyncClientError, Unit]
-    ): Either[SendAsyncClientError, Unit] = {
-      val _ = result match {
-        case Left(SendAsyncClientError.RequestRefused(_: SendAsyncError.Overloaded)) =>
-          logger.warn(
-            s"Sequencer is overloaded and rejected our send. Please tune the sequencer to handle more concurrent requests."
-          )
-          metrics.submissions.overloaded.inc()
+    ): Either[SendAsyncClientError, Unit] =
+      withEmptyMetricsContext { implicit metricsContext =>
+        result.tap {
+          case Left(SendAsyncClientError.RequestRefused(_: SendAsyncError.Overloaded)) =>
+            logger.warn(
+              s"Sequencer is overloaded and rejected our send. Please tune the sequencer to handle more concurrent requests."
+            )
+            metrics.submissions.overloaded.inc()
 
-        case Left(error) =>
-          // log, increase error counter, then ignore
-          logger.warn(s"Send request failed: $error")
+          case Left(error) =>
+            // log, increase error counter, then ignore
+            logger.warn(s"Send request failed: $error")
 
-        case Right(_) =>
-          // we've successfully sent the send request
-          metrics.submissions.inFlight.inc()
-          val sentAt = CantonTimestamp.now()
-          metrics.submissions.sends
-            .update(java.time.Duration.between(startedAt.toInstant, sentAt.toInstant))
+          case Right(_) =>
+            // we've successfully sent the send request
+            metrics.submissions.inFlight.inc()
+            val sentAt = CantonTimestamp.now()
+            metrics.submissions.sends
+              .update(java.time.Duration.between(startedAt.toInstant, sentAt.toInstant))
+        }
       }
-
-      result
-    }
 
     def updateTimestamps[A](item: A): A = {
       val now = CantonTimestamp.now()
@@ -306,20 +307,21 @@ class ReplayingSendsSequencerClientTransport(
       if (!isIdle) scheduleCheck() // schedule the next check
     }
 
-    private def updateMetrics(event: SequencedEvent[ClosedEnvelope]): Unit = {
-      val messageIdO: Option[MessageId] = event match {
-        case Deliver(_, _, _, messageId, _) => messageId
-        case DeliverError(_, _, _, messageId, _) => Some(messageId)
-        case _ => None
-      }
+    private def updateMetrics(event: SequencedEvent[ClosedEnvelope]): Unit =
+      withEmptyMetricsContext { implicit metricsContext =>
+        val messageIdO: Option[MessageId] = event match {
+          case Deliver(_, _, _, messageId, _) => messageId
+          case DeliverError(_, _, _, messageId, _) => Some(messageId)
+          case _ => None
+        }
 
-      messageIdO.flatMap(pendingSends.remove) foreach { sentAt =>
-        val latency = java.time.Duration.between(sentAt.toInstant, Instant.now())
-        metrics.submissions.inFlight.dec()
-        metrics.submissions.sequencingTime.update(latency)
-        lastReceivedEvent.set(Some(CantonTimestamp.now()))
+        messageIdO.flatMap(pendingSends.remove) foreach { sentAt =>
+          val latency = java.time.Duration.between(sentAt.toInstant, Instant.now())
+          metrics.submissions.inFlight.dec()
+          metrics.submissions.sequencingTime.update(latency)
+          lastReceivedEvent.set(Some(CantonTimestamp.now()))
+        }
       }
-    }
 
     private def handle(event: OrdinarySerializedEvent): Future[Either[NotUsed, Unit]] = {
       val content = event.signedEvent.content
@@ -385,7 +387,7 @@ class ReplayingSendsSequencerClientTransport(
       handler: SerializedEventHandler[E],
   )(implicit traceContext: TraceContext): SequencerSubscription[E] = subscribe(request, handler)
 
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
 

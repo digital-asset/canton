@@ -16,6 +16,7 @@ import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -66,7 +67,8 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Option[StoredPrivateKey]]
 
-  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  @VisibleForTesting
+  private[canton] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]]
 
@@ -236,6 +238,7 @@ trait CryptoPrivateStore extends AutoCloseable { this: NamedLogging =>
           keyOption.map(_.privateKey)
         }
     }
+
 }
 
 object CryptoPrivateStore {
@@ -301,6 +304,12 @@ object CryptoPrivateStoreError {
 
   case class FailedToDeleteKey(keyId: Fingerprint, reason: String) extends CryptoPrivateStoreError {
     override def pretty: Pretty[FailedToDeleteKey] =
+      prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
+  }
+
+  case class FailedToReplaceKeys(keyId: Seq[Fingerprint], reason: String)
+      extends CryptoPrivateStoreError {
+    override def pretty: Pretty[FailedToReplaceKeys] =
       prettyOfClass(param("keyId", _.keyId), param("reason", _.reason.unquoted))
   }
 

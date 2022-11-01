@@ -202,7 +202,7 @@ class BatchAggregatorImpl[A, B](
 
                     // Complain about too few responses
                     queueItemIterator.foreach { case (tracedItem, promise) =>
-                      tracedItem.withTraceContext { implicit traceContext => item =>
+                      tracedItem.withTraceContext[Unit] { implicit traceContext => item =>
                         val noResponseError = processor.NoResponseForAggregatedItemException(item)
                         processor.logger.error(ErrorUtil.internalErrorMessage, noResponseError)
                         promise.failure(noResponseError)

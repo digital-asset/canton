@@ -34,6 +34,7 @@ import com.digitalasset.canton.participant.util.LoggingContextUtil
 import com.digitalasset.canton.tracing.{NoTracing, TracerProvider}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LedgerParticipantId, checked}
+import io.grpc.BindableService
 
 import java.time.Duration as JDuration
 import scala.concurrent.duration.*
@@ -101,9 +102,17 @@ object CantonLedgerApiServerWrapper extends NoTracing {
     * @param config ledger API server configuration
     * @param startLedgerApiServer whether to start the ledger API server or not
     *              (i.e. when participant node is initialized in passive mode)
+    * @param createExternalServices A factory to create additional gRPC BindableService-s,
+    *                               which will be bound to the Ledger API gRPC endpoint.
+    *                               All the BindableService-s, which implement java.lang.AutoCloseable,
+    *                               will be also closed upon Ledger API service teardown.
     * @return ledger API server state wrapper EitherT-future
     */
-  def initialize(config: Config, startLedgerApiServer: Boolean)(implicit
+  def initialize(
+      config: Config,
+      startLedgerApiServer: Boolean,
+      createExternalServices: () => List[BindableService] = () => Nil,
+  )(implicit
       ec: ExecutionContextIdlenessExecutorService,
       actorSystem: ActorSystem,
   ): EitherT[Future, LedgerApiServerError, LedgerApiServerState] = {
@@ -137,6 +146,7 @@ object CantonLedgerApiServerWrapper extends NoTracing {
               config = config,
               participantDataSourceConfig = participantDataSourceConfig,
               dbConfig = dbConfig,
+              createExternalServices = createExternalServices,
             )
           }
 

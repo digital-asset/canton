@@ -1,4 +1,4 @@
-sdk-version: 2.5.0-snapshot.20221024.10827.0.c8adc54a
+sdk-version: 2.5.0-snapshot.20221028.10865.0.1b726fe8
 name: ai-analysis
 exposed-modules: 
 - AIAnalysis

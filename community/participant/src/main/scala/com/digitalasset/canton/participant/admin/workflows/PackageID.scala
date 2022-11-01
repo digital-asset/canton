@@ -5,5 +5,6 @@ package com.digitalasset.canton.participant.admin.workflows
 
 object PackageID {
   val PingPong: String = `Package IDs`.PingPong
+  val PingPongVacuum: String = `Package IDs`.PingPongVacuum
   val DarDistribution: String = `Package IDs`.DarDistribution
 }

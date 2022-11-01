@@ -4,8 +4,8 @@
 package com.digitalasset.canton.topology.store
 
 import cats.syntax.functorFilter.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, v0}
@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{
   Replace,
 }
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.*
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -261,7 +262,7 @@ final case class SignedTopologyTransactions[+Op <: TopologyChangeOp](
   def filter(
       predicate: SignedTopologyTransaction[Op] => Future[Boolean]
   )(implicit executionContext: ExecutionContext): Future[SignedTopologyTransactions[Op]] = {
-    result.traverseFilter(tx => predicate(tx).map(Option.when(_)(tx))).map(this.copy)
+    result.parTraverseFilter(tx => predicate(tx).map(Option.when(_)(tx))).map(this.copy)
   }
 }
 

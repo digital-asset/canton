@@ -5,12 +5,12 @@ package com.digitalasset.canton.lifecycle
 
 import cats.arrow.FunctionK
 import cats.data.EitherT
-import cats.{FlatMap, Functor, Id, Monad, Monoid, ~>}
-import com.digitalasset.canton.DoNotDiscardLikeFuture
+import cats.{Applicative, FlatMap, Functor, Id, Monad, Monoid, Parallel, ~>}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.LoggerUtil.logOnThrow_
 import com.digitalasset.canton.util.Thereafter
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.{DoNotDiscardLikeFuture, DoNotTraverseLikeFuture}
 
 import scala.concurrent.{Awaitable, ExecutionContext, Future}
 import scala.util.Try
@@ -76,6 +76,7 @@ sealed abstract class FutureUnlessShutdownImpl {
     * The canonical name for this type would be `T`, but `FutureUnlessShutdown` gives better error messages.
     */
   @DoNotDiscardLikeFuture
+  @DoNotTraverseLikeFuture
   type FutureUnlessShutdown[+A] <: Awaitable[UnlessShutdown[A]]
 
   /** Methods to evidence that [[FutureUnlessShutdown]] and [[scala.concurrent.Future]]`[`[[UnlessShutdown]]`]`
@@ -216,6 +217,46 @@ object FutureUnlessShutdownImpl {
     type K[T[_]] = Monoid[T[A]]
     Instance.subst[K](Monoid[Future[UnlessShutdown[A]]])
   }
+
+  private def parallelApplicativeFutureUnlessShutdownOpened(implicit
+      ec: ExecutionContext
+  ): Applicative[Lambda[alpha => Future[UnlessShutdown[alpha]]]] =
+    new Applicative[Lambda[alpha => Future[UnlessShutdown[alpha]]]] {
+      private val applicativeUnlessShutdown = Applicative[UnlessShutdown]
+
+      override def pure[A](x: A): Future[UnlessShutdown[A]] =
+        Future.successful(UnlessShutdown.Outcome(x))
+
+      override def ap[A, B](ff: Future[UnlessShutdown[A => B]])(
+          fa: Future[UnlessShutdown[A]]
+      ): Future[UnlessShutdown[B]] = ff.zipWith(fa)((f, a) => applicativeUnlessShutdown.ap(f)(a))
+    }
+
+  def parallelApplicativeFutureUnlessShutdown(implicit
+      ec: ExecutionContext
+  ): Applicative[FutureUnlessShutdown] =
+    Instance.subst[Applicative](parallelApplicativeFutureUnlessShutdownOpened)
+
+  private def parallelInstanceFutureUnlessShutdownOpened(implicit
+      ec: ExecutionContext
+  ): Parallel[Lambda[alpha => Future[UnlessShutdown[alpha]]]] =
+    new Parallel[Lambda[alpha => Future[UnlessShutdown[alpha]]]] {
+      override type F[X] = Future[UnlessShutdown[X]]
+
+      override def applicative: Applicative[F] = parallelApplicativeFutureUnlessShutdownOpened
+
+      override def monad: Monad[Lambda[alpha => Future[UnlessShutdown[alpha]]]] =
+        monadFutureUnlessShutdownOpened
+
+      override def sequential: F ~> Lambda[alpha => Future[UnlessShutdown[alpha]]] = FunctionK.id
+
+      override def parallel: Lambda[alpha => Future[UnlessShutdown[alpha]]] ~> F = FunctionK.id
+    }
+
+  implicit def parallelInstanceFutureUnlessShutdown(implicit
+      ec: ExecutionContext
+  ): Parallel[FutureUnlessShutdown] =
+    Instance.subst[Parallel](parallelInstanceFutureUnlessShutdownOpened)
 
   class FutureUnlessShutdownThereafter
       extends Thereafter[FutureUnlessShutdown, FutureUnlessShutdownThereafterContent] {

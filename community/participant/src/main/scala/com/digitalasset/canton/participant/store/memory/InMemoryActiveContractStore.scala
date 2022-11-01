@@ -85,7 +85,7 @@ class InMemoryActiveContractStore(override val loggerFactory: NamedLoggerFactory
     Future.successful {
       val snapshot = SortedMap.newBuilder[LfContractId, CantonTimestamp]
       table.foreach { case (contractId, entry) =>
-        entry.activatedBy(timestamp).map { activationTimestamp =>
+        entry.activatedBy(timestamp).foreach { activationTimestamp =>
           snapshot += (contractId -> activationTimestamp)
         }
       }

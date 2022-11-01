@@ -83,7 +83,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ReleaseProtocolVersion
-import io.grpc.ServerServiceDefinition
+import io.grpc.{BindableService, ServerServiceDefinition}
 
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
@@ -115,6 +115,7 @@ class ParticipantNodeBootstrap(
     meteringReportKey: MeteringReportKey,
     envQueueName: String,
     envQueueSize: () => Long,
+    additionalGrpcServices: CantonSyncService => List[BindableService] = _ => Nil,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
     scheduler: ScheduledExecutorService,
@@ -221,6 +222,7 @@ class ParticipantNodeBootstrap(
           ),
           // start ledger API server iff participant replica is active
           startLedgerApiServer = sync.isActive(),
+          createExternalServices = () => additionalGrpcServices(sync),
         )(executionContext, actorSystem)
         .leftMap { err =>
           // The MigrateOnEmptySchema exception is private, thus match on the expected message

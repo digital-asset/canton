@@ -420,7 +420,7 @@ trait ConsoleEnvironment extends NamedLogging with FlagCloseable with NoTracing 
 
   private def validateNames(
       values: Seq[TopLevelValue[_]]
-  ): Unit = values.foreach(v => InstanceName.tryCreate(v.nameUnsafe))
+  ): Unit = values.foreach(v => InstanceName.tryCreate(v.nameUnsafe).discard[InstanceName])
 
   private def validateNameUniqueness(
       binds: Seq[Bind[_]]

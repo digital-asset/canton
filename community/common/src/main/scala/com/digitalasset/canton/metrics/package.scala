@@ -4,8 +4,8 @@
 package com.digitalasset.canton
 
 import cats.data.EitherT
-import com.daml.metrics.MetricHandle.Timer
 import com.daml.metrics.Timed
+import com.daml.metrics.api.MetricHandle.Timer
 
 import scala.concurrent.Future
 

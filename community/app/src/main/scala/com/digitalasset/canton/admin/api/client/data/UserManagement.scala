@@ -14,14 +14,20 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
-case class LedgerApiUser(id: String, primaryParty: Option[LfPartyId], isDeactivated: Boolean)
+import scala.util.control.NoStackTrace
+
+case class LedgerApiUser(
+    id: String,
+    primaryParty: Option[LfPartyId],
+    isDeactivated: Boolean,
+    metadata: LedgerApiObjectMeta,
+)
 
 object LedgerApiUser {
   def fromProtoV0(
       value: ProtoLedgerApiUser
   ): ParsingResult[LedgerApiUser] = {
-    // TODO(#10448): Make user of metadata
-    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, _metadata) = value
+    val ProtoLedgerApiUser(id, primaryParty, isDeactivated, metadataO) = value
     Option
       .when(primaryParty.nonEmpty)(primaryParty)
       .traverse(LfPartyId.fromString)
@@ -29,7 +35,15 @@ object LedgerApiUser {
         ProtoDeserializationError.ValueConversionError("primaryParty", err)
       }
       .map { primaryPartyO =>
-        LedgerApiUser(id, primaryPartyO, isDeactivated)
+        LedgerApiUser(
+          id = id,
+          primaryParty = primaryPartyO,
+          isDeactivated = isDeactivated,
+          metadata = LedgerApiObjectMeta(
+            resourceVersion = metadataO.fold("")(_.resourceVersion),
+            annotations = metadataO.fold(Map.empty[String, String])(_.annotations),
+          ),
+        )
       }
   }
 }
@@ -63,3 +77,36 @@ object ListLedgerApiUsersResult {
     }
   }
 }
+
+/** Represents a user value exposed in the Canton console
+  */
+case class User(
+    id: String,
+    primaryParty: Option[LfPartyId],
+    isActive: Boolean,
+    annotations: Map[String, String],
+)
+
+object User {
+  def fromLapiUser(u: LedgerApiUser): User = User(
+    id = u.id,
+    primaryParty = u.primaryParty,
+    isActive = !u.isDeactivated,
+    annotations = u.metadata.annotations,
+  )
+  def toLapiUser(u: User, resourceVersion: Option[String]): LedgerApiUser = LedgerApiUser(
+    id = u.id,
+    primaryParty = u.primaryParty,
+    isDeactivated = !u.isActive,
+    metadata = LedgerApiObjectMeta(
+      resourceVersion = resourceVersion.getOrElse(""),
+      annotations = u.annotations,
+    ),
+  )
+}
+
+case class ModifyingNonModifiableUserPropertiesError()
+    extends RuntimeException("MODIFYING_AN_UNMODIFIABLE_USER_PROPERTY_ERROR")
+    with NoStackTrace
+
+case class UsersPage(users: Seq[User], nextPageToken: String)

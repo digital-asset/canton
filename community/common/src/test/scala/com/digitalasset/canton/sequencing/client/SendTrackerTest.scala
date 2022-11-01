@@ -5,7 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.SequencerClientMetrics

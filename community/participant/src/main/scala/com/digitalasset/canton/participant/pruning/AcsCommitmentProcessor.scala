@@ -917,7 +917,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         hashes.foreach(h => sumHash.add(h.toByteArray))
         sumHash.getByteString()
       }
-      commitmentTimer.foreach(_())
+      commitmentTimer.foreach(_.stop())
       res
     }
   }

@@ -66,7 +66,7 @@ class GlobalCausalOrderer(
           if (!finished) {
             mutableDependencies.foreach { case (id, timestamp) =>
               val previous = pendingEvents.getOrElse(id, List.empty)
-              pendingEvents.put(id, pending :: previous)
+              pendingEvents.put(id, pending :: previous).discard[Option[List[PendingEvent]]]
             }
             ()
           } else {
@@ -101,7 +101,7 @@ class GlobalCausalOrderer(
                 waitingOn(p.stillWaiting)
               }
 
-              release.foreach(p => p.promise.trySuccess(()))
+              release.foreach(p => p.promise.trySuccess(()).discard[Boolean])
 
               if (stay.isEmpty) {
                 pendingEvents.remove(eventLogId)

@@ -4,8 +4,9 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Counter, Gauge, Timer}
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, Timer}
+import com.daml.metrics.api.{MetricDoc, MetricName}
 
 import scala.concurrent.duration.*
 
@@ -18,6 +19,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
     summary = "Timer monitoring time and rate of sequentially handling the event application logic",
     description = """All events are received sequentially. This handler records the
         |the rate and time it takes the application (participant or domain) to handle the events.""",
+    qualification = Debug,
   )
   val applicationHandle: Timer = timer(prefix :+ "application-handle")
 
@@ -26,6 +28,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
     description =
       """Most event handling cost should come from the application-handle. This timer measures
         |the full time (which should just be marginally more than the application handle.""",
+    qualification = Debug,
   )
   val processingTime: Timer = timer(prefix :+ "event-handle")
 
@@ -33,6 +36,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
     summary = "The load on the event subscription",
     description = """The event subscription processor is a sequential process. The load is a factor between
                     |0 and 1 describing how much of an existing interval has been spent in the event handler.""",
+    qualification = Debug,
   )
   val load: TimedLoadGauge =
     loadGauge(prefix :+ "load", 1.second, processingTime)
@@ -50,6 +54,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         |it means that the node is still trying to catch up with events that were sequenced by the
         |sequencer a while ago. This can happen after having been offline for a while or if the node is
         |too slow to keep up with the messaging load.""",
+    qualification = Debug,
   )
   val delay: Gauge[Long] = gauge(prefix :+ "delay", 0L)
 
@@ -61,6 +66,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         "Number of sequencer send requests we have that are waiting for an outcome or timeout",
       description = """Incremented on every successful send to the sequencer.
           |Decremented when the event or an error is sequenced, or when the max-sequencing-time has elapsed.""",
+      qualification = Debug,
     )
     val inFlight: Counter = counter(prefix :+ "in-flight")
 
@@ -70,6 +76,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
         """Provides a rate and time of how long it takes for send requests to be accepted by the sequencer.
           |Note that this is just for the request to be made and not for the requested event to actually be sequenced.
           |""",
+      qualification = Debug,
     )
     val sends: Timer = timer(prefix :+ "sends")
 
@@ -80,6 +87,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
           |is witnessed from the sequencer, so will encompass the entire duration for the sequencer to sequence the
           |request. If the request does not result in an event no timing will be recorded.
           |""",
+      qualification = Debug,
     )
     val sequencingTime: Timer = timer(prefix :+ "sequencing")
 
@@ -87,6 +95,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
       summary = "Count of send requests which receive an overloaded response",
       description =
         "Counter that is incremented if a send request receives an overloaded response from the sequencer.",
+      qualification = Debug,
     )
     val overloaded: Counter = counter(prefix :+ "overloaded")
 
@@ -97,6 +106,7 @@ class SequencerClientMetrics(basePrefix: MetricName, val registry: MetricRegistr
                       |have been lost before reaching the sequencer, the sequencer may be at capacity and the
                       |the max-sequencing-time was exceeded by the time the request was processed, or the supplied
                       |max-sequencing-time may just be too small for the sequencer to be able to sequence the request.""",
+      qualification = Debug,
     )
     val dropped: Counter = counter(prefix :+ "dropped")
   }

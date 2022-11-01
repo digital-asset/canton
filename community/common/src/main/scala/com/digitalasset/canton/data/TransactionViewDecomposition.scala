@@ -5,6 +5,7 @@ package com.digitalasset.canton.data
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -13,6 +14,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.LfTransactionUtil
 
 import scala.annotation.nowarn
@@ -78,7 +80,7 @@ object TransactionViewDecomposition {
 
       EitherT(
         coreNodes.toNEF
-          .traverse(coreNode =>
+          .parTraverse(coreNode =>
             confirmationPolicy.informeesAndThreshold(coreNode, topologySnapshot)
           )
           .map { nodes =>
@@ -169,7 +171,7 @@ object TransactionViewDecomposition {
       val children = LfTransactionUtil.children(rootNode).map(idAndNode)
       val actionNodeChildren = peelAwayTopLevelRollbackNodes(children, rbContext)
       actionNodeChildren
-        .traverse { case (childNodeId, childNode, childRbContext) =>
+        .parTraverse { case (childNodeId, childNode, childRbContext) =>
           confirmationPolicy.informeesAndThreshold(childNode, topologySnapshot).flatMap {
             case (childInformees, childThreshold) =>
               if (childInformees == viewInformees && childThreshold == viewThreshold) {
@@ -209,7 +211,7 @@ object TransactionViewDecomposition {
 
     val rootNodes =
       peelAwayTopLevelRollbackNodes(transaction.unwrap.roots.toSeq.map(idAndNode), viewRbContext)
-    rootNodes.traverse(createNewView)
+    rootNodes.parTraverse(createNewView)
   }
 
   /** Convenience method to create a [[TransactionViewDecomposition]] with a

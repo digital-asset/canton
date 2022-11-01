@@ -16,7 +16,8 @@ object DamlLfVersionToProtocolVersions {
       : SortedMap[TransactionVersion, ProtocolVersion] =
     SortedMap(
       TransactionVersion.V14 -> ProtocolVersion.v2,
-      TransactionVersion.V15 -> ProtocolVersion.dev,
+      // Interfaces
+      TransactionVersion.V15 -> ProtocolVersion.v4,
       TransactionVersion.VDev -> ProtocolVersion.dev,
     )
 

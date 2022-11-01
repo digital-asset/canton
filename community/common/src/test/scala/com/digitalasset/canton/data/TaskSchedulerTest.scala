@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.metrics.{MetricHandle, RefGauge}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -77,7 +78,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
       // test a random selection of 1/720 of all permutations (the same permutation may be picked several times)
       val repetitions = (7 until indexedChanges.size).product
       (0 until repetitions).toList
-        .traverse_ { _ =>
+        .parTraverse_ { _ =>
           val shuffled = rand.shuffle(indexedChanges)
           val taskScheduler =
             new TaskScheduler(
@@ -107,7 +108,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
             val missingTick = firstGapFrom(SequencerCounter(0))
             if (missingTick > SequencerCounter(0)) {
               val timestamp = allTicks(missingTick - 1)
-              barriersWithFutures.traverse_ { case (barrierTimestamp, barrierCompletion) =>
+              barriersWithFutures.parTraverse_ { case (barrierTimestamp, barrierCompletion) =>
                 if (barrierTimestamp <= timestamp) {
                   barrierCompletion
                 } else {
@@ -141,7 +142,7 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
                 ticksAdded += sc
                 checkBarriers()
             }
-            _ <- tasks.result().traverse_(_.done())
+            _ <- tasks.result().parTraverse_(_.done())
           } yield {
             assert(
               executionOrder.toSeq == tasksInExecutionOrder.indices,
@@ -364,7 +365,9 @@ object TaskSchedulerTest {
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics with MetricHandle.Factory {
     override val registry: MetricRegistry = new MetricRegistry()
     override val prefix: MetricName = MetricName("test")
-    override val sequencerCounterQueue: metrics.MetricHandle.Counter = counter(prefix :+ "counter")
+    override val sequencerCounterQueue: metrics.api.MetricHandle.Counter = counter(
+      prefix :+ "counter"
+    )
     override val taskQueue: RefGauge[Int] = refGauge(prefix :+ "queue", 0)
   }
 

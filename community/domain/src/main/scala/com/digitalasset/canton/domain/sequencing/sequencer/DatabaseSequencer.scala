@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.protocol.{
+  AcknowledgeRequest,
   SendAsyncError,
   SignedContent,
   SubmissionRequest,
@@ -224,6 +225,13 @@ class DatabaseSequencer(
       traceContext: TraceContext
   ): EitherT[Future, CreateSubscriptionError, Sequencer.EventSource] =
     reader.read(member, offset)
+
+  override def acknowledgeSigned(
+      signedAcknowledgeRequest: SignedContent[AcknowledgeRequest]
+  )(implicit traceContext: TraceContext): Future[Unit] = {
+    val ack = signedAcknowledgeRequest.content
+    acknowledge(ack.member, ack.timestamp)
+  }
 
   override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext

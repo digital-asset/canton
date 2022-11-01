@@ -53,7 +53,7 @@ trait TopologyAwaiter extends FlagCloseable {
 
   private def shutdownConditions(): Unit = {
     conditions.updateAndGet { x =>
-      x.foreach(_.promise.trySuccess(UnlessShutdown.AbortedDueToShutdown))
+      x.foreach(_.promise.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard[Boolean])
       Seq()
     }.discard
   }
@@ -66,7 +66,7 @@ trait TopologyAwaiter extends FlagCloseable {
         catch {
           case NonFatal(e) =>
             logger.error("An exception occurred while checking awaiting conditions.", e)
-            stateAwait.promise.tryFailure(e)
+            stateAwait.promise.tryFailure(e).discard[Boolean]
         }
       )
   }

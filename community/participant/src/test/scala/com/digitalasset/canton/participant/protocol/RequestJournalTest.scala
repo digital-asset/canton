@@ -8,7 +8,7 @@ import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.metrics.SyncDomainMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*

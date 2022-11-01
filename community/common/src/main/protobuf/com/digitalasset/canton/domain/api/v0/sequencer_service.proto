@@ -26,7 +26,7 @@ service SequencerService {
     // Newer version of request submission (for authenticated members).
     // To be active for protocol versions >= 4.
     // The argument here is a SubmissionRequest wrapped in SignedContent.
-    // The signature is checked on the server side to avoid malicious sequencers to create fake
+    // The signature is checked on the server side to avoid that malicious sequencers create fake
     // submission requests in multi-writer architectures where writers don't fully trust each other.
     //
     // Submit a send request to the sequencer for sequencing asynchronously.
@@ -58,6 +58,20 @@ service SequencerService {
     // only periodically record acknowledgements (at an interval of minutes is expected to be more than sufficient for
     // pruning).
     rpc Acknowledge (AcknowledgeRequest) returns (google.protobuf.Empty);
+
+    // Newer version of acknowledgements.
+    // To be active for protocol versions >= 4.
+    // The argument here is an AcknowledgeRequest wrapped in SignedContent.
+    // The signature is checked on the server side to avoid that malicious sequencers create fake
+    // acknowledgements in multi-writer architectures where writers don't fully trust each other.
+    //
+    // Allows a member to acknowledge that they have read all events up to and including the provided timestamp,
+    // and that they will never re-read these events again. This information is currently only used for informational
+    // purposes and to provide a watermark for which it is safe to prune earlier events from the sequencer data stores.
+    // There is no requirement for every event to be individually acknowledged, and in fact callers are encouraged to
+    // only periodically record acknowledgements (at an interval of minutes is expected to be more than sufficient for
+    // pruning).
+    rpc AcknowledgeSigned (com.digitalasset.canton.protocol.v0.SignedContent) returns (google.protobuf.Empty);
 
 }
 

@@ -5,12 +5,13 @@ package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.Password
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStore, CryptoPublicStore}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import org.bouncycastle.asn1.edec.EdECObjectIdentifiers
 import org.bouncycastle.asn1.gm.GMObjectIdentifiers
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers
@@ -120,7 +121,7 @@ trait JavaKeyConverter {
           JavaKeyConversionError.KeyStoreError(show"Failed to list certificates: $err")
         )
 
-      _ <- certs.toList.traverse_(cert => exportCertificate(keystore, cert))
+      _ <- certs.toList.parTraverse_(cert => exportCertificate(keystore, cert))
     } yield keystore
   }
 

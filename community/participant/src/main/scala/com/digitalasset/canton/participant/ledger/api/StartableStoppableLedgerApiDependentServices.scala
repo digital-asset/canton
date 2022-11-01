@@ -92,7 +92,7 @@ class StartableStoppableLedgerApiDependentServices(
                 testingConfig,
                 packageService,
                 syncService,
-                participantId.uid,
+                participantId.adminParty,
                 hashOps,
                 adminToken,
                 loggerFactory,

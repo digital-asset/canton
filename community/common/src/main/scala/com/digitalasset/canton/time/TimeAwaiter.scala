@@ -42,7 +42,7 @@ trait TimeAwaiter {
 
   protected def expireTimeAwaiter(): Unit =
     blocking(awaitTimestampFuturesLock.synchronized {
-      awaitTimestampFutures.iterator().asScala.foreach(_._2.shutdown())
+      awaitTimestampFutures.iterator().asScala.foreach(_._2.shutdown().discard[Boolean])
     })
 
   protected def currentKnownTime: CantonTimestamp

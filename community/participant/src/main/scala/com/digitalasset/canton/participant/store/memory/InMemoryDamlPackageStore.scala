@@ -54,13 +54,17 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
       val packageId = readPackageId(pkgArchive)
       // only update the description if the given one is not empty
       if (sourceDescription.nonEmpty)
-        pkgData.put(packageId, (pkgArchive, sourceDescription))
+        pkgData
+          .put(packageId, (pkgArchive, sourceDescription))
+          .discard[Option[(DamlLf.Archive, String256M)]]
       else
         // TODO(andreas) This is not thread-safe
-        pkgData.put(
-          packageId,
-          (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse(defaultPackageDescription)),
-        )
+        pkgData
+          .put(
+            packageId,
+            (pkgArchive, pkgData.get(packageId).map(_._2).getOrElse(defaultPackageDescription)),
+          )
+          .discard[Option[(DamlLf.Archive, String256M)]]
     }
 
     dar.foreach { dar =>

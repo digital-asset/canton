@@ -31,17 +31,17 @@ trait HashBuilder {
     * @return the updated hash builder
     * @throws java.lang.IllegalStateException if the [[finish]] method has already been called on this [[HashBuilder]]
     */
-  def addWithoutLengthPrefix(a: ByteString): HashBuilder
+  def addWithoutLengthPrefix(a: ByteString): this.type
 
   /** Appends the length of `a` (encoded as fixed length [[com.google.protobuf.ByteString]]) as well as `a` to this builder.
     *
     * @return the updated hash builder
     * @throws java.lang.IllegalStateException if the [[finish]] method has already been called on this [[HashBuilder]]
     */
-  def add(a: ByteString): HashBuilder = add(a.size).addWithoutLengthPrefix(a)
+  def add(a: ByteString): this.type = add(a.size).addWithoutLengthPrefix(a)
 
   /** Shorthand for `addWithoutLengthPrefix(ByteString.copyFrom(a))` */
-  def addWithoutLengthPrefix(a: Array[Byte]): HashBuilder = addWithoutLengthPrefix(
+  def addWithoutLengthPrefix(a: Array[Byte]): this.type = addWithoutLengthPrefix(
     ByteString.copyFrom(a)
   )
 
@@ -51,21 +51,21 @@ trait HashBuilder {
     *
     * Document at the call site in production code why it is not necessary to include a length prefix.
     */
-  def addWithoutLengthPrefix(a: String): HashBuilder = addWithoutLengthPrefix(
+  def addWithoutLengthPrefix(a: String): this.type = addWithoutLengthPrefix(
     ByteString.copyFromUtf8(a)
   )
 
   /** Shorthand for `add(ByteString.copyFromUtf8(a))` */
-  def add(a: String): HashBuilder = add(ByteString.copyFromUtf8(a))
+  def add(a: String): this.type = add(ByteString.copyFromUtf8(a))
 
   /** Shorthand for `addWithoutLengthPrefix(DeterministicEncoding.encodeInt(a))` */
-  def add(a: Int): HashBuilder = addWithoutLengthPrefix(DeterministicEncoding.encodeInt(a))
+  def add(a: Int): this.type = addWithoutLengthPrefix(DeterministicEncoding.encodeInt(a))
 
   /** Shorthand for `addWithoutLengthPrefix(DeterministicEncoding.encodeLong(a))` */
-  def add(a: Long): HashBuilder = addWithoutLengthPrefix(DeterministicEncoding.encodeLong(a))
+  def add(a: Long): this.type = addWithoutLengthPrefix(DeterministicEncoding.encodeLong(a))
 
   /** Terminates the building of the hash.
-    * No more additions can be made using [[HashBuilder.addWithoutLengthPrefix(a:com\.google\.protobuf\.ByteString):com\.digitalasset\.canton\.crypto\.HashBuilder*]] after this method has been called.
+    * No more additions can be made using `HashBuilder.addWithoutLengthPrefix` after this method has been called.
     *
     * @return The hash of the array accumulated so far.
     * @throws java.lang.IllegalStateException if [[finish]] had been called before on this [[HashBuilder]]
@@ -87,13 +87,13 @@ private[crypto] class HashBuilderFromMessageDigest(algorithm: HashAlgorithm, pur
     md.update(ByteBuffer.allocate(java.lang.Integer.BYTES).putInt(purpose.id).array())
   }
 
-  override def addWithoutLengthPrefix(a: Array[Byte]): HashBuilder = {
+  override def addWithoutLengthPrefix(a: Array[Byte]): this.type = {
     assertNotFinished()
     md.update(a)
     this
   }
 
-  override def addWithoutLengthPrefix(a: ByteString): HashBuilder = addWithoutLengthPrefix(
+  override def addWithoutLengthPrefix(a: ByteString): this.type = addWithoutLengthPrefix(
     a.toByteArray
   )
 

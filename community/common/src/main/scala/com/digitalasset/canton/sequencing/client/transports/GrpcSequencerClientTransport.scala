@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.client.transports
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v0.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.domain.api.v0.SequencerServiceGrpc.SequencerServiceStub
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -28,7 +27,6 @@ import com.digitalasset.canton.sequencing.client.{
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -283,10 +281,11 @@ class GrpcSequencerClientTransport(
   )(implicit traceContext: TraceContext): SequencerSubscription[E] =
     subscribeInternal(request, handler, requiresAuthentication = false)
 
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = {
-    val requestP = AcknowledgeRequest(member, timestamp).toProtoV0
+    val timestamp = request.timestamp
+    val requestP = request.toProtoV0
     val responseP = CantonGrpcUtil.sendGrpcRequest(sequencerServiceClient, "sequencer")(
       _.acknowledge(requestP),
       requestDescription = s"acknowledge/$timestamp",

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.sequencing
 
-import com.daml.metrics.MetricHandle.Gauge
+import com.daml.metrics.api.MetricHandle.Gauge
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.protocol.Deliver
 import com.digitalasset.canton.store.SequencedEventStore.{

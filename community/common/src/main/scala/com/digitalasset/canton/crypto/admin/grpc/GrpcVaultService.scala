@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto.admin.grpc
 
 import cats.syntax.either.*
+import cats.syntax.parallel.*
 import cats.syntax.traverseFilter.*
 import com.digitalasset.canton.crypto.admin.v0
 import com.digitalasset.canton.crypto.{v0 as cryptoproto, *}
@@ -12,6 +13,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, OptionUtil}
 import org.bouncycastle.asn1.x500.X500Name
 
@@ -53,7 +55,7 @@ class GrpcVaultService(
         )
         publicKeys <- EitherTUtil.toFuture(
           mapErr(
-            keys.toList.filterA(pk =>
+            keys.toList.parFilterA(pk =>
               crypto.cryptoPrivateStore
                 .existsPrivateKey(pk.publicKey.id)
                 .leftMap[String](err => s"Failed to check key ${pk.publicKey.id}'s existence: $err")

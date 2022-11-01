@@ -86,9 +86,8 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
       supportedProtoVersion(v0.ActionDescription)(fromProtoV0),
       _.toProtoV0.toByteString,
     ),
-    // TODO(#9910) migrate to stable
     ProtoVersion(1) -> VersionedProtoConverter(
-      ProtocolVersion.dev,
+      ProtocolVersion.v4,
       supportedProtoVersion(v1.ActionDescription)(fromProtoV1),
       _.toProtoV1.toByteString,
     ),
@@ -510,8 +509,7 @@ object ActionDescription extends HasProtocolVersionedCompanion[ActionDescription
         protocolVersion: RepresentativeProtocolVersion[ActionDescription],
     ): Either[InvalidActionDescription, ExerciseActionDescription] = {
       val hasInterface = interfaceId.nonEmpty
-      // TODO(#9910) migrate to stable
-      val interfaceSupportedSince = ProtocolVersion.dev
+      val interfaceSupportedSince = ProtocolVersion.v4
       val canHaveInterface = protocolVersion.representative >= interfaceSupportedSince
 
       for {

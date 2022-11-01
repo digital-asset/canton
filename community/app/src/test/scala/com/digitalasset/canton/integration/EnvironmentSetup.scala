@@ -47,19 +47,33 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
     */
   def testFinished(environment: TCE): Unit = {}
 
-  /** Creates a new environment manually for a test without concurrent environment limitation and with optional config transformation. */
+  /** Creates a new environment manually for a test without concurrent environment limitation and with optional config transformation.
+    *
+    * @param initialConfig specifies which configuration to start from with the default being a NEW one created
+    *                      from the current environment.
+    * @param configTransform a function that applies changes to the initial configuration
+    *                        (with the plugins applied on top)
+    * @param runPlugins a function that expects a plugin reference and returns whether or not it's supposed to be run
+    *                   against the initial configuration
+    * @return a new test console environment
+    */
   protected def manualCreateEnvironment(
+      initialConfig: E#Config = envDef.generateConfig,
       configTransform: E#Config => E#Config = identity,
-      runPlugins: Boolean = true,
+      runPlugins: EnvironmentSetupPlugin[E, TCE] => Boolean = _ => true,
   ): TCE = {
-    val testConfig = envDef.generateConfig
+    val testConfig = initialConfig
     // note: beforeEnvironmentCreate may well have side-effects (e.g. starting databases or docker containers)
     val pluginConfig = {
-      if (runPlugins)
-        plugins.foldLeft(testConfig)((config, plugin) => plugin.beforeEnvironmentCreated(config))
-      else testConfig
+      plugins.foldLeft(testConfig)((config, plugin) =>
+        if (runPlugins(plugin))
+          plugin.beforeEnvironmentCreated(config)
+        else
+          config
+      )
     }
     val finalConfig = configTransform(pluginConfig)
+
     val environmentFixture =
       envDef.environmentFactory.create(
         finalConfig,
@@ -71,9 +85,9 @@ sealed trait EnvironmentSetup[E <: Environment, TCE <: TestConsoleEnvironment[E]
       val testEnvironment: TCE =
         envDef.createTestConsole(environmentFixture, loggerFactory)
 
-      if (runPlugins) {
-        plugins.foreach(_.afterEnvironmentCreated(finalConfig, testEnvironment))
-      }
+      plugins.foreach(plugin =>
+        if (runPlugins(plugin)) plugin.afterEnvironmentCreated(finalConfig, testEnvironment)
+      )
 
       if (!finalConfig.parameters.manualStart)
         testEnvironment.startAll()

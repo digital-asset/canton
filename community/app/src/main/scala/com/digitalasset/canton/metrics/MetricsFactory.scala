@@ -5,7 +5,8 @@ package com.digitalasset.canton.metrics
 
 import com.codahale.metrics
 import com.codahale.metrics.{Metric, MetricFilter}
-import com.daml.metrics.{JvmMetricSet, MetricName}
+import com.daml.metrics.JvmMetricSet
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.domain.metrics.{
   DomainMetrics,

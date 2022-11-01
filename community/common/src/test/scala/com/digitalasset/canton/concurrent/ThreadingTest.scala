@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.concurrent
 
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{LazyValWithContext, ResourceUtil}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -159,7 +160,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
         // Start computation
         val idle = taskFuture.compareAndSet(
           None, {
-            val blockingTasks = ((0 until numberOfTasksToRun): Seq[Int]).traverse_ { i =>
+            val blockingTasks = ((0 until numberOfTasksToRun): Seq[Int]).parTraverse_ { i =>
               Future {
                 logger.debug(s"$description: Starting task $i...")
                 if (closed.get()) {
@@ -273,7 +274,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
 
         // Use a few more threads to avoid flakes
         val concurrentInitializationThreads = expectedNumberOfParallelTasks + 2
-        val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).traverse_ { _ =>
+        val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).parTraverse_ { _ =>
           Future(lvt.blocker)
         }
 
@@ -307,7 +308,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
 
         // Use a few more threads to avoid flakes
         val concurrentInitializationThreads = expectedNumberOfParallelTasks + 2
-        val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).traverse_ { _ =>
+        val futures = ((1 to (concurrentInitializationThreads)): Seq[Int]).parTraverse_ { _ =>
           Future(lvt.blockerWithContext)
         }
 
@@ -326,7 +327,7 @@ class ThreadingTest extends AnyWordSpec with BaseTest {
     // Run some extra tasks to keep submitting to the fork join pool.
     // This is necessary, because the fork join pool occasionally fails to create a worker thread.
     // It is ok to do so in this test, because there are plenty of extra tasks in production.
-    ((0 until numberOfExtraTasks): Seq[Int]).traverse_ { i =>
+    ((0 until numberOfExtraTasks): Seq[Int]).parTraverse_ { i =>
       Future {
         logger.debug(s"$description: Running extra task $i...")
       }

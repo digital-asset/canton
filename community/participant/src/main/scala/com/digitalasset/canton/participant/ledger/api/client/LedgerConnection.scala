@@ -73,12 +73,15 @@ trait LedgerSubscription extends FlagCloseableAsync with NamedLogging {
   val completed: Future[Done]
 }
 
-trait LedgerConnection extends LedgerSubmit {
+trait LedgerAcs extends LedgerSubmit {
   def sender: P.Party
-  def ledgerEnd: Future[LedgerOffset]
   def activeContracts(
       filter: TransactionFilter = LedgerConnection.transactionFilter(sender)
   ): Future[(Seq[CreatedEvent], LedgerOffset)]
+}
+
+trait LedgerConnection extends LedgerSubmit with LedgerAcs {
+  def ledgerEnd: Future[LedgerOffset]
   def subscribe(
       subscriptionName: String,
       offset: LedgerOffset,

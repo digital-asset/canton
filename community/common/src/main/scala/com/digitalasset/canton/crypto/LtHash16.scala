@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto
 
+import com.digitalasset.canton.DiscardOps
 import com.google.protobuf.ByteString
 
 import java.nio.{ByteBuffer, ByteOrder, ShortBuffer}
@@ -41,7 +42,7 @@ class LtHash16 private (private val buffer: Array[Byte]) {
       val newVal = f(iBuf.get(i), hBuf.get(i))
       // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
       // gives us the desired semantics of addition modulo 2^16.
-      iBuf.put(i, newVal.toShort)
+      iBuf.put(i, newVal.toShort).discard[ShortBuffer]
     }
   }
 

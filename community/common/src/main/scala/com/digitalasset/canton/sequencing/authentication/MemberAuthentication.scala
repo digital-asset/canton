@@ -4,7 +4,7 @@
 package com.digitalasset.canton.sequencing.authentication
 
 import cats.data.EitherT
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
 import com.digitalasset.canton.crypto.*
@@ -15,6 +15,7 @@ import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.{
 }
 import com.digitalasset.canton.topology.{DomainId, *}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -42,7 +43,7 @@ sealed trait MemberAuthentication {
     for {
       // see if we have any of the possible keys that could be used to sign
       availableSigningKey <- possibleSigningKeys.forgetNE
-        .filterA(key => crypto.cryptoPrivateStore.existsSigningKey(key)(TraceContext.empty))
+        .parFilterA(key => crypto.cryptoPrivateStore.existsSigningKey(key)(TraceContext.empty))
         .map(_.headOption) // the first we find is as good as any
         .leftMap(_ => NoKeysRegistered(member))
         .subflatMap(_.toRight[AuthenticationError](NoKeysRegistered(member)))

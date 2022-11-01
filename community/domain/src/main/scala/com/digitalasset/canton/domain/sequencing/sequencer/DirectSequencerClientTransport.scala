@@ -7,7 +7,6 @@ import akka.stream.Materializer
 import cats.data.EitherT
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.service.DirectSequencerSubscriptionFactory
 import com.digitalasset.canton.lifecycle.SyncCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -16,13 +15,13 @@ import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.client.transports.SequencerClientTransport
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
+  AcknowledgeRequest,
   HandshakeRequest,
   HandshakeResponse,
   SignedContent,
   SubmissionRequest,
   SubscriptionRequest,
 }
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
@@ -79,10 +78,10 @@ class DirectSequencerClientTransport(
       SendAsyncClientError.RequestInvalid("Direct client does not support unauthenticated sends")
     )
 
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    sequencer.acknowledge(member, timestamp)
+    sequencer.acknowledge(request.member, request.timestamp)
 
   override def subscribe[E](request: SubscriptionRequest, handler: SerializedEventHandler[E])(
       implicit traceContext: TraceContext

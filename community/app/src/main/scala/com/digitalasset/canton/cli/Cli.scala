@@ -86,7 +86,7 @@ case class Cli(
       "LOG_LAST_ERRORS_FILE_NAME",
       "LOG_FORMAT_JSON",
       "LOG_IMMEDIATE_FLUSH",
-    ).foreach(System.clearProperty)
+    ).foreach(System.clearProperty(_).discard[String])
     logFileName.foreach(System.setProperty("LOG_FILE_NAME", _))
     logLastErrorsFileName.foreach(System.setProperty("LOG_LAST_ERRORS_FILE_NAME", _))
     logFileHistory.foreach(x => System.setProperty("LOG_FILE_HISTORY", x.toString))

@@ -3,26 +3,34 @@
 
 package com.digitalasset.canton.metrics
 
-import com.daml.metrics.MetricHandle.Timer
-import com.daml.metrics.{MetricHandle as DamlMetricHandle, MetricName}
+import com.daml.metrics.api.MetricDoc.MetricQualification.{
+  Debug,
+  Errors,
+  Latency,
+  Saturation,
+  Traffic,
+}
+import com.daml.metrics.api.MetricDoc.{GroupTag, Tag}
+import com.daml.metrics.api.MetricHandle.Timer
+import com.daml.metrics.api.dropwizard.DropwizardFactory
+import com.daml.metrics.api.{MetricHandle as DamlMetricHandle, MetricName}
 
-import scala.annotation.StaticAnnotation
 import scala.concurrent.duration.FiniteDuration
 import scala.reflect.ClassTag
 import scala.reflect.runtime.universe as ru
 
 object MetricHandle {
 
-  trait Factory extends DamlMetricHandle.DropwizardFactory {
+  trait Factory extends DropwizardFactory {
     def loadGauge(
         name: MetricName,
         interval: FiniteDuration,
         timer: Timer,
     ): TimedLoadGauge =
-      reRegisterGauge[Double, TimedLoadGauge](name, new TimedLoadGauge(interval, timer))
+      reRegisterGauge[Double, TimedLoadGauge](name, new TimedLoadGauge(name, interval, timer))
 
     def refGauge[T](name: MetricName, empty: T): RefGauge[T] =
-      reRegisterGauge[T, RefGauge[T]](name, new RefGauge[T](empty))
+      reRegisterGauge[T, RefGauge[T]](name, new RefGauge[T](name, empty))
 
   }
 
@@ -32,12 +40,6 @@ object MetricHandle {
 }
 
 object MetricDoc {
-
-  case class Tag(summary: String, description: String) extends StaticAnnotation
-
-  // The GroupTag can be defined for metrics that share similar names and should be grouped using a
-  // wildcard (the representative).
-  case class GroupTag(representative: String) extends StaticAnnotation
 
   def toItem(tags: Seq[Tag], groupTags: Seq[GroupTag], x: DamlMetricHandle): Option[Item] =
     (tags, groupTags) match {
@@ -197,13 +199,29 @@ object MetricDoc {
     }
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  @SuppressWarnings(
+    Array(
+      "org.wartremover.warts.Product",
+      "org.wartremover.warts.AsInstanceOf",
+      "org.wartremover.warts.Serializable",
+    )
+  )
   private def tagParser(tree: ru.Tree): Tag = {
     try {
       Seq(1, 2).map(
         tree.children(_).asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
       ) match {
-        case s :: d :: Nil => Tag(summary = s, description = d.stripMargin)
+        case s :: d :: Nil =>
+          val typeOfQ = tree.children(3).tpe
+          val q = typeOfQ match {
+            case q if q =:= ru.typeOf[Latency.type] => Latency
+            case q if q =:= ru.typeOf[Traffic.type] => Traffic
+            case q if q =:= ru.typeOf[Errors.type] => Errors
+            case q if q =:= ru.typeOf[Saturation.type] => Saturation
+            case q if q =:= ru.typeOf[Debug.type] => Debug
+            case _ => throw new IllegalStateException("Unreachable code.")
+          }
+          Tag(summary = s, description = d.stripMargin, qualification = q)
         case _ => throw new IllegalStateException("Unreachable code.")
       }
     } catch {

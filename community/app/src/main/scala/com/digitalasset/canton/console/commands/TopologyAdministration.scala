@@ -804,11 +804,13 @@ class TopologyAdministrationGroup(
             case DomainGovernanceTransaction(element) =>
               element.mapping match {
                 case DomainParametersChange(domainId, domainParameters) =>
-                  domain_parameters_changes.authorizeInternal(
-                    domainId,
-                    domainParameters,
-                    authorizeWith.some,
-                  )
+                  domain_parameters_changes
+                    .authorizeInternal(
+                      domainId,
+                      domainParameters,
+                      authorizeWith.some,
+                    )
+                    .discard[ByteString]
               }
           }
 

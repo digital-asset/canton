@@ -55,7 +55,9 @@ class DbDomainConnectionConfigStore private[store] (
   ): Future[DomainConnectionConfigStore] =
     for {
       configs <- getAllInternal
-      _ = configs.foreach(s => domainConfigCache.put(s.config.domain, s))
+      _ = configs.foreach(s =>
+        domainConfigCache.put(s.config.domain, s).discard[Option[StoredDomainConnectionConfig]]
+      )
     } yield this
 
   private def getInternal(domainAlias: DomainAlias)(implicit

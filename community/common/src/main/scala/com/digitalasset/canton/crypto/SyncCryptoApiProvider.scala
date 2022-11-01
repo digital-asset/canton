@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CacheConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SignatureCheckError.{
@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.client.{
   TopologySnapshot,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.LoggerUtil
 import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersion}
 import com.digitalasset.canton.{DomainAlias, checked}
@@ -249,7 +250,7 @@ class DomainSyncCryptoClient(
       snapshot <- EitherT.right(ipsSnapshot(referenceTime))
       signingKeys <- EitherT.right(snapshot.signingKeys(owner))
       existingKeys <- signingKeys.toList
-        .filterA(pk => crypto.cryptoPrivateStore.existsSigningKey(pk.fingerprint))
+        .parFilterA(pk => crypto.cryptoPrivateStore.existsSigningKey(pk.fingerprint))
         .leftMap[SyncCryptoError](SyncCryptoError.StoreError)
       kk <- existingKeys.lastOption
         .toRight[SyncCryptoError](

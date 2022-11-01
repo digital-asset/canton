@@ -119,7 +119,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
     blocking(lock.synchronized {
       eventByTimestamp.rangeTo(beforeAndIncluding).foreach { case (ts, e) =>
         eventByTimestamp.remove(ts).discard
-        timestampOfCounter.remove(e.counter)
+        timestampOfCounter.remove(e.counter).discard
       }
     })
 
@@ -213,7 +213,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
       if (lastSc.forall(_ <= to)) {
         timestampOfCounter.rangeFrom(fromEffective).rangeTo(to).foreach { case (sc, ts) =>
           eventByTimestamp.remove(ts).discard
-          timestampOfCounter.remove(sc)
+          timestampOfCounter.remove(sc).discard
         }
         Right(())
 
@@ -230,7 +230,7 @@ class InMemorySequencedEventStore(protected val loggerFactory: NamedLoggerFactor
   )(implicit traceContext: TraceContext): Future[Unit] = {
     timestampOfCounter.rangeFrom(from).foreach { case (sc, ts) =>
       timestampOfCounter.remove(sc).discard
-      eventByTimestamp.remove(ts)
+      eventByTimestamp.remove(ts).discard
     }
 
     Future.unit
