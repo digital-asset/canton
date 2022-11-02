@@ -43,6 +43,8 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
   val rc1 = RequestCounter(1)
   val rc2 = RequestCounter(2)
 
+  // TODO(#10692) remove the suppression
+  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   def mk(
       entries: (
           LfContractId,

@@ -102,7 +102,7 @@ class DbMultiDomainCausalityStore private (
   /** Initialise the in-memory tracking of the highest seen timestamp on each domain */
   def initialise(implicit tc: TraceContext): Future[Unit] = {
     for { firstMap <- highestSeenPerDomain } yield {
-      firstMap.foreach { case (k, v) => highestSeen.put(k, v) }
+      firstMap.foreach { case (k, v) => highestSeen.put(k, v).discard[Option[CantonTimestamp]] }
     }
   }
 

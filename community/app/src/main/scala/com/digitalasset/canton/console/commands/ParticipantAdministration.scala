@@ -269,7 +269,7 @@ class ParticipantTestingGroup(
   ): Unit =
     check(FeatureFlag.Testing) {
       participantRef.domains.list_connected().foreach { item =>
-        fetch_domain_time(item.domainId, timeout)
+        fetch_domain_time(item.domainId, timeout).discard[CantonTimestamp]
       }
     }
 

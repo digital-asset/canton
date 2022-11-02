@@ -5,7 +5,7 @@ package com.digitalasset.canton
 
 import cats.Functor
 import cats.data.{EitherT, OptionT}
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
@@ -17,6 +17,7 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyChangeOp}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ReleaseProtocolVersion,
@@ -318,7 +319,7 @@ trait BaseTest
 
   def forEveryParallel[A](inputs: Seq[A])(
       body: A => Assertion
-  )(implicit executionContext: ExecutionContext): Assertion = forEvery(inputs.traverse { input =>
+  )(implicit executionContext: ExecutionContext): Assertion = forEvery(inputs.parTraverse { input =>
     Future(Try(body(input)))
   }.futureValue)(_.get)
 
@@ -326,7 +327,7 @@ trait BaseTest
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
   lazy val DamlTestFilesPath: String = BaseTest.DamlTestFilesPath
-  lazy val DamlTestLfDevFilesPath: String = BaseTest.DamlTestLfDevFilesPath
+  lazy val DamlTestLfV15FilesPath: String = BaseTest.DamlTestLfV15FilesPath
 }
 
 object BaseTest {
@@ -366,9 +367,10 @@ object BaseTest {
   lazy val CantonExamplesPath: String = getResourcePath("CantonExamples.dar")
   lazy val CantonTestsPath: String = getResourcePath("CantonTests.dar")
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev.dar")
+  lazy val CantonLfV15: String = getResourcePath("CantonLfV15.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles.dar")
-  lazy val DamlTestLfDevFilesPath: String = getResourcePath("DamlTestLfDevFiles.dar")
+  lazy val DamlTestLfV15FilesPath: String = getResourcePath("DamlTestLfV15Files.dar")
 
   private def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

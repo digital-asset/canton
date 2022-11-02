@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import org.scalatest.prop.TableFor3
 
@@ -32,7 +32,7 @@ class RateLimiterTest extends BaseTestWordSpec with HasExecutionContext {
         s"allow for a maximum burst of size $maxBurstSize" in {
           val rateLimiter = new RateLimiter(NonNegativeInt.tryCreate(maxTasksPerSecond))
           (0 until maxBurstSize * 10).toList
-            .traverse { _ =>
+            .parTraverse { _ =>
               Future {
                 rateLimiter.checkAndUpdateRate()
               }
@@ -60,7 +60,7 @@ class RateLimiterTest extends BaseTestWordSpec with HasExecutionContext {
           val numFailures = new AtomicLong()
           val deadline = duration.fromNow
           while (deadline.hasTimeLeft()) {
-            (0 until parallelism).toList.traverse_ { _ =>
+            (0 until parallelism).toList.parTraverse_ { _ =>
               Future {
                 if (rateLimiter.checkAndUpdateRate()) numSuccessful.incrementAndGet()
                 else numFailures.incrementAndGet()

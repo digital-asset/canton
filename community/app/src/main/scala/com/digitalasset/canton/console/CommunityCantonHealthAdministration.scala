@@ -5,6 +5,7 @@ package com.digitalasset.canton.console
 
 import better.files.File
 import cats.data.NonEmptyList
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.codahale.metrics
 import com.digitalasset.canton.admin.api.client.data.{CantonStatus, CommunityCantonStatus}
@@ -13,6 +14,7 @@ import com.digitalasset.canton.health.admin.data.NodeStatus
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.util.FutureInstances.*
 import io.circe.{Encoder, KeyEncoder}
 
 import java.time.Instant
@@ -98,7 +100,7 @@ trait CantonHealthAdministration[Status <: CantonStatus]
       timeout: NonNegativeDuration = consoleEnv.commandTimeouts.ledgerCommand,
       chunkSize: Option[Int] = None,
   ): String = {
-    val remoteDumps = consoleEnv.nodes.remote.toList.traverse { n =>
+    val remoteDumps = consoleEnv.nodes.remote.toList.parTraverse { n =>
       Future {
         n.health.dump(
           File.newTemporaryFile(s"remote-${n.name}-"),

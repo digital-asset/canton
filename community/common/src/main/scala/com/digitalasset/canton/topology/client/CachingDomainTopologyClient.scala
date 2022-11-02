@@ -4,7 +4,7 @@
 package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -21,6 +21,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.AtomicReference
@@ -357,7 +358,7 @@ class CachingTopologySnapshot(
       participants: Seq[ParticipantId]
   ): Future[Map[ParticipantId, ParticipantAttributes]] =
     participants
-      .traverse(participant => participantState(participant).map((participant, _)))
+      .parTraverse(participant => participantState(participant).map((participant, _)))
       .map(_.toMap)
 
   override def findParticipantCertificate(

@@ -9,7 +9,7 @@ import cats.syntax.traverse.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.api.v1.admin.package_management_service.PackageDetails
-import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails
+import com.daml.ledger.api.v1.admin.party_management_service.PartyDetails as ProtoPartyDetails
 import com.daml.ledger.api.v1.command_completion_service.Checkpoint
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.completion.Completion
@@ -18,8 +18,8 @@ import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.api.v1.transaction.{Transaction, TransactionTree}
 import com.daml.ledger.api.v1.transaction_filter.{Filters, TransactionFilter}
 import com.daml.ledger.client.binding.{Contract, Primitive as P, TemplateCompanion}
-import com.daml.metrics.MetricHandle.{Histogram, Meter}
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
+import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.admin.api.client.commands.{
   LedgerApiCommands,
@@ -28,7 +28,12 @@ import com.digitalasset.canton.admin.api.client.commands.{
 import com.digitalasset.canton.admin.api.client.data.{
   LedgerApiUser,
   ListLedgerApiUsersResult,
+  ModifyingNonModifiablePartyDetailsPropertiesError,
+  ModifyingNonModifiableUserPropertiesError,
+  PartyDetails,
+  User,
   UserRights,
+  UsersPage,
 }
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
@@ -268,9 +273,9 @@ trait BaseLedgerApiAdministration extends NoTracing {
 
             override def onNext(tree: TransactionTree): Unit = {
               val s = tree.rootEventIds.size.toLong
-              metric.mark(s)
+              metric.mark(s)(MetricsContext.Empty)
               nodeCount.update(s)
-              transactionSize.update(tree.serializedSize)
+              transactionSize.update(tree.serializedSize)(MetricsContext.Empty)
               onTransaction(tree)
             }
 
@@ -602,23 +607,88 @@ trait BaseLedgerApiAdministration extends NoTracing {
       }
     }
 
-    @Help.Summary("Manage parties through the ledger api", FeatureFlag.Testing)
+    @Help.Summary("Manage parties through the Ledger API", FeatureFlag.Testing)
     @Help.Group("Party Management")
     object parties extends Helpful {
 
-      @Help.Summary("Allocate new party", FeatureFlag.Testing)
-      def allocate(party: String, displayName: String): PartyDetails =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
+      @Help.Summary("Allocate a new party", FeatureFlag.Testing)
+      @Help.Description(
+        """Allocates a new party on the ledger. 
+          party: a hint for generating the party identifier
+          displayName: a human-readable name of this party
+          annotations: key-value pairs associated with this party and stored locally on this Ledger API server"""
+      )
+      def allocate(
+          party: String,
+          displayName: String,
+          annotations: Map[String, String] = Map.empty,
+      ): PartyDetails = {
+        val proto = check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
-            LedgerApiCommands.PartyManagementService.AllocateParty(party, displayName)
+            LedgerApiCommands.PartyManagementService.AllocateParty(
+              partyIdHint = party,
+              displayName = displayName,
+              annotations = annotations,
+            )
           )
         })
+        PartyDetails.fromProtoPartyDetails(proto)
+      }
 
-      @Help.Summary("List parties known by the ledger API server", FeatureFlag.Testing)
-      def list(): Seq[PartyDetails] =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
+      @Help.Summary("List parties known by the Ledger API server", FeatureFlag.Testing)
+      def list(): Seq[PartyDetails] = {
+        val proto = check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(LedgerApiCommands.PartyManagementService.ListKnownParties())
         })
+        proto.map(PartyDetails.fromProtoPartyDetails)
+      }
+
+      @Help.Summary("Update participant-local party details")
+      @Help.Description(
+        """Currently you can update only the annotations.
+           |You cannot update other user attributes.
+          party: party to be updated,
+          modifier: a function to modify the party details, e.g.: `partyDetails => { partyDetails.copy(annotations = partyDetails.annotations.updated("a", "b").removed("c")) }`"""
+      )
+      def update(
+          party: String,
+          modifier: PartyDetails => PartyDetails,
+      ): PartyDetails = {
+        val rawDetails = get(party = party)
+        val srcDetails = PartyDetails.fromProtoPartyDetails(rawDetails)
+        val modifiedDetails = modifier(srcDetails)
+        verifyOnlyModifiableFieldsWhereModified(srcDetails, modifiedDetails)
+        val annotationsUpdate = makeAnnotationsUpdate(
+          original = srcDetails.annotations,
+          modified = modifiedDetails.annotations,
+        )
+        val rawUpdatedDetails = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementService.Update(
+              party = party,
+              annotationsUpdate = Some(annotationsUpdate),
+              resourceVersionO = Some(rawDetails.localMetadata.fold("")(_.resourceVersion)),
+            )
+          )
+        })
+        PartyDetails.fromProtoPartyDetails(rawUpdatedDetails)
+      }
+
+      private def verifyOnlyModifiableFieldsWhereModified(
+          srcDetails: PartyDetails,
+          modifiedDetails: PartyDetails,
+      ): Unit = {
+        val withAllowedUpdatesReverted = modifiedDetails.copy(annotations = srcDetails.annotations)
+        if (withAllowedUpdatesReverted != srcDetails) {
+          throw ModifyingNonModifiablePartyDetailsPropertiesError()
+        }
+      }
+
+      private def get(party: String): ProtoPartyDetails = {
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(LedgerApiCommands.PartyManagementService.GetParty(party = party))
+        })
+      }
 
     }
 
@@ -775,43 +845,78 @@ trait BaseLedgerApiAdministration extends NoTracing {
           actAs: the set of parties this user is allowed to act as
           primaryParty: the optional party that should be linked to this user by default
           readAs: the set of parties this user is allowed to read as
-          participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api 
+          participantAdmin: flag (default false) indicating if the user is allowed to use the admin commands of the Ledger Api
+          isActive: flag (default true) indicating if the user is active
+          annotations: the set of key-value pairs linked to this user
           """
       )
       def create(
           id: String,
-          actAs: Set[LfPartyId],
+          actAs: Set[LfPartyId] = Set(),
           primaryParty: Option[LfPartyId] = None,
           readAs: Set[LfPartyId] = Set(),
           participantAdmin: Boolean = false,
-      ): LedgerApiUser =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          isActive: Boolean = true,
+          annotations: Map[String, String] = Map.empty,
+      ): User = {
+        val lapiUser = check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.Users.Create(
-              id,
-              actAs,
-              primaryParty,
-              readAs,
-              participantAdmin,
+              id = id,
+              actAs = actAs,
+              primaryParty = primaryParty,
+              readAs = readAs,
+              participantAdmin = participantAdmin,
+              isDeactivated = !isActive,
+              annotations = annotations,
             )
           )
         })
+        User.fromLapiUser(lapiUser)
+      }
+
+      @Help.Summary("Update a user", FeatureFlag.Testing)
+      @Help.Description(
+        """Currently you can update the annotations, active status and primary party.
+          |You cannot update other user attributes.
+          id: id of the user to be updated
+          modifier: a function for modifying the user; e.g: `user => { user.copy(isActive = false, primaryParty = None, annotations = user.annotations.updated("a", "b").removed("c")) }` 
+          """
+      )
+      def update(
+          id: String,
+          modifier: User => User,
+      ): User = {
+        val rawUser = doGet(id)
+        val srcUser = User.fromLapiUser(rawUser)
+        val modifiedUser = modifier(srcUser)
+        verifyOnlyModifiableFieldsWhereModified(srcUser, modifiedUser)
+        val annotationsUpdate =
+          makeAnnotationsUpdate(original = srcUser.annotations, modified = modifiedUser.annotations)
+        val rawUpdatedUser = check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.Users.Update(
+              id = id,
+              annotationsUpdate = Some(annotationsUpdate),
+              primaryPartyUpdate = Some(modifiedUser.primaryParty),
+              isDeactivatedUpdate = Some(!modifiedUser.isActive),
+              resourceVersionO = Some(rawUser.metadata.resourceVersion),
+            )
+          )
+        })
+        User.fromLapiUser(rawUpdatedUser)
+      }
 
       @Help.Summary("Get the user data of the user with the given id", FeatureFlag.Testing)
       @Help.Description(
         """Fetch the data associated with the given user id failing if there is no such user.
-          |This can be used to get the primary party associated with a given user.
-          |If you need the full user rights, use rights.list instead."""
+          |You will get the user's primary party, active status and annotations.
+          |If you need the user rights, use rights.list instead."""
       )
-      def get(
-          id: String
-      ): LedgerApiUser =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(LedgerApiCommands.Users.Get(id))
-        })
+      def get(id: String): User = User.fromLapiUser(doGet(id))
 
-      @Help.Summary("Delete user", FeatureFlag.Testing)
-      @Help.Description("""Delete a user.""")
+      @Help.Summary("Delete a user", FeatureFlag.Testing)
+      @Help.Description("""Delete a user by id.""")
       def delete(id: String): Unit =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -830,8 +935,8 @@ trait BaseLedgerApiAdministration extends NoTracing {
           filterUser: String = "",
           pageToken: String = "",
           pageSize: Int = 100,
-      ): ListLedgerApiUsersResult =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
+      ): UsersPage = {
+        val page: ListLedgerApiUsersResult = check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.Users.List(
               filterUser,
@@ -840,6 +945,28 @@ trait BaseLedgerApiAdministration extends NoTracing {
             )
           )
         })
+        UsersPage(
+          users = page.users.map(User.fromLapiUser),
+          nextPageToken = page.nextPageToken,
+        )
+      }
+
+      def verifyOnlyModifiableFieldsWhereModified(srcUser: User, modifiedUser: User): Unit = {
+        val withAllowedUpdatesReverted = modifiedUser.copy(
+          primaryParty = srcUser.primaryParty,
+          isActive = srcUser.isActive,
+          annotations = srcUser.annotations,
+        )
+        if (withAllowedUpdatesReverted != srcUser) {
+          throw ModifyingNonModifiableUserPropertiesError()
+        }
+      }
+
+      private def doGet(id: String): LedgerApiUser = {
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(LedgerApiCommands.Users.Get(id))
+        })
+      }
 
       @Help.Summary("Manage Ledger Api User Rights", FeatureFlag.Testing)
       @Help.Group("Ledger Api User Rights")
@@ -960,6 +1087,16 @@ trait BaseLedgerApiAdministration extends NoTracing {
         })
 
     }
+  }
+
+  /** @return The modified map where deletion from the original are represented as keys with empty values
+    */
+  private def makeAnnotationsUpdate(
+      original: Map[String, String],
+      modified: Map[String, String],
+  ): Map[String, String] = {
+    val deletions = original.removedAll(modified.keys).view.mapValues(_ => "").toMap
+    modified.concat(deletions)
   }
 
 }

@@ -7,7 +7,6 @@ import akka.actor.ActorSystem
 import akka.stream.Materializer
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.{toCloseableActorSystem, toCloseableMaterializer}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -24,7 +23,6 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -119,7 +117,7 @@ class HttpSequencerClientTransport(
   /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
     * The client should then never subscribe for events from before this point.
     */
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = {
     // Pruning is currently not supported by the CCF sequencer and is the only use for acknowledgements,

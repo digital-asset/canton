@@ -6,6 +6,7 @@ package com.digitalasset.canton.domain.sequencing.service
 import akka.stream.Materializer
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -101,24 +102,34 @@ object GrpcSequencerService {
       timeouts,
     )
 
-  private sealed trait WrappedSubmissionRequest[+A] extends Product with Serializable {
+  private sealed trait WrappedSubmissionRequest extends Product with Serializable {
     def unwrap: SubmissionRequest
     def proto: v0.SubmissionRequest
-    def fullRequest: A
   }
   private case class PlainSubmissionRequest(
       request: SubmissionRequest,
       override val proto: v0.SubmissionRequest,
-  ) extends WrappedSubmissionRequest[SubmissionRequest] {
+  ) extends WrappedSubmissionRequest {
     override def unwrap: SubmissionRequest = request
-    override def fullRequest: SubmissionRequest = request
   }
   private case class SignedSubmissionRequest(signedRequest: SignedContent[SubmissionRequest])
-      extends WrappedSubmissionRequest[SignedContent[SubmissionRequest]] {
+      extends WrappedSubmissionRequest {
     override def unwrap: SubmissionRequest = signedRequest.content
     override lazy val proto: v0.SubmissionRequest = signedRequest.content.toProtoV0
-    override def fullRequest: SignedContent[SubmissionRequest] = signedRequest
   }
+
+  private sealed trait WrappedAcknowledgeRequest extends Product with Serializable {
+    def unwrap: AcknowledgeRequest
+  }
+  private case class PlainAcknowledgeRequest(request: AcknowledgeRequest)
+      extends WrappedAcknowledgeRequest {
+    override def unwrap: AcknowledgeRequest = request
+  }
+  private case class SignedAcknowledgeRequest(val signedRequest: SignedContent[AcknowledgeRequest])
+      extends WrappedAcknowledgeRequest {
+    override def unwrap: AcknowledgeRequest = signedRequest.content
+  }
+
 }
 
 /** Service providing a GRPC connection to the [[sequencer.Sequencer]] instance.
@@ -190,11 +201,11 @@ class GrpcSequencerService(
   private def send[Req, Response](
       submissionRequestE: Either[
         ProtoDeserializationError,
-        WrappedSubmissionRequest[Req],
+        WrappedSubmissionRequest,
       ],
       toResponse: Option[SendAsyncError] => Response,
   )(implicit traceContext: TraceContext): Future[Response] = {
-    val validatedRequestEither: Either[SendAsyncError, WrappedSubmissionRequest[Req]] = for {
+    val validatedRequestEither: Either[SendAsyncError, WrappedSubmissionRequest] = for {
       result <- submissionRequestE
         .leftMap {
           case ProtoDeserializationError.MaxBytesToDecompressExceeded(message) =>
@@ -279,9 +290,7 @@ class GrpcSequencerService(
           for {
             validatedRequest <- EitherT.fromEither[Future](validatedRequestEither)
             _ <- checkRate(validatedRequest)
-          } yield PlainSubmissionRequest(validatedRequest, requestP): WrappedSubmissionRequest[
-            SubmissionRequest
-          ]
+          } yield PlainSubmissionRequest(validatedRequest, requestP): WrappedSubmissionRequest
 
         sendRequestIfValid(
           validatedRequestF,
@@ -295,7 +304,7 @@ class GrpcSequencerService(
     }
 
   private def sendRequestIfValid[Req, Response](
-      validatedRequestEither: EitherT[Future, SendAsyncError, WrappedSubmissionRequest[Req]],
+      validatedRequestEither: EitherT[Future, SendAsyncError, WrappedSubmissionRequest],
       errorToResponse: Option[SendAsyncError] => Response,
   )(implicit traceContext: TraceContext): Future[Response] = {
     val resultET = for {
@@ -376,7 +385,7 @@ class GrpcSequencerService(
         "Requests sent from or to unauthenticated members must not specify the timestamp of the signing key",
       )
     } yield {
-      metrics.bytesProcessed.mark(requestSize.toLong)
+      metrics.bytesProcessed.mark(requestSize.toLong)(MetricsContext.Empty)
       metrics.messagesProcessed.mark()
       if (TimeProof.isTimeProofSubmission(request)) metrics.timeRequests.mark()
 
@@ -623,25 +632,49 @@ class GrpcSequencerService(
         )
     }
 
-  override def acknowledge(requestP: v0.AcknowledgeRequest): Future[Empty] = {
+  override def acknowledge(requestP: v0.AcknowledgeRequest): Future[Empty] =
+    performAcknowledge(
+      AcknowledgeRequest
+        .fromProtoV0Unmemoized(requestP)
+        .map(ack => PlainAcknowledgeRequest(ack))
+    )
+
+  override def acknowledgeSigned(request: protocolV0.SignedContent): Future[Empty] =
+    performAcknowledge(
+      SignedContent
+        .fromProtoV0[AcknowledgeRequest](AcknowledgeRequest.fromByteString, request)
+        .map(ack => SignedAcknowledgeRequest(ack))
+    )
+
+  private def performAcknowledge(
+      acknowledgeRequestE: Either[
+        ProtoDeserializationError,
+        WrappedAcknowledgeRequest,
+      ]
+  ): Future[Empty] = {
     fromGrpcContext { implicit traceContext =>
       // deserialize the request and check that they're authorized to perform a request on behalf of the member.
       // intentionally not using an EitherT here as we want to remain on the same thread to retain the GRPC context
       // for authorization.
       val validatedRequestE = for {
-        request <- AcknowledgeRequest
-          .fromProtoV0(requestP)
+        wrappedRequest <- acknowledgeRequestE
           .leftMap(err => invalidRequest(err.toString).asException())
+        request = wrappedRequest.unwrap
         // check they are authenticated to perform actions on behalf of this member
         _ <- checkAuthenticatedMemberPermission(request.member)
           .leftMap(_.asException())
-      } yield request
+      } yield wrappedRequest
 
       validatedRequestE.fold(
         Future.failed,
-        request => {
+        wrappedRequest => {
           for {
-            _ <- sequencer.acknowledge(request.member, request.timestamp)
+            _ <- wrappedRequest match {
+              case p: PlainAcknowledgeRequest =>
+                sequencer.acknowledge(p.unwrap.member, p.unwrap.timestamp)
+              case s: SignedAcknowledgeRequest =>
+                sequencer.acknowledgeSigned(s.signedRequest)
+            }
           } yield Empty()
         },
       )

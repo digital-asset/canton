@@ -5,6 +5,7 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.data.EitherT
 import cats.syntax.option.*
+import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.Lifecycle
@@ -161,11 +162,14 @@ class SendTracker(
       }
 
   private def updateSequencedMetrics(pendingSend: PendingSend, result: SendResult): Unit = {
-    def recordSequencingTime(): Unit =
-      pendingSend.startedAt foreach { startedAt =>
-        val elapsed = java.time.Duration.between(startedAt, Instant.now())
-        metrics.submissions.sequencingTime.update(elapsed)
+    def recordSequencingTime(): Unit = {
+      withEmptyMetricsContext { implicit metricsContext =>
+        pendingSend.startedAt foreach { startedAt =>
+          val elapsed = java.time.Duration.between(startedAt, Instant.now())
+          metrics.submissions.sequencingTime.update(elapsed)
+        }
       }
+    }
 
     result match {
       case SendResult.Success(_) => recordSequencingTime()

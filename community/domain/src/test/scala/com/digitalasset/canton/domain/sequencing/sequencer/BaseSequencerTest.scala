@@ -100,6 +100,10 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
         traceContext: TraceContext
     ): Future[Unit] = ???
 
+    override def acknowledgeSigned(signedAcknowledgeRequest: SignedContent[AcknowledgeRequest])(
+        implicit traceContext: TraceContext
+    ): Future[Unit] = ???
+
     override def pruningStatus(implicit
         traceContext: TraceContext
     ): Future[SequencerPruningStatus] = ???

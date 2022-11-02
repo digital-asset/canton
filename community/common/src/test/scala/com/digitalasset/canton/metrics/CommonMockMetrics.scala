@@ -4,7 +4,7 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 
 object CommonMockMetrics {
 

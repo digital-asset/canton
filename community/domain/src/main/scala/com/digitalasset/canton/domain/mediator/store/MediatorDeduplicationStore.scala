@@ -140,10 +140,12 @@ private[mediator] trait MediatorDeduplicationStore extends NamedLogging {
       uuidByExpiration.remove(expireAt, uuids)
 
       for (uuid <- uuids) {
-        dataByUuid.updateWith(uuid) {
-          case None => None
-          case Some(existing) => NonEmpty.from(existing.filter(_.expireAfter > upToInclusive))
-        }
+        dataByUuid
+          .updateWith(uuid) {
+            case None => None
+            case Some(existing) => NonEmpty.from(existing.filter(_.expireAfter > upToInclusive))
+          }
+          .discard[Option[NonEmpty[Set[DeduplicationData]]]]
       }
     }
 

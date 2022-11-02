@@ -8,6 +8,7 @@ import cats.data.Chain
 import cats.kernel.Semigroup
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.logging.ErrorLoggingContext
 
 import scala.annotation.tailrec
@@ -216,7 +217,7 @@ object MapsUtil {
       m.updateWith(k) {
         case None => Some(v)
         case Some(mv) => Some(merge(mv, v))
-      }
+      }.discard[Option[V]]
     }
   }
 

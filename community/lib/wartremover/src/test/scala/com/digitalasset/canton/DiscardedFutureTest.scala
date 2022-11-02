@@ -95,6 +95,29 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
       }
       assertErrors(result, 1)
     }
+
+    "detect discarded futures inside foreach" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        Seq.empty[Int].foreach(i => Future.successful(i))
+        List.empty[Int].foreach(i => EitherT(Future.successful(Either.right(i))))
+        Iterable(1).foreach(_ => OptionT(Future.successful(Option.empty[Int])))
+        Iterator(1).foreach(_ => new WannabeFuture())
+        ()
+      }
+      assertErrors(result, 4)
+    }
+
+    "detect discarded futures inside tapEach" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        Seq.empty[Int].tapEach(i => Future.successful(i))
+        List.empty[Int].tapEach(i => EitherT(Future.successful(Either.right(i))))
+        Iterable(1).tapEach(_ => OptionT(Future.successful(Option.empty[Int])))
+        Iterator(1).tapEach(_ => new WannabeFuture())
+        ()
+      }
+      assertErrors(result, 4)
+    }
+
   }
 }
 

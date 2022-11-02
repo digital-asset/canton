@@ -182,7 +182,9 @@ class ReferenceDemoScript(
             }
           }).foreach { case (name, pid, participant) =>
             partyIdCache.put(name, (pid, participant)).discard
-            readyToSubscribeM.updateAndGet(cur => cur + (name -> ParticipantTab.LedgerBegin))
+            readyToSubscribeM
+              .updateAndGet(cur => cur + (name -> ParticipantTab.LedgerBegin))
+              .discard[Map[String, LedgerOffset]]
           }
 
         },
@@ -433,7 +435,9 @@ class ReferenceDemoScript(
                 Threading.sleep(waitDuration.toMillis)
                 // now, flush all participants that have some business with this node
                 Seq(participant1, participant2, participant5).foreach(p =>
-                  participant5.health.ping(p, timeout = 60.seconds)
+                  participant5.health
+                    .ping(p, timeout = 60.seconds)
+                    .discard[scala.concurrent.duration.Duration]
                 )
                 // give the ACS commitment processor some time to catchup
                 Threading.sleep(5.seconds.toMillis)

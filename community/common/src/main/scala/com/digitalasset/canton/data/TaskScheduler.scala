@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.data
 
-import com.daml.metrics.MetricHandle.Counter
+import com.daml.metrics.api.MetricHandle.Counter
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.PeanoQueue.{BeforeHead, InsertedValue, NotInserted}
 import com.digitalasset.canton.lifecycle.{FlagCloseableAsync, SyncCloseable}

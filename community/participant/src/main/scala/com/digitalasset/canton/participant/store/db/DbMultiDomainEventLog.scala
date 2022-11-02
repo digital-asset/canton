@@ -11,6 +11,7 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import cats.syntax.traverseFilter.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
@@ -275,7 +276,7 @@ class DbMultiDomainEventLog private[db] (
             logger.debug(
               show"Published event from event log $id with local offset ${event.localOffset} with publication time $publicationTime."
             )(data.traceContext)
-            metrics.updatesPublished.mark(event.eventSize.toLong)
+            metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
           }
 
         case None =>

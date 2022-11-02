@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.processing
 
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -33,7 +33,7 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Positive
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwner, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
@@ -193,9 +193,15 @@ class TopologyTransactionProcessor(
           if (effective.value != approximate.value) {
             listenersUpdateHead(effective, approximate, potentialChanges = true)
           }
-          clock.scheduleAt(
-            _ => listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true),
-            effective.value,
+          FutureUtil.doNotAwait(
+            clock
+              .scheduleAt(
+                _ =>
+                  listenersUpdateHead(effective, effective.toApproximate, potentialChanges = true),
+                effective.value,
+              )
+              .unwrap,
+            "Notifying listeners to the topology processor's head",
           )
         } else {
           // if the effective time is in the past, directly advance our approximate time to the respective effective time
@@ -276,7 +282,7 @@ class TopologyTransactionProcessor(
       filtered = validated._2.collect {
         case transaction if transaction.rejectionReason.isEmpty => transaction.transaction
       }
-      _ <- listeners.toList.traverse(
+      _ <- listeners.toList.parTraverse(
         _.observed(
           sequencingTimestamp,
           effectiveTimestamp = effectiveTimestamp,

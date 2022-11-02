@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
 import cats.syntax.traverse.*
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
 import com.digitalasset.canton.config.RequireTypes.String255
@@ -178,6 +179,8 @@ private[domain] class ParticipantDomainTopologyService(
     }
 
   override def onClosed(): Unit = {
-    responsePromiseMap.values.foreach(_.trySuccess(UnlessShutdown.AbortedDueToShutdown))
+    responsePromiseMap.values.foreach(
+      _.trySuccess(UnlessShutdown.AbortedDueToShutdown).discard[Boolean]
+    )
   }
 }

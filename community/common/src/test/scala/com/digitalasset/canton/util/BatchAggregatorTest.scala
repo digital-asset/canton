@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.util
 
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
@@ -11,6 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, TracedLogger}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.github.blemale.scaffeine.Scaffeine
@@ -92,7 +94,7 @@ class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionCon
         batchGetter = batchGetterWithCounter(requestsCountPerSize, blocker.future),
       )
 
-      val resultF = List(1, 2, 3).traverse(aggregator.run)
+      val resultF = List(1, 2, 3).parTraverse(aggregator.run)
 
       blocker.success(())
 
@@ -172,7 +174,7 @@ class BatchAggregatorTest extends AnyWordSpec with BaseTest with HasExecutionCon
       val requests = (0 until 100).map(_ => Random.nextInt(20)).toList
       val expectedResult = requests.map(key => (key, defaultKeyToValue(key)))
 
-      val results = requests.traverse(key => aggregator.run(key).map((key, _))).futureValue
+      val results = requests.parTraverse(key => aggregator.run(key).map((key, _))).futureValue
       results shouldBe expectedResult
     }
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -85,7 +86,9 @@ object CantonServerBuilder {
 
         override def close(): Unit = {
           for (_ <- 0 until registry.getServices.size()) {
-            registry.removeService(registry.getServices.get(registry.getServices.size() - 1))
+            registry
+              .removeService(registry.getServices.get(registry.getServices.size() - 1))
+              .discard[Boolean]
           }
         }
       }

@@ -17,9 +17,12 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import io.functionmeta.functionFullName
+import slick.dbio.DBIOAction
 import slick.jdbc.GetResult
+import slick.sql.SqlAction
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -169,7 +172,8 @@ class DbCryptoPrivateStore(
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     insertKey(key)
 
-  private[crypto] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
+  @VisibleForTesting
+  private[canton] def listPrivateKeys(purpose: KeyPurpose, encrypted: Boolean)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Set[StoredPrivateKey]] =
     EitherTUtil
@@ -182,13 +186,37 @@ class DbCryptoPrivateStore(
         err => CryptoPrivateStoreError.FailedToListKeys(err.toString),
       )
 
+  private def deleteKey(keyId: Fingerprint): SqlAction[Int, NoStream, Effect.Write] =
+    sqlu"delete from crypto_private_keys where key_id = $keyId"
+
+  /** Replaces keys but maintains their id stable, i.e. when the keys remain the same, but the
+    * storage format changes (e.g. encrypting a key)
+    */
+  private[crypto] def replaceStoredPrivateKeys(newKeys: Seq[StoredPrivateKey])(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, CryptoPrivateStoreError, Unit] =
+    EitherTUtil.fromFuture(
+      insertTime.event {
+        storage
+          .update_(
+            DBIOAction
+              .sequence(
+                newKeys.map(key => deleteKey(key.id).andThen(insertKeyUpdate(key)))
+              )
+              .transactionally,
+            functionFullName,
+          )
+      },
+      err => CryptoPrivateStoreError.FailedToReplaceKeys(newKeys.map(_.id), err.toString),
+    )
+
   private[crypto] def deletePrivateKey(keyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): EitherT[Future, CryptoPrivateStoreError, Unit] =
     EitherTUtil.fromFuture(
       insertTime.event(
         storage
-          .update_(sqlu"delete from crypto_private_keys where key_id = $keyId", functionFullName)
+          .update_(deleteKey(keyId), functionFullName)
       ),
       err => CryptoPrivateStoreError.FailedToDeleteKey(keyId, err.toString),
     )
@@ -223,5 +251,4 @@ class DbCryptoPrivateStore(
           else
             Right(wrapper_keys.headOption)
       }
-
 }

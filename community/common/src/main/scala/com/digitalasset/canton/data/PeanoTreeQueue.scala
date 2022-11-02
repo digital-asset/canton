@@ -123,7 +123,7 @@ class PeanoTreeQueue[Discr, V](initHead: Counter[Discr]) extends PeanoQueue[Coun
   override def toString: String = {
     val builder = new StringBuilder("PeanoQueue(front = ").append(frontV)
     elems.foreach { case (k, v) =>
-      builder.append(", ").append(k).append("->").append(v.toString)
+      builder.append(", ").append(k).append("->").append(v.toString).discard[StringBuilder]
     }
     builder.append(")")
     builder.toString

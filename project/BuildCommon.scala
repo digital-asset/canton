@@ -354,6 +354,10 @@ object BuildCommon {
 
   lazy val cantonWarts = Seq(
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
+    // TODO(#10660) Enable this wart for all projects
+    // wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
+    // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
+    Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.SlickString"),
     wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
@@ -423,6 +427,8 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedAppSettings,
+        // TODO(#10660) Remove when enabled for all projects
+        wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           jul_to_slf4j,
@@ -477,6 +483,8 @@ object BuildCommon {
       )
       .settings(
         sharedCantonSettings,
+        // TODO(#10660) Remove when enabled for all projects
+        wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
           daml_lf_archive_reader,
@@ -596,6 +604,8 @@ object BuildCommon {
       )
       .settings(
         sharedCantonSettings,
+        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
+        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           scalatest % Test,
@@ -629,6 +639,8 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonSettings,
+        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
+        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           scalatest % Test,
@@ -662,7 +674,12 @@ object BuildCommon {
             (Compile / sourceDirectory).value / "daml",
             (Compile / resourceDirectory).value / "dar" / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
-          )
+          ),
+          (
+            (Compile / sourceDirectory).value / "daml" / "ping-pong-vacuum",
+            (Compile / resourceManaged).value / "AdminWorkflowsWithVacuuming.dar",
+            "com.digitalasset.canton.participant.admin.workflows",
+          ),
         ),
         damlFixedDars := Seq("AdminWorkflows.dar"),
         addProtobufFilesToHeaderCheck(Compile),
@@ -767,6 +784,8 @@ object BuildCommon {
       .dependsOn(`community-app` % "compile->compile;test->test")
       .settings(
         sharedCantonSettings,
+        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
+        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scalafx,
           scalatest % Test,

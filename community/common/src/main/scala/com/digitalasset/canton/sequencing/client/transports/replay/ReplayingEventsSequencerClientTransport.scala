@@ -15,6 +15,7 @@ import com.digitalasset.canton.sequencing.client.transports.SequencerClientTrans
 import com.digitalasset.canton.sequencing.client.transports.replay.ReplayingEventsSequencerClientTransport.ReplayingSequencerSubscription
 import com.digitalasset.canton.sequencing.handshake.HandshakeRequestError
 import com.digitalasset.canton.sequencing.protocol.{
+  AcknowledgeRequest,
   HandshakeRequest,
   HandshakeResponse,
   SignedContent,
@@ -22,7 +23,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   SubscriptionRequest,
 }
 import com.digitalasset.canton.sequencing.{SequencerClientRecorder, SerializedEventHandler}
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil}
@@ -74,7 +74,7 @@ class ReplayingEventsSequencerClientTransport(
     EitherT.rightT(())
 
   /** Does nothing */
-  override def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  override def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit] = Future.unit
 

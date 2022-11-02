@@ -4,8 +4,10 @@
 package com.digitalasset.canton.participant.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricHandle.{Counter, Meter}
-import com.daml.metrics.{MetricName, Metrics as LedgerApiServerMetrics}
+import com.daml.metrics.api.MetricDoc.MetricQualification.Debug
+import com.daml.metrics.api.MetricHandle.{Counter, Meter}
+import com.daml.metrics.api.{MetricDoc, MetricName}
+import com.daml.metrics.Metrics as LedgerApiServerMetrics
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.data.TaskSchedulerMetrics
 import com.digitalasset.canton.metrics.MetricHandle.NodeMetrics
@@ -36,6 +38,7 @@ class ParticipantMetrics(
     description =
       """When an update is published through the read service, it has already been committed to the ledger.
         |The indexer will subsequently store the update in a form that allows for querying the ledger efficiently.""",
+    qualification = Debug,
   )
   val updatesPublished: Meter = meter(prefix :+ "updates-published")
 
@@ -56,6 +59,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
         """The task scheduler will work off tasks according to the timestamp order, scheduling
           |the tasks whenever a new timestamp has been observed. This metric exposes the number of
           |un-processed sequencer messages that will trigger a timestamp advancement.""",
+      qualification = Debug,
     )
     val sequencerCounterQueue: Counter =
       counter(prefix :+ "sequencer-counter-queue")
@@ -66,6 +70,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.
                       |A huge number does not necessarily indicate a bottleneck;
                       |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
+      qualification = Debug,
     )
     val taskQueue: RefGauge[Int] = refGauge(prefix :+ "task-queue", 0)
 
@@ -79,6 +84,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
                     |exposes the number of tasks that are waiting in the task queue for the right time to pass.
                     |A huge number does not necessarily indicate a bottleneck;
                     |it could also mean that a huge number of tasks have not yet arrived at their execution time.""",
+    qualification = Debug,
   )
   val numDirtyRequests: Counter = counter(prefix :+ "dirty-requests")
 
@@ -90,6 +96,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       summary = "Size of record order publisher sequencer counter queue",
       description = """Same as for conflict-detection, but measuring the sequencer counter
           |queues for the publishing to the ledger api server according to record time.""",
+      qualification = Debug,
     )
     val sequencerCounterQueue: Counter =
       counter(prefix :+ "sequencer-counter-queue")
@@ -98,6 +105,7 @@ class SyncDomainMetrics(override val prefix: MetricName, val registry: MetricReg
       summary = "Size of record order publisher task queue",
       description = """The task scheduler will schedule tasks to run at a given timestamp. This metric
                       |exposes the number of tasks that are waiting in the task queue for the right time to pass.""",
+      qualification = Debug,
     )
     val taskQueue: RefGauge[Int] = refGauge(prefix :+ "task-queue", 0)
   }

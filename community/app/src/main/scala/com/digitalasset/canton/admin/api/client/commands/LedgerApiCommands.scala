@@ -17,6 +17,7 @@ import com.daml.ledger.api.v1.admin.metering_report_service.{
   GetMeteringReportResponse,
   MeteringReportServiceGrpc,
 }
+import com.daml.ledger.api.v1.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v1.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
 import com.daml.ledger.api.v1.admin.package_management_service.*
 import com.daml.ledger.api.v1.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
@@ -40,6 +41,8 @@ import com.daml.ledger.api.v1.admin.user_management_service.{
   RevokeUserRightsRequest,
   RevokeUserRightsResponse,
   Right as UserRight,
+  UpdateUserRequest,
+  UpdateUserResponse,
   User,
   UserManagementServiceGrpc,
 }
@@ -102,6 +105,7 @@ import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.google.protobuf.empty.Empty
+import com.google.protobuf.field_mask.FieldMask
 import io.grpc.*
 import io.grpc.stub.StreamObserver
 
@@ -267,13 +271,26 @@ object LedgerApiCommands {
   }
 
   object PartyManagementService {
-    final case class AllocateParty(partyIdHint: String, displayName: String)
-        extends GrpcAdminCommand[AllocatePartyRequest, AllocatePartyResponse, PartyDetails] {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
       override type Svc = PartyManagementServiceStub
+
       override def createService(channel: ManagedChannel): PartyManagementServiceStub =
         PartyManagementServiceGrpc.stub(channel)
+    }
+
+    final case class AllocateParty(
+        partyIdHint: String,
+        displayName: String,
+        annotations: Map[String, String],
+    ) extends BaseCommand[AllocatePartyRequest, AllocatePartyResponse, PartyDetails] {
       override def createRequest(): Either[String, AllocatePartyRequest] =
-        Right(AllocatePartyRequest(partyIdHint, displayName))
+        Right(
+          AllocatePartyRequest(
+            partyIdHint = partyIdHint,
+            displayName = displayName,
+            localMetadata = Some(ObjectMeta(annotations = annotations)),
+          )
+        )
       override def submitRequest(
           service: PartyManagementServiceStub,
           request: AllocatePartyRequest,
@@ -283,13 +300,44 @@ object LedgerApiCommands {
         response.partyDetails.toRight("Party could not be created")
     }
 
+    final case class Update(
+        party: String,
+        annotationsUpdate: Option[Map[String, String]],
+        resourceVersionO: Option[String],
+    ) extends BaseCommand[UpdatePartyDetailsRequest, UpdatePartyDetailsResponse, PartyDetails] {
+
+      override def submitRequest(
+          service: PartyManagementServiceStub,
+          request: UpdatePartyDetailsRequest,
+      ): Future[UpdatePartyDetailsResponse] =
+        service.updatePartyDetails(request)
+
+      override def createRequest(): Either[String, UpdatePartyDetailsRequest] = {
+        val metadata = ObjectMeta(
+          annotations = annotationsUpdate.getOrElse(Map.empty),
+          resourceVersion = resourceVersionO.getOrElse(""),
+        )
+        val partyDetails = PartyDetails(party = party, localMetadata = Some(metadata))
+        val updatePaths =
+          annotationsUpdate.fold(Seq.empty[String])(_ => Seq("local_metadata.annotations"))
+        val req = UpdatePartyDetailsRequest(
+          partyDetails = Some(partyDetails),
+          updateMask = Some(FieldMask(paths = updatePaths)),
+        )
+        Right(req)
+      }
+
+      override def handleResponse(
+          response: UpdatePartyDetailsResponse
+      ): Either[String, PartyDetails] =
+        response.partyDetails.toRight("Failed to update the party details")
+
+    }
+
     final case class ListKnownParties()
-        extends GrpcAdminCommand[ListKnownPartiesRequest, ListKnownPartiesResponse, Seq[
+        extends BaseCommand[ListKnownPartiesRequest, ListKnownPartiesResponse, Seq[
           PartyDetails
         ]] {
-      override type Svc = PartyManagementServiceStub
-      override def createService(channel: ManagedChannel): PartyManagementServiceStub =
-        PartyManagementServiceGrpc.stub(channel)
       override def createRequest(): Either[String, ListKnownPartiesRequest] =
         Right(ListKnownPartiesRequest())
       override def submitRequest(
@@ -301,6 +349,24 @@ object LedgerApiCommands {
           response: ListKnownPartiesResponse
       ): Either[String, Seq[PartyDetails]] =
         Right(response.partyDetails)
+    }
+
+    final case class GetParty(party: String)
+        extends BaseCommand[GetPartiesRequest, GetPartiesResponse, PartyDetails] {
+
+      override def createRequest(): Either[String, GetPartiesRequest] =
+        Right(GetPartiesRequest(parties = Seq(party)))
+
+      override def submitRequest(
+          service: PartyManagementServiceStub,
+          request: GetPartiesRequest,
+      ): Future[GetPartiesResponse] = service.getParties(request)
+
+      override def handleResponse(
+          response: GetPartiesResponse
+      ): Either[String, PartyDetails] = {
+        response.partyDetails.headOption.toRight("PARTY_NOT_FOUND")
+      }
     }
   }
 
@@ -832,6 +898,8 @@ object LedgerApiCommands {
         primaryParty: Option[LfPartyId],
         readAs: Set[LfPartyId],
         participantAdmin: Boolean,
+        isDeactivated: Boolean,
+        annotations: Map[String, String],
     ) extends BaseCommand[CreateUserRequest, CreateUserResponse, LedgerApiUser]
         with HasRights {
 
@@ -843,12 +911,65 @@ object LedgerApiCommands {
 
       override def createRequest(): Either[String, CreateUserRequest] = Right(
         CreateUserRequest(
-          user = Some(User(id = id, primaryParty = primaryParty.getOrElse(""))),
+          user = Some(
+            User(
+              id = id,
+              primaryParty = primaryParty.getOrElse(""),
+              isDeactivated = isDeactivated,
+              metadata = Some(ObjectMeta(annotations = annotations)),
+            )
+          ),
           rights = getRights,
         )
       )
 
       override def handleResponse(response: CreateUserResponse): Either[String, LedgerApiUser] =
+        ProtoConverter
+          .parseRequired(LedgerApiUser.fromProtoV0, "user", response.user)
+          .leftMap(_.toString)
+
+    }
+
+    final case class Update(
+        id: String,
+        primaryPartyUpdate: Option[Option[LfPartyId]],
+        isDeactivatedUpdate: Option[Boolean],
+        annotationsUpdate: Option[Map[String, String]],
+        resourceVersionO: Option[String],
+    ) extends BaseCommand[UpdateUserRequest, UpdateUserResponse, LedgerApiUser] {
+
+      override def submitRequest(
+          service: UserManagementServiceStub,
+          request: UpdateUserRequest,
+      ): Future[UpdateUserResponse] =
+        service.updateUser(request)
+
+      override def createRequest(): Either[String, UpdateUserRequest] = {
+        val user = User(
+          id = id,
+          primaryParty = primaryPartyUpdate.fold("")(_.getOrElse("")),
+          isDeactivated = isDeactivatedUpdate.getOrElse(false),
+          metadata = Some(
+            ObjectMeta(
+              annotations = annotationsUpdate.getOrElse(Map.empty),
+              resourceVersion = resourceVersionO.getOrElse(""),
+            )
+          ),
+        )
+        val updatePaths: Seq[String] = Seq(
+          primaryPartyUpdate.map(_ => "primary_party"),
+          isDeactivatedUpdate.map(_ => "is_deactivated"),
+          annotationsUpdate.map(_ => "metadata.annotations"),
+        ).flatten
+        Right(
+          UpdateUserRequest(
+            user = Some(user),
+            updateMask = Some(FieldMask(paths = updatePaths)),
+          )
+        )
+      }
+
+      override def handleResponse(response: UpdateUserResponse): Either[String, LedgerApiUser] =
         ProtoConverter
           .parseRequired(LedgerApiUser.fromProtoV0, "user", response.user)
           .leftMap(_.toString)

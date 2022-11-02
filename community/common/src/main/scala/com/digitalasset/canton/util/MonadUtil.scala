@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.util
 
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
-import cats.{Monad, Monoid}
+import cats.syntax.parallel.*
+import cats.{Monad, Monoid, Parallel}
 
 import scala.annotation.tailrec
 
@@ -72,25 +71,19 @@ object MonadUtil {
     */
   def batchedSequentialTraverse[X, M[_], S](parallelism: Int, chunkSize: Int)(
       xs: Seq[X]
-  )(processChunk: Seq[X] => M[Seq[S]])(implicit
-      monad: Monad[M]
-  ): M[Seq[S]] =
-    monad.map(
+  )(processChunk: Seq[X] => M[Seq[S]])(implicit M: Parallel[M]): M[Seq[S]] =
+    M.monad.map(
       sequentialTraverse(xs.grouped(chunkSize).grouped(parallelism).toSeq)(
-        _.flatTraverse(processChunk)
-      )
-    )(
-      _.flatten
-    )
+        _.parFlatTraverse(processChunk)
+      )(M.monad)
+    )(_.flatten)
 
   def batchedSequentialTraverse_[X, M[_], S](parallelism: Int, chunkSize: Int)(
       xs: Seq[X]
-  )(processChunk: Seq[X] => M[Unit])(implicit
-      monad: Monad[M]
-  ): M[Unit] = {
+  )(processChunk: Seq[X] => M[Unit])(implicit M: Parallel[M]): M[Unit] = {
     sequentialTraverse_(xs.grouped(chunkSize).grouped(parallelism))(chunk =>
-      chunk.toSeq.traverse_(processChunk)
-    )
+      chunk.toSeq.parTraverse_(processChunk)
+    )(M.monad)
   }
 
   /** Conceptually equivalent to `sequentialTraverse(xs)(step).map(monoid.combineAll)`.

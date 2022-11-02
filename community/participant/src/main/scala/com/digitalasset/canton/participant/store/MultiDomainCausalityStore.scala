@@ -115,10 +115,12 @@ trait MultiDomainCausalityStore extends AutoCloseable { self: NamedLogging =>
         causalityMessages.foreach { message =>
           val vc = message.clock
 
-          transferStore.updateWith(id) {
-            case Some(value) => Some(value + (vc.partyId -> vc))
-            case None => Some(Map(vc.partyId -> vc))
-          }
+          transferStore
+            .updateWith(id) {
+              case Some(value) => Some(value + (vc.partyId -> vc))
+              case None => Some(Map(vc.partyId -> vc))
+            }
+            .discard[Option[Map[LfPartyId, VectorClock]]]
         }
 
         transferOutPromises.get(id).foreach(p => p.trySuccess(()))

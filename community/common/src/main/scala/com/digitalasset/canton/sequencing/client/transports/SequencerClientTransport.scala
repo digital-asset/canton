@@ -4,7 +4,6 @@
 package com.digitalasset.canton.sequencing.client.transports
 
 import cats.data.EitherT
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.sequencing.SerializedEventHandler
 import com.digitalasset.canton.sequencing.client.{
@@ -14,7 +13,6 @@ import com.digitalasset.canton.sequencing.client.{
 }
 import com.digitalasset.canton.sequencing.handshake.SupportsHandshake
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -72,7 +70,7 @@ trait SequencerClientTransport extends FlagCloseable with SupportsHandshake {
   /** Acknowledge that we have successfully processed all events up to and including the given timestamp.
     * The client should then never subscribe for events from before this point.
     */
-  def acknowledge(member: Member, timestamp: CantonTimestamp)(implicit
+  def acknowledge(request: AcknowledgeRequest)(implicit
       traceContext: TraceContext
   ): Future[Unit]
 

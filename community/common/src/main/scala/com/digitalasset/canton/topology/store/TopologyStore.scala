@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -30,6 +31,7 @@ import com.digitalasset.canton.topology.store.db.DbTopologyStoreFactory
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStoreFactory
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -704,7 +706,7 @@ object TopologyStore {
         .forall(_ == domainId) && include(tx.transaction.transaction.element.mapping)
     )
     val authF = filtered.toList
-      .flatTraverse(tx =>
+      .parFlatTraverse(tx =>
         validator
           .authorizedBy(tx.transaction)
           .map(_.toList)

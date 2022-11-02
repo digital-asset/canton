@@ -195,7 +195,7 @@ object CommunityConfigValidations
       val isMinimumDeprecatedVersion = minimum.getOrElse(ProtocolVersion.v2).isDeprecated
 
       if (isMinimumDeprecatedVersion && !config.parameters.dontWarnOnDeprecatedPV)
-        DeprecatedProtocolVersion.WarnParticipant(name, minimum)
+        DeprecatedProtocolVersion.WarnParticipant(name, minimum).discard
     }
     Validated.valid(())
   }

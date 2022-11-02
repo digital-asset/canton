@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonError
@@ -19,6 +20,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{DomainId, KeyOwnerCode, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, OptionUtil}
 import com.google.protobuf.timestamp.{Timestamp as ProtoTimestamp}
 
@@ -96,7 +98,7 @@ class GrpcTopologyAggregationService(
       partyId: PartyId,
   ): Future[Map[ParticipantId, Map[DomainId, ParticipantPermission]]] =
     clients
-      .flatTraverse { case (domainId, client) =>
+      .parFlatTraverse { case (domainId, client) =>
         client
           .activeParticipantsOf(partyId.toLf)
           .map(_.map { case (participantId, attributes) =>
@@ -116,7 +118,7 @@ class GrpcTopologyAggregationService(
         parties <- EitherT.right(
           findMatchingParties(matched, filterParty, filterParticipant, limit)
         )
-        results <- EitherT.right(parties.toList.traverse { partyId =>
+        results <- EitherT.right(parties.toList.parTraverse { partyId =>
           findParticipants(matched, partyId).map(res => (partyId, res))
         })
       } yield {
@@ -151,7 +153,7 @@ class GrpcTopologyAggregationService(
             .traverse(code => KeyOwnerCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
         ): EitherT[Future, CantonError, Option[KeyOwnerCode]]
         matched <- snapshots(request.filterDomain, request.asOf)
-        res <- EitherT.right(matched.traverse { case (storeId, client) =>
+        res <- EitherT.right(matched.parTraverse { case (storeId, client) =>
           client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
             (storeId, res)
           }

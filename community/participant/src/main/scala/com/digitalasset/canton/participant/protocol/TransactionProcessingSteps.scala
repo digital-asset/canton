@@ -14,6 +14,7 @@ import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.ledger.participant.state.v2.*
 import com.daml.lf.data.ImmArray
 import com.daml.lf.transaction.ContractStateMachine.{KeyInactive, KeyMapping}
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.crypto.*
@@ -348,7 +349,7 @@ class TransactionProcessingSteps(
       } yield {
         val batch = request.asBatch
         val batchSize = batch.toProtoVersioned.serializedSize
-        metrics.protocolMessages.confirmationRequestSize.update(batchSize)
+        metrics.protocolMessages.confirmationRequestSize.update(batchSize)(MetricsContext.Empty)
 
         new PreparedTransactionBatch(
           batch,

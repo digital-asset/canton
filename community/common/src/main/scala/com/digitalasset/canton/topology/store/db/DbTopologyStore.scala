@@ -3,10 +3,8 @@
 
 package com.digitalasset.canton.topology.store.db
 
-import cats.instances.future.*
-import cats.instances.list.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{
@@ -30,6 +28,7 @@ import com.digitalasset.canton.topology.store.TopologyStore.InsertTransaction
 import com.digitalasset.canton.topology.store.*
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
 import slick.jdbc.GetResult
@@ -397,7 +396,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
           ],
           functionFullName,
         )
-        .flatMap(_.toList.traverse { case (id, dt, sequencedTsO, validFrom, validUntil) =>
+        .flatMap(_.toList.parTraverse { case (id, dt, sequencedTsO, validFrom, validUntil) =>
           getOrComputeSequencedTime(store, id, sequencedTsO, validFrom).map { sequencedTs =>
             StoredTopologyTransaction(
               SequencedTime(sequencedTs),
@@ -745,7 +744,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         uids
           .grouped(maxItemsInSqlQuery)
           .toList
-          .traverse(lessUids => forward(Some(lessUids)))
+          .parTraverse(lessUids => forward(Some(lessUids)))
           .map(all => StoredTopologyTransactions(all.flatMap(_.result)))
     }
   }

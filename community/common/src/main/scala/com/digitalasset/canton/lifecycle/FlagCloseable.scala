@@ -79,9 +79,10 @@ trait FlagCloseable extends AutoCloseable {
     val tasks = onShutdownTasks.getAndSet(List())
     tasks.foreach { task =>
       if (!task.done) {
-        Try { task.run() }.recover { t =>
-          logger.warn(s"Task ${task.name} failed on shutdown!", t)
-        }
+        Try { task.run() }.fold(
+          t => logger.warn(s"Task ${task.name} failed on shutdown!", t),
+          Predef.identity,
+        )
       }
     }
   }

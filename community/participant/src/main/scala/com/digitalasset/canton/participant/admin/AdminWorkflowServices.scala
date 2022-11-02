@@ -9,7 +9,7 @@ import cats.implicits.*
 import com.daml.error.definitions.DamlError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.api.refinements.{ApiTypes as A}
+import com.daml.ledger.api.refinements.ApiTypes as A
 import com.daml.ledger.api.v1.ledger_offset.LedgerOffset
 import com.daml.ledger.client.configuration.CommandClientConfiguration
 import com.daml.lf.data.Ref.PackageId
@@ -30,8 +30,8 @@ import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceInjectionError.PassiveReplica
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.TopologyManagerError.NoAppropriateSigningKeyInStore
-import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ResourceUtil.withResource
@@ -53,7 +53,7 @@ class AdminWorkflowServices(
     parameters: ParticipantNodeParameters,
     packageService: PackageService,
     syncService: CantonSyncService,
-    adminPartyId: UniqueIdentifier,
+    adminPartyId: PartyId,
     hashOps: HashOps,
     adminToken: CantonAdminToken,
     protected val loggerFactory: NamedLoggerFactory,
@@ -72,7 +72,7 @@ class AdminWorkflowServices(
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
-  private val adminParty = Converters.toParty(adminPartyId)
+  private val adminParty = adminPartyId.toPrim
 
   if (syncService.isActive() && parameters.adminWorkflow.autoloadDar) {
     withNewTraceContext { implicit traceContext =>
@@ -86,10 +86,12 @@ class AdminWorkflowServices(
   val (pingSubscription, ping) = createService("admin-ping") { connection =>
     new PingService(
       connection,
-      adminParty,
+      adminPartyId,
       parameters.adminWorkflow.bongTestMaxLevel,
+      timeouts,
       syncService.maxDeduplicationDuration, // Set the deduplication duration for Ping command to the maximum allowed.
       syncService.isActive(),
+      Some(syncService),
       loggerFactory,
       clock,
     )
@@ -262,15 +264,19 @@ class AdminWorkflowServices(
 }
 
 object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
-  private val AdminWorkflowDarResourceName: String = "dar/AdminWorkflows.dar"
-  private def adminWorkflowDarInputStream(): InputStream =
+  private val AdminWorkflowDarResourceName: String = "AdminWorkflowsWithVacuuming.dar"
+  private def adminWorkflowDarInputStream(): InputStream = getDarInputStream(
+    AdminWorkflowDarResourceName
+  )
+
+  private def getDarInputStream(resourceName: String): InputStream =
     Option(
-      PingService.getClass.getClassLoader.getResourceAsStream(AdminWorkflowDarResourceName)
+      PingService.getClass.getClassLoader.getResourceAsStream(resourceName)
     ) match {
       case Some(is) => is
       case None =>
         throw new IllegalStateException(
-          s"Failed to load [$AdminWorkflowDarResourceName] from classpath"
+          s"Failed to load [$resourceName] from classpath"
         )
     }
 
@@ -280,6 +286,7 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
       .valueOr(err =>
         throw new IllegalStateException(s"Unable to load admin workflow packages: $err")
       )
+
   @Explanation(
     """This error indicates that the admin workflow package could not be vetted. The admin workflows is 
       |a set of packages that are pre-installed and can be used for administrative processes. 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{Crypto, Fingerprint, KeyPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,6 +27,7 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.fromGrpcContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -157,7 +159,7 @@ class GrpcTopologyManagerReadService(
         .flatMap { col =>
           col.result
             .filter(_.transaction.key.fingerprint.unwrap.startsWith(baseQuery.filterSigningKey))
-            .traverse { tx =>
+            .parTraverse { tx =>
               val resultE = for {
                 // Re-create the signed topology transaction if necessary
                 signedTx <- baseQuery.protocolVersion
@@ -192,7 +194,7 @@ class GrpcTopologyManagerReadService(
     for {
       baseQuery <- wrapErr(BaseQuery.fromProto(baseQueryProto))
       stores <- collectStores(baseQuery.filterStore)
-      results <- EitherT.right(stores.traverse { store =>
+      results <- EitherT.right(stores.parTraverse { store =>
         fromStore(baseQuery, store)
       })
     } yield {
@@ -404,7 +406,7 @@ class GrpcTopologyManagerReadService(
         baseQuery <- wrapErr(BaseQuery.fromProto(request.baseQuery))
         stores <- collectStores(baseQuery.filterStore)
         results <- EitherT.right(
-          stores.traverse { store =>
+          stores.parTraverse { store =>
             store
               .inspect(
                 stateStore =

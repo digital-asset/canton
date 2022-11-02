@@ -11,7 +11,11 @@ import com.digitalasset.canton.admin.api.client.commands.{
   ParticipantAdminCommands,
   TopologyAdminCommands,
 }
-import com.digitalasset.canton.admin.api.client.data.{ListConnectedDomainsResult, ListPartiesResult}
+import com.digitalasset.canton.admin.api.client.data.{
+  ListConnectedDomainsResult,
+  ListPartiesResult,
+  PartyDetails,
+}
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String255}
 import com.digitalasset.canton.console.{
@@ -91,7 +95,7 @@ class PartiesAdministrationGroup(runner: AdminCommandRunner, consoleEnvironment:
 
 class ParticipantPartiesAdministrationGroup(
     participantId: => ParticipantId,
-    runner: AdminCommandRunner with ParticipantAdministration,
+    runner: AdminCommandRunner with ParticipantAdministration with BaseLedgerApiAdministration,
     consoleEnvironment: ConsoleEnvironment,
 ) extends PartiesAdministrationGroup(runner, consoleEnvironment) {
 
@@ -272,6 +276,23 @@ class ParticipantPartiesAdministrationGroup(
     }
   }
 
+  @Help.Summary("Update participant-local party details")
+  @Help.Description(
+    """Currently you can update only the annotations.
+           |You cannot update other user attributes.
+          party: party to be updated,
+          modifier: a function to modify the party details, e.g.: `partyDetails => { partyDetails.copy(annotations = partyDetails.annotations.updated("a", "b").removed("c")) }`"""
+  )
+  def update(
+      party: String,
+      modifier: PartyDetails => PartyDetails,
+  ): PartyDetails = {
+    runner.ledger_api.parties.update(
+      party = party,
+      modifier = modifier,
+    )
+  }
+
   @Help.Summary("Set party display name")
   @Help.Description(
     "Locally set the party display name (shown on the ledger-api) to the given value"
@@ -287,7 +308,10 @@ class ParticipantPartiesAdministrationGroup(
 
 class LocalParticipantPartiesAdministrationGroup(
     reference: LocalParticipantReference,
-    runner: AdminCommandRunner with BaseInspection[ParticipantNode] with ParticipantAdministration,
+    runner: AdminCommandRunner
+      with BaseInspection[ParticipantNode]
+      with ParticipantAdministration
+      with BaseLedgerApiAdministration,
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends ParticipantPartiesAdministrationGroup(reference.id, runner, consoleEnvironment)

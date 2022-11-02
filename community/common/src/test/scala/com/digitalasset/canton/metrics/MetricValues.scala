@@ -4,8 +4,13 @@
 package com.digitalasset.canton.metrics
 
 import com.codahale.metrics.Snapshot
-import com.daml.metrics.MetricHandle
-import com.daml.metrics.MetricHandle.{Counter, Histogram, Meter, Timer}
+import com.daml.metrics.api.MetricHandle.{Counter, Histogram, Meter, Timer}
+import com.daml.metrics.api.dropwizard.{
+  DropwizardCounter,
+  DropwizardHistogram,
+  DropwizardMeter,
+  DropwizardTimer,
+}
 
 trait MetricValues {
 
@@ -31,27 +36,33 @@ trait MetricValues {
 
   class CounterValues(counter: Counter) {
     def value: Long = counter match {
-      case MetricHandle.DropwizardCounter(_, metric) => metric.getCount
+      case DropwizardCounter(_, metric) => metric.getCount
+      case other =>
+        throw new IllegalArgumentException(s"Value not supported for $other")
     }
   }
 
   class MeterValues(meter: Meter) {
     def value: Long = meter match {
-      case MetricHandle.DropwizardMeter(_, metric) => metric.getCount
+      case DropwizardMeter(_, metric) => metric.getCount
+      case other =>
+        throw new IllegalArgumentException(s"Value not supported for $other")
     }
   }
 
   class HistogramValues(histogram: Histogram) {
     def snapshot: Snapshot = histogram match {
-      case MetricHandle.DropwizardHistogram(_, metric) => metric.getSnapshot
+      case DropwizardHistogram(_, metric) => metric.getSnapshot
+      case other =>
+        throw new IllegalArgumentException(s"Snapshot not supported for $other")
     }
   }
 
   class TimerValues(timer: Timer) {
     def snapshot: Snapshot = timer match {
-      case MetricHandle.DropwizardTimer(_, metric) => metric.getSnapshot
-      case Timer.NoOpTimer(_) =>
-        throw new IllegalArgumentException("Snapshot not supported for noOp")
+      case DropwizardTimer(_, metric) => metric.getSnapshot
+      case other =>
+        throw new IllegalArgumentException(s"Snapshot not supported for $other")
     }
   }
 

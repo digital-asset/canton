@@ -9,6 +9,7 @@ import cats.data.OptionT
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
+import com.daml.metrics.api.MetricsContext
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.LedgerTransactionId
@@ -161,7 +162,7 @@ class InMemoryMultiDomainEventLog(
             )
             notifyOnPublish(Seq(publication))
 
-            metrics.updatesPublished.mark(event.eventSize.toLong)
+            metrics.updatesPublished.mark(event.eventSize.toLong)(MetricsContext.Empty)
           } else {
             ErrorUtil.internalError(
               new IllegalArgumentException(

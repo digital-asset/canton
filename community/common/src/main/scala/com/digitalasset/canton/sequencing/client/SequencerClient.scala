@@ -1010,8 +1010,10 @@ class SequencerClient(
     */
   private[client] def acknowledge(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Unit] =
-    transport.acknowledge(member, timestamp)
+  ): Future[Unit] = {
+    val request = AcknowledgeRequest(member, timestamp, protocolVersion)
+    transport.acknowledge(request)
+  }
 
   def changeTransport(
       newTransport: SequencerClientTransport

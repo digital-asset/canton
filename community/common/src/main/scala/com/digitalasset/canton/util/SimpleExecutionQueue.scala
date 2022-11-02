@@ -123,7 +123,7 @@ object SimpleExecutionQueue {
     private val completionPromise: Promise[Unit] = Promise[Unit]()
 
     /** `null` if no predecessor has been chained.
-      * [[scala.Some$]]`(cell)`` if the predecessor task is `cell` and this task is queued or running.
+      * [[scala.Some$]]`(cell)` if the predecessor task is `cell` and this task is queued or running.
       * [[scala.None$]] if this task has been completed.
       */
     private val predecessorCell: AtomicReference[Option[TaskCell]] =

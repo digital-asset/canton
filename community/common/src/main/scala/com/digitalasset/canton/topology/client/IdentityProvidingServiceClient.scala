@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.client
 
 import cats.data.EitherT
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.crypto.{EncryptionPublicKey, SigningPublicKey}
@@ -22,6 +22,7 @@ import com.digitalasset.canton.topology.processing.{
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, checked}
 
@@ -40,7 +41,7 @@ class IdentityProvidingServiceClient {
 
   private val domains = TrieMap.empty[DomainId, DomainTopologyClient]
 
-  def add(domainClient: DomainTopologyClient): IdentityProvidingServiceClient = {
+  def add(domainClient: DomainTopologyClient): this.type = {
     domains += (domainClient.domainId -> domainClient)
     this
   }
@@ -506,7 +507,7 @@ private[client] trait PartyTopologySnapshotBaseClient {
       check: (ParticipantPermission => Boolean) = _.isActive,
   ): EitherT[Future, Set[LfPartyId], Unit] = {
     val fetchedF =
-      parties.toList.traverse(party => activeParticipantsOf(party).map(x => (party, x)))
+      parties.toList.parTraverse(party => activeParticipantsOf(party).map(x => (party, x)))
     EitherT(
       fetchedF
         .map { fetched =>
@@ -542,7 +543,7 @@ private[client] trait PartyTopologySnapshotBaseClient {
       permissionCheck: ParticipantAttributes => Boolean = _.permission.isActive,
   ): Future[Boolean] =
     partyIds.toList
-      .traverse(hostedOn(_, participantId).map(_.exists(permissionCheck)))
+      .parTraverse(hostedOn(_, participantId).map(_.exists(permissionCheck)))
       .map(_.forall(x => x))
 
   override def canConfirm(
@@ -561,7 +562,7 @@ private[client] trait PartyTopologySnapshotBaseClient {
       parties: List[LfPartyId]
   ): EitherT[Future, Set[LfPartyId], Set[ParticipantId]] =
     EitherT(for {
-      withActiveParticipants <- parties.traverse(p =>
+      withActiveParticipants <- parties.parTraverse(p =>
         activeParticipantsOf(p).map(pMap => p -> pMap)
       )
       (noActive, allActive) = withActiveParticipants.foldLeft(
@@ -622,7 +623,7 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient {
       loader: (ParticipantId, PackageId) => EitherT[Future, PackageId, Set[PackageId]],
   ): EitherT[Future, PackageId, Set[PackageId]] =
     packages.toList
-      .flatTraverse(packageId => loader(participantId, packageId).map(_.toList))
+      .parFlatTraverse(packageId => loader(participantId, packageId).map(_.toList))
       .map(_.toSet)
 
   override def findUnvettedPackagesOrDependencies(

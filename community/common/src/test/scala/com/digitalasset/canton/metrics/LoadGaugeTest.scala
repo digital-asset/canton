@@ -14,7 +14,7 @@ class LoadGaugeTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   private class Fixture {
     val now = new AtomicLong(0)
-    val gauge = new LoadGauge(1000.millis, now.get() * 1000000)
+    val gauge = new LoadGauge("test", 1000.millis, now.get() * 1000000)
 
     def run(ms: Long): Unit = {
       Await.result(

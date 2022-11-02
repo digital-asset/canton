@@ -144,7 +144,7 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
       lastErrorsLogFile.lineCount shouldEqual 4
       val errorContents = lastErrorsLogFile.contentAsString
       // Errors file must include debug output
-      List("some logging debug event", "some logging error").foreach(errorContents.contains)
+      forEvery(List("some logging debug event", "some logging error"))(errorContents.contains)
     }
 
     "dynamically set log level with log last errors enabled" in { processLogger =>
@@ -160,13 +160,14 @@ class CliIntegrationTest extends FixtureAnyWordSpec with BaseTest with SuiteMixi
       lastErrorsLogFile.lineCount shouldEqual 6
       val errorContents = lastErrorsLogFile.contentAsString
       // Errors file must include debug output
-      List(
-        "some logging debug event",
-        "some logging error",
-        "final logging debug event",
-        "final logging error",
-      )
-        .foreach(errorContents.contains)
+      forEvery(
+        List(
+          "some logging debug event",
+          "some logging error",
+          "final logging debug event",
+          "final logging error",
+        )
+      )(errorContents.contains)
     }
 
     "run with log file appender off" in { processLogger =>

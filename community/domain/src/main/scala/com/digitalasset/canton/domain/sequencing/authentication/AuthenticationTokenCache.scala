@@ -63,7 +63,10 @@ class AuthenticationTokenCache(
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
       _ <- store.invalidateMember(member)
-      _ = tokenCache.filter(_._2.member == member).keys.foreach(tokenCache.remove)
+      _ = tokenCache
+        .filter(_._2.member == member)
+        .keys
+        .foreach(tokenCache.remove(_).discard[Option[StoredAuthenticationToken]])
     } yield ()
 
   private def cacheToken(stored: StoredAuthenticationToken): Unit = {

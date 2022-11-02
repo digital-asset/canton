@@ -4,6 +4,6 @@
 package com.digitalasset.canton.domain.metrics
 
 import com.codahale.metrics.MetricRegistry
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 
 object DomainTestMetrics extends DomainMetrics(MetricName("test"), new MetricRegistry()) {}

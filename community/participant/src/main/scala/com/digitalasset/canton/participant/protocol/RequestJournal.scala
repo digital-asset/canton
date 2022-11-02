@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.data.OptionT
-import com.daml.metrics.MetricHandle
+import com.daml.metrics.api.MetricHandle
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Counter,

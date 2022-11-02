@@ -5,7 +5,7 @@ package com.digitalasset.canton.health
 
 import com.codahale.metrics.MetricRegistry
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
-import com.daml.metrics.MetricName
+import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonCommunityConfig
 import com.digitalasset.canton.config.RequireTypes.InstanceName
