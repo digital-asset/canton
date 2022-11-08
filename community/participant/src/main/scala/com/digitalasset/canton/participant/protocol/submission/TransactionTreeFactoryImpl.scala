@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.Ref.PackageId
@@ -24,6 +24,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{ErrorUtil, LfTransactionUtil, MapsUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
@@ -479,7 +480,7 @@ abstract class TransactionTreeFactoryImpl(
 
     for {
       coreInputsWithInstances <- coreInputs.toSeq
-        .traverse(cid => withInstance(cid).map(cid -> _))
+        .parTraverse(cid => withInstance(cid).map(cid -> _))
         .leftWiden[TransactionTreeConversionError]
         .map(_.toMap)
       viewParticipantData <- EitherT

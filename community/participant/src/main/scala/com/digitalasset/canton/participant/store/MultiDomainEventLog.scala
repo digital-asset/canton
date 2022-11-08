@@ -8,8 +8,7 @@ import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.data.OptionT
 import cats.syntax.option.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.ChangeId
 import com.daml.ledger.participant.state.v2.Update.{CommandRejected, TransactionAccepted}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -39,6 +38,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerSubmissionId, LedgerTransactionId}
 
@@ -146,8 +146,8 @@ trait MultiDomainEventLog extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): Future[(Map[DomainId, LocalOffset], Option[LocalOffset])] = {
     for {
-      domainLogIds <- domainIds.traverse(IndexedDomain.indexed(indexedStringStore))
-      domainOffsets <- domainLogIds.traverseFilter { domainId =>
+      domainLogIds <- domainIds.parTraverse(IndexedDomain.indexed(indexedStringStore))
+      domainOffsets <- domainLogIds.parTraverseFilter { domainId =>
         lastLocalOffsetBeforeOrAt(
           DomainEventLogId(domainId),
           upToInclusive,

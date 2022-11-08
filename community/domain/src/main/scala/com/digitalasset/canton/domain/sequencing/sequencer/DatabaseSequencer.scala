@@ -295,6 +295,10 @@ class DatabaseSequencer(
   ): EitherT[Future, String, SequencerSnapshot] =
     EitherT.rightT(SequencerSnapshot.unimplemented(protocolVersion))
 
+  override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
+    // Database sequencers are never bootstrapped
+    SequencerCounter.Genesis
+
   override def onClosed(): Unit = {
     super.onClosed()
     Lifecycle.close(

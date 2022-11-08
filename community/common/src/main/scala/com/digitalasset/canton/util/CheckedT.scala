@@ -3,13 +3,15 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.{Chain, EitherT, NonEmptyChain, OptionT}
+import cats.data.{Chain, EitherT, Nested, NonEmptyChain, OptionT}
 import cats.syntax.either.*
-import cats.{Applicative, FlatMap, Functor, Monad, MonadError}
+import cats.{Applicative, FlatMap, Functor, Monad, MonadError, Parallel, ~>}
+import com.digitalasset.canton.FutureTransformer
 
 /** Monad Transformer for [[Checked]], allowing the effect of a monad `F` to be combined with the aborting and
   * non-aborting failure effect of [[Checked]]. Similar to [[cats.data.EitherT]].
   */
+@FutureTransformer(0)
 final case class CheckedT[F[_], A, N, R](value: F[Checked[A, N, R]]) {
 
   import Checked.{Abort, Result}
@@ -60,6 +62,14 @@ final case class CheckedT[F[_], A, N, R](value: F[Checked[A, N, R]]) {
       F: Applicative[F]
   ): CheckedT[F, AA, NN, (R, RR)] =
     CheckedT(F.map(F.product(this.value, other.value)) { case (x, y) => x.product(y) })
+
+  /** Applicative operation. Consistent with [[flatMap]] according to Cats' laws.
+    * Errors from the function take precedence over the function argument (=this).
+    */
+  def ap[AA >: A, NN >: N, RR](ff: CheckedT[F, AA, NN, R => RR])(implicit
+      F: Applicative[F]
+  ): CheckedT[F, AA, NN, RR] =
+    CheckedT(F.map(F.product(ff.value, this.value)) { case (f, x) => x.ap(f) })
 
   def flatMap[AA >: A, NN >: N, RR](
       f: R => CheckedT[F, AA, NN, RR]
@@ -224,7 +234,7 @@ object CheckedT extends CheckedTInstances {
   }
 }
 
-trait CheckedTInstances {
+trait CheckedTInstances extends CheckedTInstances1 {
 
   implicit def cantonUtilMonadErrorForCheckedT[F[_], A, N](implicit
       F0: Monad[F]
@@ -232,9 +242,49 @@ trait CheckedTInstances {
     new CheckedTMonadError[F, A, N] {
       implicit val F = F0
     }
+
+  implicit def cantonUtilParallelForCheckedT[M[_], A, N](implicit
+      P: Parallel[M]
+  ): Parallel.Aux[CheckedT[M, A, N, *], Nested[P.F, Checked[A, N, *], *]] =
+    new Parallel[CheckedT[M, A, N, *]] {
+      type F[x] = Nested[P.F, Checked[A, N, *], x]
+
+      implicit val monadEither: Monad[Checked[A, N, *]] =
+        Checked.cantonUtilMonadErrorForChecked
+
+      def applicative: Applicative[Nested[P.F, Checked[A, N, *], *]] =
+        cats.data.Nested.catsDataApplicativeForNested(P.applicative, implicitly)
+
+      def monad: Monad[CheckedT[M, A, N, *]] = CheckedT.cantonUtilMonadErrorForCheckedT(P.monad)
+
+      def sequential: Nested[P.F, Checked[A, N, *], *] ~> CheckedT[M, A, N, *] =
+        new (Nested[P.F, Checked[A, N, *], *] ~> CheckedT[M, A, N, *]) {
+          def apply[R](nested: Nested[P.F, Checked[A, N, *], R]): CheckedT[M, A, N, R] = {
+            val mva = P.sequential(nested.value)
+            CheckedT(mva)
+          }
+        }
+
+      def parallel: CheckedT[M, A, N, *] ~> Nested[P.F, Checked[A, N, *], *] =
+        new (CheckedT[M, A, N, *] ~> Nested[P.F, Checked[A, N, *], *]) {
+          def apply[R](checkedT: CheckedT[M, A, N, R]): Nested[P.F, Checked[A, N, *], R] = {
+            val fea = P.parallel(checkedT.value)
+            Nested(fea)
+          }
+        }
+    }
 }
 
-trait CheckedTInstances1 {
+trait CheckedTInstances1 extends CheckedTInstances2 {
+  implicit def cantonUtilApplicativeForCheckedT[F[_], A, N](implicit
+      F0: Applicative[F]
+  ): Applicative[CheckedT[F, A, N, *]] =
+    new CheckedTApplicative[F, A, N] {
+      implicit val F = F0
+    }
+}
+
+trait CheckedTInstances2 {
   implicit def cantonUtilFunctorForCheckedT[F[_], A, N](implicit
       F0: Functor[F]
   ): Functor[CheckedT[F, A, N, *]] =
@@ -247,6 +297,16 @@ private[util] trait CheckedTFunctor[F[_], A, N] extends Functor[CheckedT[F, A, N
   implicit val F: Functor[F]
   override def map[R, RR](checkedT: CheckedT[F, A, N, R])(f: R => RR): CheckedT[F, A, N, RR] =
     checkedT.map(f)
+}
+
+private[util] trait CheckedTApplicative[F[_], A, N] extends Applicative[CheckedT[F, A, N, *]] {
+  implicit val F: Applicative[F]
+
+  override def pure[R](x: R): CheckedT[F, A, N, R] = CheckedT(F.pure(Checked.result(x)))
+
+  override def ap[R, S](ff: CheckedT[F, A, N, R => S])(
+      fa: CheckedT[F, A, N, R]
+  ): CheckedT[F, A, N, S] = fa.ap(ff)
 }
 
 private[util] trait CheckedTMonadError[F[_], A, N]

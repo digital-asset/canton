@@ -6,6 +6,8 @@ package com.digitalasset.canton.util
 import cats.Eq
 import cats.data.{Chain, EitherT, NonEmptyChain}
 import cats.laws.discipline.MonadErrorTests
+import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.BaseTestWordSpec
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.wordspec.{AnyWordSpec, AnyWordSpecLike}
@@ -13,6 +15,7 @@ import org.scalatest.wordspec.{AnyWordSpec, AnyWordSpecLike}
 class CheckedTest extends AnyWordSpec with BaseTestWordSpec {
 
   def failure[A](x: A): Nothing = throw new RuntimeException
+
   def failure2[A, B](x: A, y: B): Nothing = throw new RuntimeException
 
   "map" should {
@@ -355,6 +358,7 @@ class CheckedTest extends AnyWordSpec with BaseTestWordSpec {
 
   "traverse" should {
     def f(x: String): Option[Int] = Some(x.length)
+
     def g(x: String): Option[Int] = None
 
     "run on a result" in {
@@ -491,6 +495,24 @@ class CheckedTest extends AnyWordSpec with BaseTestWordSpec {
       "MonadError",
       MonadErrorTests[Checked[Int, String, *], Int].monadError[Int, Int, String],
     )
+  }
+
+  private lazy val stackSafetyDepth = 20000
+
+  "traverse" should {
+    "be stack safe" in {
+      (1 to stackSafetyDepth: Seq[Int]).traverse(x => Checked.result(x)).getResult.value should
+        have size stackSafetyDepth.toLong
+    }
+  }
+
+  "traverse_" should {
+    "be stack safe" in {
+      (1 to stackSafetyDepth: Seq[Int])
+        .traverse_(x => Checked.result(x))
+        .getResult
+        .value should be(())
+    }
   }
 }
 

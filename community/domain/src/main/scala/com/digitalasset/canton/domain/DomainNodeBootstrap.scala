@@ -22,7 +22,7 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStore.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.admin.v0.{DomainServiceGrpc, SequencerVersionServiceGrpc}
-import com.digitalasset.canton.domain.admin.{grpc as admingrpc}
+import com.digitalasset.canton.domain.admin.grpc as admingrpc
 import com.digitalasset.canton.domain.config.*
 import com.digitalasset.canton.domain.governance.ParticipantAuditor
 import com.digitalasset.canton.domain.initialization.*
@@ -43,7 +43,11 @@ import com.digitalasset.canton.lifecycle.Lifecycle
 import com.digitalasset.canton.lifecycle.Lifecycle.CloseableServer
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonMutableHandlerRegistry
-import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
+import com.digitalasset.canton.protocol.{
+  DomainParametersLookup,
+  DynamicDomainParameters,
+  StaticDomainParameters,
+}
 import com.digitalasset.canton.resource.{CommunityStorageFactory, Storage, StorageFactory}
 import com.digitalasset.canton.sequencing.client.{grpc as _, *}
 import com.digitalasset.canton.store.SequencerCounterTrackerStore
@@ -57,7 +61,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, 
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -410,10 +414,22 @@ class DomainNodeBootstrap(
           parameters.processingTimeouts,
           loggerFactory,
         )
-
+        domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
+          staticDomainParameters,
+          topologyClient,
+          futureSupervisor,
+          loggerFactory,
+        )
+        maxRequestSize <- EitherTUtil
+          .fromFuture(
+            domainParamsLookup.getApproximate(warnOnUsingDefaults = false),
+            error => s"Unable to retrieve the domain parameters: ${error.getMessage}",
+          )
+          .map(_.maxRequestSize)
         // must happen before the init of topology management since it will call the embedded sequencer's public api
         publicServer = PublicGrpcServerInitialization(
           config,
+          maxRequestSize,
           metrics,
           parameters,
           loggerFactory,

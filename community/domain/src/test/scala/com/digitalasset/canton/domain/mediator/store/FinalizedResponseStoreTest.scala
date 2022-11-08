@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.mediator.store
 
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -16,6 +16,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, TestingIdentityFactory}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfPartyId}
 import io.functionmeta.functionFullName
 import org.scalatest.BeforeAndAfterAll
@@ -115,7 +116,7 @@ trait FinalizedResponseStoreTest extends BeforeAndAfterAll {
         val requests = (1 to 3).map(n => currentVersion.copy(requestId = requestIdTs(n)))
 
         for {
-          _ <- requests.toList.traverse(sut.store)
+          _ <- requests.toList.parTraverse(sut.store)
           _ <- sut.prune(ts(2))
           _ <- noneOrFail(sut.fetch(requestIdTs(1)))("fetch(ts1)")
           _ <- noneOrFail(sut.fetch(requestIdTs(2)))("fetch(ts2)")

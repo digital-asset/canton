@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.topology
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.RetryUtil.AllExnRetryable
 import com.digitalasset.canton.util.{DelayUtil, EitherTUtil, ErrorUtil, FutureUtil, retry}
@@ -87,7 +88,7 @@ class ParticipantTopologyDispatcher(
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
       val num = transactions.size
       domains.values.toList
-        .traverse(_.newTransactionsAddedToAuthorizedStore(timestamp, num))
+        .parTraverse(_.newTransactionsAddedToAuthorizedStore(timestamp, num))
         .map(_ => ())
     }
   })
@@ -613,7 +614,7 @@ private trait DomainOutboxDispatch extends NamedLogging with FlagCloseable {
       traceContext: TraceContext,
   ): EitherT[Future, DomainRegistryError, SignedTopologyTransactions[TopologyChangeOp]] = {
     transactions.result
-      .traverse { tx =>
+      .parTraverse { tx =>
         if (tx.transaction.hasEquivalentVersion(protocolVersion)) {
           // Transaction already in the correct version, nothing to do here
           EitherT.rightT[Future, String](tx)

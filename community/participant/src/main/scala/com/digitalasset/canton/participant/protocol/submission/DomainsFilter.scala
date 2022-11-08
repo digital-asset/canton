@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission
 
 import cats.syntax.alternative.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.{PackageId, Party}
 import com.daml.lf.engine.Blinding
 import com.daml.lf.transaction.TransactionVersion
@@ -14,6 +14,7 @@ import com.digitalasset.canton.protocol.{LfVersionedTransaction, PackageInfoServ
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -27,7 +28,7 @@ private[submission] class DomainsFilter(
 )(implicit ec: ExecutionContext, traceContext: TraceContext)
     extends NamedLogging {
   def split: Future[(List[DomainNotUsedReason], List[DomainId])] = domains
-    .traverse { case (domainId, protocolVersion, snapshot, packageInfoService) =>
+    .parTraverse { case (domainId, protocolVersion, snapshot, packageInfoService) =>
       val checker = new DomainUsabilityCheckerFull(
         domainId,
         protocolVersion,

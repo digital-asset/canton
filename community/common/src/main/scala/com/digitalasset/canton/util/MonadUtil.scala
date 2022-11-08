@@ -28,13 +28,20 @@ object MonadUtil {
 
   /** The implementation of `traverse` in `cats` is parallel, so this provides a sequential alternative.
     * The caller must ensure that the Iterable is immutable
+    *
+    * Do not use Cats' .traverse_ methods as Cats does not specify whether the `step` runs sequentially or in parallel
+    * for future-like monads. In fact, this behaviour differs for different versions of Cats.
     */
   def sequentialTraverse_[M[_], A](xs: Iterable[A])(step: A => M[_])(implicit
       monad: Monad[M]
   ): M[Unit] =
     sequentialTraverse_(xs.iterator)(step)
 
-  /** The caller must ensure that the underlying data structure of the iterator is immutable */
+  /** The caller must ensure that the underlying data structure of the iterator is immutable
+    *
+    * Do not use Cats' .traverse_ methods as Cats does not specify whether the `step` runs sequentially or in parallel
+    * for future-like monads. In fact, this behaviour differs for different versions of Cats.
+    */
   def sequentialTraverse_[M[_], A](xs: Iterator[A])(step: A => M[_])(implicit
       monad: Monad[M]
   ): M[Unit] =

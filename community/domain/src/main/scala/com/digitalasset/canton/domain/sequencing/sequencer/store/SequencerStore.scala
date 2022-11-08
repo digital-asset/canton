@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.store
 import cats.Order.*
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import cats.{Functor, Show}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
@@ -28,6 +28,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -559,7 +560,7 @@ trait SequencerStore extends NamedLogging with AutoCloseable {
     def adjustTimestamp(): Future[CantonTimestamp] =
       for {
         disabledMemberIds <- disabledClients.members.toList
-          .traverse(lookupMember)
+          .parTraverse(lookupMember)
           .map(_.flatMap(_.toList).map(_.memberId))
         adjustedTimestampO <- adjustPruningTimestampForCounterCheckpoints(
           safeTimestamp,

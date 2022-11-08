@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -101,7 +101,7 @@ class ParticipantTopologyManager(
       transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
   )(implicit traceContext: TraceContext): Future[Unit] =
     blocking(synchronized(observers.toList))
-      .traverse(_.addedNewTransactions(timestamp, transactions))
+      .parTraverse(_.addedNewTransactions(timestamp, transactions))
       .map(_ => ())
       .onShutdown(())
 
@@ -362,7 +362,7 @@ class ParticipantTopologyManager(
       if (syncVetting) {
         EitherT.right(
           clients()
-            .traverse {
+            .parTraverse {
               _.await(
                 _.findUnvettedPackagesOrDependencies(pid, packageSet).value.map(x =>
                   x.exists(_.isEmpty)

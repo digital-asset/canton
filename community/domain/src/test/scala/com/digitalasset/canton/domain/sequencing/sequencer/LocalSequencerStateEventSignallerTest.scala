@@ -4,13 +4,14 @@
 package com.digitalasset.canton.domain.sequencing.sequencer
 
 import akka.stream.scaladsl.{Keep, Sink, SinkQueueWithCancel}
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.lifecycle.{FlagCloseable, Lifecycle}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.util.AkkaUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
@@ -81,7 +82,7 @@ class LocalSequencerStateEventSignallerTest
     for {
       // write a number that will certainly exceed any local buffers the akka stream operators may have
       // the test here is just checking it doesn't deadlock
-      _ <- (0 until 3001).toList.traverse(_ =>
+      _ <- (0 until 3001).toList.parTraverse(_ =>
         signaller.notifyOfLocalWrite(WriteNotification.Members(SortedSet(aliceId)))
       )
       // regardless of all of the prior events that were pummeled only a single signal is produced when subscribed

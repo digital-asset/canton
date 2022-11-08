@@ -7,7 +7,7 @@ import cats.Id
 import cats.data.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.protocol.{
@@ -17,6 +17,7 @@ import com.digitalasset.canton.protocol.{
   WithTransactionId,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT, MapsUtil}
 import com.digitalasset.canton.{LfPartyId, RequestCounter}
 
@@ -126,7 +127,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
     }
 
     for {
-      wrongContractsC <- contracts.traverse(checkContractAgainstStore).map(_.flattenOption).value
+      wrongContractsC <- contracts.parTraverse(checkContractAgainstStore).map(_.flattenOption).value
     } yield {
       val contractsToAdd = wrongContractsC.getResult.getOrElse(Seq.empty)
       val contractsWithDifferentDataInStore = wrongContractsC.nonaborts.toList.toSet
@@ -180,7 +181,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
         )
 
     contracts.toList
-      .traverse {
+      .parTraverse {
         case (contractId, true) => writeIfPending(contractId)
         case (contractId, false) => rollback(contractId)
       }
@@ -226,7 +227,7 @@ class StoredContractManager(store: ContractStore, override val loggerFactory: Na
 
     EitherT {
       divulgences
-        .traverse(divulgence => storeDivulgedContract(divulgence).toValidatedNec)
+        .parTraverse(divulgence => storeDivulgedContract(divulgence).toValidatedNec)
         .map(_.sequence_.toEither)
     }
   }

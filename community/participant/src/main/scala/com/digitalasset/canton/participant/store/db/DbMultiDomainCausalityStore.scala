@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,6 +15,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -120,7 +121,7 @@ class DbMultiDomainCausalityStore private (
 
     for {
       pairs <- storage.query(query, functionFullName)
-      mappedPairs <- pairs.traverseFilter {
+      mappedPairs <- pairs.parTraverseFilter {
         case (index, ts) if index > 0 =>
           IndexedDomain
             .fromDbIndexOT("linearized_event_log", indexedStringStore)(index)

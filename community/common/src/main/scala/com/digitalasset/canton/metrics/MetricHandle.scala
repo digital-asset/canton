@@ -22,6 +22,9 @@ import scala.reflect.runtime.universe as ru
 object MetricHandle {
 
   trait Factory extends DropwizardFactory {
+
+    def prefix: MetricName
+
     def loadGauge(
         name: MetricName,
         interval: FiniteDuration,
@@ -50,8 +53,8 @@ object MetricDoc {
 
   // Converts a Tag accompanied with a GroupTag to a MetricDoc.Item. If the metric's name matches
   // one of the representatives then the item's name is set to be the corresponding representative.
-  // The instance is set to equal the part of the metric's name replaced by the wildcard
-  // (representative). Otherwise, the item is constructed as if the GroupTag was missing.
+  // The instance is set to equal the part of the metric's name replaced by the wildcard.
+  // Otherwise, the item is constructed as if the GroupTag was missing.
   def groupTagToItem(tag: Tag, groupTags: Seq[GroupTag], x: DamlMetricHandle): Item = {
     val wildcard = "<.*>".r // wildcard must be inside angle brackets (<,>)
     val matchingRepresentative = groupTags
@@ -59,23 +62,28 @@ object MetricDoc {
       .find(representative => {
         val escaped = representative.replace(".", "\\.")
         val pattern = wildcard.replaceFirstIn(escaped, ".*")
-        pattern.r.matches(x.name)
+        // check if the pattern exists in the name and is a prefix
+        pattern.r.findFirstIn(x.name).fold(false)(x.name.startsWith(_))
       })
     matchingRepresentative match {
       case None => Item(tag = tag, name = x.name, metricType = x.metricType, groupingInfo = None)
       case Some(representative) => {
-        val startWildcard = representative.indexOf('<')
-        val endWildcard = representative.indexOf('>')
-        val commonSuffixLength = representative.length - endWildcard - 1
+        // representative lacks the suffix of the metrics' name and it should be appended
+        val commonPrefixLength = x.name.zip(representative).takeWhile(Function.tupled(_ == _)).size
+        // the instance is after the common prefix and until the first dot (.) encountered
+        val instance = x.name.drop(commonPrefixLength).takeWhile(_ != '.')
+        // extend the representative by the name of the specific metric
+        val suffixName = x.name.substring(commonPrefixLength + instance.size)
+        val representativeExtended =
+          representative.substring(0, representative.indexOf('>') + 1) + suffixName
         Item(
           tag = tag,
-          name = representative,
+          name = representativeExtended,
           metricType = x.metricType,
           groupingInfo = Some(
             GroupInfo(
-              Seq(
-                x.name.drop(startWildcard).take(x.name.length - commonSuffixLength - startWildcard)
-              )
+              instances = Seq(instance),
+              fullNames = Seq(x.name),
             )
           ),
         )
@@ -84,7 +92,8 @@ object MetricDoc {
   }
 
   case class GroupInfo(
-      instances: Seq[String]
+      instances: Seq[String],
+      fullNames: Seq[String],
   )
 
   case class Item(
@@ -100,7 +109,7 @@ object MetricDoc {
     !ignorePackages.exists(symbol.fullName.startsWith)
 
   // Deduplicate Items that have the same name and collect the instances of those into one item
-  def deduplicateGroupped(grouped: Seq[Item]): Seq[Item] =
+  def group(grouped: Seq[Item]): Seq[Item] =
     grouped
       .groupBy(_.name)
       .values
@@ -109,7 +118,10 @@ object MetricDoc {
           .map(
             _.copy(groupingInfo =
               Some(
-                GroupInfo(s.map(_.groupingInfo).flatMap(_.toList).flatMap(_.instances).distinct)
+                GroupInfo(
+                  instances = s.map(_.groupingInfo).flatMap(_.toList).flatMap(_.instances).distinct,
+                  fullNames = s.map(_.groupingInfo).flatMap(_.toList).flatMap(_.fullNames).distinct,
+                )
               )
             )
           )
@@ -122,11 +134,17 @@ object MetricDoc {
     * NOTE: does not support lazy val metrics
     */
   def getItems[T: ClassTag](instance: T): Seq[Item] = {
-    val (unique, grouped) = getItemsAll[T](instance, Seq()).partition(_.groupingInfo.isEmpty)
-    unique ++ deduplicateGroupped(grouped)
+    val (unique, groupable) = getItemsAll[T](instance, Seq()).partition(_.groupingInfo.isEmpty)
+    val grouped = group(groupable)
+    // remove the items that are grouped already
+    val fullNames = grouped.map(_.groupingInfo).flatMap(_.toList).flatMap(_.fullNames).toSet
+    val ungrouped = unique.filterNot(fullNames contains _.name)
+    ungrouped ++ grouped
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  @SuppressWarnings(
+    Array("org.wartremover.warts.AsInstanceOf", "org.wartremover.warts.Serializable")
+  )
   private def getItemsAll[T: ClassTag](
       instance: T,
       inheritedGroupTags: Seq[GroupTag],
@@ -165,7 +183,15 @@ object MetricDoc {
                   case x: DamlMetricHandle =>
                     val tag = extractTag(rf.symbol.annotations, tagParser)
                     val groupTags = extractTag(rf.symbol.annotations, groupTagParser)
-                    toItem(tag, inheritedGroupTags ++ classGroupTags ++ groupTags, x).toList
+                    val allGroupTags = inheritedGroupTags ++ classGroupTags ++ groupTags
+                    // collect the group tags that are relevant to the groupable class
+                    val groupTagsMatching =
+                      if (symbol.isClass)
+                        allGroupTags.filter(gt =>
+                          gt.groupableClass == mirror.runtimeClass(symbol.asClass)
+                        )
+                      else Seq()
+                    toItem(tag, groupTagsMatching, x).toList
                   // otherwise, continue scanning for metrics
                   case _ =>
                     val fm = rf.get
@@ -227,7 +253,10 @@ object MetricDoc {
     } catch {
       case x: RuntimeException =>
         println(
-          "Failed to process description (description needs to be a constant-string. i.e. don't apply stripmargin here ...): " + tree.toString
+          """Failed to process Tag annotation:
+            |summary and description need to be constant-string, i.e. don't apply stripmargin here ...),
+            |and MetricQualification must be an object of MetricQualification:
+            |""" + tree.toString
         )
         throw x
     }
@@ -236,17 +265,20 @@ object MetricDoc {
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   private def groupTagParser(tree: ru.Tree): GroupTag = {
     try {
-      Seq(1).map(
-        tree.children(_).asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
-      ) match {
-        case r :: Nil =>
-          GroupTag(representative = r)
-        case _ => throw new IllegalStateException("Unreachable code.")
-      }
+      val representative =
+        tree.children(1).asInstanceOf[ru.Literal].value.value.asInstanceOf[String]
+      val gcClassSymbol =
+        tree.children(2).asInstanceOf[ru.Literal].value.tpe.typeArgs(0).typeSymbol.asClass
+      val mirror = ru.runtimeMirror(getClass.getClassLoader)
+      val groupableClass = mirror.runtimeClass(gcClassSymbol)
+      GroupTag(representative = representative, groupableClass = groupableClass)
     } catch {
       case x: RuntimeException =>
         println(
-          "Failed to process description (description needs to be a constant-string. i.e. don't apply stripmargin here ...): " + tree.toString
+          """Failed to process GroupTag annotation:
+            |representative needs to be a constant-string, i.e. don't apply stripmargin here ...),
+            |and groupableClass must be defined as classOf[CLASSNAME]:
+            |""" + tree.toString
         )
         throw x
     }

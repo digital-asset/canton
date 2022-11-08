@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.config.ParticipantInitConfig.{
   ParticipantParametersInitConfig,
 }
 import com.digitalasset.canton.participant.config.*
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.time.*
@@ -525,6 +526,9 @@ object CantonConfig {
           .flatMap(duration => NonNegativeDuration.fromDuration(duration).leftMap(err))
       }
 
+    implicit val maxRequestSizeReader: ConfigReader[MaxRequestSize] =
+      NonNegativeNumeric.nonNegativeNumericReader[Int].map(MaxRequestSize)
+
     private def strToFiniteDuration(str: String): Either[String, FiniteDuration] =
       Either
         .catchOnly[NumberFormatException](Duration.apply(str))
@@ -948,6 +952,9 @@ object CantonConfig {
     implicit val lengthLimitedStringWriter: ConfigWriter[LengthLimitedString] =
       ConfigWriter.toString(_.unwrap)
     implicit val nonNegativeIntWriter: ConfigWriter[NonNegativeInt] =
+      ConfigWriter.toString(x => x.unwrap.toString)
+
+    implicit val maxRequestSizeWriter: ConfigWriter[MaxRequestSize] =
       ConfigWriter.toString(x => x.unwrap.toString)
     implicit def positiveNumericWriter[T]: ConfigWriter[PositiveNumeric[T]] =
       ConfigWriter.toString(x => x.unwrap.toString)

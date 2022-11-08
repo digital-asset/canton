@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
@@ -19,6 +20,7 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -113,7 +115,7 @@ object EncryptedViewMessageFactory {
     AsymmetricEncrypted[SecureRandomness],
   ]] =
     participants
-      .traverse { participant =>
+      .parTraverse { participant =>
         cryptoSnapshot
           .encryptFor(randomness, participant, version)
           .bimap(UnableToDetermineKey(participant, _, cryptoSnapshot.domainId), participant -> _)

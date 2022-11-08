@@ -31,6 +31,7 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
+import com.digitalasset.canton.participant.config.LedgerApiServerConfig.DefaultRateLimit
 import com.digitalasset.canton.participant.config.PostgresDataSourceConfigCanton.{
   DefaultPostgresTcpKeepalivesCount,
   DefaultPostgresTcpKeepalivesIdle,
@@ -283,7 +284,7 @@ case class LedgerApiServerConfig(
     inMemoryStateUpdaterParallelism: Int =
       LedgerApiServerConfig.DefaultInMemoryStateUpdaterParallelism,
     inMemoryFanOutThreadPoolSize: Option[Int] = None,
-    rateLimit: Option[RateLimitingConfig] = None,
+    rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
     preparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
       LedgerApiServerConfig.DefaultPreparePackageMetadataTimeOutWarning,
 ) extends CommunityServerConfig // We can't currently expose enterprise server features at the ledger api anyway
@@ -319,6 +320,13 @@ object LedgerApiServerConfig {
   val DefaultInMemoryStateUpdaterParallelism: Int = 2
   val DefaultPreparePackageMetadataTimeOutWarning: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration(DamlIndexServiceConfig.PreparePackageMetadataTimeOutWarning.toJava)
+  val DefaultRateLimit: RateLimitingConfig =
+    RateLimitingConfig.Default.copy(
+      maxApiServicesQueueSize = 20000,
+      // The two options below are to turn off memory based rate limiting by default
+      maxUsedHeapSpacePercentage = 100,
+      minFreeHeapSpaceBytes = 0,
+    )
 
   def DefaultInMemoryFanOutThreadPoolSize(implicit loggingContext: ErrorLoggingContext): Int = {
     val numberOfThreads =

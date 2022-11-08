@@ -118,7 +118,10 @@ object SequencedEvent extends HasProtocolVersionedSerializerCompanion[SequencedE
       domainId <- DomainId.fromProtoPrimitive(domainIdP, "SequencedEvent.domainId")
       // TODO(i10428) Prevent zip bombing when decompressing the request
       mbBatch <- mbBatchP.traverse(
-        Batch.fromProtoV0(envelopeDeserializer)(_, maxRequestSize = MaxRequestSize.NoLimit)
+        Batch.fromProtoV0(envelopeDeserializer)(
+          _,
+          maxRequestSize = MaxRequestSizeToDeserialize.NoLimit,
+        )
       )
       mbDeliverErrorReason <- mbDeliverErrorReasonP.traverse(DeliverErrorReason.fromProtoV0)
       // errors have an error reason, delivers have a batch

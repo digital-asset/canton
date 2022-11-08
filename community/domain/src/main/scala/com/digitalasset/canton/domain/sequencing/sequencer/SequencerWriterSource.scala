@@ -10,6 +10,7 @@ import cats.data.{EitherT, Validated}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -24,6 +25,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -272,7 +274,7 @@ class SendEventGenerator(
     def validateRecipients: Future[Validated[NonEmpty[Seq[Member]], Set[SequencerMemberId]]] =
       for {
         validatedSeq <- submission.batch.allRecipients.toSeq
-          .traverse(validateRecipient)
+          .parTraverse(validateRecipient)
         validated = validatedSeq.traverse(_.leftMap(NonEmpty(Seq, _)))
       } yield validated.map(_.toSet)
 

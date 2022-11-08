@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.Monoid
 import cats.data.OptionT
-import cats.implicits.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}

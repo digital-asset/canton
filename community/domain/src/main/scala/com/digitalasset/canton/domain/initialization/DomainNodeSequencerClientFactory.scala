@@ -110,6 +110,8 @@ class DomainNodeSequencerClientFactory(
       domainParameters,
       cantonParameterConfig.processingTimeouts,
       clock,
+      topologyClient,
+      futureSupervisor,
       member =>
         Domain.recordSequencerInteractions
           .get()

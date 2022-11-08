@@ -85,6 +85,8 @@ object Dependencies {
   lazy val daml_ledger_api_auth_client =
     "com.daml" % "ledger-api-auth-client" % daml_libraries_version
   lazy val daml_ledger_api_client = "com.daml" %% "ledger-api-client" % daml_libraries_version
+  lazy val daml_ledger_api_scalapb = "com.daml" %% "ledger-api-scalapb" % daml_libraries_version
+  lazy val daml_ledger_api_proto = "com.daml" % "ledger-api-proto" % daml_libraries_version
   lazy val daml_participant_integration_api =
     "com.daml" %% "participant-integration-api" % daml_libraries_version
   lazy val daml_caching = "com.daml" %% "caching" % daml_libraries_version
@@ -107,6 +109,9 @@ object Dependencies {
     "org.bouncycastle" % "bcpkix-jdk15on" % bouncy_castle_version
 
   lazy val javax_annotations = "javax.annotation" % "javax.annotation-api" % "1.3.2"
+
+  lazy val googleapis_common_protos =
+    "com.google.api.grpc" % "googleapis-common-protos" % "0.0.3"
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
@@ -151,9 +156,9 @@ object Dependencies {
   lazy val janino = "org.codehaus.janino" % "janino" % "3.1.4"
   lazy val logstash = "net.logstash.logback" % "logstash-logback-encoder" % "6.6"
 
-  lazy val cats = "org.typelevel" %% "cats-core" % "2.6.1"
-  lazy val cats_law = "org.typelevel" %% "cats-laws" % "2.6.1"
-  lazy val cats_scalacheck = "io.chrisdavenport" %% "cats-scalacheck" % "0.2.0"
+  lazy val cats = "org.typelevel" %% "cats-core" % "2.8.0"
+  lazy val cats_law = "org.typelevel" %% "cats-laws" % "2.8.0"
+  lazy val cats_scalacheck = "io.chrisdavenport" %% "cats-scalacheck" % "0.3.2"
 
   lazy val chimney = "io.scalaland" %% "chimney" % "0.6.1"
 
@@ -238,7 +243,7 @@ object Dependencies {
   lazy val vmbc_sequencer_core_reference_docker_image_name: String =
     "digitalasset/canton-sequencer-core-reference"
   lazy val vmbc_sequencer_core_reference_docker_image_label: String =
-    "sdk-version_2.3.0-snapshot.20220611.10066.0.458cfc43_vmbc-driver-commit_53f118f46"
+    "sdk-version_2.5.0-snapshot.20221028.10865.0.1b726fe8_vmbc-driver-commit_96853d036"
 
   lazy val concurrency_limits =
     "com.netflix.concurrency-limits" % "concurrency-limits-grpc" % "0.3.6"

@@ -5,8 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import cats.data.{Chain, EitherT}
 import cats.syntax.foldable.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RequestCounter
@@ -27,6 +26,7 @@ import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableB
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT, ErrorUtil, IterableUtil}
 import io.functionmeta.functionFullName
 import slick.jdbc.*
@@ -123,7 +123,7 @@ class DbActiveContractStore(
         _ <- bulkInsert(contractIds, toc, ChangeType.Activation, remoteDomain = None)
         _ <-
           if (enableAdditionalConsistencyChecks) {
-            contractIds.traverse_ { contractId =>
+            contractIds.parTraverse_ { contractId =>
               for {
                 _ <- checkCreateArchiveAtUnique(contractId, toc, ChangeType.Activation)
                 _ <- checkChangesBeforeCreation(contractId, toc)
@@ -144,7 +144,7 @@ class DbActiveContractStore(
         _ <- bulkInsert(contractIds, toc, ChangeType.Deactivation, remoteDomain = None)
         _ <-
           if (enableAdditionalConsistencyChecks) {
-            contractIds.traverse_ { contractId =>
+            contractIds.parTraverse_ { contractId =>
               for {
                 _ <- checkCreateArchiveAtUnique(contractId, toc, ChangeType.Deactivation)
                 _ <- checkChangesAfterArchival(contractId, toc)
@@ -160,7 +160,7 @@ class DbActiveContractStore(
   private def indexedDomains(
       contractAndDomain: Seq[(LfContractId, DomainId)]
   ): CheckedT[Future, AcsError, AcsWarning, Seq[(LfContractId, IndexedDomain)]] = {
-    CheckedT.result(contractAndDomain.traverse { case (contractId, domainId) =>
+    CheckedT.result(contractAndDomain.parTraverse { case (contractId, domainId) =>
       IndexedDomain
         .indexed(indexedStringStore)(domainId)
         .map(s => (contractId, s))
@@ -173,7 +173,7 @@ class DbActiveContractStore(
     processingTime.checkedTEvent {
       for {
         bySourceDomainIndexed <- indexedDomains(transferIns).map(_.groupBy(_._2).toList)
-        _ <- bySourceDomainIndexed.traverse_ { case (sourceDomain, contractIdsAndDomain) =>
+        _ <- bySourceDomainIndexed.parTraverse_ { case (sourceDomain, contractIdsAndDomain) =>
           bulkInsert(
             contractIdsAndDomain.map(_._1),
             toc,
@@ -191,7 +191,7 @@ class DbActiveContractStore(
     processingTime.checkedTEvent {
       for {
         byTargetIndexed <- indexedDomains(transferOuts).map(_.groupBy(_._2).toList)
-        _ <- byTargetIndexed.traverse_ { case (targetDomain, contractIdsAndDomain) =>
+        _ <- byTargetIndexed.parTraverse_ { case (targetDomain, contractIdsAndDomain) =>
           bulkInsert(
             contractIdsAndDomain.map(_._1),
             toc,
@@ -211,7 +211,7 @@ class DbActiveContractStore(
         // With H2, it is faster to do lookup contracts individually than to use a range query
         contractIds
           .to(LazyList)
-          .traverseFilter { contractId =>
+          .parTraverseFilter { contractId =>
             storage
               .querySingle(fetchContractStateQuery(contractId), functionFullName)
               .semiflatMap(storedContract =>
@@ -249,7 +249,7 @@ class DbActiveContractStore(
 
             storage
               .sequentialQueryAndCombine(queries, functionFullName)
-              .flatMap(_.toList.traverse { case (id, contract) =>
+              .flatMap(_.toList.parTraverse { case (id, contract) =>
                 contract.toContractState.map(cs => (id, cs))
               })
               .map(foundContracts => foundContracts.toMap)
@@ -265,8 +265,8 @@ class DbActiveContractStore(
     // The contractStore is unused
     // As we can directly query daml_contracts from the database
 
-    import DbStorage.Implicits.BuilderChain.*
     import DbStorage.Implicits.*
+    import DbStorage.Implicits.BuilderChain.*
 
     // TODO(i9480): Integrate with performance tests to check that we can remove packages when there are many contracts.
 
@@ -498,7 +498,7 @@ class DbActiveContractStore(
       toc: TimeOfChange,
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit] =
     if (enableAdditionalConsistencyChecks) {
-      transfers.traverse_ { case (contractId, _) =>
+      transfers.parTraverse_ { case (contractId, _) =>
         for {
           _ <- checkTocAgainstLatestCreation(contractId, toc)
           _ <- checkTocAgainstEarliestArchival(contractId, toc)
@@ -706,7 +706,7 @@ class DbActiveContractStore(
         )
       val results: Future[List[(LfContractId, Option[DomainId])]] = storage
         .sequentialQueryAndCombine(queries, functionFullName)
-        .flatMap(_.toList.traverseFilter {
+        .flatMap(_.toList.parTraverseFilter {
           case (cid, None) => Future.successful(Some((cid, None)))
           case (cid, Some(remoteIdx)) =>
             IndexedDomain

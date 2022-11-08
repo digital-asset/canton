@@ -7,8 +7,8 @@ import cats.data.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import cats.{Applicative, MonoidK}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, HashOps}
@@ -63,6 +63,7 @@ import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, Part
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
 import com.digitalasset.canton.util.EitherUtil.condUnitE
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
@@ -384,7 +385,7 @@ class TransferOutProcessingSteps(
         transferCoordination.addTransferOutRequest(transferData)
       }
       confirmingStakeholders <- EitherT.right(
-        storedContract.contract.metadata.stakeholders.toList.traverseFilter(stakeholder =>
+        storedContract.contract.metadata.stakeholders.toList.parTraverseFilter(stakeholder =>
           sourceIps.canConfirm(participantId, stakeholder).map(if (_) Some(stakeholder) else None)
         )
       )
@@ -624,7 +625,7 @@ class TransferOutProcessingSteps(
           _ <- EitherT.fromEither[Future](checkStakeholders)
           _ <- EitherT(
             adminParties.toList
-              .traverse(checkAdminParticipantCanConfirm(sourceIps, logger))
+              .parTraverse(checkAdminParticipantCanConfirm(sourceIps, logger))
               .map(
                 _.sequence.toEither.leftMap(errors =>
                   AdminPartyPermissionErrors(stringOfNec(errors)): TransferProcessorError
@@ -633,7 +634,7 @@ class TransferOutProcessingSteps(
           )
           _ <- EitherT(
             stakeholders.toList
-              .traverse(checkStakeholderHasTransferringParticipant)
+              .parTraverse(checkStakeholderHasTransferringParticipant)
               .map(
                 _.sequence.toEither
                   .leftMap(errors =>
@@ -832,7 +833,7 @@ object TransferOutProcessingSteps {
   ): EitherT[Future, TransferProcessorError, (Set[LfPartyId], Set[ParticipantId])] = {
 
     val stakeholdersWithParticipantPermissionsF = stakeholders.toList
-      .traverse { stakeholder =>
+      .parTraverse { stakeholder =>
         val sourceF = partyParticipants(sourceIps, stakeholder)
         val targetF = partyParticipants(targetIps, stakeholder)
         for {
@@ -856,7 +857,7 @@ object TransferOutProcessingSteps {
       )
       transferOutAdminParties <- EitherT(
         transferOutParticipants.toList
-          .traverse(adminPartyFor(sourceIps, logger))
+          .parTraverse(adminPartyFor(sourceIps, logger))
           .map(
             _.sequence.toEither
               .bimap(
@@ -1035,7 +1036,7 @@ object TransferOutProcessingSteps {
 
     def hostedStakeholders(snapshot: TopologySnapshot): Future[Set[LfPartyId]] = {
       stks.toList
-        .traverseFilter { partyId =>
+        .parTraverseFilter { partyId =>
           snapshot
             .hostedOn(partyId, participantId)
             .map(x => x.filter(_.permission == ParticipantPermission.Submission).map(_ => partyId))

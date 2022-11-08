@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.protocol
 
 import cats.Semigroup
-import cats.implicits.*
+import cats.syntax.order.*
+import cats.syntax.semigroup.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -163,7 +164,6 @@ object SingleDomainCausalTracker {
     implicit val maxTimestampSemigroup: Semigroup[CantonTimestamp] =
       (x: CantonTimestamp, y: CantonTimestamp) => x.max(y)
 
-    import cats.implicits.*
     clocks.foldLeft(new HashMap[DomainId, CantonTimestamp](): Map[DomainId, CantonTimestamp])({
       case (acc, clk) =>
         acc.combine(clk)

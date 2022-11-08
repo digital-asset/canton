@@ -7,6 +7,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{
   DomainId,
@@ -47,11 +48,13 @@ object TestDomainParameters {
     )
 
   def defaultDynamic(
-      maxRatePerParticipant: NonNegativeInt
+      maxRatePerParticipant: NonNegativeInt,
+      maxRequestSize: MaxRequestSize,
   ): DynamicDomainParameters =
     DynamicDomainParameters.initialValues(
       topologyChangeDelay = NonNegativeFiniteDuration.ofMillis(250),
       protocolVersion = BaseTest.testedProtocolVersion,
       maxRatePerParticipant = maxRatePerParticipant,
+      maxRequestSize = maxRequestSize,
     )
 }

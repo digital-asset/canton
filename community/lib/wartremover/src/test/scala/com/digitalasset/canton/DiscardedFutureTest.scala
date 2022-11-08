@@ -4,9 +4,16 @@
 
 package com.digitalasset.canton
 
+import cats.Applicative
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
-import com.digitalasset.canton.DiscardedFutureTest.{TraitWithFuture, WannabeFuture, assertErrors}
+import com.digitalasset.canton.DiscardedFutureTest.{
+  TraitWithFuture,
+  Transformer0,
+  Transformer1,
+  WannabeFuture,
+  assertErrors,
+}
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -88,6 +95,25 @@ class DiscardedFutureTest extends AnyWordSpec with Matchers with org.mockito.Moc
       assertErrors(result, 1)
     }
 
+    "detects annotated transformers of future-like computations" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        new Transformer0[Future, Int]
+        new Transformer1[Int, Future]
+        new Transformer0[Transformer1[*, OptionT[WannabeFuture, *]], Int]
+        ()
+      }
+      assertErrors(result, 3)
+    }
+
+    "allow annotated transformers of future-unlike computations" in {
+      val result = WartTestTraverser(DiscardedFuture) {
+        new Transformer0[List, Int]
+        new Transformer0[Transformer1[*, OptionT[List, *]], Int]
+        ()
+      }
+      result.errors shouldBe empty
+    }
+
     "detects nested annotated future-like classes" in {
       val result = WartTestTraverser(DiscardedFuture) {
         EitherT(new WannabeFuture[Either[String, Int]])
@@ -132,6 +158,20 @@ object DiscardedFutureTest {
   }
 
   @DoNotDiscardLikeFuture class WannabeFuture[A]
+
+  @FutureTransformer(0) class Transformer0[F[_], A]
+  object Transformer0 {
+    implicit def applicativeTransformer0[F[_]](implicit
+        F: Applicative[F]
+    ): Applicative[Transformer0[F, *]] = ???
+  }
+
+  @FutureTransformer(1) class Transformer1[A, F[_]]
+  object Transformer1 {
+    implicit def applicativeTransformer1[F[_]](implicit
+        F: Applicative[F]
+    ): Applicative[Transformer1[*, F]] = ???
+  }
 
   def assertErrors(result: WartTestTraverser.Result, expectedErrors: Int): Assertion = {
     import Matchers.*

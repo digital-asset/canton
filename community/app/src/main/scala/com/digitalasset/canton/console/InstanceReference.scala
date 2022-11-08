@@ -25,10 +25,12 @@ import com.digitalasset.canton.participant.config.{
 import com.digitalasset.canton.participant.domain.DomainConnectionConfig
 import com.digitalasset.canton.protocol.{LfContractId, SerializableContractWithWitnesses}
 import com.digitalasset.canton.sequencing.SequencerConnection
-import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId}
+import com.digitalasset.canton.topology.{DomainId, Identity, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.version.ProtocolVersion
 
+import java.io.File
 import scala.util.hashing.MurmurHash3
 
 trait InstanceReference
@@ -559,7 +561,7 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
         ignoreAlreadyAdded: Boolean = true,
     ): Unit =
       runRepairCommand(tc =>
-        access(_.sync.addContractsRepair(domain, contractsToAdd, ignoreAlreadyAdded)(tc))
+        access(_.sync.repairService.addContracts(domain, contractsToAdd, ignoreAlreadyAdded)(tc))
       )
 
     private def runRepairCommand[T](command: TraceContext => Either[String, T]): T =
@@ -592,7 +594,7 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
         ignoreAlreadyPurged: Boolean = true,
     ): Unit =
       runRepairCommand(tc =>
-        access(_.sync.purgeContractsRepair(domain, contractIds, ignoreAlreadyPurged)(tc))
+        access(_.sync.repairService.purgeContracts(domain, contractIds, ignoreAlreadyPurged)(tc))
       )
 
     @Help.Summary("Move contracts with specified Contract IDs from one domain to another.")
@@ -625,7 +627,7 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
     ): Unit =
       runRepairCommand(tc =>
         access(
-          _.sync.changeDomainRepair(
+          _.sync.repairService.changeDomainAwait(
             contractIds,
             sourceDomain,
             targetDomain,
@@ -653,17 +655,18 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
     ): Unit = {
       implicit val ec = consoleEnvironment.environment.executionContext
       runRepairCommand(tc =>
-        consoleEnvironment.commandTimeouts.unbounded.await()(
-          access(
-            _.sync
-              .migrateDomain(source, target)(tc)
-              .leftMap(_.asGrpcError.getStatus.getDescription)
-              .value
-              .onShutdown {
-                Left(("Aborted due to shutdown. Please restart me."))
-              }
+        consoleEnvironment.commandTimeouts.unbounded
+          .await(s"running command to migrate from domain $source to domain $target")(
+            access(
+              _.sync
+                .migrateDomain(source, target)(tc)
+                .leftMap(_.asGrpcError.getStatus.getDescription)
+                .value
+                .onShutdown {
+                  Left(("Aborted due to shutdown. Please restart me."))
+                }
+            )
           )
-        )
       )
     }
 
@@ -689,7 +692,9 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
         to: SequencerCounter,
         force: Boolean = false,
     ): Unit =
-      runRepairCommand(tc => access { _.sync.ignoreEventsRepair(domainId, from, to, force)(tc) })
+      runRepairCommand(tc =>
+        access { _.sync.repairService.ignoreEvents(domainId, from, to, force)(tc) }
+      )
 
     @Help.Summary("Remove the ignored status from sequenced events.")
     @Help.Description(
@@ -710,7 +715,54 @@ class LocalParticipantReference(override val consoleEnvironment: ConsoleEnvironm
         to: SequencerCounter,
         force: Boolean = false,
     ): Unit =
-      runRepairCommand(tc => access { _.sync.unignoreEventsRepair(domainId, from, to, force)(tc) })
+      runRepairCommand(tc =>
+        access { _.sync.repairService.unignoreEvents(domainId, from, to, force)(tc) }
+      )
+
+    @Help.Summary("Download all contracts for the given set of parties to a file.")
+    @Help.Description(
+      """This command can be used to download the current active contract set of a given set of parties to a text file.
+        |This is mainly interesting for recovery and operational purposes.
+        |
+        |The file will contain base64 encoded strings, one line per contract. The lines are written 
+        |sorted according to their domain and contract id. This allows to compare the contracts stored
+        |by two participants using standard file comparison tools.
+        |The domain-id is printed with the prefix domain-id before the block of contracts starts.
+        |
+        |This command may take a long time to complete and may require significant resources. 
+        |It will first load the contract ids of the active contract set into memory and then subsequently
+        |load the contracts in batches and inspect their stakeholders. As this operation needs to traverse
+        |the entire datastore, it might take a long time to complete. 
+        |
+        The arguments are:
+        - parties: identifying contracts having at least one stakeholder from the given set
+        - target: the target file where to store the data. Use .gz as a suffix to get a compressed file (recommended)
+        - protocolVersion: the protocol version to use for the serialization. Defaults to latest.
+        - filterDomainId: restrict the export to a given domain 
+        - batchSize: batch size used to load contracts. Defaults to 1000. 
+        """
+    )
+    def download(
+        parties: Set[PartyId],
+        target: String,
+        protocolVersion: ProtocolVersion = ProtocolVersion.latest,
+        filterDomainId: String = "",
+        batchSize: PositiveInt = PositiveInt.tryCreate(1000),
+    ): Unit = {
+      runRepairCommand { tc =>
+        access(
+          _.sync.stateInspection
+            .storeActiveContractsToFile(
+              parties,
+              new File(target),
+              batchSize,
+              _.filterString.startsWith(filterDomainId),
+              protocolVersion,
+            )(tc)
+        )
+      }
+    }
+
   }
 
   @Help.Summary("Inspect and manage parties")

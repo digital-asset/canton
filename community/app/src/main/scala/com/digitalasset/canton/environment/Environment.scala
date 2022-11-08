@@ -7,6 +7,7 @@ import akka.actor.ActorSystem
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
+import com.daml.error.definitions.LedgerApiErrors
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.concurrent.*
 import com.digitalasset.canton.config.*
@@ -48,6 +49,11 @@ import scala.util.control.NonFatal
 /** Holds all significant resources held by this process.
   */
 trait Environment extends NamedLogging with AutoCloseable with NoTracing {
+
+  // TODO(matthias): Remove this, once the cyclic class initialization has been fixed upstream.
+  //  https://digitalasset.atlassian.net/browse/DPP-1303
+  //  Background: https://www.farside.org.uk/201510/deadlocks_in_java_class_initialisation
+  LedgerApiErrors.discard
 
   type Config <: CantonConfig
   type Console <: ConsoleEnvironment

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.topology
 
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.DisplayName
 import com.digitalasset.canton.config.RequireTypes.{LengthLimitedString, String255}
@@ -90,7 +90,7 @@ class LedgerServerPartyNotifier(
           sequencerCounter: SequencerCounter,
           transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        transactions.traverse_(tx => observedF(sequencerTimestamp, effectiveTimestamp, tx))
+        transactions.parTraverse_(tx => observedF(sequencerTimestamp, effectiveTimestamp, tx))
 
     }
 
@@ -100,7 +100,7 @@ class LedgerServerPartyNotifier(
           timestamp: CantonTimestamp,
           transactions: Seq[SignedTopologyTransaction[TopologyChangeOp]],
       )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-        transactions.traverse_(observedF(SequencedTime(clock.now), EffectiveTime(clock.now), _))
+        transactions.parTraverse_(observedF(SequencedTime(clock.now), EffectiveTime(clock.now), _))
     }
 
   private val sequentialQueue = new SimpleExecutionQueue()

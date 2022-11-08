@@ -6,8 +6,8 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, ConfirmingParty}
@@ -24,6 +24,7 @@ import com.digitalasset.canton.protocol.{RequestId, RootHash, ViewHash, v0}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -192,7 +193,7 @@ private[mediator] final case class ResponseAggregation private (
           )
           val hostedConfirmingPartiesF =
             declaredConfirmingParties.toList
-              .filterA(p => topologySnapshot.canConfirm(sender, p, requiredTrustLevel))
+              .parFilterA(p => topologySnapshot.canConfirm(sender, p, requiredTrustLevel))
               .map(_.toSet)
           val res = hostedConfirmingPartiesF.map { hostedConfirmingParties =>
             logger.debug(
@@ -219,7 +220,7 @@ private[mediator] final case class ResponseAggregation private (
 
             unauthorizedConfirmingParties <- OptionT.liftF(
               confirmingParties.toList
-                .filterA(p =>
+                .parFilterA(p =>
                   topologySnapshot.canConfirm(sender, p, requiredTrustLevel).map(x => !x)
                 )
                 .map(_.toSet)
@@ -337,8 +338,8 @@ private[mediator] final case class ResponseAggregation private (
 
             val informeesByView = request.informeesAndThresholdByView
             val ret = informeesByView.toList
-              .traverseFilter { case (viewHash, (informees, _threshold)) =>
-                val hostedConfirmingPartiesF = informees.toList.traverseFilter {
+              .parTraverseFilter { case (viewHash, (informees, _threshold)) =>
+                val hostedConfirmingPartiesF = informees.toList.parTraverseFilter {
                   case ConfirmingParty(party, _) =>
                     topologySnapshot
                       .canConfirm(sender, party, requiredTrustLevel)

@@ -127,7 +127,7 @@ object TimeProof {
         client.sendAsync(
           // we intentionally ask for an empty event to be sequenced to observe the time.
           // this means we can safely share this event without mentioning other recipients.
-          Batch.empty(client.staticDomainParameters.protocolVersion),
+          Batch.empty(client.protocolVersion),
           // as we typically won't know the domain time at the point of doing this request (hence doing the request for the time...),
           // we can't pick a known good domain time for the max sequencing time.
           // if we were to guess it we may get it wrong and then in the event of no activity on the domain for our recipient,
@@ -138,7 +138,7 @@ object TimeProof {
         )
       case _: UnauthenticatedMemberId =>
         client.sendAsyncUnauthenticated(
-          Batch.empty(client.staticDomainParameters.protocolVersion),
+          Batch.empty(client.protocolVersion),
           maxSequencingTime = CantonTimestamp.MaxValue,
           messageId = mkTimeProofRequestMessageId,
         )

@@ -206,6 +206,18 @@ trait DomainAdministration {
         _.maxRatePerParticipant,
       )
 
+    @Help.Summary("Get the max request size")
+    @Help.Description("""Depending on the protocol version used on the domain, the value will be
+        read either from the static domain parameters or the dynamic ones.
+        This value is not necessarily the one used by the sequencer node because it requires a restart
+        of the server to be taken into account.""")
+    def get_max_request_size: NonNegativeInt = {
+      getParameterStaticV0DynamicV1(
+        "max request size",
+        _.maxInboundMessageSize,
+        _.maxRequestSize,
+      )
+    }
     @Help.Summary("Get the mediator deduplication timeout", FeatureFlag.Preview)
     @Help.Description(
       "The method will fail, if the domain does not support the mediatorDeduplicationTimeout."
@@ -295,10 +307,26 @@ trait DomainAdministration {
       check(FeatureFlag.Preview) {
         update_dynamic_domain_parameters_v1(
           _.copy(maxRatePerParticipant = maxRatePerParticipant),
-          "update maxRatePerParticipant",
+          "update max rate per participant",
         )
       }
 
+    // TODO(#9800) Change reference to dev, remove preview
+    @Help.Summary("Try to update the max rate per participant for the domain")
+    @Help.Description("""If the max request size is dynamic, update the value.
+                         The update won't have any effect unless the sequencer server is restarted. 
+    If the max request size is not dynamic (i.e., if the domain is running
+    on protocol version lower than DEV), then it will throw an error.
+    """)
+    def set_max_request_size(
+        maxRequestSize: NonNegativeInt
+    ): Unit =
+      check(FeatureFlag.Preview) {
+        update_dynamic_domain_parameters_v1(
+          _.copy(maxRequestSize = maxRequestSize),
+          "update max request size",
+        )
+      }
     private def update_dynamic_domain_parameters_v1(
         modifier: DynamicDomainParametersV1 => DynamicDomainParametersV1,
         operation: String,

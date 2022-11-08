@@ -9,8 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,6 +27,7 @@ import com.digitalasset.canton.sequencing.protocol.{DeliverError, MessageId}
 import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
@@ -274,7 +274,7 @@ class InFlightSubmissionTracker(
       domains: Seq[DomainId]
   )(implicit traceContext: TraceContext): Future[Unit] = {
     for {
-      unsequenceds <- domains.traverse { domainId =>
+      unsequenceds <- domains.parTraverse { domainId =>
         store.lookupUnsequencedUptoUnordered(domainId, CantonTimestamp.MaxValue)
       }
       unsequenced = unsequenceds.flatten
@@ -384,7 +384,7 @@ class InFlightSubmissionTracker(
     ): Future[Seq[(InFlightBySequencingInfo, MultiDomainEventLog.OnPublish.Publication)]] = {
       EventLogId.forDomain(multiDomainEventLog.indexedStringStore)(domainId).flatMap { eventLogId =>
         localOffsets
-          .traverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
+          .parTraverseFilter { case (localOffset, inFlight, deduplicationInfo) =>
             multiDomainEventLog.globalOffsetFor(eventLogId, localOffset).map { optPublicationInfo =>
               optPublicationInfo.map { case (globalOffset, publicationTime) =>
                 val info = inFlight.referenceBySequencingInfo

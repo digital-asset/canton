@@ -4,6 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
@@ -31,6 +32,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -435,7 +437,7 @@ private[domain] class DomainTopologyManagerRequestService(
   ): Future[List[RegisterTopologyTransactionResponseResult]] = {
     for {
       // run pre-checks first
-      preChecked <- res.traverse(preCheck)
+      preChecked <- res.parTraverse(preCheck)
       preCheckedTx = res.zip(preChecked)
       valid = preCheckedTx.collect { case (tx, Accepted) =>
         tx

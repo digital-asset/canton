@@ -18,7 +18,7 @@ object GrpcSequencerChannelBuilder {
   def apply(
       clientChannelBuilder: ClientChannelBuilder,
       connection: GrpcSequencerConnection,
-      maxInboundMessageSize: NonNegativeInt,
+      maxRequestSize: NonNegativeInt,
       traceContextPropagation: Propagation,
       keepAlive: Option[KeepAliveClientConfig] = Some(KeepAliveClientConfig()),
   )(implicit executor: Executor): ManagedChannel =
@@ -29,7 +29,7 @@ object GrpcSequencerChannelBuilder {
         executor,
         connection.customTrustCertificates,
         traceContextPropagation,
-        maxInboundMessageSize.some,
+        maxRequestSize.some,
         keepAlive,
       )
       .build()

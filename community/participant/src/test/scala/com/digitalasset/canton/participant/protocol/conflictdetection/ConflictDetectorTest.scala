@@ -7,6 +7,7 @@ import cats.data.{Chain, EitherT, NonEmptyChain}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
@@ -56,6 +57,7 @@ import com.digitalasset.canton.protocol.{
   LfGlobalKey,
   TransferId,
 }
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, HasExecutorService, RequestCounter}
@@ -774,7 +776,7 @@ private[conflictdetection] class ConflictDetectorTest
         }
         fin1 <- cd.finalizeRequest(mkCommitSet(arch = Set(coid00, coid11, coid20)), toc1).flatten
         _ = assert(fin1 == Right(()))
-        _ <- List(coid00 -> 1, coid11 -> 0, coid20 -> 1).traverse_ { case (coid, locks) =>
+        _ <- List(coid00 -> 1, coid11 -> 0, coid20 -> 1).parTraverse_ { case (coid, locks) =>
           if (locks > 0) {
             checkContractState(cd, coid, Archived, toc1, 0, locks, 0)(
               s"Archived contract $coid is retained because of more locks"
@@ -816,7 +818,7 @@ private[conflictdetection] class ConflictDetectorTest
         _ <- checkContractState(acs, coid00, (Archived, toc1))(
           s"contract $coid00 is double archived by request $rc"
         )
-        _ <- List(coid01, coid10).traverse_ { coid =>
+        _ <- List(coid01, coid10).parTraverse_ { coid =>
           checkContractState(acs, coid, (Archived, toc))(s"contract $coid is archived as usual")
         }
 
@@ -963,7 +965,7 @@ private[conflictdetection] class ConflictDetectorTest
         // Finalize second request
         fin1 <- cd.finalizeRequest(mkCommitSet(arch = Set(coid00, coid10)), toc1).flatten
         _ = assert(fin1 == Right(()))
-        _ <- List(coid00 -> 0, coid10 -> 0).traverse_ { case (coid, deactivationLocks) =>
+        _ <- List(coid00 -> 0, coid10 -> 0).parTraverse_ { case (coid, deactivationLocks) =>
           checkContractState(cd, coid, Archived, toc1, 0, 1 + deactivationLocks, 0)(
             s"contract $coid archived by opportunistic follow-up still locked"
           )

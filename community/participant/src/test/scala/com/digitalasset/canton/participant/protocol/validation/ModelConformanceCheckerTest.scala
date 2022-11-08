@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
-import cats.implicits.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.ImmArray
 import com.daml.lf.engine
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfCommand, LfKeyResolver, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -121,7 +122,7 @@ class ModelConformanceCheckerTest extends AsyncWordSpec with BaseTest {
 
         "reinterpret views individually" in {
           example.transactionViewTrees
-            .traverse_ { viewTree =>
+            .parTraverse_ { viewTree =>
               for {
                 result <- valueOrFail(check(sut, viewsWithNoInputKeys(Seq(viewTree))))(
                   s"model conformance check for view at ${viewTree.viewPosition}"

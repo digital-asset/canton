@@ -4,8 +4,8 @@
 package com.digitalasset.canton.domain.sequencing.service
 
 import cats.data.EitherT
-import cats.syntax.foldable.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -18,6 +18,8 @@ import com.digitalasset.canton.domain.metrics.DomainTestMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.Sequencer
 import com.digitalasset.canton.domain.sequencing.sequencer.errors.SequencerError
 import com.digitalasset.canton.domain.sequencing.service.SubscriptionPool.PoolClosed
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
+import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{
   DomainParametersLookup,
   TestDomainParameters,
@@ -27,6 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.{ProtocolVersion, UntypedVersionedMessage}
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
@@ -103,6 +106,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
       mock[SubscriptionPool[GrpcManagedSubscription]]
 
     private val maxRatePerParticipant = NonNegativeInt.tryCreate(5)
+    private val maxRequestSize = NonNegativeInt.tryCreate(1000)
     val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
     private val topologyClient = mock[DomainTopologyClient]
     private val mockTopologySnapshot = mock[TopologySnapshot]
@@ -115,19 +119,24 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
     )
       .thenReturn(
         Future.successful(
-          TestDomainParameters.defaultDynamic(maxRatePerParticipant = maxRatePerParticipant)
+          TestDomainParameters.defaultDynamic(
+            maxRatePerParticipant = maxRatePerParticipant,
+            maxRequestSize = MaxRequestSize(maxRequestSize),
+          )
         )
       )
 
-    private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
-      DomainParametersLookup.forMaxRatePerParticipant(
-        BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant =
-          maxRatePerParticipant.unwrap
+    private val domainParamLookup: DomainParametersLookup[SequencerDomainParameters] =
+      DomainParametersLookup.forSequencerDomainParameters(
+        BaseTest.defaultStaticDomainParametersWith(
+          maxRatePerParticipant = maxRatePerParticipant.unwrap,
+          maxRequestSize = maxRequestSize.unwrap,
         ),
         topologyClient,
         FutureSupervisor.Noop,
         loggerFactory,
       )
+
     val service =
       new GrpcSequencerService(
         sequencer,
@@ -139,8 +148,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
         },
         subscriptionPool,
         sequencerSubscriptionFactory,
-        maxRatePerParticipantLookup,
-        NonNegativeInt.tryCreate(1000),
+        domainParamLookup,
         timeouts,
       )
   }
@@ -539,7 +547,7 @@ class GrpcSequencerServiceTest extends FixtureAsyncWordSpec with BaseTest {
             }
           }
           // We don't need log suppression for the good requests so we can run them in parallel
-          _ <- goodRequests.zipWithIndex.traverse_ { case ((goodRequest, sender), index) =>
+          _ <- goodRequests.zipWithIndex.parTraverse_ { case ((goodRequest, sender), index) =>
             withClue(s"good request #$index") {
               val senderEnv = new Environment(sender)
               sendAndCheckSucceed(goodRequest.toProtoV0)(senderEnv)

@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer
 import akka.actor.ActorSystem
 import akka.stream.Materializer
 import akka.stream.scaladsl.Sink
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.lifecycle.{
@@ -27,6 +27,7 @@ import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.RepresentativeProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, SequencerCounter}
 import com.typesafe.config.ConfigFactory
@@ -179,7 +180,7 @@ class SequencerTest extends FixtureAsyncWordSpec with BaseTest with HasExecution
 
       for {
         _ <- valueOrFail(
-          List(alice, bob, carole, topologyClientMember).traverse(sequencer.registerMember)
+          List(alice, bob, carole, topologyClientMember).parTraverse(sequencer.registerMember)
         )(
           "member registration"
         )

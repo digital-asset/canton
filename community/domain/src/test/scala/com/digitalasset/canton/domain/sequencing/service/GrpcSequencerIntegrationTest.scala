@@ -8,7 +8,6 @@ import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   LoggingConfig,
@@ -28,6 +27,7 @@ import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, Lifecycle, SyncC
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.messages.{
   ProtocolMessage,
   ProtocolMessageV0,
@@ -88,8 +88,11 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   private val clock = new SimClock(loggerFactory = loggerFactory)
   private val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
   def timeouts = DefaultProcessingTimeouts.testing
+  private val futureSupervisor = FutureSupervisor.Noop
   private val topologyClient = mock[DomainTopologyClient]
   private val mockTopologySnapshot = mock[TopologySnapshot]
+  private val maxRatePerParticipant = BaseTest.defaultStaticDomainParameters.maxRatePerParticipant
+  private val maxRequestSize = BaseTest.defaultStaticDomainParameters.maxRequestSize
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
     .thenReturn(mockTopologySnapshot)
   when(
@@ -100,29 +103,44 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
   )
     .thenReturn(
       Future.successful(
-        TestDomainParameters.defaultDynamic(maxRatePerParticipant = NonNegativeInt.tryCreate(100))
+        TestDomainParameters.defaultDynamic(
+          maxRatePerParticipant = maxRatePerParticipant,
+          maxRequestSize = maxRequestSize,
+        )
       )
     )
 
-  private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
-    DomainParametersLookup.forMaxRatePerParticipant(
-      BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant = 100),
+  private val domainParamsLookup: DomainParametersLookup[SequencerDomainParameters] =
+    DomainParametersLookup.forSequencerDomainParameters(
+      BaseTest.defaultStaticDomainParametersWith(maxRatePerParticipant =
+        maxRatePerParticipant.unwrap
+      ),
       topologyClient,
-      FutureSupervisor.Noop,
+      futureSupervisor,
       loggerFactory,
     )
+
+  val authenticationCheck = new AuthenticationCheck {
+
+    override def authenticate(
+        member: Member,
+        authenticatedMember: Option[Member],
+    ): Either[String, Unit] =
+      Either.cond(
+        member == participant,
+        (),
+        s"$participant attempted operation on behalf of $member",
+      )
+
+    override def lookupCurrentMember(): Option[Member] = None
+  }
   private val service =
     new GrpcSequencerService(
       sequencer,
       DomainTestMetrics.sequencer,
       loggerFactory,
       ParticipantAuditor.noop,
-      member =>
-        Either.cond(
-          member == participant,
-          (),
-          s"$participant attempted operation on behalf of $member",
-        ),
+      authenticationCheck,
       new SubscriptionPool[GrpcManagedSubscription](
         clock,
         DomainTestMetrics.sequencer,
@@ -130,8 +148,7 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         loggerFactory,
       ),
       sequencerSubscriptionFactory,
-      maxRatePerParticipantLookup,
-      NonNegativeInt.tryCreate(10000000),
+      domainParamsLookup,
       timeouts,
     )
   private val connectService = new GrpcSequencerConnectService(
@@ -203,6 +220,8 @@ case class Env(loggerFactory: NamedLoggerFactory)(implicit
         BaseTest.defaultStaticDomainParameters,
         DefaultProcessingTimeouts.testing,
         clock,
+        topologyClient,
+        futureSupervisor,
         _ => None,
         _ => None,
         CommonMockMetrics.sequencerClient,

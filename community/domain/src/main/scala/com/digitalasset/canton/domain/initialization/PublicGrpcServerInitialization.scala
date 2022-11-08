@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.Lifecycle.{CloseableServer, toCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricHandle
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,6 +30,7 @@ object PublicGrpcServerInitialization {
   @nowarn("cat=deprecation") // Can be removed once we don't use DomainService
   def apply(
       config: DomainConfig,
+      maxRequestSize: MaxRequestSize,
       metrics: MetricHandle.Factory,
       cantonParameterConfig: DomainNodeParameters,
       loggerFactory: NamedLoggerFactory,
@@ -52,7 +54,7 @@ object PublicGrpcServerInitialization {
         cantonParameterConfig.tracing,
       )
       // Overriding the dummy setting from PublicServerConfig.
-      .maxInboundMessageSize(config.init.domainParameters.maxInboundMessageSize)
+      .maxInboundMessageSize(maxRequestSize.value)
       .addService(ProtoReflectionService.newInstance(), withLogging = false)
 
     // the server builder is mutable

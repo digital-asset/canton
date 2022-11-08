@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.bifunctor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.data.CantonTimestamp
@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   packageId,
   transactionId,
 }
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -239,9 +240,9 @@ trait ContractStoreTest { this: AsyncWordSpec with BaseTest =>
       val store = mk()
       for {
         _ <- List(contract, contract2, contract4, contract5)
-          .traverse(store.storeCreatedContract(rc, transactionId1, _))
+          .parTraverse(store.storeCreatedContract(rc, transactionId1, _))
         _ <- store.deleteIgnoringUnknown(Seq(contractId, contractId2, contractId3, contractId4))
-        notFounds <- List(contractId, contractId2, contractId3, contractId4).traverse(
+        notFounds <- List(contractId, contractId2, contractId3, contractId4).parTraverse(
           store.lookupE(_).value
         )
         notDeleted <- store.lookupE(contractId5).value

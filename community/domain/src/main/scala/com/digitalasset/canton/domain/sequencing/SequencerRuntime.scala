@@ -6,8 +6,8 @@ package com.digitalasset.canton.domain.sequencing
 import akka.actor.ActorSystem
 import cats.data.EitherT
 import cats.syntax.either.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
   LocalNodeParameters,
   ProcessingTimeout,
@@ -44,6 +44,7 @@ import com.digitalasset.canton.health.admin.data.{SequencerHealthStatus, Topolog
 import com.digitalasset.canton.lifecycle.{FlagCloseable, HasCloseContext, Lifecycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
+import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.client.*
@@ -72,6 +73,7 @@ import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
@@ -165,8 +167,6 @@ class SequencerRuntime(
       }
 
   private val registerInitialMembers = withNewTraceContext { implicit traceContext =>
-    import cats.syntax.traverse.*
-
     logger.debug("Registering initial sequencer members")
 
     // only register the sequencer itself if we have remote sequencers that will necessitate topology transactions
@@ -174,7 +174,7 @@ class SequencerRuntime(
     DomainMember
       .list(domainId, includeSequencer = registerSequencerMember)
       .toList
-      .traverse(
+      .parTraverse(
         sequencer
           .ensureRegistered(_)
           .leftFlatMap[Unit, SequencerWriteError[RegisterMemberError]] {
@@ -205,6 +205,13 @@ class SequencerRuntime(
     }
   }
 
+  private val sequencerDomainParamsLookup: DomainParametersLookup[SequencerDomainParameters] =
+    DomainParametersLookup.forSequencerDomainParameters(
+      staticDomainParameters,
+      topologyClient,
+      futureSupervisor,
+      loggerFactory,
+    )
   /* If we're running separately from the domain node we create a sequencer client and connect it to a topology client
    * to power sequencer authentication.
    */
@@ -232,7 +239,8 @@ class SequencerRuntime(
           ),
           localNodeParameters.sequencerClient,
           testingConfig,
-          staticDomainParameters,
+          staticDomainParameters.protocolVersion,
+          sequencerDomainParamsLookup,
           localNodeParameters.processingTimeouts,
           // Since the sequencer runtime trusts itself, there is no point in validating the events.
           SequencedEventValidatorFactory.noValidation(domainId, sequencerId, warn = false),
@@ -245,7 +253,7 @@ class SequencerRuntime(
           replayEnabled = false,
           localNodeParameters.loggingConfig,
           loggerFactory,
-          initialState.flatMap(_.snapshot.heads.get(sequencerId).map(_ + 1)),
+          sequencer.firstSequencerCounterServeableForSequencer,
         )
         val timeTracker = DomainTimeTracker(timeTrackerConfig, clock, client, loggerFactory)
 
@@ -284,22 +292,13 @@ class SequencerRuntime(
   private val timeoutScheduler: ScheduledExecutorService =
     Threading.singleThreadScheduledExecutor(loggerFactory.threadName + "-env-scheduler", logger)
 
-  private val maxRatePerParticipantLookup: DomainParametersLookup[NonNegativeInt] =
-    DomainParametersLookup.forMaxRatePerParticipant(
-      staticDomainParameters,
-      topologyClient,
-      futureSupervisor,
-      loggerFactory,
-    )
-
   private val sequencerService = GrpcSequencerService(
     sequencer,
     metrics,
     auditLogger,
     authenticationConfig.check,
     clock,
-    maxRatePerParticipantLookup,
-    staticDomainParameters.maxInboundMessageSize,
+    sequencerDomainParamsLookup,
     localNodeParameters.processingTimeouts,
     loggerFactory,
   )

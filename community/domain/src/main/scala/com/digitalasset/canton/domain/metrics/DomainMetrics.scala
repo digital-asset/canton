@@ -80,6 +80,10 @@ class EnvMetrics(override val registry: MetricRegistry) extends MetricHandle.Fac
 
 }
 
+@MetricDoc.GroupTag(
+  representative = "canton.<component>.sequencer-client",
+  groupableClass = classOf[SequencerClientMetrics],
+)
 class DomainMetrics(override val prefix: MetricName, override val registry: MetricRegistry)
     extends MetricHandle.NodeMetrics {
 

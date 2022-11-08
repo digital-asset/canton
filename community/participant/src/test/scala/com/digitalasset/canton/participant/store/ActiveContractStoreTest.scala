@@ -4,8 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.Chain
-import cats.implicits.toFoldableOps
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref
 import com.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.canton.config.RequireTypes.String300
@@ -23,6 +22,7 @@ import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import com.digitalasset.canton.{BaseTest, LfPackageId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
@@ -975,17 +975,21 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
         (0L to 3L).map(i => TimeOfChange(rc + i, ts.addMicros(i)))
       val activations = List(toc1, toc2, toc3)
       for {
-        transferIns <- activations.traverse(acs.transferInContract(coid00, _, domain1).value)
+        transferIns <- activations.parTraverse(acs.transferInContract(coid00, _, domain1).value)
         ignoredPruneResult <- acs.prune(toc4.timestamp).value
-        snapshotsTakenAfterIgnoredPrune <- activations.traverse(toc => acs.snapshot(toc.timestamp))
-        countsAfterIgnoredPrune <- activations.traverse(toc => acs.contractCount(toc.timestamp))
+        snapshotsTakenAfterIgnoredPrune <- activations.parTraverse(toc =>
+          acs.snapshot(toc.timestamp)
+        )
+        countsAfterIgnoredPrune <- activations.parTraverse(toc => acs.contractCount(toc.timestamp))
         _ <- acs
           .archiveContract(coid00, toc4)
           .value // the presence of an archival/deactivation enables pruning
         actualPruneResult <- acs.prune(toc4.timestamp).value
 
-        snapshotsTakenAfterActualPrune <- activations.traverse(toc => acs.snapshot(toc.timestamp))
-        countsAfterActualPrune <- activations.traverse(toc => acs.contractCount(toc.timestamp))
+        snapshotsTakenAfterActualPrune <- activations.parTraverse(toc =>
+          acs.snapshot(toc.timestamp)
+        )
+        countsAfterActualPrune <- activations.parTraverse(toc => acs.contractCount(toc.timestamp))
       } yield {
         transferIns.foreach(in => assert(in.successful, s"transfer-in succeeds"))
         assert(ignoredPruneResult.isRight, "first pruning succeeds")
@@ -1210,7 +1214,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest { this: AsyncWordSpecLi
           contractStore: ContractStore,
           contracts: List[(LfContractId, LfPackageId)],
       ): Future[Unit] = {
-        contracts.traverse_ { case (contractId, pkg) =>
+        contracts.parTraverse_ { case (contractId, pkg) =>
           contractStore.storeCreatedContract(
             RequestCounter(0),
             transactionId(1),

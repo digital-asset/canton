@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.mediator
 
 import cats.data.EitherT
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, SyncCryptoError}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -146,7 +147,7 @@ private[mediator] class DefaultVerdictSender(
     ): Future[(Map[ParticipantId, Set[LfPartyId]], Set[LfPartyId])] = {
       val start = Map.empty[ParticipantId, Set[LfPartyId]]
       val prefetchF =
-        informees.toList.traverse(partyId =>
+        informees.toList.parTraverse(partyId =>
           topologySnapshot.activeParticipantsOf(partyId).map(res => (partyId, res))
         )
       prefetchF.map { fetched =>
@@ -190,7 +191,7 @@ private[mediator] class DefaultVerdictSender(
         } else verdict
       }
       envelopes <- informeesMap.toList
-        .traverse { case (participantId, informees) =>
+        .parTraverse { case (participantId, informees) =>
           val result = request.createMediatorResult(requestId, verdictWithInformeeCheck, informees)
           SignedProtocolMessage
             .create(result, snapshot, crypto.pureCrypto, protocolVersion)

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.engine
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -35,6 +35,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPartyId, RequestCounter, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -83,7 +84,7 @@ class ModelConformanceChecker(
     val CommonData(transactionId, ledgerTime, submissionTime, confirmationPolicy) = commonData
 
     for {
-      suffixedTxs <- rootViews.toNEF.traverse { v =>
+      suffixedTxs <- rootViews.toNEF.parTraverse { v =>
         checkView(
           v,
           keyResolverFor(v),

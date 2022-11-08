@@ -7,7 +7,11 @@ import akka.NotUsed
 import akka.stream.Materializer
 import akka.stream.scaladsl.Source
 import cats.data.EitherT
-import cats.implicits.*
+import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functorFilter.*
+import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.*
 import com.daml.error.definitions.PackageServiceError
@@ -25,7 +29,7 @@ import com.daml.telemetry.TelemetryContext
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{PositiveInt, String256M}
+import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.SyncServiceErrorGroup
@@ -40,8 +44,8 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.*
+import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
-import com.digitalasset.canton.participant.admin.{workflows, *}
 import com.digitalasset.canton.participant.config.ParticipantNodeParameters
 import com.digitalasset.canton.participant.domain.*
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -76,6 +80,8 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFinite
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.version.ProtocolVersion
 import io.functionmeta.functionFullName
@@ -319,7 +325,7 @@ class CantonSyncService(
       loggerFactory,
     )
 
-  private val repairService: RepairService = new RepairService(
+  val repairService: RepairService = new RepairService(
     participantId,
     topologyStoreFactory,
     syncCrypto,
@@ -330,6 +336,7 @@ class CantonSyncService(
     aliasManager,
     parameters,
     indexedStringStore,
+    connectedDomainsMap.contains,
     loggerFactory,
   )
 
@@ -1293,7 +1300,7 @@ class CantonSyncService(
   ): EitherT[Future, SyncServiceError, Unit] = {
     val connectedDomains =
       connectedDomainsMap.keys.toList.mapFilter(aliasManager.aliasForDomainId).distinct
-    connectedDomains.traverse_(disconnectDomain)
+    connectedDomains.parTraverse_(disconnectDomain)
   }
 
   /** Checks if a given party has any active contracts. */
@@ -1338,138 +1345,6 @@ class CantonSyncService(
           Future.successful(false)
       }
     } yield res
-  }
-
-  /** Participant repair utility for manually adding contracts to a domain in an offline fashion.
-    *
-    * @param domain             alias of domain to add contracts to. The domain needs to be configured, but disconnected
-    *                           to prevent race conditions.
-    * @param contractsToAdd     contracts to add. Relevant pieces of each contract: create-arguments (LfContractInst),
-    *                           template-id (LfContractInst), contractId, ledgerCreateTime, salt (to be added to
-    *                           SerializableContract), and witnesses, SerializableContract.metadata is only validated,
-    *                           but otherwise ignored as stakeholder and signatories can be recomputed from contracts.
-    * @param ignoreAlreadyAdded whether to ignore and skip over contracts already added/present in the domain. Setting
-    *                           this to true (at least on retries) enables writing idempotent repair scripts.
-    */
-  def addContractsRepair(
-      domain: DomainAlias,
-      contractsToAdd: Seq[SerializableContractWithWitnesses],
-      ignoreAlreadyAdded: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
-    for {
-      // Ensure domain is configured but not connected to avoid race conditions.
-      domainId <- aliasManager.domainIdForAlias(domain).toRight(s"Could not find $domain")
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(domainId),
-        (),
-        s"Participant is still connected to $domain",
-      )
-      _ <- repairService.addContracts(domainId, contractsToAdd, ignoreAlreadyAdded)
-    } yield ()
-  }
-
-  /** Participant repair utility for manually purging (archiving) contracts in an offline fashion.
-    *
-    * @param domain              alias of domain to purge contracts from. The domain needs to be configured, but
-    *                            disconnected to prevent race conditions.
-    * @param contractIds         lf contract ids of contracts to purge
-    * @param ignoreAlreadyPurged whether to ignore already purged contracts.
-    */
-  def purgeContractsRepair(
-      domain: DomainAlias,
-      contractIds: Seq[LfContractId],
-      ignoreAlreadyPurged: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] =
-    for {
-      // Ensure domain is configured but not connected to avoid race conditions.
-      domainId <- aliasManager
-        .domainIdForAlias(domain)
-        .toRight(s"Could not find domain ${domain.unwrap}")
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(domainId),
-        (),
-        s"Participant is still connected to $domain",
-      )
-      _ <- repairService.purgeContracts(domainId, contractIds, ignoreAlreadyPurged)
-    } yield ()
-
-  /** Participant repair utility for manually moving contracts from a source domain to a target domain in an offline
-    * fashion.
-    *
-    * @param contractIds  ids of contracts to move that reside in the sourceDomain (or for idempotency already in the
-    *                     targetDomain)
-    * @param sourceDomain alias of source domain from which to move contracts
-    * @param targetDomain alias of target domain to which to move contracts
-    * @param skipInactive whether to only move contracts that are active in the source domain
-    * @param batchSize    how many contracts to write at once
-    */
-  def changeDomainRepair(
-      contractIds: Seq[LfContractId],
-      sourceDomain: DomainAlias,
-      targetDomain: DomainAlias,
-      skipInactive: Boolean,
-      batchSize: PositiveInt,
-  )(implicit tranceContext: TraceContext): Either[String, Unit] = {
-    for {
-      // Ensure both domains are configured but not connected to avoid race conditions.
-      sourceDomainId <- aliasManager
-        .domainIdForAlias(sourceDomain)
-        .toRight(s"Could not find source domain $sourceDomain")
-      targetDomainId <- aliasManager
-        .domainIdForAlias(targetDomain)
-        .toRight(s"Could not find target domain $targetDomain")
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(sourceDomainId),
-        (),
-        s"Participant is still connected to source domain $sourceDomain",
-      )
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(targetDomainId),
-        (),
-        s"Participant is still connected to target domain $targetDomain",
-      )
-      _ <- repairService.changeDomainAwait(
-        contractIds,
-        sourceDomainId,
-        targetDomainId,
-        skipInactive,
-        batchSize,
-      )
-    } yield ()
-  }
-
-  def ignoreEventsRepair(
-      domain: DomainId,
-      from: SequencerCounter,
-      to: SequencerCounter,
-      force: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
-    logger.info(s"Ignoring sequenced events from $from to $to (force = $force).")
-    for {
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(domain),
-        (),
-        s"Participant is still connected to domain $domain",
-      )
-      _ <- repairService.ignoreEvents(domain, from, to, force)
-    } yield ()
-  }
-
-  def unignoreEventsRepair(
-      domain: DomainId,
-      from: SequencerCounter,
-      to: SequencerCounter,
-      force: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] = {
-    logger.info(s"Unignoring sequenced events from $from to $to (force = $force).")
-    for {
-      _ <- Either.cond(
-        !connectedDomainsMap.contains(domain),
-        (),
-        s"Participant is still connected to domain $domain",
-      )
-      _ <- repairService.unignoreEvents(domain, from, to, force)
-    } yield ()
   }
 
   /** prepares a domain connection for migration: connect and wait until the topology state has been pushed
@@ -1854,7 +1729,6 @@ object SyncServiceError extends SyncServiceErrorGroup {
     case class UnrecoverableError(domain: DomainAlias, _reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = show"$domain fatally disconnected because of ${_reason}")
-
     case class UnrecoverableException(domain: DomainAlias, throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(

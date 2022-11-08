@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.tracing.TraceContext
@@ -38,7 +39,8 @@ import com.digitalasset.canton.version.{DomainProtocolVersion, ProtocolVersion}
 final case class DomainParametersConfig(
     reconciliationInterval: PositiveSeconds = StaticDomainParameters.defaultReconciliationInterval,
     maxRatePerParticipant: NonNegativeInt = StaticDomainParameters.defaultMaxRatePerParticipant,
-    maxInboundMessageSize: NonNegativeInt = StaticDomainParameters.defaultMaxInboundMessageSize,
+    maxInboundMessageSize: MaxRequestSize =
+      StaticDomainParameters.defaultMaxRequestSize, // Cannot change the name for now
     uniqueContractKeys: Boolean = true,
     requiredSigningKeySchemes: Option[NonEmpty[Set[SigningKeyScheme]]] = None,
     requiredEncryptionKeySchemes: Option[NonEmpty[Set[EncryptionKeyScheme]]] = None,
@@ -103,7 +105,7 @@ final case class DomainParametersConfig(
       StaticDomainParameters.create(
         reconciliationInterval = reconciliationInterval,
         maxRatePerParticipant = maxRatePerParticipant,
-        maxInboundMessageSize = maxInboundMessageSize,
+        maxRequestSize = maxInboundMessageSize,
         uniqueContractKeys = uniqueContractKeys,
         requiredSigningKeySchemes = newRequiredSigningKeySchemes,
         requiredEncryptionKeySchemes = newRequiredEncryptionKeySchemes,
@@ -124,23 +126,23 @@ final case class DomainParametersConfig(
     val currentPV = protocolVersion.version
     // TODO(#9800) Change references to protocol version 4
     if (currentPV >= ProtocolVersion.dev) {
-      if (reconciliationInterval != StaticDomainParameters.defaultReconciliationInterval) {
+      if (reconciliationInterval != StaticDomainParameters.defaultReconciliationInterval)
         logger.warn(
-          s"""|Starting from protocol version ${ProtocolVersion.dev}, reconciliation-interval is a dynamic parameter that cannot be configured within the configuration file.
-              |The configured value "reconciliation-interval = $reconciliationInterval" is ignored. The default value is ${StaticDomainParameters.defaultReconciliationInterval}.
-              |Please use the admin api to set this parameter: domain-name.service.set_reconciliation_interval($reconciliationInterval)
-              |""".stripMargin
+          logMessage(reconciliationInterval, StaticDomainParameters.defaultReconciliationInterval)
         )
-      }
-      if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant) {
+      if (maxRatePerParticipant != StaticDomainParameters.defaultMaxRatePerParticipant)
         logger.warn(
-          s"""|Starting from protocol version ${ProtocolVersion.dev}, max-rate-per-participant is a dynamic parameter that cannot be configured within the configuration file.
-                |The configured value "max-rate-per-participant = $maxRatePerParticipant" is ignored. The default value is ${StaticDomainParameters.defaultMaxRatePerParticipant}.
-                |Please use the admin api to set this parameter: domain-name.service.set_max_rate_per_participant($maxRatePerParticipant)
-                |""".stripMargin
+          logMessage(maxRatePerParticipant, StaticDomainParameters.defaultMaxRatePerParticipant)
         )
-      }
-    }
 
+      if (maxInboundMessageSize != StaticDomainParameters.defaultMaxRequestSize)
+        logger.warn(logMessage(maxInboundMessageSize, StaticDomainParameters.defaultMaxRequestSize))
+    }
   }
+  private def logMessage[A](configureValue: A, defaultValue: A) =
+    s"""|Starting from protocol version ${ProtocolVersion.dev}, max-inbound-message-size is a dynamic parameter that cannot be configured within the configuration file.
+        |The configured value "max-inbound-message-size = $configureValue" is ignored. The default value is ${defaultValue}.
+        |Please use the admin api to set this parameter: domain-name.service.set_max_request_size($configureValue)
+        |""".stripMargin
+
 }

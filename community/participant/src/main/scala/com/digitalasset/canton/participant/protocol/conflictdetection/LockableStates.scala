@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.store.{ConflictDetectionStore, HasPru
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.compat.immutable.ArraySeq
@@ -345,7 +346,7 @@ private[conflictdetection] class LockableStates[
     }
     val fetchedF = store.fetchStates(toFetch)
     cached
-      .traverse {
+      .parTraverse {
         case (id, None) => fetchedF.map(fetched => (id, fetched.get(id)))
         case (id, Some(storedF)) => storedF.map((id, _))
       }
@@ -546,9 +547,11 @@ private[conflictdetection] class LockableStates[
       // Await on the store Futures to make sure that there's no context switch in the conflict detection thread
       // This ensures that invariant checking runs atomically.
       val storeSnapshot =
-        timeouts.io.await()(store.fetchStatesForInvariantChecking(withoutPendingWrites.keys))
+        timeouts.io.await(
+          s"running fetchStatesForInvariantChecking with ${withoutPendingWrites.keys}"
+        )(store.fetchStatesForInvariantChecking(withoutPendingWrites.keys))
       val pruningStatusO = timeouts.io
-        .await()(store.pruningStatus.value)
+        .await("getting the pruning status")(store.pruningStatus.value)
         .valueOr(err => throw new RuntimeException(s"Failed to get the pruning status: $err"))
       withoutPendingWrites.foreach { case (id, state) =>
         val storedState = storeSnapshot.get(id)

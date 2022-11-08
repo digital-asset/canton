@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.mediator
 import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
@@ -24,6 +24,7 @@ import com.digitalasset.canton.time.DomainTimeTracker
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -235,7 +236,7 @@ private[mediator] class ConfirmationResponseProcessor(
     def wrongMembers(): Future[WrongMembers] = {
       val allInformeeParticipantsF =
         request.allInformees.toList
-          .traverse(topologySnapshot.activeParticipantsOf)
+          .parTraverse(topologySnapshot.activeParticipantsOf)
           .map(_.flatMap(_.keySet).toSet[Member])
       allInformeeParticipantsF.map { allInformeeParticipants =>
         val membersSet = members.toSet
@@ -316,7 +317,7 @@ private[mediator] class ConfirmationResponseProcessor(
       for {
         snapshot <- crypto.awaitSnapshot(requestId.unwrap)
         envs <- recipientsByViewType.toSeq
-          .traverse { case (viewType, recipients) =>
+          .parTraverse { case (viewType, recipients) =>
             val rejection =
               MalformedMediatorRequestResult(
                 requestId,

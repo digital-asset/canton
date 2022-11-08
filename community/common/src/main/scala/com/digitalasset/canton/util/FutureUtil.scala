@@ -140,7 +140,7 @@ object FutureUtil {
   @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   def noisyAwaitResult[T](
       future: Future[T],
-      description: => String = "",
+      description: => String,
       timeout: Duration = Duration.Inf,
       warnAfter: Duration = 1.minute,
       killAwait: Unit => Boolean = _ => false,

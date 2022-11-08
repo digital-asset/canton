@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
+import cats.implicits.toFoldableOps
 import com.daml.error.definitions.DamlError
 import com.daml.ledger.api.v1.commands.Command
 import com.daml.ledger.api.v1.transaction.Transaction
@@ -11,7 +12,7 @@ import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AcceptRejectError.OfferNotFound
 import com.digitalasset.canton.participant.admin.ShareError.DarNotFound
-import com.digitalasset.canton.participant.admin.workflows.{DarDistribution as M}
+import com.digitalasset.canton.participant.admin.workflows.DarDistribution as M
 import com.digitalasset.canton.participant.ledger.api.client.CommandSubmitterWithRetry.{
   CommandResult,
   Success as CommandSuccess,
@@ -22,6 +23,7 @@ import com.digitalasset.canton.participant.ledger.api.client.DecodeUtil.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.LedgerSubmit
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
 import com.google.protobuf.ByteString
 
@@ -152,7 +154,8 @@ class DarDistributionService(
     with DarDistribution
     with NamedLogging {
   import cats.data.*
-  import cats.implicits.*
+  import cats.syntax.parallel.*
+  import cats.syntax.either.*
 
   /** Async processing of the transaction.
     * TODO(danilo): promote async processing to [[AdminWorkflowService]] and our LedgerConnection
@@ -230,7 +233,7 @@ class DarDistributionService(
   }
 
   private def processShareArchived(shareId: P.ContractId[M.ShareDar]): Future[Unit] =
-    List(shareRequestStore, shareOfferStore).traverse_(store => store.remove(shareId))
+    List(shareRequestStore, shareOfferStore).parTraverse_(store => store.remove(shareId))
 
   private def processAcceptedDarCreated(
       acceptance: Contract[M.AcceptedDar]

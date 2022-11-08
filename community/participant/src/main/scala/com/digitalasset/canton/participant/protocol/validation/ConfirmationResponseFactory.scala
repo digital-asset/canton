@@ -4,17 +4,17 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.ConfirmingParty
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
-import com.digitalasset.canton.protocol.messages.{Malformed, *}
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{ConfirmationPolicy, LfContractId, RequestId, ViewHash}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, checked}
 
@@ -68,7 +68,7 @@ class ConfirmationResponseFactory(
         confirmationPolicy: ConfirmationPolicy,
     ): Future[Set[LfPartyId]] = {
       viewValidationResult.view.viewCommonData.informees.toList
-        .traverseFilter {
+        .parTraverseFilter {
           case ConfirmingParty(party, _) =>
             topologySnapshot
               .canConfirm(participantId, party, confirmationPolicy.requiredTrustLevel)
@@ -222,7 +222,7 @@ class ConfirmationResponseFactory(
             transactionValidationResult.timeValidationResult.fold(
               err =>
                 transactionValidationResult.viewValidationResults.toList
-                  .traverse { case (k, viewValidationResult) =>
+                  .parTraverse { case (k, viewValidationResult) =>
                     val partiesF =
                       hostedConfirmingPartiesOfView(viewValidationResult, confirmationPolicy)
                     partiesF.map { parties =>
@@ -257,7 +257,7 @@ class ConfirmationResponseFactory(
                   .map(_.toMap),
               { case () =>
                 transactionValidationResult.viewValidationResults.toList
-                  .traverse { case (k, v) =>
+                  .parTraverse { case (k, v) =>
                     verdictsForView(v, confirmationPolicy).map(r => (k, r))
                   }
                   .map(_.toMap)

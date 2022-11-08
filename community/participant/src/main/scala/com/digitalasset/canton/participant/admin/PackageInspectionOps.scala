@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import cats.implicits.{toFoldableOps, *}
+import cats.syntax.parallel.*
 import com.daml.lf.data.Ref.PackageId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.transaction.{
   VettedPackages,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPackageId, participant}
 
@@ -78,7 +79,7 @@ class PackageInspectionOpsImpl(
   )(implicit tc: TraceContext): EitherT[Future, PackageVetted, Unit] = {
     // TODO(i9505): Consider unit testing this
 
-    import cats.implicits.*
+    import cats.syntax.functorFilter.*
 
     val store = TopologyStoreFactory.apply(storage, timeouts, loggerFactory)
 
@@ -119,7 +120,7 @@ class PackageInspectionOpsImpl(
     val snapshotFromAuthorizedStore = snapshotFromStore(AuthorizedStore)
 
     val packageIsVettedOn = (snapshotFromAuthorizedStore :: snapshotsForDomains)
-      .traverse { snapshot =>
+      .parTraverse { snapshot =>
         snapshot
           .findUnvettedPackagesOrDependencies(participantId, Set(pkg))
           .map { pkgId =>
@@ -149,7 +150,7 @@ class PackageInspectionOpsImpl(
   ): EitherT[Future, PackageInUse, Unit] = {
     stateManager.getAll.toList
       .sortBy(_._1.toProtoPrimitive) // Sort to keep tests deterministic
-      .traverse_ { case (id, state) =>
+      .parTraverse_ { case (id, state) =>
         EitherT(
           state.activeContractStore
             .packageUsage(packageId, state.contractStore)

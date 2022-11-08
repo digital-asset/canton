@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.EitherT
-import cats.implicits.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory

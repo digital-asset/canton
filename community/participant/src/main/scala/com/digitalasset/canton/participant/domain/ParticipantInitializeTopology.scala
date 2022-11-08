@@ -71,7 +71,7 @@ object ParticipantInitializeTopology {
       val handle = new SequencerBasedRegisterTopologyTransactionHandle(
         (traceContext, env) =>
           client.sendAsyncUnauthenticated(
-            Batch(List(env), client.staticDomainParameters.protocolVersion)
+            Batch(List(env), client.protocolVersion)
           )(traceContext),
         domainId,
         participantId,

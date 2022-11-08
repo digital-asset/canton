@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.admin.RepairService.RepairContext
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.*
@@ -13,6 +12,7 @@ import com.digitalasset.canton.participant.protocol.RequestJournal.{
   RequestData,
 }
 import com.digitalasset.canton.store.{CursorPrehead, CursorPreheadStoreTest}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
@@ -65,7 +65,7 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
         val data3 = RequestData.clean(rc + 3L, ts.plusSeconds(2), ts.plusSeconds(5))
         val inserts = List(data0, data1, data2, data3)
         for {
-          _ <- inserts.traverse(store.insert)
+          _ <- inserts.parTraverse(store.insert)
           find5 <- store.firstRequestWithCommitTimeAfter(ts.plusSeconds(5))
           find1 <- store.firstRequestWithCommitTimeAfter(ts.plusSeconds(1))
           find10 <- store.firstRequestWithCommitTimeAfter(ts.plusSeconds(10))
@@ -356,7 +356,7 @@ trait RequestJournalStoreTest extends CursorPreheadStoreTest {
         )
         for {
           empty <- store.repairRequests(RequestCounter.Genesis)
-          _ <- requests.traverse_(store.insert)
+          _ <- requests.parTraverse_(store.insert)
           repair1 <- store.repairRequests(RequestCounter(1))
           repair2 <- store.repairRequests(RequestCounter(2))
           repair4 <- store.repairRequests(RequestCounter(4))

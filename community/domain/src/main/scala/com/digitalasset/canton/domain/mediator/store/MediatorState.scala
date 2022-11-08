@@ -5,7 +5,6 @@ package com.digitalasset.canton.domain.mediator.store
 
 import cats.data.OptionT
 import cats.instances.future.*
-import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.mediator.ResponseAggregation
@@ -54,7 +53,7 @@ private[mediator] class MediatorState(
   private val MAX_FINISHED_REQUESTS = 1000
 
   private def updateNumRequests(num: Int): Unit =
-    metrics.outstanding.updateValue(_ + num)(MetricsContext.Empty)
+    metrics.outstanding.updateValue(_ + num)
 
   /** Adds an incoming ResponseAggregation */
   def add(

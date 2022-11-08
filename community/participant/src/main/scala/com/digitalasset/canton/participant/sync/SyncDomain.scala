@@ -7,7 +7,7 @@ import akka.stream.Materializer
 import cats.Monad
 import cats.data.EitherT
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -385,7 +385,7 @@ class SyncDomain(
       liftF(for {
         contractIdChanges <- persistent.activeContractStore
           .changesBetween(fromExclusive, toInclusive)
-        changes <- contractIdChanges.traverse { case (toc, change) =>
+        changes <- contractIdChanges.parTraverse { case (toc, change) =>
           lookupChangeMetadata(change).map(ch => (RecordTime.fromTimeOfChange(toc), ch))
         }
       } yield {

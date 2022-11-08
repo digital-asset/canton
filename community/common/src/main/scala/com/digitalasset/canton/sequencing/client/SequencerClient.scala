@@ -11,6 +11,7 @@ import cats.syntax.option.*
 import com.daml.metrics.Timed
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.domain.ServiceAgreementId
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   KeepAliveClientConfig,
@@ -37,8 +38,10 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
-import com.digitalasset.canton.protocol.StaticDomainParameters
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
+import com.digitalasset.canton.protocol.DomainParametersLookup.SequencerDomainParameters
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.protocol.{DomainParametersLookup, StaticDomainParameters}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
@@ -66,6 +69,7 @@ import com.digitalasset.canton.store.SequencedEventStore.{
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced, TracingConfig}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -159,7 +163,8 @@ class SequencerClient(
     sequencerClientTransport: SequencerClientTransport,
     val config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
-    val staticDomainParameters: StaticDomainParameters,
+    val protocolVersion: ProtocolVersion,
+    domainParametersLookup: DomainParametersLookup[SequencerDomainParameters],
     override val timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
     clock: Clock,
@@ -173,7 +178,7 @@ class SequencerClient(
     replayEnabled: Boolean,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
-    initialCounter: Option[SequencerCounter] = None,
+    initialCounterLowerBound: SequencerCounter = SequencerCounter.Genesis,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends SequencerClientSend
     with FlagCloseableAsync
@@ -283,8 +288,6 @@ class SequencerClient(
         callback,
       )
 
-  private def protocolVersion: ProtocolVersion = staticDomainParameters.protocolVersion
-
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],
       requiresAuthentication: Boolean,
@@ -321,15 +324,29 @@ class SequencerClient(
       )
 
       val serializedRequestSize = request.toProtoV0.serializedSize
-      val maxInboundMessageSize = staticDomainParameters.maxInboundMessageSize.unwrap
-      val unitOrRequestSizeErr = Either.cond(
-        serializedRequestSize <= maxInboundMessageSize,
-        (),
-        SendAsyncClientError.RequestInvalid(
-          s"Batch size ($serializedRequestSize bytes) is exceeding maximum size (${maxInboundMessageSize} bytes) for domain $domainId"
-        ),
-      )
 
+      def checkRequestSize(maxRequestSize: MaxRequestSize): Either[SendAsyncClientError, Unit] =
+        Either.cond(
+          serializedRequestSize <= maxRequestSize.unwrap,
+          (),
+          SendAsyncClientError.RequestInvalid(
+            s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for domain $domainId"
+          ),
+        )
+
+      // avoid emitting a warning during the first sequencing of the topology snapshot
+      val warnOnUsingDefaults = member match {
+        case _: ParticipantId => true
+        case _ => false
+      }
+      val domainParamsF =
+        EitherTUtil.fromFuture(
+          domainParametersLookup.getApproximate(warnOnUsingDefaults),
+          throwable =>
+            SendAsyncClientError.RequestFailed(
+              s"failed to retrieve maxRequestSize because ${throwable.getMessage}"
+            ),
+        )
       def trackSend: EitherT[Future, SendAsyncClientError, Unit] =
         sendTracker
           .track(messageId, maxSequencingTime, callback)
@@ -339,8 +356,9 @@ class SequencerClient(
           }
 
       if (replayEnabled) {
-        EitherT.fromEither(for {
-          _ <- unitOrRequestSizeErr
+        for {
+          domainParams <- domainParamsF
+          _ <- EitherT.fromEither[Future](checkRequestSize(domainParams.maxRequestSize))
         } yield {
           // Invoke the callback immediately, because it will not be triggered by replayed messages,
           // as they will very likely have mismatching message ids.
@@ -356,10 +374,11 @@ class SequencerClient(
               )
             )
           callback(dummySendResult)
-        })
+        }
       } else {
         for {
-          _ <- EitherT.fromEither[Future](unitOrRequestSizeErr)
+          domainParams <- domainParamsF
+          _ <- EitherT.fromEither[Future](checkRequestSize(domainParams.maxRequestSize))
           _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
           _ <- performSend(messageId, request, requiresAuthentication)
@@ -588,8 +607,9 @@ class SequencerClient(
         val lastEvent = replayEvents.lastOption
         val preSubscriptionEvent = lastEvent.orElse(initialPriorEventO)
 
-        val nextCounter = initialCounter
-          .getOrElse(preSubscriptionEvent.fold(SequencerCounter.Genesis)(_.counter))
+        val nextCounter =
+          // previously seen counter takes precedence over the lower bound
+          preSubscriptionEvent.fold(initialCounterLowerBound)(_.counter)
 
         val eventValidator = eventValidatorFactory.create(
           // We validate events before we persist them in the SequencedEventStore
@@ -1037,7 +1057,8 @@ class SequencerClient(
       logger.debug(s"Closing sequencer subscription...")
       subscription.close()
       logger.trace(s"Wait for the subscription to complete")
-      timeouts.shutdownNetwork.await_()(subscription.closeReason)
+      timeouts.shutdownNetwork
+        .await_("closing resilient sequencer client subscription")(subscription.closeReason)
 
       logger.trace(s"Wait for the handler to become idle")
 
@@ -1124,6 +1145,8 @@ object SequencerClient {
       domainParameters: StaticDomainParameters,
       processingTimeout: ProcessingTimeout,
       clock: Clock,
+      topologyClient: DomainTopologyClient,
+      futureSupervisor: FutureSupervisor,
       recordingConfigForMember: Member => Option[RecordingConfig],
       replayConfigForMember: Member => Option[ReplayConfig],
       metrics: SequencerClientMetrics,
@@ -1158,6 +1181,12 @@ object SequencerClient {
             loggerFactory,
           )
         }
+        val sequencerDomainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
+          domainParameters,
+          topologyClient,
+          futureSupervisor,
+          loggerFactory,
+        )
 
         for {
           transport <- makeTransport(
@@ -1202,7 +1231,8 @@ object SequencerClient {
           transport,
           config,
           testingConfig,
-          domainParameters,
+          domainParameters.protocolVersion,
+          sequencerDomainParamsLookup,
           processingTimeout,
           validatorFactory,
           clock,
@@ -1293,7 +1323,7 @@ object SequencerClient {
           GrpcSequencerChannelBuilder(
             channelBuilder,
             conn,
-            domainParameters.maxInboundMessageSize,
+            NonNegativeInt.maxValue, // we set this limit only on the sequencer node, to avoid restarting the client if this value is changed
             traceContextPropagation,
             config.keepAliveClient,
           )
