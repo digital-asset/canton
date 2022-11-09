@@ -118,7 +118,9 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
       }
     )
   when(mockSequencerClient.domainId).thenReturn(domain)
-  when(mockSequencerClient.staticDomainParameters).thenReturn(defaultStaticDomainParameters)
+  when(mockSequencerClient.protocolVersion).thenReturn(
+    defaultStaticDomainParameters.protocolVersion
+  )
 
   private val trm = mock[TransactionResultMessage]
   when(trm.pretty).thenAnswer(Pretty.adHocPrettyInstance[TransactionResultMessage])
@@ -170,7 +172,7 @@ class ProtocolProcessorTest extends AnyWordSpec with BaseTest with HasExecutionC
     val indexedStringStore = InMemoryIndexedStringStore()
     val clock = new WallClock(timeouts, loggerFactory)
     implicit val mat = mock[Materializer]
-    val nodePersistentState = timeouts.default.await()(
+    val nodePersistentState = timeouts.default.await("creating node persistent state")(
       ParticipantNodePersistentState(
         syncDomainPersistentStates,
         new MemoryStorage,

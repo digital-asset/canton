@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
-import cats.implicits.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.routing.Transfers.TransferArgs
@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.sync.{SyncDomain, TransactionRoutingE
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 
 import scala.collection.concurrent.TrieMap
@@ -30,7 +31,7 @@ private[routing] class ContractsTransferer(
       logger.info(
         s"Automatic transaction transfer into domain ${domainRankTarget.domainId}"
       )
-      domainRankTarget.transfers.toSeq.traverse_ { case (cid, (lfParty, sourceDomainId)) =>
+      domainRankTarget.transfers.toSeq.parTraverse_ { case (cid, (lfParty, sourceDomainId)) =>
         perform(
           TransferArgs(
             sourceDomainId,

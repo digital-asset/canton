@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.5.0-snapshot.20221028.10865.0.1b726fe8"
+  val version: String = "2.5.0-snapshot.20221107.10906.0.346bb489"
 
   /** Custom Daml artifacts override version.
     */
@@ -28,7 +28,7 @@ object DamlVersions {
 
   /** The version of the VMBC driver libraries in use.
     */
-  val vmbc_driver_libraries_base_version: String = "2.3.0-snapshot.20220611.10066.0.458cfc43-0.2"
+  val vmbc_driver_libraries_base_version: String = "2.5.0-snapshot.20221028.10865.0.1b726fe8-0.0"
 
   /** Custom VMBC driver libraries override version.
     */

@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.admin
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.daml_lf_dev.DamlLf
 import com.daml.error.definitions.{DamlError, PackageServiceError}
 import com.daml.lf.archive
@@ -36,6 +36,7 @@ import com.digitalasset.canton.participant.sync.ParticipantEventPublisher
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.protocol.{PackageDescription, PackageInfoService}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.PathUtils
 import com.github.blemale.scaffeine.Scaffeine
 import com.google.protobuf.ByteString
@@ -188,7 +189,7 @@ class PackageService(
         .packageUnused(mainPkg)
         .leftMap(err => new MainPackageInUse(err.pkg, darDescriptor, err.contract, err.domain))
 
-      packageUsed <- EitherT.liftF(packages.traverse(p => inspectionOps.packageUnused(p).value))
+      packageUsed <- EitherT.liftF(packages.parTraverse(p => inspectionOps.packageUnused(p).value))
 
       usedPackages = packageUsed.mapFilter {
         case Left(packageInUse: PackageRemovalErrorCode.PackageInUse) => Some(packageInUse.pkg)
@@ -352,7 +353,7 @@ class PackageService(
   ): EitherT[Future, DamlError, Unit] =
     for {
       packages <- archives
-        .traverse(archive => catchUpstreamErrors(Decode.decodeArchive(archive)))
+        .parTraverse(archive => catchUpstreamErrors(Decode.decodeArchive(archive)))
         .map(_.toMap)
       _ <- EitherT.fromEither[Future](
         engine
@@ -382,7 +383,7 @@ class PackageService(
 
   def packageDependencies(packages: List[PackageId]): EitherT[Future, PackageId, Set[PackageId]] =
     packages
-      .traverse(pkgId => OptionT(dependencyCache.get(pkgId)).toRight(pkgId))
+      .parTraverse(pkgId => OptionT(dependencyCache.get(pkgId)).toRight(pkgId))
       .map(_.flatten.toSet -- packages)
 
   private def loadPackageDependencies(packageId: PackageId)(implicit
@@ -392,7 +393,7 @@ class PackageService(
         packageIds: List[PackageId]
     ): EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]] =
       for {
-        directDependenciesByPackage <- packageIds.traverse { packageId =>
+        directDependenciesByPackage <- packageIds.parTraverse { packageId =>
           for {
             pckg <- OptionT(
               performUnlessClosingF(functionFullName)(packagesDarsStore.getPackage(packageId))

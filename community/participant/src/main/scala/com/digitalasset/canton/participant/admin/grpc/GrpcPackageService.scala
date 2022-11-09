@@ -214,7 +214,7 @@ class GrpcPackageService(
   private def acceptRejectResultToResponse(
       name: String
   )(result: Either[AcceptRejectError, Unit]): Try[Empty] = {
-    import cats.implicits.*
+    import cats.syntax.either.*
 
     def errorToStatus: AcceptRejectError => Status = {
       case AcceptRejectError.OfferNotFound =>

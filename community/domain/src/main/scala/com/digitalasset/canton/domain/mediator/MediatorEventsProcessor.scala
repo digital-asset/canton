@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.mediator
 import cats.kernel.Monoid
 import cats.syntax.alternative.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.crypto.DomainSyncCryptoClient
@@ -25,6 +25,7 @@ import com.digitalasset.canton.sequencing.{
   UnsignedProtocolEventHandler,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -134,7 +135,7 @@ private[mediator] class MediatorEventsProcessor(
 
   private def executeStage(traceContext: TraceContext)(stage: MediatorEventStage): HandlerResult = {
     for {
-      result <- stage.requests.forgetNE.toSeq.traverse { case (requestId, events) =>
+      result <- stage.requests.forgetNE.toSeq.parTraverse { case (requestId, events) =>
         handleMediatorEvents(requestId, events, traceContext)
       } map Monoid[AsyncResult].combineAll
     } yield result
@@ -205,7 +206,7 @@ private[mediator] class MediatorEventsProcessor(
         timestamp: CantonTimestamp,
     )(implicit traceContext: TraceContext): Future[EventProcessingStages] =
       pendingRequests
-        .traverse { requestID =>
+        .parTraverse { requestID =>
           hasRequestTimedOut(requestID, timestamp).map(Either.cond(_, requestID, requestID))
         }
         .map(_.separate)

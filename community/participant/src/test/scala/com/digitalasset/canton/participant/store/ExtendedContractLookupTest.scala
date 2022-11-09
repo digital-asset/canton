@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.daml.lf.value.Value.{ValueText, ValueUnit}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
@@ -13,6 +13,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   transactionId,
 }
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
@@ -43,8 +44,6 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
   val rc1 = RequestCounter(1)
   val rc2 = RequestCounter(2)
 
-  // TODO(#10692) remove the suppression
-  @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
   def mk(
       entries: (
           LfContractId,
@@ -54,29 +53,30 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
           RequestCounter,
           Option[TransactionId],
       )*
-  ): ContractLookup = {
+  ): Future[ContractLookup] = {
     val store = new InMemoryContractStore(loggerFactory)
-    entries.foreach {
-      case (id, contractInstance, metadata, ledgerTime, requestCounter, None) =>
-        store.storeDivulgedContract(
-          requestCounter,
-          asSerializable(id, contractInstance, metadata, ledgerTime),
-        )
-      case (
-            id,
-            contractInstance,
-            metadata,
-            ledgerTime,
+    entries
+      .parTraverse_ {
+        case (id, contractInstance, metadata, ledgerTime, requestCounter, None) =>
+          store.storeDivulgedContract(
             requestCounter,
-            Some(creatingTransactionId),
-          ) =>
-        store.storeCreatedContract(
-          requestCounter,
-          creatingTransactionId,
-          asSerializable(id, contractInstance, metadata, ledgerTime),
-        )
-    }
-    store
+            asSerializable(id, contractInstance, metadata, ledgerTime),
+          )
+        case (
+              id,
+              contractInstance,
+              metadata,
+              ledgerTime,
+              requestCounter,
+              Some(creatingTransactionId),
+            ) =>
+          store.storeCreatedContract(
+            requestCounter,
+            creatingTransactionId,
+            asSerializable(id, contractInstance, metadata, ledgerTime),
+          )
+      }
+      .map((_: Unit) => store)
   }
 
   "ExtendedContractLookup" should {
@@ -102,7 +102,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
     val metadata2 =
       ContractMetadata.tryCreate(signatories = Set(alice), stakeholders = Set(alice, bob), None)
 
-    val store = mk(
+    val preloadedStoreF = mk(
       (coid00, instance0, metadata00, let0, rc0, None),
       (coid01, instance1, metadata1, let1, rc1, Some(transactionId1)),
       (coid01, instance1, metadata1, let1, rc1, None),
@@ -124,26 +124,39 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
       ),
     )
 
-    val extendedStore =
-      new ExtendedContractLookup(store, overwrites, Map(key00 -> Some(coid00), key1 -> None))
+    val extendedStoreF = preloadedStoreF.map(
+      new ExtendedContractLookup(
+        _,
+        overwrites,
+        Map(key00 -> Some(coid00), key1 -> None),
+      )
+    )
 
     "return un-overwritten contracts" in {
-      List(coid00, coid10)
-        .traverse_ { coid =>
+      for {
+        preloadedStore <- preloadedStoreF
+        extendedStore <- extendedStoreF
+        _ <- List(coid00, coid10).parTraverse_ { coid =>
           for {
             resultExtended <- extendedStore.lookup(coid).value
-            resultBacking <- store.lookup(coid).value
+            resultBacking <- preloadedStore.lookup(coid).value
           } yield assert(resultExtended == resultBacking)
         }
-        .map(_ => succeed)
+      } yield succeed
     }
 
     "not make up contracts" in {
-      extendedStore.lookup(coid11).value.map(result => assert(result.isEmpty))
+      for {
+        extendedStore <- extendedStoreF
+        result <- extendedStore.lookup(coid11).value
+      } yield {
+        assert(result.isEmpty)
+      }
     }
 
     "find an overwritten contract" in {
       for {
+        extendedStore <- extendedStoreF
         result <- extendedStore.lookup(coid01).value
       } yield {
         assert(result.contains(overwrites(coid01)))
@@ -152,6 +165,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
 
     "find an additional divulged contract" in {
       for {
+        extendedStore <- extendedStoreF
         result <- extendedStore.lookup(coid20).value
       } yield {
         assert(result.contains(overwrites(coid20)))
@@ -160,6 +174,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
 
     "find an additional created contract" in {
       for {
+        extendedStore <- extendedStoreF
         result <- extendedStore.lookup(coid21).value
       } yield {
         assert(result.contains(overwrites(coid21)))
@@ -167,19 +182,22 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest {
     }
 
     "complain about inconsistent contract ids" in {
-      Future.successful {
-        val contract = StoredContract.fromDivulgedContract(
-          asSerializable(coid01, instance1, metadata1, let0),
-          rc0,
-        )
+      val contract = StoredContract.fromDivulgedContract(
+        asSerializable(coid01, instance1, metadata1, let0),
+        rc0,
+      )
+      for {
+        preloadedStore <- preloadedStoreF
+      } yield {
         assertThrows[IllegalArgumentException](
-          new ExtendedContractLookup(store, Map(coid10 -> contract), Map.empty)
+          new ExtendedContractLookup(preloadedStore, Map(coid10 -> contract), Map.empty)
         )
       }
     }
 
     "find exactly the keys in the provided map" in {
       for {
+        extendedStore <- extendedStoreF
         result00 <- valueOrFail(extendedStore.lookupKey(key00))(show"lookup $key00")
         result1 <- valueOrFail(extendedStore.lookupKey(key1))(show"lookup $key1")
         forbidden <- extendedStore.lookupKey(forbiddenKey).value

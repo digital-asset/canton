@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.SubmitterInfo
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.LoggingConfig
@@ -30,6 +30,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -153,7 +154,7 @@ class ConfirmationRequestFactory(
         )
       } yield ()
     }
-    submitters.traverse(assertSubmitterNodeAuthorization).map(_ => ())
+    submitters.parTraverse(assertSubmitterNodeAuthorization).map(_ => ())
   }
 
   private def createTransactionViewEnvelopes(
@@ -172,7 +173,7 @@ class ConfirmationRequestFactory(
           .leftMap(KeySeedError)
       )
       res <- lightTreesWithMetadata.toList
-        .traverse { case (vt, witnesses, seed) =>
+        .parTraverse { case (vt, witnesses, seed) =>
           for {
             viewMessage <- EncryptedViewMessageFactory
               .create(TransactionViewType)(vt, cryptoSnapshot, protocolVersion, Some(seed))

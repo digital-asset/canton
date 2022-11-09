@@ -7,6 +7,7 @@ import cats.Monad
 import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.data.CantonTimestamp
@@ -23,6 +24,7 @@ import com.digitalasset.canton.participant.store.memory.InMemoryRequestJournalSt
 import com.digitalasset.canton.participant.store.{PreHookRequestJournalStore, RequestJournalStore}
 import com.digitalasset.canton.store.CursorPrehead
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.Assertion
@@ -102,7 +104,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
     val rj = mk(initRc, store)
 
     inserts
-      .traverse_ { case (rc, timestamp) =>
+      .parTraverse_ { case (rc, timestamp) =>
         rj.insert(rc, timestamp)
       }
       .map(_ => rj)
@@ -112,7 +114,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
       expectedState: (RequestCounter, CantonTimestamp) => RequestData
   ): Future[Assertion] = {
     presentRcs
-      .traverse_ { case (rc, ts) =>
+      .parTraverse_ { case (rc, ts) =>
         rj.query(rc)
           .value
           .map(result =>
@@ -127,7 +129,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
 
   def assertAbsent(rj: RequestJournal, absentRcs: List[RequestCounter]): Future[Assertion] = {
     absentRcs
-      .traverse_ { rc =>
+      .parTraverse_ { rc =>
         rj.query(rc)
           .value
           .map(result => assert(result.isEmpty, s"Found state $result for request counter $rc"))
@@ -498,7 +500,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
       def setup(): Future[RequestJournal] =
         for {
           rj <- mkWith(initRc, inserts.map(_._1))
-          _ <- inserts.traverse_ { case ((rc, timestamp), target, commitTime) =>
+          _ <- inserts.parTraverse_ { case ((rc, timestamp), target, commitTime) =>
             transitTo(rj, rc, timestamp, target, commitTime).value
           }
         } yield rj
@@ -506,7 +508,7 @@ class RequestJournalTest extends AsyncWordSpec with BaseTest {
       "queries are correct" in {
         for {
           rj <- setup()
-          _ <- inserts.traverse_ { case ((rc, timestamp), target, commitTime) =>
+          _ <- inserts.parTraverse_ { case ((rc, timestamp), target, commitTime) =>
             rj.query(rc)
               .value
               .map(result =>

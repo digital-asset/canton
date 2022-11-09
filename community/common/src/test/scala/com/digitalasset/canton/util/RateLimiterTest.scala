@@ -31,14 +31,14 @@ class RateLimiterTest extends BaseTestWordSpec with HasExecutionContext {
       s"the maximum rate is $maxTasksPerSecond" must {
         s"allow for a maximum burst of size $maxBurstSize" in {
           val rateLimiter = new RateLimiter(NonNegativeInt.tryCreate(maxTasksPerSecond))
-          (0 until maxBurstSize * 10).toList
-            .parTraverse { _ =>
-              Future {
-                rateLimiter.checkAndUpdateRate()
-              }
-            }
-            .futureValue
-            .count(identity) should be <= maxBurstSize
+          val start = System.nanoTime()
+          val results = (0 until maxBurstSize * 10).toList.parTraverse { _ =>
+            Future { rateLimiter.checkAndUpdateRate() }
+          }.futureValue
+          val stop = System.nanoTime()
+          // If the test took longer than a single cycle, we should expect to see several bursts.
+          val allowedCycles = (stop - start) / (cycleMillis * 1000000) + 1
+          results.count(identity).toLong should be <= (maxBurstSize * allowedCycles)
         }
 
         "maintain the target rate on average if executed sequentially" in {

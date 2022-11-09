@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.domain
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.DiscardOps
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.LengthLimitedString.TopologyRequestId
@@ -73,7 +73,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
         protocolVersion = protocolVersion,
       )
       .toList
-      .traverse(service.registerTopologyTransaction)
+      .parTraverse(service.registerTopologyTransaction)
       .map(_.map(_.results))
       .map(_.flatten)
 

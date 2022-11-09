@@ -134,6 +134,9 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     ): Future[SequencerHealthStatus] = Future.successful(SequencerHealthStatus(isActive = true))
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
+
+    override private[sequencing] def firstSequencerCounterServeableForSequencer: SequencerCounter =
+      ???
   }
 
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>

@@ -7,6 +7,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.DomainTopologyClient
 import com.digitalasset.canton.tracing.TraceContext
@@ -33,7 +34,9 @@ sealed trait DomainParametersLookup[+P] {
   /** If the parameter is static, return its value.
     *       If the parameter is dynamic, return the value of the topology snapshot approximation.
     */
-  def getApproximate(implicit traceContext: TraceContext): Future[P]
+  def getApproximate(warnOnUsingDefaults: Boolean = true)(implicit
+      traceContext: TraceContext
+  ): Future[P]
 
   /** Return a list of parameters, together with their validity interval,
     * @param warnOnUsingDefaults Log a warning if dynamic domain parameters are not set
@@ -57,7 +60,7 @@ class StaticDomainParametersLookup[P](parameters: P) extends DomainParametersLoo
       traceContext: TraceContext
   ): Future[P] = Future.successful(parameters)
 
-  def getApproximate(implicit traceContext: TraceContext): Future[P] =
+  def getApproximate(warnOnUsingDefaults: Boolean)(implicit traceContext: TraceContext): Future[P] =
     Future.successful(parameters)
 
   def getAll(validAt: CantonTimestamp)(implicit
@@ -87,11 +90,11 @@ class DynamicDomainParametersLookup[P](
     .flatMap(_.findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults))
     .map(projector)
 
-  def getApproximate(implicit
+  def getApproximate(warnOnUsingDefaults: Boolean)(implicit
       traceContext: TraceContext
   ): Future[P] = {
     topologyClient.currentSnapshotApproximation
-      .findDynamicDomainParametersOrDefault(protocolVersion)
+      .findDynamicDomainParametersOrDefault(protocolVersion, warnOnUsingDefaults)
       .map(projector)
   }
 
@@ -130,18 +133,23 @@ object DomainParametersLookup {
       )
   }
 
-  def forMaxRatePerParticipant(
+  def forSequencerDomainParameters(
       staticDomainParameters: StaticDomainParameters,
       topologyClient: DomainTopologyClient,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
-  )(implicit ec: ExecutionContext): DomainParametersLookup[NonNegativeInt] = {
+  )(implicit ec: ExecutionContext): DomainParametersLookup[SequencerDomainParameters] = {
     // TODO(#9800) migrate to stable version
     if (staticDomainParameters.protocolVersion < ProtocolVersion.dev)
-      new StaticDomainParametersLookup(staticDomainParameters.maxRatePerParticipant)
+      new StaticDomainParametersLookup(
+        SequencerDomainParameters(
+          staticDomainParameters.maxRatePerParticipant,
+          staticDomainParameters.maxRequestSize,
+        )
+      )
     else {
       new DynamicDomainParametersLookup(
-        _.maxRatePerParticipant,
+        params => SequencerDomainParameters(params.maxRatePerParticipant, params.maxRequestSize),
         topologyClient,
         staticDomainParameters.protocolVersion,
         futureSupervisor,
@@ -149,4 +157,8 @@ object DomainParametersLookup {
       )
     }
   }
+  case class SequencerDomainParameters(
+      maxRatePerParticipant: NonNegativeInt,
+      maxRequestSize: MaxRequestSize,
+  )
 }

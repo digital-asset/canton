@@ -59,6 +59,7 @@ import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.RetryUtil.NoExnRetryable
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
 import io.functionmeta.functionFullName
+import io.grpc.ServerServiceDefinition
 import io.grpc.protobuf.services.ProtoReflectionService
 import io.opentelemetry.api.trace.Tracer
 
@@ -295,17 +296,25 @@ abstract class CantonNodeBootstrapBase[
   ): Unit = {
     adminServerRegistry
       .addServiceU(
-        TopologyManagerWriteServiceGrpc.bindService(
-          new GrpcTopologyManagerWriteService(
-            topologyManager,
-            authorizedStore,
-            crypto.cryptoPublicStore,
-            parameterConfig.initialProtocolVersion,
-            loggerFactory,
-          ),
-          executionContext,
-        )
+        topologyManagerWriteService(topologyManager, authorizedStore)
       )
+  }
+
+  protected def topologyManagerWriteService[E <: CantonError](
+      topologyManager: TopologyManager[E],
+      authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+  ): ServerServiceDefinition = {
+    TopologyManagerWriteServiceGrpc.bindService(
+      new GrpcTopologyManagerWriteService(
+        topologyManager,
+        authorizedStore,
+        crypto.cryptoPublicStore,
+        parameterConfig.initialProtocolVersion,
+        loggerFactory,
+      ),
+      executionContext,
+    )
+
   }
 
   protected def startWithStoredNodeId(id: NodeId): EitherT[Future, String, Unit] = {

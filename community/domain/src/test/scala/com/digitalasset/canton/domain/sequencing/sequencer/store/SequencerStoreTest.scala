@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.store
 
 import cats.data.EitherT
 import cats.syntax.option.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.String256M
 import com.digitalasset.canton.data.CantonTimestamp
@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.{
   UnauthenticatedMemberId,
   UniqueIdentifier,
 }
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, SequencerCounter}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
@@ -91,7 +92,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       ): Future[Sequenced[PayloadId]] =
         for {
           senderId <- store.registerMember(sender, ts)
-          recipientIds <- recipients.toList.traverse(store.registerMember(_, ts)).map(_.toSet)
+          recipientIds <- recipients.toList.parTraverse(store.registerMember(_, ts)).map(_.toSet)
         } yield Sequenced(
           ts,
           DeliverStoreEvent(
@@ -131,7 +132,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       ): Future[Assertion] = {
         for {
           senderId <- lookupRegisteredMember(expectedSender)
-          recipientIds <- expectedRecipients.toList.traverse(lookupRegisteredMember).map(_.toSet)
+          recipientIds <- expectedRecipients.toList.parTraverse(lookupRegisteredMember).map(_.toSet)
         } yield {
           event.timestamp shouldBe expectedTimestamp
           event.event match {
@@ -804,7 +805,7 @@ trait SequencerStoreTest extends AsyncWordSpec with BaseTest {
       import env.*
 
       for {
-        List(aliceId, bobId, caroleId) <- List(alice, bob, carole).traverse(
+        List(aliceId, bobId, caroleId) <- List(alice, bob, carole).parTraverse(
           store.registerMember(_, ts(0))
         )
         disabledClientsBefore <- store.status(ts(0)).map(_.disabledClients)

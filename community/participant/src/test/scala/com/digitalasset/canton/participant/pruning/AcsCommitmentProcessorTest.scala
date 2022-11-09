@@ -4,10 +4,9 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
-import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, NonNegativeDuration}
@@ -54,6 +53,7 @@ import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.Assertion
 import org.scalatest.wordspec.{AnyWordSpec, AsyncWordSpec}
@@ -109,7 +109,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[ActiveContractSnapshot] = {
     val acs = new InMemoryActiveContractStore(loggerFactory)
     lifespan.toList
-      .traverse_ { case (cid, (createdTs, archivedTs)) =>
+      .parTraverse_ { case (cid, (createdTs, archivedTs)) =>
         for {
           _ <- acs.createContract(cid, TimeOfChange(RequestCounter(0), createdTs)).value
           _ <- acs.archiveContract(cid, TimeOfChange(RequestCounter(0), archivedTs)).value
@@ -503,7 +503,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
       )
 
       for {
-        remote <- remoteCommitments.traverse(commitmentMsg)
+        remote <- remoteCommitments.parTraverse(commitmentMsg)
         delivered = remote.map(cmt =>
           (
             cmt.message.period.toInclusive.plusSeconds(1),
@@ -512,7 +512,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         )
         // First ask for the remote commitments to be processed, and then compute locally
         _ <- delivered
-          .traverse_ { case (ts, batch) =>
+          .parTraverse_ { case (ts, batch) =>
             processor.processBatchInternal(ts.forgetRefinement, batch)
           }
           .onShutdown(fail())
@@ -591,7 +591,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
         val remoteCommitments = List((remoteId1, List(coid(0, 0)), ts(5), ts(10)))
 
         for {
-          remote <- remoteCommitments.traverse(commitmentMsg)
+          remote <- remoteCommitments.parTraverse(commitmentMsg)
           delivered = remote.map(cmt =>
             (
               cmt.message.period.toInclusive.plusSeconds(1),
@@ -600,7 +600,7 @@ class AcsCommitmentProcessorTest extends AsyncWordSpec with AcsCommitmentProcess
           )
           // First ask for the remote commitments to be processed, and then compute locally
           _ <- delivered
-            .traverse_ { case (ts, batch) =>
+            .parTraverse_ { case (ts, batch) =>
               processor.processBatchInternal(ts.forgetRefinement, batch)
             }
             .onShutdown(fail())

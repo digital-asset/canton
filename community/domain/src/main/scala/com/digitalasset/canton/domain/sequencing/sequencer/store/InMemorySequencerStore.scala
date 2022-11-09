@@ -8,7 +8,7 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.SequencerCounter
@@ -18,6 +18,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.store.InMemorySequenc
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.{Member, UnauthenticatedMemberId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -95,7 +96,7 @@ class InMemorySequencerStore(protected val loggerFactory: NamedLoggerFactory)(im
   override def savePayloads(payloadsToInsert: NonEmpty[Seq[Payload]], instanceDiscriminator: UUID)(
       implicit traceContext: TraceContext
   ): EitherT[Future, SavePayloadsError, Unit] =
-    payloadsToInsert.toNEF.traverse { case Payload(id, content) =>
+    payloadsToInsert.toNEF.parTraverse { case Payload(id, content) =>
       Option(payloads.putIfAbsent(id.unwrap, StoredPayload(instanceDiscriminator, content)))
         .flatMap { existingPayload =>
           // if we found an existing payload it must have a matching instance discriminator

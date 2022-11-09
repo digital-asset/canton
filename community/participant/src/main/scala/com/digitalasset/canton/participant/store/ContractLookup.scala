@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.TracedLogger
@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.{
   SerializableContract,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -29,7 +30,7 @@ trait ContractLookup {
   def lookupManyUncached(
       ids: Seq[LfContractId]
   )(implicit traceContext: TraceContext): Future[List[Option[StoredContract]]] =
-    ids.toList.traverse(lookup(_).value)
+    ids.toList.parTraverse(lookup(_).value)
 
   def lookupE(id: LfContractId)(implicit
       traceContext: TraceContext

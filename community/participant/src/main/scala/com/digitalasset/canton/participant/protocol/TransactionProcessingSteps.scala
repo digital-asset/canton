@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.error.definitions.LedgerApiErrors
 import com.daml.ledger.api.DeduplicationPeriod
@@ -64,6 +65,7 @@ import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, IterableUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -314,7 +316,7 @@ class TransactionProcessingSteps(
         )
 
         _submitters <- submitterInfo.actAs
-          .traverse(rawSubmitter =>
+          .parTraverse(rawSubmitter =>
             EitherT
               .fromEither[Future](LfPartyId.fromString(rawSubmitter))
               .leftMap[TransactionSubmissionTrackingData.RejectionCause](msg =>
@@ -604,7 +606,7 @@ class TransactionProcessingSteps(
       }
 
       val result = for {
-        decryptionResult <- batch.toNEF.traverse(decryptView)
+        decryptionResult <- batch.toNEF.parTraverse(decryptView)
       } yield DecryptedViews(decryptionResult)
       EitherT.right(result)
     }
@@ -1303,7 +1305,6 @@ class TransactionProcessingSteps(
 
         // Since the informees of a Create node are the stakeholders of the created contract,
         // the participant either witnesses all creations in a view's core or hosts a party of all created contracts.
-        import cats.implicits.*
         if (partyPrefetch.hostsAny(informees)) {
           createdContractsOfHostedStakeholdersB ++= viewParticipantData.createdCore.map(
             createdContract =>
@@ -1637,7 +1638,7 @@ class TransactionProcessingSteps(
       }
     }
     prefetchParties.toSeq
-      .traverse(partyId =>
+      .parTraverse(partyId =>
         topologySnapshot.hostedOn(partyId, participantId).map {
           case Some(relationship) if relationship.permission.isActive => partyId -> true
           case _ => partyId -> false

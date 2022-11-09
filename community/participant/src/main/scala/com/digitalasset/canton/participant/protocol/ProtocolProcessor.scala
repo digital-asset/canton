@@ -7,7 +7,7 @@ import cats.data.{EitherT, NonEmptyChain}
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.ledger.api.DeduplicationPeriod
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{DomainSnapshotSyncCryptoApi, DomainSyncCryptoClient}
@@ -49,6 +49,7 @@ import com.digitalasset.canton.topology.MediatorId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.{DiscardOps, RequestCounter, SequencerCounter, checked}
 import com.google.common.annotations.VisibleForTesting
@@ -401,7 +402,7 @@ abstract class ProtocolProcessor[
         .awaitSnapshot(submissionTimestamp)
         .flatMap(
           _.findDynamicDomainParametersOrDefault(
-            sequencerClient.staticDomainParameters.protocolVersion
+            sequencerClient.protocolVersion
           )
         )
       decisionTime = domainParameters.decisionTimeFor(submissionTimestamp)
@@ -412,7 +413,7 @@ abstract class ProtocolProcessor[
             logger.debug(s"Removing sent submission $submissionId without a result.")
             steps.postProcessResult(
               MediatorError.Timeout.Reject
-                .create(sequencerClient.staticDomainParameters.protocolVersion),
+                .create(sequencerClient.protocolVersion),
               submissionData,
             )
         }
@@ -462,7 +463,7 @@ abstract class ProtocolProcessor[
       for {
         domainParameters <- EitherT.right(
           snapshot.ipsSnapshot.findDynamicDomainParametersOrDefault(
-            sequencerClient.staticDomainParameters.protocolVersion
+            sequencerClient.protocolVersion
           )
         )
 
@@ -565,7 +566,7 @@ abstract class ProtocolProcessor[
           )
         _ = EitherTUtil.doNotAwait(timeoutET, "Handling timeout failed")
 
-        signedResponsesTo <- EitherT.right(responsesTo.traverse { case (response, recipients) =>
+        signedResponsesTo <- EitherT.right(responsesTo.parTraverse { case (response, recipients) =>
           signResponse(snapshot, response).map(_ -> recipients)
         })
         messages: Seq[(ProtocolMessage, Recipients)] = signedResponsesTo ++ causalityMsgs
@@ -780,7 +781,7 @@ abstract class ProtocolProcessor[
 
       domainParameters <- EitherT.right(
         snapshot.findDynamicDomainParametersOrDefault(
-          sequencerClient.staticDomainParameters.protocolVersion
+          sequencerClient.protocolVersion
         )
       )
 

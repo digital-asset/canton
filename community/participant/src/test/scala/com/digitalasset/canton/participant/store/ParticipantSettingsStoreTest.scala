@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.foldable.*
 import cats.syntax.option.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore.Settings
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
 import monocle.Lens
 import monocle.macros.GenLens
@@ -127,7 +128,7 @@ trait ParticipantSettingsStoreTest
       (1 until 10)
         .map(NonNegativeInt.tryCreate)
         .toList
-        .traverse_(i => store.writeResourceLimits(ResourceLimits(Some(i), None)))
+        .parTraverse_(i => store.writeResourceLimits(ResourceLimits(Some(i), None)))
         .futureValue
 
       val cachedValue = store.settings

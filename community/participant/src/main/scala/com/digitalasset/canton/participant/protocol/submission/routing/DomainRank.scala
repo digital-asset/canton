@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.Order.*
 import cats.data.{Chain, EitherT}
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.transfer.TransferOutProcessingSteps
@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -42,7 +43,7 @@ private[routing] class DomainRankComputation(
     val targetSnapshotET = EitherT.fromEither[Future](snapshotProvider(targetDomain))
 
     val transfers: EitherT[Future, TransactionRoutingError, Chain[SingleTransfer]] = {
-      Chain.fromSeq(contracts).flatTraverse { c =>
+      Chain.fromSeq(contracts).parFlatTraverse { c =>
         val contractDomain = c.domain
 
         if (contractDomain == targetDomain) EitherT.pure(Chain.empty)

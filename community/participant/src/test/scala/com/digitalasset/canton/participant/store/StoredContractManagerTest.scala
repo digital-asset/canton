@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   asSerializable,
@@ -13,6 +14,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   transactionId,
 }
 import com.digitalasset.canton.protocol.WithTransactionId
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, RequestCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -26,7 +28,7 @@ class StoredContractManagerTest extends AsyncWordSpec with BaseTest {
   def preload(contracts: Seq[StoredContract] = Seq.empty[StoredContract]): Future[ContractStore] = {
     val store = new InMemoryContractStore(loggerFactory)
     contracts
-      .traverse_ {
+      .parTraverse_ {
         case StoredContract(contract, rc, Some(txId)) =>
           store.storeCreatedContract(rc, txId, contract)
         case StoredContract(contract, rc, None) => store.storeDivulgedContract(rc, contract)

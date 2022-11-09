@@ -5,7 +5,7 @@ package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
 import cats.syntax.foldable.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -49,6 +49,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{BatchTracing, TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -271,7 +272,7 @@ private[domain] class DomainTopologyDispatcher(
       // filter out anything that might have ended up somehow in the target store
       // despite us not having succeeded updating the watermark
       filteredTx <- transactions.result.toList
-        .traverseFilter { tx =>
+        .parTraverseFilter { tx =>
           targetStore
             .exists(tx.transaction)
             .map(exists => Option.when(!exists)(tx))

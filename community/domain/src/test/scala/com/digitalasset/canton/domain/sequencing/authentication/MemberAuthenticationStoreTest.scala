@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.authentication
 
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.Nonce
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -12,6 +12,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
+import com.digitalasset.canton.util.FutureInstances.*
 import io.functionmeta.functionFullName
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -86,7 +87,7 @@ trait MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
         val p2t1 = generateToken(participant2)
 
         for {
-          _ <- List(p1t1, p1t2, p2t1).traverse(store.saveToken)
+          _ <- List(p1t1, p1t2, p2t1).parTraverse(store.saveToken)
           p1Tokens <- store.fetchTokens(participant1)
           p2Tokens <- store.fetchTokens(participant2)
           p3Tokens <- store.fetchTokens(participant3)
@@ -110,8 +111,8 @@ trait MemberAuthenticationStoreTest extends AsyncWordSpec with BaseTest {
         val t3 = generateToken(participant1, defaultExpiry.plusSeconds(1))
 
         for {
-          _ <- List(n1, n2, n3).traverse(store.saveNonce)
-          _ <- List(t1, t2, t3).traverse(store.saveToken)
+          _ <- List(n1, n2, n3).parTraverse(store.saveNonce)
+          _ <- List(t1, t2, t3).parTraverse(store.saveToken)
           _ <- store.expireNoncesAndTokens(defaultExpiry)
           fn1O <- store.fetchAndRemoveNonce(participant1, n1.nonce)
           fn2O <- store.fetchAndRemoveNonce(participant1, n2.nonce)

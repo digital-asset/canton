@@ -4,7 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.data.{Chain, EitherT, NonEmptyChain}
-import cats.{Applicative, Functor, MonadError}
+import cats.{Applicative, Eval, Functor, MonadError, Now}
 
 import scala.annotation.tailrec
 
@@ -76,7 +76,7 @@ sealed abstract class Checked[+A, +N, +R] extends Product with Serializable {
         }
     }
 
-  /** Applicative operation. Consistent with the monadic [[flatMap]], i.e.,
+  /** Applicative operation. Consistent with the monadic [[flatMap]] according to Cats' laws, i.e.,
     * {{{
     * x.ap(f) = for { g <- f; y <- x } yield g(x)
     * }}}
@@ -84,7 +84,7 @@ sealed abstract class Checked[+A, +N, +R] extends Product with Serializable {
   def ap[AA >: A, NN >: N, RR](f: Checked[AA, NN, R => RR]): Checked[AA, NN, RR] =
     f.product(this).map { case (g, x) => g(x) }
 
-  /** Reverse applicative operation. Errors from the argument take precedence over those from the function. */
+  /** Reverse applicative operation. Errors from the argument (= `this`) take precedence over those from the function. */
   def reverseAp[AA >: A, NN >: N, RR](f: Checked[AA, NN, R => RR]): Checked[AA, NN, RR] =
     this.product(f).map { case (x, g) => g(x) }
 
@@ -260,6 +260,13 @@ object Checked {
           fa: Checked[A, N, R],
           fb: Checked[A, N, RR],
       ): Checked[A, N, (R, RR)] = fa.product(fb)
+
+      override def map2Eval[R, RR, Z](fr: Checked[A, N, R], frr: Eval[Checked[A, N, RR]])(
+          f: (R, RR) => Z
+      ): Eval[Checked[A, N, Z]] = fr match {
+        case abort @ Abort(_, _) => Now(abort)
+        case Result(ns, r) => frr.map(_.prependNonaborts(ns).map(f(r, _)))
+      }
 
       override def flatMap[R, RR](fa: Checked[A, N, R])(
           f: R => Checked[A, N, RR]

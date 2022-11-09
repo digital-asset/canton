@@ -49,7 +49,7 @@ trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends Pre
 
   /** Same as Await.result, but with this timeout */
   def await[F](
-      description: => String = "",
+      description: => String,
       logFailing: Option[Level] = None,
       stackTraceFilter: Thread => Boolean = defaultStackTraceFilter,
       onTimeout: TimeoutException => Unit = _ => (),
@@ -65,7 +65,7 @@ trait RefinedNonNegativeDuration[D <: RefinedNonNegativeDuration[D]] extends Pre
 
   /** Same as await, but not returning a value */
   def await_(
-      description: => String = "",
+      description: => String,
       logFailing: Option[Level] = None,
   )(fut: Future[_])(implicit loggingContext: ErrorLoggingContext): Unit = {
     await(description, logFailing)(fut).discard

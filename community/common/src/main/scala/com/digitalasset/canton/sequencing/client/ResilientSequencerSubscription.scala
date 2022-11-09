@@ -260,8 +260,11 @@ class ResilientSequencerSubscription[HandlerError](
     logger.debug(s"Closing subscription")
     subscription.close()
 
-    // Wait for the running subscription to close
-    val reason = Try(timeouts.shutdownNetwork.await()(subscription.closeReason))
+    val reason = Try(
+      timeouts.shutdownNetwork.await("wait for the running sequencer subscription to close")(
+        subscription.closeReason
+      )
+    )
 
     reason match {
       case Success(reason) =>

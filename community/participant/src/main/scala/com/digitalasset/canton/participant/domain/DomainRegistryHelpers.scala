@@ -214,6 +214,8 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           staticDomainParameters,
           participantNodeParameters.processingTimeouts,
           clock,
+          topologyClient,
+          futureSupervisor,
           ifParticipant(recordSequencerInteractions.get().map(updateMemberRecordingPath)),
           ifParticipant(
             replaySequencerConfig

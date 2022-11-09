@@ -7,10 +7,9 @@ import akka.NotUsed
 import akka.stream.*
 import akka.stream.scaladsl.{Keep, Sink, Source}
 import cats.data.OptionT
-import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
@@ -18,14 +17,7 @@ import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{
-  AsyncCloseable,
-  AsyncOrSyncCloseable,
-  CloseContext,
-  FlagCloseableAsync,
-  HasCloseContext,
-  SyncCloseable,
-}
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.TimedLoadGauge
 import com.digitalasset.canton.participant.event.RecordOrderPublisher.{
@@ -56,6 +48,7 @@ import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{DiscardOps, LedgerTransactionId, RequestCounter}
@@ -107,10 +100,10 @@ class DbMultiDomainEventLog private[db] (
     with NamedLogging
     with HasFlushFuture {
 
+  import ParticipantStorageImplicits.*
   import TimestampedEvent.getResultTimestampedEvent
   import storage.api.*
   import storage.converters.*
-  import ParticipantStorageImplicits.*
 
   private val processingTime: TimedLoadGauge =
     storage.metrics.loadGaugeM("multi-domain-event-log")
@@ -306,7 +299,7 @@ class DbMultiDomainEventLog private[db] (
         }
     }
 
-    eventsBeforeOrAtLastLocalOffset.traverse_(_.withTraceContext(implicit traceContext => {
+    eventsBeforeOrAtLastLocalOffset.parTraverse_(_.withTraceContext(implicit traceContext => {
       case (id, localOffset) =>
         for {
           existingGlobalOffsetO <- globalOffsetFor(id, localOffset)
@@ -651,7 +644,7 @@ class DbMultiDomainEventLog private[db] (
           .as[(GlobalOffset, Int, LocalOffset, CantonTimestamp)]
     }
     storage.query(query, functionFullName).flatMap { vec =>
-      vec.traverseFilter { case (offset, logId, localOffset, ts) =>
+      vec.parTraverseFilter { case (offset, logId, localOffset, ts) =>
         EventLogId
           .fromDbLogIdOT("lineralized event log", indexedStringStore)(logId)
           .map { evLogId =>

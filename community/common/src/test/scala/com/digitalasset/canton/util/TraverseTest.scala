@@ -27,8 +27,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   "traverse" when {
     futureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
-        // TODO(#10690) unignore
-        "deadlock" ignore {
+        "deadlock" in {
           deadlockTraverse(fOps)
         }
       }
@@ -40,6 +39,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
         List(1).traverse(Option.apply).value shouldBe a[List[_]]
         Vector(1).traverse(Option.apply).value shouldBe a[Vector[_]]
         ArraySeq(1).traverse(Option.apply).value shouldBe an[ArraySeq[_]]
+        LazyList(1).traverse(Option.apply).value shouldBe a[LazyList[_]]
       }
     }
 
@@ -51,6 +51,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
         go(List(1))
         go(Vector(1))
         go(ArraySeq(1))
+        go(LazyList(1))
       }
     }
 
@@ -59,6 +60,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
         NonEmpty(List, 1).toNEF.traverse(Option.apply).value.forgetNE shouldBe a[List[_]]
         NonEmpty(Vector, 1).toNEF.traverse(Option.apply).value.forgetNE shouldBe a[Vector[_]]
         NonEmpty(ArraySeq, 1).toNEF.traverse(Option.apply).value.forgetNE shouldBe an[ArraySeq[_]]
+        NonEmpty(LazyList, 1).toNEF.traverse(Option.apply).value.forgetNE shouldBe a[LazyList[_]]
       }
     }
 
@@ -73,6 +75,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
         go(NonEmpty(List, 1))
         go(NonEmpty(Vector, 1))
         go(NonEmpty(ArraySeq, 1))
+        go(NonEmpty(LazyList, 1))
       }
     }
   }
@@ -80,8 +83,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   "traverse_" when {
     futureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
-        // TODO(#10690) unignore
-        "deadlock" ignore {
+        "deadlock" in {
           deadlockTraverse_(fOps)
         }
       }
@@ -91,8 +93,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   "flatTraverse" when {
     futureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
-        // TODO(#10690) unignore
-        "deadlock" ignore {
+        "deadlock" in {
           deadlockFlatTraverse(fOps)
         }
       }

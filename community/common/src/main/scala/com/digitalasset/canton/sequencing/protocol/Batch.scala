@@ -90,7 +90,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
           ProtocolVersion.v2,
           supportedProtoVersion(v0.CompressedBatch) { (deserializer, proto) =>
             // TODO(i10428) Prevent zip bombing when decompressing the request
-            fromProtoV0(deserializer)(proto, maxRequestSize = MaxRequestSize.NoLimit)
+            fromProtoV0(deserializer)(proto, maxRequestSize = MaxRequestSizeToDeserialize.NoLimit)
           },
           _.toProtoV0.toByteString,
         )
@@ -136,7 +136,7 @@ object Batch extends HasProtocolVersionedSerializerCompanion[Batch[Envelope[_]]]
       envelopeDeserializer: v0.Envelope => ParsingResult[Env]
   )(
       batchProto: v0.CompressedBatch,
-      maxRequestSize: MaxRequestSize,
+      maxRequestSize: MaxRequestSizeToDeserialize,
   ): ParsingResult[Batch[Env]] = {
     val v0.CompressedBatch(algorithm, compressed) = batchProto
 

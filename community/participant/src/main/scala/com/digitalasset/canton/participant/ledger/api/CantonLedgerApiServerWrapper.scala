@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.ledger.api
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.implicits.*
+import cats.syntax.either.*
 import com.daml.ledger.configuration.{LedgerId, LedgerTimeModel}
 import com.daml.ledger.resources.ResourceContext
 import com.daml.lf.engine.Engine

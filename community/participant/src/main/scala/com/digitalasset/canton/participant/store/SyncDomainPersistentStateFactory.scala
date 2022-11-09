@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.data.EitherT
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -17,6 +17,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, SequencedEventStore}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
@@ -61,7 +62,7 @@ class SyncDomainPersistentStateFactory(
         )
         .map(_.protocolVersion)
 
-    aliasManager.aliases.toList.traverse_ { alias =>
+    aliasManager.aliases.toList.parTraverse_ { alias =>
       val resultE = for {
         domainId <- EitherT.fromEither[Future](
           aliasManager.domainIdForAlias(alias).toRight("Unknown domain-id")

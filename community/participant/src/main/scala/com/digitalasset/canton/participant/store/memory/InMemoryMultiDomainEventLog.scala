@@ -7,8 +7,7 @@ import akka.NotUsed
 import akka.stream.scaladsl.Source
 import cats.data.OptionT
 import cats.syntax.foldable.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.platform.akkastreams.dispatcher.Dispatcher
 import com.daml.platform.akkastreams.dispatcher.SubSource.RangeSource
@@ -50,6 +49,7 @@ import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, SimpleExecutionQueue}
 
@@ -189,7 +189,7 @@ class InMemoryMultiDomainEventLog(
         fromExclusive + 1,
         upToInclusive,
       )
-      unpublishedEvents <- unpublishedOffsets.traverse(offset =>
+      unpublishedEvents <- unpublishedOffsets.parTraverse(offset =>
         lookupEvent(namedLoggingContext)(id, offset)
       )
     } yield unpublishedEvents.map { tseAndUpdate =>
@@ -263,7 +263,7 @@ class InMemoryMultiDomainEventLog(
       case Some(n) => referencesInRange.take(n)
       case None => referencesInRange
     }
-    limitedReferencesInRange.toList.traverse {
+    limitedReferencesInRange.toList.parTraverse {
       case (globalOffset, (id, localOffset, _processingTime)) =>
         lookupEvent(namedLoggingContext)(id, localOffset).map(globalOffset -> _)
     }
@@ -275,7 +275,7 @@ class InMemoryMultiDomainEventLog(
     Map[TimestampedEvent.EventId, (GlobalOffset, TimestampedEventAndCausalChange, CantonTimestamp)]
   ] = {
     eventIds
-      .traverseFilter { eventId =>
+      .parTraverseFilter { eventId =>
         byEventId(namedLoggingContext)(eventId).flatMap { case (eventLogId, localOffset) =>
           OptionT(globalOffsetFor(eventLogId, localOffset)).semiflatMap {
             case (globalOffset, publicationTime) =>
@@ -477,7 +477,7 @@ object InMemoryMultiDomainEventLog extends HasLoggerName {
     implicit val ec: ExecutionContext = DirectExecutionContext(loggingContext.tracedLogger)
 
     OptionT(for {
-      result <- allEventLogs.toList.traverseFilter { case (eventLogId, eventLog) =>
+      result <- allEventLogs.toList.parTraverseFilter { case (eventLogId, eventLog) =>
         eventLog.eventById(eventId).map(event => eventLogId -> event.tse.localOffset).value
       }
     } yield result.headOption)

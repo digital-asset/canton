@@ -7,16 +7,16 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import com.daml.ledger.api.v1.value.{Identifier, Record}
-import com.daml.ledger.api.validation.{ValueValidator as LedgerApiValueValidator}
+import com.daml.ledger.api.validation.ValueValidator as LedgerApiValueValidator
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.{ImmArray, Ref}
 import com.daml.lf.value.Value
 import com.daml.platform.participant.util.LfEngineToApi
-import com.daml.platform.server.api.validation.{FieldValidations as LedgerApiFieldValidations}
+import com.daml.platform.server.api.validation.FieldValidations as LedgerApiFieldValidations
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{
@@ -69,6 +69,7 @@ import com.digitalasset.canton.topology.store.TopologyStoreFactory
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.*
 
@@ -104,6 +105,7 @@ class RepairService(
     aliasManager: DomainAliasManager,
     parameters: ParticipantNodeParameters,
     indexedStringStore: IndexedStringStore,
+    isConnected: DomainId => Boolean,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
@@ -117,24 +119,43 @@ class RepairService(
   // not corrupt state.
   private val executionQueue = new SimpleExecutionQueue()
 
+  private def aliasToUnconnectedDomainId(alias: DomainAlias): EitherT[Future, String, DomainId] =
+    for {
+      domainId <- EitherT.fromEither[Future](
+        aliasManager.domainIdForAlias(alias).toRight(s"Could not find $alias")
+      )
+      _ <- domainNotConnected(domainId)
+    } yield domainId
+  private def domainNotConnected(domainId: DomainId): EitherT[Future, String, Unit] = EitherT.cond(
+    !isConnected(domainId),
+    (),
+    s"Participant is still connected to domain $domainId",
+  )
+
   /** Participant repair utility for manually adding contracts to a domain in an offline fashion.
     *
-    * @param domainId           id of domain to add contracts to. The domain needs to be configured, but disconnected
+    * @param domain             alias of domain to add contracts to. The domain needs to be configured, but disconnected
     *                           to prevent race conditions.
     * @param contractsToAdd     contracts to add. Relevant pieces of each contract: create-arguments (LfContractInst),
     *                           template-id (LfContractInst), contractId, ledgerCreateTime, salt (to be added to
     *                           SerializableContract), and witnesses, SerializableContract.metadata is only validated,
-    *                           but otherwise ignored as stakeholders, signatories, maintainers and key can be recomputed from contracts.
-    * @param ignoreAlreadyAdded whether to ignore and skip over contracts already added/present in the domain.
+    *                           but otherwise ignored as stakeholder and signatories can be recomputed from contracts.
+    * @param ignoreAlreadyAdded whether to ignore and skip over contracts already added/present in the domain. Setting
+    *                           this to true (at least on retries) enables writing idempotent repair scripts.
     */
   def addContracts(
-      domainId: DomainId,
+      domain: DomainAlias,
       contractsToAdd: Seq[SerializableContractWithWitnesses],
       ignoreAlreadyAdded: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] =
+  )(implicit traceContext: TraceContext): Either[String, Unit] = {
+    logger.info(
+      s"Adding ${contractsToAdd.length} contracts to domain ${domain} with ignoreAlreadyAdded=${ignoreAlreadyAdded}"
+    )
     lockAndAwaitEitherT(
       "repair.add", {
         for {
+          // Ensure domain is configured but not connected to avoid race conditions.
+          domainId <- aliasToUnconnectedDomainId(domain)
           _ <- EitherT.cond[Future](contractsToAdd.nonEmpty, (), "No contracts to add specified")
 
           repair <- initRepairRequestAndVerifyPreconditions(domainId)
@@ -144,13 +165,13 @@ class RepairService(
             .map(_.contract.rawContractInstance.contractInstance.unversioned.template.packageId)
             .toSet
             .toList
-            .traverse_(packageVetted)
+            .parTraverse_(packageVetted)
 
           _uniqueKeysWithHostedMaintainerInContractsToAdd <- EitherTUtil.ifThenET(
             repair.domainParameters.uniqueContractKeys
           ) {
             val keysWithContractIdsF = contractsToAdd
-              .traverseFilter { case SerializableContractWithWitnesses(contract, _witnesses) =>
+              .parTraverseFilter { case SerializableContractWithWitnesses(contract, _witnesses) =>
                 // Only check for duplicates where the participant hosts a maintainer
                 getKeyIfOneMaintainerIsLocal(
                   repair.topologySnapshot,
@@ -200,26 +221,30 @@ class RepairService(
 
           // If all has gone well, bump the clean head, effectively committing the changes to the domain.
           _ <- commitRepairs(repair)
-
         } yield ()
       },
     )
+  }
 
-  /** Participant repair utility for manually purging contracts from a domain in an offline fashion.
+  /** Participant repair utility for manually purging (archiving) contracts in an offline fashion.
     *
-    * @param domainId            id of domain to purge contracts from. The domain needs to be configured, but
+    * @param domain              alias of domain to purge contracts from. The domain needs to be configured, but
     *                            disconnected to prevent race conditions.
-    * @param contractIds         contract ids of contracts to purge.
-    * @param ignoreAlreadyPurged whether to ignore and skip over contracts already purged/absent from the domain.
+    * @param contractIds         lf contract ids of contracts to purge
+    * @param ignoreAlreadyPurged whether to ignore already purged contracts.
     */
   def purgeContracts(
-      domainId: DomainId,
+      domain: DomainAlias,
       contractIds: Seq[LfContractId],
       ignoreAlreadyPurged: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] =
+  )(implicit traceContext: TraceContext): Either[String, Unit] = {
+    logger.info(
+      s"Purging ${contractIds.length} contracts from ${domain} with ignoreAlreadyPurged=${ignoreAlreadyPurged}"
+    )
     lockAndAwaitEitherT(
       "repair.purge", {
         for {
+          domainId <- aliasToUnconnectedDomainId(domain)
           _ <- EitherTUtil.condUnitET[Future](contractIds.nonEmpty, "Missing contract ids to purge")
 
           repair <- initRepairRequestAndVerifyPreconditions(domainId)
@@ -262,33 +287,40 @@ class RepairService(
         } yield ()
       },
     )
+  }
 
   /** Participant repair utility for manually moving contracts from a source domain to a target domain in an offline
     * fashion.
     *
     * @param contractIds    ids of contracts to move that reside in the sourceDomain
-    * @param sourceDomainId the id of the source domain from which to move contracts
-    * @param targetDomainId the id of the target domain to which to move contracts
+    * @param sourceDomain alias of source domain from which to move contracts
+    * @param targetDomain alias of target domain to which to move contracts
     * @param skipInactive   whether to only move contracts that are active in the source domain
     * @param batchSize      how big the batches should be used during the migration
     */
   def changeDomainAwait(
       contractIds: Seq[LfContractId],
-      sourceDomainId: DomainId,
-      targetDomainId: DomainId,
+      sourceDomain: DomainAlias,
+      targetDomain: DomainAlias,
       skipInactive: Boolean,
       batchSize: PositiveInt,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
-
+    logger.info(
+      s"Change domain request for ${contractIds.length} contracts from ${sourceDomain} to ${targetDomain} with skipInactive=${skipInactive}"
+    )
     lockAndAwaitEitherT(
       "repair.change_domain", {
-        changeDomain(
-          contractIds,
-          sourceDomainId,
-          targetDomainId,
-          skipInactive,
-          batchSize,
-        )
+        for {
+          sourceDomainId <- aliasToUnconnectedDomainId(sourceDomain)
+          targetDomainId <- aliasToUnconnectedDomainId(targetDomain)
+          _ <- changeDomain(
+            contractIds,
+            sourceDomainId,
+            targetDomainId,
+            skipInactive,
+            batchSize,
+          )
+        } yield ()
       },
     )
   }
@@ -308,11 +340,15 @@ class RepairService(
       targetDomainId: DomainId,
       skipInactive: Boolean,
       batchSize: PositiveInt,
-  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[Future, String, Unit] = {
     if (contractIds.isEmpty) EitherT.rightT(())
     else
       for {
-
+        _ <- EitherT.cond[Future](
+          sourceDomainId != targetDomainId,
+          (),
+          "Source must differ from target domain!",
+        )
         repairSource <- initRepairRequestAndVerifyPreconditions(sourceDomainId)
         repairTarget <- initRepairRequestAndVerifyPreconditions(targetDomainId)
 
@@ -328,17 +364,22 @@ class RepairService(
         // If all has gone well, bump the clean head to both domains transactionally
         _ <- commitRepairs(repairTarget, repairSource)
       } yield ()
+  }
 
   def ignoreEvents(domain: DomainId, from: SequencerCounter, to: SequencerCounter, force: Boolean)(
       implicit traceContext: TraceContext
-  ): Either[String, Unit] =
+  ): Either[String, Unit] = {
+    logger.info(s"Ignoring sequenced events from $from to $to (force = $force).")
     lockAndAwaitEitherT(
-      "repair.skip_messages", {
-        performIfRangeSuitableForIgnoreOperations(domain, from, force)(
+      "repair.skip_messages",
+      for {
+        _ <- domainNotConnected(domain)
+        _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(
           _.ignoreEvents(from, to).leftMap(_.toString)
         )
-      },
+      } yield (),
     )
+  }
 
   private def performIfRangeSuitableForIgnoreOperations[T](
       domain: DomainId,
@@ -381,14 +422,18 @@ class RepairService(
       from: SequencerCounter,
       to: SequencerCounter,
       force: Boolean,
-  )(implicit traceContext: TraceContext): Either[String, Unit] =
+  )(implicit traceContext: TraceContext): Either[String, Unit] = {
+    logger.info(s"Unignoring sequenced events from $from to $to (force = $force).")
     lockAndAwaitEitherT(
-      "repair.unskip_messages", {
-        performIfRangeSuitableForIgnoreOperations(domain, from, force)(sequencedEventStore =>
+      "repair.unskip_messages",
+      for {
+        _ <- domainNotConnected(domain)
+        _ <- performIfRangeSuitableForIgnoreOperations(domain, from, force)(sequencedEventStore =>
           sequencedEventStore.unignoreEvents(from, to).leftMap(_.toString)
         )
-      },
+      } yield (),
     )
+  }
 
   private def hostsParty(snapshot: TopologySnapshot)(party: LfPartyId): Future[Boolean] =
     snapshot.hostedOn(party, participantId).map(_.exists(_.permission.isActive))
@@ -467,7 +512,7 @@ class RepairService(
       )
 
       // Witnesses all known locally.
-      _witnessesKnownLocally <- witnesses.toList.traverse_ { p =>
+      _witnessesKnownLocally <- witnesses.toList.parTraverse_ { p =>
         EitherT(hostsParty(topologySnapshot)(p).map { hosted =>
           EitherUtil.condUnitE(
             hosted,
@@ -763,7 +808,7 @@ class RepairService(
       for {
         filtered <- EitherT.fromEither[Future](filteredE)
         stakeholders <- readStakeholders(repairSource, filtered.toSet)
-        _ <- filtered.traverse { cid =>
+        _ <- filtered.parTraverse_ { cid =>
           checkStakeholders(cid, stakeholders.getOrElse(cid, Set.empty))
         }
       } yield filtered
@@ -779,7 +824,7 @@ class RepairService(
       else {
         for {
           keys <- EitherT.right(
-            contracts.traverseFilter(contract =>
+            contracts.parTraverseFilter(contract =>
               getKeyIfOneMaintainerIsLocal(
                 request.topologySnapshot,
                 contract.metadata.maybeKeyWithMaintainers,
@@ -794,7 +839,7 @@ class RepairService(
 
     def persistContracts(cids: List[LfContractId]): EitherT[Future, String, Unit] = {
       val loadedET = cids
-        .traverse { cid =>
+        .parTraverse { cid =>
           for {
             // first, read the contract from the store such that we can store it in the target domain
             serializedSource <- readContract(repairSource, cid)
@@ -1159,7 +1204,7 @@ class RepairService(
         .leftMap(t => log(s"Failed to update request journal store on ${repair.domainAlias}: $t"))
 
     for {
-      _ <- repairs.traverse_(markClean)
+      _ <- repairs.parTraverse_(markClean)
       advancePreheads = repairs.map { repair =>
         val prehead = CursorPrehead(repair.rc, repair.ts)
         repair.domainPersistence.requestJournalStore.advancePreheadCleanToTransactionalUpdate(

@@ -72,7 +72,9 @@ class GrpcAdminCommandRunner(
         traceContext
       )
       val apiResult =
-        awaitTimeout.await()(
+        awaitTimeout.await(
+          s"Running on ${instanceName} command ${command} against ${clientConfig}"
+        )(
           grpcRunner.run(instanceName, command, closeableChannel.channel, token, callTimeout).value
         )
       // convert to a console command result

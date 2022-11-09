@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.CloseContext
@@ -21,6 +21,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import io.functionmeta.functionFullName
@@ -63,7 +64,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       events: Seq[TimestampedEventAndCausalChange]
   )(implicit traceContext: TraceContext): Future[Seq[Either[TimestampedEvent, Unit]]] = {
     idempotentInserts(events).flatMap { insertResult =>
-      insertResult.traverse {
+      insertResult.parTraverse {
         case right @ Right(()) => Future.successful(right)
         case Left(event) =>
           event.eventId match {
@@ -89,7 +90,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
         insertionResults = rowCounts.toList.zip(events).map { case (rowCount, event) =>
           Either.cond(rowCount == 1, (), event)
         }
-        checkResults <- insertionResults.traverse {
+        checkResults <- insertionResults.parTraverse {
           case Right(()) =>
             Future.successful(Right(()))
           case Left(TimestampedEventAndCausalChange(event, causalityUpdate)) =>
@@ -140,7 +141,7 @@ class DbSingleDimensionEventLog[+Id <: EventLogId](
       events: Seq[TimestampedEventAndCausalChange]
   )(implicit traceContext: TraceContext): Future[Array[Int]] = {
     // resolve associated domain-id
-    val eventsWithAssociatedDomainIdF = events.traverse { event =>
+    val eventsWithAssociatedDomainIdF = events.parTraverse { event =>
       event.tse.eventId.flatMap(_.associatedDomain) match {
         case Some(domainId) =>
           IndexedDomain.indexed(indexedStringStore)(domainId).map(indexed => (event, Some(indexed)))

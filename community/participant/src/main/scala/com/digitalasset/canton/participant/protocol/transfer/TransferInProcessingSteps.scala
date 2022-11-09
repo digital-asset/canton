@@ -7,8 +7,8 @@ import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
 import com.daml.ledger.participant.state.v2.TransactionMeta
 import com.daml.lf.CantonOnly
 import com.daml.lf.data.ImmArray
@@ -52,6 +52,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.condUnitE
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.Transfer.{SourceProtocolVersion, TargetProtocolVersion}
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
@@ -176,9 +177,8 @@ private[transfer] class TransferInProcessingSteps(
       rootHash = fullTree.rootHash
       mediatorMessage = fullTree.mediatorMessage
       recipientsSet <- {
-        import cats.syntax.traverse.*
         stakeholders.toSeq
-          .traverse(activeParticipantsOfParty)
+          .parTraverse(activeParticipantsOfParty)
           .map(_.foldLeft(Set.empty[Member])(_ ++ _))
       }
       recipients <- EitherT.fromEither[Future](
@@ -407,7 +407,7 @@ private[transfer] class TransferInProcessingSteps(
           }
 
           recipients <- EitherT.liftF {
-            confirmForClocks.traverse { clock =>
+            confirmForClocks.parTraverse { clock =>
               val hostedBy =
                 targetCrypto.ipsSnapshot.activeParticipantsOf(clock.partyId).map(_.keySet)
               hostedBy.map(ptps => (clock, ptps))
@@ -630,13 +630,14 @@ private[transfer] class TransferInProcessingSteps(
             ): TransferProcessorError,
           )
           sourceIps = sourceCrypto.ipsSnapshot
-          confirmingParties <- EitherT.right(transferInRequest.stakeholders.toList.traverseFilter {
-            stakeholder =>
+          confirmingParties <- EitherT.right(
+            transferInRequest.stakeholders.toList.parTraverseFilter { stakeholder =>
               for {
                 source <- sourceIps.canConfirm(participantId, stakeholder)
                 target <- targetIps.canConfirm(participantId, stakeholder)
               } yield if (source && target) Some(stakeholder) else None
-          })
+            }
+          )
 
         } yield Some(TransferInValidationResult(confirmingParties.toSet))
       case None =>
@@ -646,7 +647,7 @@ private[transfer] class TransferInProcessingSteps(
             if (transferringParticipant) {
               val targetIps = targetCrypto.ipsSnapshot
               val confirmingPartiesF = transferInRequest.stakeholders.toList
-                .traverseFilter { stakeholder =>
+                .parTraverseFilter { stakeholder =>
                   targetIps
                     .canConfirm(participantId, stakeholder)
                     .map(if (_) Some(stakeholder) else None)

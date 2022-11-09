@@ -316,6 +316,7 @@ object BuildCommon {
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     {
+      case PathList("buf.yaml") => MergeStrategy.discard
       case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
       case "reflect.properties" => MergeStrategy.first
       case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
@@ -354,8 +355,7 @@ object BuildCommon {
 
   lazy val cantonWarts = Seq(
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
-    // TODO(#10660) Enable this wart for all projects
-    // wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
     // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
     Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
@@ -427,8 +427,6 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedAppSettings,
-        // TODO(#10660) Remove when enabled for all projects
-        wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           jul_to_slf4j,
@@ -483,8 +481,6 @@ object BuildCommon {
       )
       .settings(
         sharedCantonSettings,
-        // TODO(#10660) Remove when enabled for all projects
-        wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           akka_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.AkkaUtil.createActorSystem
           daml_lf_archive_reader,
@@ -560,6 +556,13 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
+        // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
+        // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
+        Compile / packageBin / packageOptions += (
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/scalapb/package.proto"
+          )
+        ),
         Compile / PB.protoSources ++= (Test / PB.protoSources).value,
         buildInfoKeys := Seq[BuildInfoKey](
           version,
@@ -604,8 +607,6 @@ object BuildCommon {
       )
       .settings(
         sharedCantonSettings,
-        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
-        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           scalatest % Test,
@@ -621,6 +622,13 @@ object BuildCommon {
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
+        // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
+        Compile / packageBin / packageOptions += (
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/domain/scalapb/package.proto"
+          )
         ),
         // excluded generated protobuf classes from code coverage
         coverageExcludedPackages := formatCoverageExcludes(
@@ -639,8 +647,6 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonSettings,
-        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
-        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scala_logging,
           scalatest % Test,
@@ -661,6 +667,13 @@ object BuildCommon {
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
+        // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
+        Compile / packageBin / packageOptions += (
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/participant/scalapb/package.proto"
+          )
         ),
         coverageExcludedPackages := formatCoverageExcludes(
           """
@@ -784,8 +797,6 @@ object BuildCommon {
       .dependsOn(`community-app` % "compile->compile;test->test")
       .settings(
         sharedCantonSettings,
-        // TODO(#10660) Enable and correct traverse usage, then remove when enabled for all projects
-        //  wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
         libraryDependencies ++= Seq(
           scalafx,
           scalatest % Test,

@@ -6,8 +6,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import cats.syntax.traverse.*
-import cats.syntax.traverseFilter.*
+import cats.syntax.parallel.*
 import com.daml.ledger.participant.state.v2.{SubmitterInfo, TransactionMeta}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -47,6 +46,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, LfKeyResolver, LfPartyId}
@@ -197,7 +197,7 @@ class DomainRouter(
     if (inputDomains.sizeCompare(2) >= 0) Future.successful(true)
     else
       inputDomains.toList
-        .traverse(allInformeesOnDomain(informees)(_))
+        .parTraverse(allInformeesOnDomain(informees)(_))
         .map(!_.forall(identity))
   }
 
@@ -397,8 +397,8 @@ object DomainRouter {
     val submittersL = submitters.toList
 
     val domainsKnowingAllSubmittersF = snapshotsOfDomain.toList
-      .traverse { case (domain, snapshot) =>
-        submittersL.traverse(snapshot.hostedOn(_, localParticipantId)).map { res =>
+      .parTraverse { case (domain, snapshot) =>
+        submittersL.parTraverse(snapshot.hostedOn(_, localParticipantId)).map { res =>
           (domain, res.forall(_.exists(_.permission == Submission)))
         }
       }
@@ -429,14 +429,14 @@ object DomainRouter {
 
     def partiesHostedOnDomain(snapshot: TopologySnapshot): Future[Set[LfPartyId]] =
       informeesList
-        .traverseFilter { partyId =>
+        .parTraverseFilter { partyId =>
           snapshot
             .isHostedByAtLeastOneParticipantF(partyId, _.permission.isActive)
             .map(if (_) Some(partyId) else None)
         }
         .map(_.toSet)
 
-    val hostedOfDomainF = candidateDomains.toList.traverse { case (domainId, domain) =>
+    val hostedOfDomainF = candidateDomains.toList.parTraverse { case (domainId, domain) =>
       val snapshot = domain.topologyClient.currentSnapshotApproximation
       partiesHostedOnDomain(snapshot).map { hosted =>
         domainId -> hosted

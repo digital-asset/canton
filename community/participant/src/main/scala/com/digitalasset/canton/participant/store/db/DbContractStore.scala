@@ -4,8 +4,7 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.data.{EitherT, OptionT}
-import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.{PositiveNumeric, String2066}
 import com.digitalasset.canton.config.{BatchAggregatorConfig, CacheConfig, ProcessingTimeout}
@@ -227,7 +226,6 @@ class DbContractStore(
 
   // Not to be called directly: use contractsCache
   private def contractInsert(storedContract: StoredContract): DbAction.WriteOnly[Int] = {
-    import DbStorage.Implicits.*
     val contractId = storedContract.contractId
     val contract = storedContract.contract.rawContractInstance
     val metadata = storedContract.contract.metadata
@@ -375,7 +373,7 @@ class DbContractStore(
       case Some(idsNel) =>
         EitherT(
           idsNel.forgetNE.toSeq
-            .traverse(id => lookupContract(id).toRight(id).value)
+            .parTraverse(id => lookupContract(id).toRight(id).value)
             .map(_.collectRight)
             .map { contracts =>
               Either.cond(
@@ -396,7 +394,7 @@ class DbContractStore(
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): Future[Unit] = {
-    elements.traverse_ { element =>
+    elements.parTraverse_ { element =>
       val contract = fn(element)
       storage
         .queryAndUpdate(contractInsert(contract), functionFullName)

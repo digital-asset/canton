@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.value.Value.ValueInt64
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.ContractKeyJournal.{
@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.store.ContractKeyJournal.{
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.LfGlobalKey
 import com.digitalasset.canton.store.PrunableByTimeTest
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{LfTransactionBuilder, MonadUtil}
 import com.digitalasset.canton.{BaseTest, RequestCounter}
@@ -178,7 +179,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLik
           )
           _ <- valueOrFail(ckj.prune(toc1.timestamp))("prune")
           fetch1 <- ckj.fetchStates(keys012)
-          count1 <- keys012.traverse(ckj.countUpdates)
+          count1 <- keys012.parTraverse(ckj.countUpdates)
           _ <- valueOrFail(ckj.addKeyStateUpdates(Map(key1 -> Unassigned), toc2))(
             s"Add key $key1 at $toc2"
           )
@@ -187,7 +188,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLik
           )
           _ <- valueOrFail(ckj.prune(toc3.timestamp))("prune")
           fetch2 <- ckj.fetchStates(keys012)
-          count2 <- keys012.traverse(ckj.countUpdates)
+          count2 <- keys012.parTraverse(ckj.countUpdates)
         } yield {
           fetch1 shouldBe Map(
             key0 -> ContractKeyState(Assigned, toc2),
@@ -219,7 +220,7 @@ trait ContractKeyJournalTest extends PrunableByTimeTest { this: AsyncWordSpecLik
           )
           _ <- valueOrFail(ckj.deleteSince(toc1))(s"Delete since $toc1")
           fetch1 <- ckj.fetchStates(keys012)
-          count1 <- keys012.traverse(ckj.countUpdates)
+          count1 <- keys012.parTraverse(ckj.countUpdates)
           _ <- valueOrFail(ckj.deleteSince(toc))(s"Delete since $toc")
           fetch2 <- ckj.fetchStates(keys012)
         } yield {

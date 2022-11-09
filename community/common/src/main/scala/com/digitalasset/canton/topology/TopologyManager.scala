@@ -138,10 +138,6 @@ abstract class TopologyManager[E <: CantonError](
     } yield ()
   }
 
-  // TODO(#10692) Do not discard the future
-  @SuppressWarnings(
-    Array("com.digitalasset.canton.DiscardedFuture", "com.digitalasset.canton.NonUnitForEach")
-  )
   protected def keyRevocationDelegationIsNotDangerous(
       transaction: SignedTopologyTransaction[TopologyChangeOp],
       namespace: Namespace,
@@ -178,7 +174,7 @@ abstract class TopologyManager[E <: CantonError](
             )
 
             // step3: remove namespace delegation transaction from cache store
-            _ = storedTxsToRemove.foreach { storedTxToRemove =>
+            _ <- storedTxsToRemove.parTraverse { storedTxToRemove =>
               {
                 val wrapStoredTx =
                   new StoredTopologyTransactions[TopologyChangeOp](Seq(storedTxToRemove))

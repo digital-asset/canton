@@ -7,6 +7,7 @@ import cats.data.{NonEmptyList, ValidatedNec}
 import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import cats.syntax.validated.*
 import com.daml.error.*
@@ -43,6 +44,7 @@ import com.digitalasset.canton.store.SequencerCounterTrackerStore
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherUtil.RichEither
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.retry.Policy
 import com.digitalasset.canton.version.ProtocolVersion
@@ -432,22 +434,25 @@ class AcsCommitmentProcessor(
 
     val future = for {
       _ <- initFuture
-      _ <- batch.traverse_ { envelope =>
+      _ <- batch.parTraverse_ { envelope =>
         getReconciliationIntervals(
           envelope.protocolMessage.message.period.toInclusive.forgetRefinement
         )
-          .map { reconciliationIntervals =>
+          // TODO(#10790) Investigate whether we can validate and process the commitments asynchronously.
+          .flatMap { reconciliationIntervals =>
             validateEnvelope(timestamp, envelope, reconciliationIntervals) match {
               case Right(()) =>
                 val payload = envelope.protocolMessage.message
                 logger.debug(
                   s"Checking commitment (purportedly by) ${payload.sender} for period ${payload.period}"
                 )
-                checkSignedMessage(timestamp, envelope.protocolMessage)
+                FutureUnlessShutdown.outcomeF(
+                  checkSignedMessage(timestamp, envelope.protocolMessage)
+                )
 
               case Left(errors) =>
                 errors.toList.foreach(logger.error(_))
-                Future.unit
+                FutureUnlessShutdown.unit
             }
           }
       }
@@ -457,10 +462,9 @@ class AcsCommitmentProcessor(
       future,
       failureMessage = s"Failed to process incoming commitment. Halting SyncDomain $domainId",
       onFailure = _ => {
-        // First close ourselves such that we don't process any more messages
+        // First close ourselves so that we don't process any more messages
         close()
-        // Then close the sync domain, do not wait for the killswitch, otherwise we block the sequencer client shutdown
-        FutureUtil.doNotAwait(Future.successful(killSwitch), s"failed to kill SyncDomain $domainId")
+        killSwitch
       },
     )
   }
@@ -666,7 +670,7 @@ class AcsCommitmentProcessor(
   private def checkMatchAndMarkSafe(
       remote: List[AcsCommitment]
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    remote.traverse_ { cmt =>
+    remote.parTraverse_ { cmt =>
       for {
         commitments <- store.getComputed(cmt.period, cmt.sender)
         lastPruningTime <- store.pruningStatus.valueOr { err =>
@@ -737,7 +741,7 @@ class AcsCommitmentProcessor(
       msgs: Map[ParticipantId, SignedProtocolMessage[AcsCommitment]],
   )(implicit traceContext: TraceContext): Future[Unit] =
     for {
-      _ <- msgs.toList.traverse_ { case (pid, msg) =>
+      _ <- msgs.toList.parTraverse_ { case (pid, msg) =>
         store.storeComputed(msg.message.period, pid, msg.message.commitment)
       }
       _ = logger.debug(s"Computed and stored ${msgs.size} commitment messages for period $period")

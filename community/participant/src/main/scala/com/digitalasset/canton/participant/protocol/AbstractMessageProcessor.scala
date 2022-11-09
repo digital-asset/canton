@@ -43,7 +43,7 @@ abstract class AbstractMessageProcessor(
     extends NamedLogging
     with FlagCloseable {
   private lazy val protocolVersion: ProtocolVersion =
-    sequencerClient.staticDomainParameters.protocolVersion
+    sequencerClient.protocolVersion
 
   protected def terminateRequest(
       requestCounter: RequestCounter,
@@ -101,7 +101,7 @@ abstract class AbstractMessageProcessor(
         )
         maxSequencingTime = requestId.unwrap.add(domainParameters.participantResponseTimeout.unwrap)
         _ <- sequencerClient.sendAsync(
-          Batch.of(sequencerClient.staticDomainParameters.protocolVersion, messages: _*),
+          Batch.of(sequencerClient.protocolVersion, messages: _*),
           maxSequencingTime = maxSequencingTime,
           callback = SendCallback.log(s"Response message for request [$rc]", logger),
         )

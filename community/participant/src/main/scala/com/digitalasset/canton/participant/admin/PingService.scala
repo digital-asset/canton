@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.implicits.toFoldableOps
+import cats.syntax.parallel.*
 import com.daml.error.definitions.LedgerApiErrors.ConsistencyErrors.ContractNotFound
 import com.daml.ledger.api.refinements.ApiTypes.WorkflowId
 import com.daml.ledger.api.v1.commands.Command as ScalaCommand
@@ -36,6 +37,7 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{BatchAggregator, FutureUtil, LoggerUtil, SimpleExecutionQueue}
 import com.google.common.annotations.VisibleForTesting
@@ -220,7 +222,7 @@ class PingService(
     )
 
     // Archive the ones we can
-    val futArchive = toArchive.traverse_ { contract =>
+    val futArchive = toArchive.parTraverse_ { contract =>
       logger.debug(s"archiving PingProposal $contract")
 
       vacuumBatchAggregator.run(
@@ -250,7 +252,7 @@ class PingService(
         .partition(_.value.validators.forall(_ == adminParty))
 
     // Archive the ones we can
-    val futArchive = toArchive.traverse_ { contract =>
+    val futArchive = toArchive.parTraverse_ { contract =>
       logger.debug(s"archiving Ping $contract")
 
       vacuumBatchAggregator.run(
@@ -263,7 +265,7 @@ class PingService(
     }
 
     // Try to clean the remaining ones
-    val futCleanup = toCleanup.traverse_ { contract =>
+    val futCleanup = toCleanup.parTraverse_ { contract =>
       logger.debug(s"cleaning Ping $contract")
 
       vacuumBatchAggregator.run(
@@ -286,7 +288,7 @@ class PingService(
     val toExpire = explodes.filter(_.value.initiator == adminParty)
 
     // Archive the ones we can
-    toExpire.traverse_ { contract =>
+    toExpire.parTraverse_ { contract =>
       logger.debug(s"expiring Explode $contract")
 
       vacuumBatchAggregator.run(
@@ -307,7 +309,7 @@ class PingService(
     val toExpire = merges.filter(_.value.initiator == adminParty)
 
     // Expire the ones we can
-    toExpire.traverse_ { contract =>
+    toExpire.parTraverse_ { contract =>
       logger.debug(s"expiring Merge $contract")
 
       vacuumBatchAggregator.run(
@@ -328,7 +330,7 @@ class PingService(
     val toExpire = collapses.filter(_.value.initiator == adminParty)
 
     // Expire the ones we can
-    toExpire.traverse_ { contract =>
+    toExpire.parTraverse_ { contract =>
       logger.debug(s"expiring Collapse $contract")
 
       vacuumBatchAggregator.run(
@@ -581,7 +583,7 @@ class PingService(
       traceContext: TraceContext
   ): Future[Unit] = {
     // accept proposals where i'm the next candidate
-    proposals.filter(_.value.candidates.headOption.contains(adminParty)).traverse_ { proposal =>
+    proposals.filter(_.value.candidates.headOption.contains(adminParty)).parTraverse_ { proposal =>
       logger.debug(s"Accepting ping proposal ${proposal.value.id} from ${proposal.value.initiator}")
       val command = proposal.contractId.exerciseAccept(adminParty).command
       val id = proposal.value.id
@@ -728,7 +730,7 @@ class PingService(
   )(implicit
       traceContext: TraceContext
   ): Future[Unit] =
-    pongs.filter(_.value.initiator == adminParty).traverse_ { p =>
+    pongs.filter(_.value.initiator == adminParty).parTraverse_ { p =>
       // purge duplicate checker
       duplicate.clear()
       // first, ack the pong

@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.{Chain, EitherT, NonEmptyChain, OptionT}
+import cats.data.{Chain, EitherT, NonEmptyChain, OptionT, Validated}
 import cats.instances.either.*
-import cats.laws.discipline.{FunctorTests, MonadErrorTests}
+import cats.laws.discipline.{ApplicativeTests, FunctorTests, MonadErrorTests, ParallelTests}
 import cats.syntax.either.*
 import cats.{Eq, Monad}
 import com.digitalasset.canton.BaseTestWordSpec
@@ -685,10 +685,30 @@ class CheckedTTest extends AnyWordSpec with BaseTestWordSpec {
       )
     }
 
+    "Applicative" should {
+      import cats.laws.discipline.arbitrary.catsLawsArbitraryForValidated
+      checkAllLaws(
+        "Applicative",
+        ApplicativeTests[CheckedT[Validated[String, *], Int, String, *]]
+          .applicative[Int, Int, String],
+      )
+    }
+
     "MonadError" should {
       checkAllLaws(
         "MonadError",
         MonadErrorTests[CheckedT[Monad, Int, String, *], Int].monadError[Int, Int, String],
+      )
+    }
+
+    "Parallel" should {
+      import cats.laws.discipline.arbitrary.{
+        catsLawsArbitraryForValidated,
+        catsLawsArbitraryForNested,
+      }
+      checkAllLaws(
+        name = "Parallel",
+        ParallelTests[CheckedT[Monad, Int, String, *]].parallel[Int, String],
       )
     }
   }

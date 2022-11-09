@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.topology
 
 import cats.data.EitherT
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.LegalIdentityClaimEvidence.X509Cert
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.nowarn
@@ -135,7 +136,7 @@ object DomainTopologyManager {
       // check that topology manager has a signing key
       _ <- hasSigningKey(DomainTopologyManagerId(id.uid))
       // check that all mediators have a signing key
-      _ <- mediators.toList.traverse(hasSigningKey)
+      _ <- mediators.toList.parTraverse(hasSigningKey)
       // check that sequencer has a signing key
       _ <- hasSigningKey(SequencerId(id.uid))
     } yield ()

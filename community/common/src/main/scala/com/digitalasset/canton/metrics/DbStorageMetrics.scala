@@ -11,6 +11,10 @@ import com.daml.metrics.api.{MetricDoc, MetricName}
 
 import scala.concurrent.duration.*
 
+@MetricDoc.GroupTag(
+  representative = "canton.db-storage.<service>.executor",
+  groupableClass = classOf[DbQueueMetrics],
+)
 class DbStorageMetrics(basePrefix: MetricName, override val registry: MetricRegistry)
     extends MetricHandle.Factory {
   override val prefix: MetricName = basePrefix :+ "db-storage"

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.{String255, String256M}
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, TestHash}
@@ -12,6 +12,7 @@ import com.digitalasset.canton.participant.admin.PackageServiceTest.readCantonEx
 import com.digitalasset.canton.participant.store.DamlPackageStore.readPackageId
 import com.digitalasset.canton.protocol.PackageDescription
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
@@ -145,7 +146,7 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
         val remainingPackage = damlPackages.takeRight(1).headOption.value
 
         for {
-          _units <- parallelFutures.sequence
+          _units <- Future.sequence(parallelFutures)
           dar <- store.getDar(hash)
           pkg <- store.getPackage(readPackageId(remainingPackage))
 
@@ -154,8 +155,8 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
           _ = pkg shouldBe Some(remainingPackage)
 
           // Cleanup for the next iteration
-          _ <- Seq(hash, hash2).traverse(d => store.removeDar(d))
-          _ <- (Seq(damlPackage, damlPackage2) ++ damlPackages.takeRight(2)).traverse(p =>
+          _ <- Seq(hash, hash2).parTraverse(d => store.removeDar(d))
+          _ <- (Seq(damlPackage, damlPackage2) ++ damlPackages.takeRight(2)).parTraverse(p =>
             store.removePackage(readPackageId(p))
           )
 

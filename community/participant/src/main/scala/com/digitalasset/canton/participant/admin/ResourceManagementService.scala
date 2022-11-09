@@ -21,9 +21,9 @@ trait ResourceManagementService {
   def warnIfOverloadedDuring: Option[NonNegativeFiniteDuration]
 
   private val lastSuccess: AtomicReference[CantonTimestamp] =
-    new AtomicReference[CantonTimestamp](CantonTimestamp.MinValue)
+    new AtomicReference[CantonTimestamp](CantonTimestamp.now())
   private val lastWarning: AtomicReference[CantonTimestamp] =
-    new AtomicReference[CantonTimestamp](CantonTimestamp.MinValue)
+    new AtomicReference[CantonTimestamp](CantonTimestamp.now())
 
   def checkOverloaded(currentLoad: Int)(implicit
       loggingContext: ErrorLoggingContext

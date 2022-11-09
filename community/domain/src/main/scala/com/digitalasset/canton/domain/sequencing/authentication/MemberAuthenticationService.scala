@@ -6,7 +6,7 @@ package com.digitalasset.canton.domain.sequencing.authentication
 import cats.data.EitherT
 import cats.instances.future.*
 import cats.syntax.bifunctor.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.common.domain.ServiceAgreementId
@@ -34,6 +34,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
 import io.functionmeta.functionFullName
 
@@ -225,7 +226,7 @@ class MemberAuthenticationService(
     cryptoApi.snapshot(cryptoApi.topologyKnownUntilTimestamp).flatMap { snapshot =>
       // we are a bit more conservative here. a participant needs to be active NOW and the head state (i.e. effective in the future)
       Seq(snapshot.ipsSnapshot, cryptoApi.currentSnapshotApproximation.ipsSnapshot)
-        .traverse(_.isParticipantActive(participant))
+        .parTraverse(_.isParticipantActive(participant))
         .map(_.forall(identity))
     }
   }

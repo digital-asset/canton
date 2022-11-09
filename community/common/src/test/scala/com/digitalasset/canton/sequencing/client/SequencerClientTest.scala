@@ -8,7 +8,7 @@ import cats.syntax.foldable.*
 import com.codahale.metrics.MetricRegistry
 import com.daml.metrics.api.MetricName
 import com.digitalasset.canton.*
-import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
@@ -23,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, SequencerClientMetrics}
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
+import com.digitalasset.canton.protocol.{DomainParametersLookup, TestDomainParameters}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.GapInSequencerCounter
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
@@ -60,6 +61,7 @@ import com.digitalasset.canton.time.{
 }
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
+import com.digitalasset.canton.topology.client.{DomainTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -841,6 +843,26 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         )(implicit loggingContext: NamedLoggingContext): SequencedEventValidator =
           eventValidator
       }
+      val topologyClient = mock[DomainTopologyClient]
+      val mockTopologySnapshot = mock[TopologySnapshot]
+      when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
+        .thenReturn(mockTopologySnapshot)
+      when(
+        mockTopologySnapshot.findDynamicDomainParametersOrDefault(
+          any[ProtocolVersion],
+          anyBoolean,
+        )(any[TraceContext])
+      )
+        .thenReturn(
+          Future.successful(TestDomainParameters.defaultDynamic)
+        )
+      val maxRequestSizeLookup =
+        DomainParametersLookup.forSequencerDomainParameters(
+          domainParameters,
+          topologyClient,
+          FutureSupervisor.Noop,
+          loggerFactory,
+        )
 
       val client = new SequencerClient(
         DefaultTestIdentities.domainId,
@@ -848,7 +870,8 @@ class SequencerClientTest extends AsyncWordSpec with BaseTest with HasExecutorSe
         transport,
         options,
         TestingConfigInternal(),
-        domainParameters,
+        domainParameters.protocolVersion,
+        maxRequestSizeLookup,
         timeouts,
         eventValidatorFactory,
         clock,

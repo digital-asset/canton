@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import cats.syntax.foldable.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.transaction.TransactionVersion
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.submission.DomainUsabilityChecker.*
@@ -14,6 +14,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
@@ -58,7 +59,7 @@ class DomainUsabilityCheckerFull(
     val checkers: Seq[DomainUsabilityChecker[DomainNotUsedReason]] =
       Seq(vetting, partiesConnected, protocolVersionChecker)
 
-    checkers.traverse_(_.isUsable)
+    checkers.parTraverse_(_.isUsable)
   }
 }
 
@@ -113,7 +114,7 @@ class DomainUsabilityCheckerVetting[E >: UnknownPackage <: DomainNotUsedReason](
     for {
       requiredPerParticipant <- requiredPackagesByParticipant
       unknownPackages <- requiredPerParticipant.toList
-        .flatTraverse { case (participant, packages) =>
+        .parFlatTraverse { case (participant, packages) =>
           unknownPackages(participant, packages)
         }
     } yield Either.cond(
@@ -129,7 +130,7 @@ class DomainUsabilityCheckerVetting[E >: UnknownPackage <: DomainNotUsedReason](
   ): Future[List[PackageUnknownTo]] =
     snapshot.findUnvettedPackagesOrDependencies(participantId, required).value.flatMap {
       case Right(notVetted) =>
-        notVetted.toList.traverse(packageId =>
+        notVetted.toList.parTraverse(packageId =>
           packageInfoService.getDescription(packageId).map { descriptionOpt =>
             val description = descriptionOpt
               .map(_.sourceDescription.unwrap)

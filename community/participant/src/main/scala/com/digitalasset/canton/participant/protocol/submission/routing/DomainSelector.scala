@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.alternative.*
-import cats.syntax.traverse.*
+import cats.syntax.parallel.*
 import com.daml.lf.transaction.TransactionVersion
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.NonEmptyColl.*
@@ -27,6 +27,7 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -289,7 +290,7 @@ private[routing] class DomainSelector(
   ): EitherT[Future, TransactionRoutingError, DomainRank] =
     for {
       rankedDomains <- domains.toSeq.toNEF
-        .traverse(targetDomain =>
+        .parTraverse(targetDomain =>
           domainRankComputation.compute(contracts, targetDomain, submitters)
         )
 

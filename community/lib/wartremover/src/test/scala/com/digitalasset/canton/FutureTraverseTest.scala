@@ -11,6 +11,7 @@ import cats.syntax.option.*
 import cats.syntax.traverse.*
 import cats.syntax.traverseFilter.*
 import cats.{Applicative, Foldable, Traverse, TraverseFilter}
+import com.digitalasset.canton.DiscardedFutureTest.{Transformer0, Transformer1}
 import com.digitalasset.canton.FutureTraverseTest.WannabeFuture
 import org.scalatest.Assertion
 import org.scalatest.matchers.should.Matchers
@@ -140,6 +141,21 @@ class FutureTraverseTest extends AnyWordSpec with Matchers {
         (??? : Seq[Int]).traverse_(_ => new WannabeFuture[Int])
         Foldable[Seq].traverse_(Seq(1))(_ => new WannabeFuture[Int])
         Traverse[Seq].traverse_(Seq(1))(_ => new WannabeFuture[Int])
+      }
+      assertIsError(result, "traverse_", 3)
+    }
+
+    "detect usages with annotated transformers of future-like types" in {
+      val result = WartTestTraverser(FutureTraverse) {
+        Seq.empty[Int].traverse_(_ => new Transformer0[Future, Int])
+        Seq
+          .empty[Int]
+          .traverse_[Transformer1[*, WannabeFuture], Int](_ => new Transformer1[Int, WannabeFuture])
+        Seq
+          .empty[Int]
+          .traverse_[Transformer1[*, Transformer0[WannabeFuture, *]], Int](_ =>
+            new Transformer1[Int, Transformer0[WannabeFuture, *]]
+          )
       }
       assertIsError(result, "traverse_", 3)
     }

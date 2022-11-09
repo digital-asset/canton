@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.data.NonEmptyChain
-import cats.syntax.foldable.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.LockedStates
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker.*
@@ -12,6 +12,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.{ActiveContractStore, ContractKeyJournal}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.{BaseTest, RequestCounter, SequencerCounter}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -992,7 +993,7 @@ private[conflictdetection] trait RequestTrackerTest {
         _ <- checkFinalize(rc, finalize0)
         finalize2 <- enterTR(rt, rc + 2, sc + 5, ts.plusMillis(7), CommitSet.empty, 0L, toF2)
         _ <- checkFinalize(rc + 2, finalize2)
-        _ <- List(coid00, coid01).traverse_ { coid =>
+        _ <- List(coid00, coid01).parTraverse_ { coid =>
           checkContractState(acs, coid, (Active, rc, ts))(s"contract $coid was created")
         }
         activenessSet3 = mkActivenessSet(useOnly = Set(coid00, coid01))

@@ -5,7 +5,9 @@ package com.digitalasset.canton.participant.admin
 
 import akka.actor.ActorSystem
 import cats.data.EitherT
-import cats.implicits.*
+import cats.syntax.either.*
+import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import com.daml.error.definitions.DamlError
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -34,6 +36,7 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.TopologyManagerError.NoAppropriateSigningKeyInStore
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.tracing.{NoTracing, Spanning, TraceContext, TracerProvider}
+import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil}
 import com.google.protobuf.ByteString
@@ -129,7 +132,7 @@ class AdminWorkflowServices(
       lc: LedgerConnection,
   ): Future[Boolean] =
     for {
-      pkgRes <- pkgs.keys.toList.traverse(lc.getPackageStatus)
+      pkgRes <- pkgs.keys.toList.parTraverse(lc.getPackageStatus)
     } yield pkgRes.forall(pkgResponse => pkgResponse.packageStatus.isRegistered)
 
   private def handleDamlErrorDuringPackageLoading(
@@ -234,7 +237,12 @@ class AdminWorkflowServices(
       tracerProvider,
       noRetryOnPassiveReplica,
     )
-    (parameters.processingTimeouts.unbounded.await()(connection.ledgerEnd), connection)
+    (
+      parameters.processingTimeouts.unbounded.await("querying the ledger end")(
+        connection.ledgerEnd
+      ),
+      connection,
+    )
   }
 
   private def createService[S <: AdminWorkflowService](

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.sync
 
 import cats.data.EitherT
-import cats.implicits.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -20,6 +19,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.MigrationErrors
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.ShowUtil.*
 import io.functionmeta.functionFullName
 
 import scala.concurrent.{ExecutionContext, Future}

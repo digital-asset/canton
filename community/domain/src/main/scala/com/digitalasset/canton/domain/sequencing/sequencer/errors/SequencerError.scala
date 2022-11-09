@@ -4,12 +4,12 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.errors
 
 import com.daml.error.{Explanation, Resolution}
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.SignatureCheckError
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.error.{Alarm, AlarmErrorCode, CantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.protocol.DomainParameters.MaxRequestSize
 import com.digitalasset.canton.sequencing.protocol.{SignedContent, SubmissionRequest}
 import com.digitalasset.canton.topology.Member
 
@@ -57,14 +57,14 @@ object SequencerError extends SequencerErrorGroup {
   }
 
   @Explanation(
-    """This error means that the request size has exceeded the configured value maxInboundMessageSize."""
+    """This error means that the request size has exceeded the configured value maxRequestSize."""
   )
   @Resolution(
-    """Send smaller requests or increase the maxInboundMessageSize in the domain parameters"""
+    """Send smaller requests or increase the maxRequestSize in the domain parameters"""
   )
   object MaxRequestSizeExceeded extends AlarmErrorCode("MAX_REQUEST_SIZE_EXCEEDED") {
 
-    case class Error(message: String, maxRequestSize: NonNegativeInt) extends Alarm(message)
+    case class Error(message: String, maxRequestSize: MaxRequestSize) extends Alarm(message)
   }
 
   @Explanation("""
